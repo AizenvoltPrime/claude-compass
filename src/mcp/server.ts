@@ -105,10 +105,7 @@ export class ClaudeCompassMCPServer {
                   default: true,
                 },
               },
-              oneOf: [
-                { required: ['file_id'] },
-                { required: ['file_path'] },
-              ],
+              additionalProperties: false,
             },
           },
           {

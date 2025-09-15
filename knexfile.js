@@ -17,7 +17,7 @@ module.exports = {
     migrations: {
       directory: './dist/database/migrations',
       tableName: 'knex_migrations',
-      pattern: /^\d+_.*\.js$/
+      extension: 'js'
     }
   },
 
@@ -37,7 +37,7 @@ module.exports = {
     migrations: {
       directory: './dist/database/migrations',
       tableName: 'knex_migrations',
-      pattern: /^\d+_.*\.js$/
+      extension: 'js'
     }
   },
 
@@ -51,7 +51,7 @@ module.exports = {
     migrations: {
       directory: './dist/database/migrations',
       tableName: 'knex_migrations',
-      pattern: /^\d+_.*\.js$/
+      extension: 'js'
     }
   }
 };

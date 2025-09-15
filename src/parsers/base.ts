@@ -96,7 +96,37 @@ export abstract class BaseParser {
    */
   protected parseContent(content: string): Parser.Tree | null {
     try {
-      const tree = this.parser.parse(content);
+      // Validate content before parsing
+      if (!content || typeof content !== 'string') {
+        this.logger.warn('Invalid content provided to parser', {
+          contentType: typeof content,
+          isEmpty: !content
+        });
+        return null;
+      }
+
+      // Check for extremely large files that might cause issues
+      if (content.length > 5 * 1024 * 1024) { // 5MB limit
+        this.logger.warn('Content too large for parsing', { size: content.length });
+        return null;
+      }
+
+      // Check for binary content (rough heuristic)
+      if (this.isBinaryContent(content)) {
+        this.logger.warn('Content appears to be binary, skipping parse');
+        return null;
+      }
+
+      // Check for invalid UTF-8 sequences or unusual encoding issues
+      if (this.hasEncodingIssues(content)) {
+        this.logger.warn('Content has encoding issues, skipping parse');
+        return null;
+      }
+
+      // Normalize line endings to prevent parser issues
+      const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+      const tree = this.parser.parse(normalizedContent);
       if (tree.rootNode.hasError) {
         this.logger.warn('Syntax tree contains errors', {
           errorCount: this.countTreeErrors(tree.rootNode)
@@ -106,6 +136,56 @@ export abstract class BaseParser {
     } catch (error) {
       this.logger.error('Failed to parse content', { error: (error as Error).message });
       return null;
+    }
+  }
+
+  /**
+   * Simple heuristic to detect binary content
+   */
+  private isBinaryContent(content: string): boolean {
+    // Check for null bytes (common in binary files)
+    if (content.indexOf('\0') !== -1) {
+      return true;
+    }
+
+    // Check for high percentage of non-printable characters
+    const nonPrintableCount = content.split('').filter(char => {
+      const code = char.charCodeAt(0);
+      return code < 32 && code !== 9 && code !== 10 && code !== 13; // Exclude tab, LF, CR
+    }).length;
+
+    const nonPrintableRatio = nonPrintableCount / content.length;
+    return nonPrintableRatio > 0.1; // More than 10% non-printable chars
+  }
+
+  /**
+   * Check for encoding issues that might cause parser problems
+   */
+  private hasEncodingIssues(content: string): boolean {
+    try {
+      // Check for replacement characters (indicates encoding issues)
+      if (content.includes('\uFFFD')) {
+        return true;
+      }
+
+      // Check for very long lines that might indicate a minified file or data
+      const lines = content.split('\n');
+      for (const line of lines) {
+        if (line.length > 10000) { // 10K character line limit
+          return true;
+        }
+      }
+
+      // Check for unusual control characters that might confuse the parser
+      const controlCharPattern = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/;
+      if (controlCharPattern.test(content.substring(0, Math.min(1000, content.length)))) {
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      // If any encoding check fails, assume there are issues
+      return true;
     }
   }
 

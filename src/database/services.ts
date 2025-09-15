@@ -28,16 +28,35 @@ export class DatabaseService {
   // Repository operations
   async createRepository(data: CreateRepository): Promise<Repository> {
     logger.debug('Creating repository', { name: data.name, path: data.path });
+
+    // Convert framework_stack array to JSON for database storage
+    const insertData = {
+      ...data,
+      framework_stack: JSON.stringify(data.framework_stack || [])
+    };
+
     const [repository] = await this.db('repositories')
-      .insert(data)
+      .insert(insertData)
       .returning('*');
-    return repository as Repository;
+
+    // Parse JSON back to array for the returned object
+    const result = repository as Repository;
+    if (result.framework_stack && typeof result.framework_stack === 'string') {
+      result.framework_stack = JSON.parse(result.framework_stack as string);
+    }
+
+    return result;
   }
 
   async getRepository(id: number): Promise<Repository | null> {
     const repository = await this.db('repositories')
       .where({ id })
       .first();
+
+    if (repository && repository.framework_stack && typeof repository.framework_stack === 'string') {
+      repository.framework_stack = JSON.parse(repository.framework_stack);
+    }
+
     return repository as Repository || null;
   }
 
@@ -45,6 +64,11 @@ export class DatabaseService {
     const repository = await this.db('repositories')
       .where({ path })
       .first();
+
+    if (repository && repository.framework_stack && typeof repository.framework_stack === 'string') {
+      repository.framework_stack = JSON.parse(repository.framework_stack);
+    }
+
     return repository as Repository || null;
   }
 
@@ -65,11 +89,27 @@ export class DatabaseService {
 
   // File operations
   async createFile(data: CreateFile): Promise<File> {
-    logger.debug('Creating file', { path: data.path, repo_id: data.repo_id });
-    const [file] = await this.db('files')
-      .insert(data)
-      .returning('*');
-    return file as File;
+    logger.debug('Creating/updating file', { path: data.path, repo_id: data.repo_id });
+
+    // Try to find existing file first
+    const existingFile = await this.db('files')
+      .where({ repo_id: data.repo_id, path: data.path })
+      .first();
+
+    if (existingFile) {
+      // Update existing file
+      const [file] = await this.db('files')
+        .where({ id: existingFile.id })
+        .update({ ...data, updated_at: new Date() })
+        .returning('*');
+      return file as File;
+    } else {
+      // Insert new file
+      const [file] = await this.db('files')
+        .insert(data)
+        .returning('*');
+      return file as File;
+    }
   }
 
   async getFile(id: number): Promise<File | null> {
@@ -133,10 +173,31 @@ export class DatabaseService {
     if (symbols.length === 0) return [];
 
     logger.debug('Creating symbols in batch', { count: symbols.length });
-    const results = await this.db('symbols')
-      .insert(symbols)
-      .returning('*');
-    return results as Symbol[];
+
+    // Break into smaller batches to avoid PostgreSQL query size limits
+    const BATCH_SIZE = 50; // Further reduced batch size
+    const results: Symbol[] = [];
+
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE).map(symbol => ({
+        ...symbol,
+        // Truncate signature to prevent PostgreSQL query size issues
+        signature: symbol.signature && symbol.signature.length > 1000
+          ? symbol.signature.substring(0, 997) + '...'
+          : symbol.signature
+      }));
+
+      logger.debug(`Processing symbol batch ${i / BATCH_SIZE + 1}/${Math.ceil(symbols.length / BATCH_SIZE)}`, {
+        batchSize: batch.length
+      });
+
+      const batchResults = await this.db('symbols')
+        .insert(batch)
+        .returning('*');
+      results.push(...(batchResults as Symbol[]));
+    }
+
+    return results;
   }
 
   async getSymbol(id: number): Promise<Symbol | null> {
@@ -219,8 +280,12 @@ export class DatabaseService {
     if (dependencies.length === 0) return [];
 
     logger.debug('Creating dependencies in batch', { count: dependencies.length });
+
+    // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
     const results = await this.db('dependencies')
       .insert(dependencies)
+      .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type'])
+      .merge(['line_number', 'confidence', 'updated_at'])
       .returning('*');
     return results as Dependency[];
   }
