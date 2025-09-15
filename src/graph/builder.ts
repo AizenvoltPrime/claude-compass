@@ -177,6 +177,7 @@ export class GraphBuilder {
     let repository = await this.dbService.getRepositoryByPath(absolutePath);
 
     if (!repository) {
+      // Create new repository
       const name = path.basename(absolutePath);
       const primaryLanguage = await this.detectPrimaryLanguage(absolutePath);
       const frameworkStack = await this.detectFrameworks(absolutePath);
@@ -186,6 +187,24 @@ export class GraphBuilder {
         path: absolutePath,
         language_primary: primaryLanguage,
         framework_stack: frameworkStack
+      });
+
+      this.logger.info('Created new repository', {
+        name,
+        path: absolutePath,
+        id: repository.id
+      });
+    } else {
+      // Repository exists - clean up old data for fresh analysis
+      this.logger.info('Repository exists, cleaning up old data for re-analysis', {
+        id: repository.id,
+        path: absolutePath
+      });
+
+      await this.dbService.cleanupRepositoryData(repository.id);
+
+      this.logger.info('Repository data cleanup completed', {
+        id: repository.id
       });
     }
 

@@ -342,6 +342,100 @@ export class DatabaseService {
     })) as DependencyWithSymbols[];
   }
 
+  // Cleanup methods for re-analysis
+  async cleanupRepositoryData(repositoryId: number): Promise<void> {
+    logger.info('Cleaning up repository data for re-analysis', { repositoryId });
+
+    // Delete in correct order to respect foreign key constraints
+    // 1. Delete dependencies first (they reference symbols)
+    await this.db.transaction(async (trx) => {
+      // Delete dependencies related to symbols in this repository
+      const deletedDependencies = await trx('dependencies')
+        .whereIn('from_symbol_id',
+          trx('symbols').select('id').whereIn('file_id',
+            trx('files').select('id').where('repo_id', repositoryId)
+          )
+        )
+        .orWhereIn('to_symbol_id',
+          trx('symbols').select('id').whereIn('file_id',
+            trx('files').select('id').where('repo_id', repositoryId)
+          )
+        )
+        .del();
+
+      // Delete symbols in files belonging to this repository
+      const deletedSymbols = await trx('symbols')
+        .whereIn('file_id',
+          trx('files').select('id').where('repo_id', repositoryId)
+        )
+        .del();
+
+      // Delete files belonging to this repository
+      const deletedFiles = await trx('files')
+        .where('repo_id', repositoryId)
+        .del();
+
+      logger.info('Repository cleanup completed', {
+        repositoryId,
+        deletedDependencies,
+        deletedSymbols,
+        deletedFiles
+      });
+    });
+  }
+
+  async deleteRepositoryCompletely(repositoryId: number): Promise<boolean> {
+    logger.info('Completely deleting repository and all related data', { repositoryId });
+
+    try {
+      return await this.db.transaction(async (trx) => {
+        // Delete dependencies related to symbols in this repository
+        const deletedDependencies = await trx('dependencies')
+          .whereIn('from_symbol_id',
+            trx('symbols').select('id').whereIn('file_id',
+              trx('files').select('id').where('repo_id', repositoryId)
+            )
+          )
+          .orWhereIn('to_symbol_id',
+            trx('symbols').select('id').whereIn('file_id',
+              trx('files').select('id').where('repo_id', repositoryId)
+            )
+          )
+          .del();
+
+        // Delete symbols in files belonging to this repository
+        const deletedSymbols = await trx('symbols')
+          .whereIn('file_id',
+            trx('files').select('id').where('repo_id', repositoryId)
+          )
+          .del();
+
+        // Delete files belonging to this repository
+        const deletedFiles = await trx('files')
+          .where('repo_id', repositoryId)
+          .del();
+
+        // Then delete the repository itself
+        const deletedRepo = await trx('repositories')
+          .where('id', repositoryId)
+          .del();
+
+        logger.info('Repository completely deleted', {
+          repositoryId,
+          deletedDependencies,
+          deletedSymbols,
+          deletedFiles,
+          deletedRepo
+        });
+
+        return deletedRepo > 0;
+      });
+    } catch (error) {
+      logger.error('Failed to delete repository completely', { repositoryId, error });
+      throw error;
+    }
+  }
+
   // Utility methods
   async runMigrations(): Promise<void> {
     logger.info('Running database migrations');
