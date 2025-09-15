@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: claude-compass-postgres
+    environment:
+      POSTGRES_DB: claude_compass
+      POSTGRES_USER: claude_compass
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - claude-compass-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claude_compass -d claude_compass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres_test:
+    image: pgvector/pgvector:pg15
+    container_name: claude-compass-postgres-test
+    environment:
+      POSTGRES_DB: claude_compass_test
+      POSTGRES_USER: claude_compass
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - claude-compass-network
+    profiles:
+      - test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claude_compass -d claude_compass_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: claude-compass-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - claude-compass-network
+    profiles:
+      - cache
+    command: redis-server --appendonly yes
+
+  adminer:
+    image: adminer:4.8.1
+    container_name: claude-compass-adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - claude-compass-network
+    profiles:
+      - tools
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  claude-compass-network:
+    driver: bridge
