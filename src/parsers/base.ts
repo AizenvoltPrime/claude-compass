@@ -126,7 +126,30 @@ export abstract class BaseParser {
       // Normalize line endings to prevent parser issues
       const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      const tree = this.parser.parse(normalizedContent);
+      // Check for Tree-sitter size limitation (around 30-35K characters)
+      const TREE_SITTER_SIZE_LIMIT = 32000;
+      let contentToParse = normalizedContent;
+
+      if (normalizedContent.length > TREE_SITTER_SIZE_LIMIT) {
+        this.logger.warn('Content exceeds Tree-sitter size limit, attempting smart truncation', {
+          originalSize: normalizedContent.length,
+          limit: TREE_SITTER_SIZE_LIMIT
+        });
+
+        const truncated = this.truncateAtSafePoint(normalizedContent, TREE_SITTER_SIZE_LIMIT);
+        if (truncated) {
+          contentToParse = truncated;
+          this.logger.info('Successfully truncated content at safe point', {
+            originalSize: normalizedContent.length,
+            truncatedSize: contentToParse.length
+          });
+        } else {
+          this.logger.warn('Could not find safe truncation point, using hard limit');
+          contentToParse = normalizedContent.substring(0, TREE_SITTER_SIZE_LIMIT);
+        }
+      }
+
+      const tree = this.parser.parse(contentToParse);
       if (tree.rootNode.hasError) {
         this.logger.warn('Syntax tree contains errors', {
           errorCount: this.countTreeErrors(tree.rootNode)
@@ -287,6 +310,61 @@ export abstract class BaseParser {
 
     return parentNode.type === 'export_statement' ||
            parentNode.type === 'export_declaration';
+  }
+
+  /**
+   * Smart truncation at safe points to avoid cutting off important symbols
+   */
+  private truncateAtSafePoint(content: string, maxLength: number): string | null {
+    if (content.length <= maxLength) return content;
+
+    // Calculate a safe range to look for truncation points (85% of maxLength)
+    const safeSearchEnd = Math.floor(maxLength * 0.85);
+    const searchRange = content.substring(0, safeSearchEnd);
+
+    // Look for safe truncation points in order of preference
+    const safePoints = [
+      // End of function/class/interface definitions with closing brace and semicolon
+      searchRange.lastIndexOf(';\n\n'),
+      searchRange.lastIndexOf('};\n'),
+      searchRange.lastIndexOf('}\n\n'),
+      // End of export statements
+      searchRange.lastIndexOf('\nexport '),
+      // End of function declarations
+      searchRange.lastIndexOf('\nfunction '),
+      searchRange.lastIndexOf('\nconst '),
+      searchRange.lastIndexOf('\nlet '),
+      searchRange.lastIndexOf('\nvar '),
+      // End of class/interface declarations
+      searchRange.lastIndexOf('\nclass '),
+      searchRange.lastIndexOf('\ninterface '),
+      searchRange.lastIndexOf('\ntype '),
+      // Simple closing braces
+      searchRange.lastIndexOf('}\n'),
+      searchRange.lastIndexOf('}\r\n')
+    ];
+
+    // Find the best truncation point
+    const validPoints = safePoints.filter(point => point > 0);
+
+    if (validPoints.length === 0) {
+      this.logger.warn('No safe truncation points found');
+      return null;
+    }
+
+    const bestPoint = Math.max(...validPoints);
+
+    // Add a few characters to include the newline/delimiter
+    const truncateAt = bestPoint + (content.charAt(bestPoint) === ';' ? 2 : 1);
+
+    this.logger.debug('Found safe truncation point', {
+      originalLength: content.length,
+      truncateAt,
+      contextBefore: content.substring(Math.max(0, bestPoint - 50), bestPoint),
+      contextAfter: content.substring(bestPoint, bestPoint + 20)
+    });
+
+    return content.substring(0, truncateAt);
   }
 
   /**
