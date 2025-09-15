@@ -40,10 +40,11 @@ AI assistants suffer from **context starvation** - they make decisions without u
 
 ### Supported Frameworks
 
-- **JavaScript/TypeScript**: Next.js, NestJS, React
-- **Python**: Django, FastAPI, Flask
-- **Java**: Spring Boot, Spring Framework
-- **C#**: .NET Core, ASP.NET
+**Sequential Implementation:**
+- **Phase 1**: **JavaScript/TypeScript** (Vue.js, Next.js, React, Node.js)
+- **Phase 2**: **PHP** (Laravel)
+- **Phase 3**: **C#** (Godot game engine)
+- **Phase 4**: **Python** (Django, FastAPI, Flask)
 
 ## Architecture
 
@@ -71,7 +72,7 @@ createdb claude_compass
 psql claude_compass -c "CREATE EXTENSION vector;"
 npm run migrate
 
-# Index your first repository
+# Index your first repository (JavaScript/TypeScript projects supported first)
 npm run analyze -- --repo /path/to/your/nextjs-project
 
 # Start MCP server
@@ -83,14 +84,15 @@ npm run mcp-server
 
 ## Development Phases
 
-1. **Phase 1**: Core Foundation (Months 1-2)
-2. **Phase 2**: Framework Analysis (Months 2-3)
-3. **Phase 3**: Advanced Graphs (Months 3-4)
-4. **Phase 4**: AI-Powered Analysis (Months 4-5)
-5. **Phase 5**: Forward Specifications (Months 5-6)
-6. **Phase 6**: Sync & Drift Detection (Months 6-7)
-7. **Phase 7**: Multi-Language Support (Months 7-8)
-8. **Phase 8**: Enterprise Features (Months 8-9)
+**Sequential Stack Implementation:**
+1. **Phase 1**: JavaScript/TypeScript Foundation (Months 1-2)
+2. **Phase 2**: JS/TS Framework Analysis (Months 2-3)
+3. **Phase 3**: Advanced JS/TS Graphs (Months 3-4)
+4. **Phase 4**: PHP Support (Months 4-5)
+5. **Phase 5**: C# Support (Months 5-6)
+6. **Phase 6**: Python Support (Months 6-7)
+7. **Phase 7**: AI-Powered Analysis (Months 7-8)
+8. **Phase 8**: Forward Specifications & Drift Detection (Months 8-9)
 
 ## Success Metrics
 
