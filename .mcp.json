@@ -10,6 +10,13 @@
     "sequential-thinking": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "claude-compass": {
+      "command": "node",
+      "args": ["/home/astefanopoulos/Documents/claude-compass/dist/mcp/server.js"],
+      "env": {
+        "DATABASE_URL": "postgresql://claude_compass:password@localhost:5432/claude_compass"
+      }
     }
   }
 }

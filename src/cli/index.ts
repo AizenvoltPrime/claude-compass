@@ -93,10 +93,21 @@ program
       console.log(chalk.white('• Search for symbols: claude-compass search <query>'));
       console.log(chalk.white('• Show repository stats: claude-compass stats'));
 
+      // Close database connection
+      await databaseService.close();
+
     } catch (error) {
       spinner.fail('Analysis failed');
       console.error(chalk.red('\n❌ Error during analysis:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      // Close database connection even in error case
+      try {
+        await databaseService.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
       process.exit(1);
     }
   });
@@ -192,10 +203,21 @@ program
 
       console.log(chalk.blue(`\nShowing ${filteredSymbols.length} of ${symbols.length} total results`));
 
+      // Close database connection
+      await databaseService.close();
+
     } catch (error) {
       spinner.fail('Search failed');
       console.error(chalk.red('\n❌ Error during search:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      // Close database connection even in error case
+      try {
+        await databaseService.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
       process.exit(1);
     }
   });
@@ -218,10 +240,21 @@ program
       console.log(chalk.yellow('Statistics feature not yet fully implemented.'));
       console.log(chalk.gray('This requires additional database methods to aggregate data.'));
 
+      // Close database connection
+      await databaseService.close();
+
     } catch (error) {
       spinner.fail('Failed to load statistics');
       console.error(chalk.red('\n❌ Error loading statistics:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      // Close database connection even in error case
+      try {
+        await databaseService.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
       process.exit(1);
     }
   });
@@ -239,10 +272,21 @@ program
 
       console.log(chalk.green('\n✅ Database migrations completed!'));
 
+      // Close database connection
+      await databaseService.close();
+
     } catch (error) {
       spinner.fail('Migration failed');
       console.error(chalk.red('\n❌ Migration error:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      // Close database connection even in error case
+      try {
+        await databaseService.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
       process.exit(1);
     }
   });
@@ -259,10 +303,21 @@ program
 
       console.log(chalk.green('\n✅ Database migration rollback completed!'));
 
+      // Close database connection
+      await databaseService.close();
+
     } catch (error) {
       spinner.fail('Rollback failed');
       console.error(chalk.red('\n❌ Rollback error:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      // Close database connection even in error case
+      try {
+        await databaseService.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
       process.exit(1);
     }
   });
