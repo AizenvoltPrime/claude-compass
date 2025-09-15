@@ -51,8 +51,10 @@ AI assistants suffer from **context starvation** - they make decisions without u
 ### Technology Stack
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
-- **Search**: Hybrid vector embeddings + full-text search
+- **Search**: Hybrid vector embeddings + full-text search (RRF fusion)
+- **Cache**: Redis for performance optimization
 - **MCP Server**: Node.js/TypeScript implementation
+- **Embeddings**: OpenAI Ada v2 or similar
 
 ### Graph Types
 - **File Graph**: Import/export relationships
@@ -72,8 +74,8 @@ createdb claude_compass
 psql claude_compass -c "CREATE EXTENSION vector;"
 npm run migrate
 
-# Index your first repository (JavaScript/TypeScript projects supported first)
-npm run analyze -- --repo /path/to/your/nextjs-project
+# Index your first repository (focus on key graph types for best initial experience)
+npm run analyze -- --repo /path/to/your/nextjs-project --focus=routes,di,jobs
 
 # Start MCP server
 npm run mcp-server
@@ -100,6 +102,8 @@ npm run mcp-server
 - **Bug introduction rate**: 50% reduction in breaking changes
 - **Developer productivity**: 20% improvement in feature delivery
 - **Documentation freshness**: 90% of specs match implementation
+- **Search accuracy**: 95% of relationships correctly identified
+- **Response time**: 95% of queries under 500ms
 
 ## License
 

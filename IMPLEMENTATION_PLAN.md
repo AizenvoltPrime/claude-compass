@@ -6,29 +6,43 @@ This project implements a "closed loop" system that gives AI assistants the same
 
 ## Problem Statement
 
+**The core problem**: Claude Code isn't dumb, it's context-starved.
+
+Picture this: You're thrown into a sprawling codebase with years of accumulated business logic and interconnected systems. Claude Code analyzes the files you show it and suggests clean, elegant code. You trust it. Then testing reveals the changes have unknowingly:
+
+- Broken a critical batch job processing user data overnight
+- Crashed the API that relied on a specific response format
+- Interfered with a legacy import system handling 30% of enterprise customers
+
+The code wasn't wrong in isolation. Claude Code just had no idea about the hidden dependencies and business context that make any real system tick.
+
 AI assistants suffer from "context starvation" - they make decisions without understanding:
+
 - Hidden dependencies and business context
 - Blast radius of changes
 - Framework-specific relationships
 - Legacy system interactions
 - Cross-cutting concerns
 
-**Result**: Elegant-looking code that breaks critical batch jobs, APIs, and legacy import systems.
+**Result**: Elegant-looking code that breaks critical systems in production.
 
 ## Solution Architecture
 
 ### Core Components
 
 1. **Reverse-Map Reality from Code**
+
    - Parse codebases with Tree-sitter
    - Build multiple graph types (files, symbols, framework-specific)
    - Generate dependency-aware summaries
 
 2. **Generate Forward Specifications**
+
    - Transform problem statements into PRDs, user stories, schemas, prototypes
    - Use as guardrails during implementation
 
 3. **MCP Integration**
+
    - Expose graphs and tools via Model Context Protocol
    - Enable AI assistants to query ground truth instead of guessing
 
@@ -41,6 +55,7 @@ AI assistants suffer from "context starvation" - they make decisions without und
 ### Technology Stack
 
 **Core Infrastructure:**
+
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
 - **Search**: Hybrid vector embeddings + full-text search
@@ -48,6 +63,7 @@ AI assistants suffer from "context starvation" - they make decisions without und
 - **Vector Embeddings**: OpenAI Ada v2 or similar
 
 **Supported Languages & Frameworks (Sequential Implementation):**
+
 - **Phase 1**: **JavaScript/TypeScript** (Vue.js, Node.js, Next.js)
 - **Phase 2**: **PHP** (Laravel)
 - **Phase 3**: **C#** (Godot game engine)
@@ -56,6 +72,7 @@ AI assistants suffer from "context starvation" - they make decisions without und
 ### Database Schema
 
 #### Core Entities
+
 ```sql
 -- Repositories
 CREATE TABLE repositories (
@@ -106,6 +123,7 @@ CREATE TABLE dependencies (
 ```
 
 #### Framework-Specific Entities
+
 ```sql
 -- Web Routes
 CREATE TABLE routes (
@@ -149,6 +167,7 @@ CREATE TABLE orm_entities (
 ```
 
 #### Analysis & Specifications
+
 ```sql
 -- AI-generated summaries
 CREATE TABLE summaries (
@@ -193,35 +212,43 @@ CREATE TABLE spec_drift (
 ### Graph Types
 
 #### 1. File Graph
+
 - **Nodes**: Files
 - **Edges**: Import/export relationships
 - **Purpose**: Understand module dependencies
 
 #### 2. Symbol Graph
+
 - **Nodes**: Functions, classes, interfaces, variables
 - **Edges**: Calls, inheritance, implementation, references
 - **Purpose**: Code-level dependency tracking
 
-#### 3. Framework Graphs
+#### 3. Framework Graphs (The Secret Sauce)
+
+**This is the key differentiator** - while AST-only maps are too brittle for frameworks with "magic", framework-aware graphs capture the real relationships:
 
 **Route Graph:**
+
 - **Nodes**: HTTP routes, controllers, middleware, services
 - **Edges**: Route → handler → service → repository
-- **Purpose**: Request flow understanding
+- **Purpose**: Request flow understanding (Web routes → controller/handler → service → repo)
 
 **Dependency Injection Graph:**
+
 - **Nodes**: Services, providers, consumers
-- **Edges**: Provides/depends relationships
+- **Edges**: Provides/depends relationships (DI edges: providers/consumers)
 - **Purpose**: Runtime dependency tracking
 
 **Job Graph:**
+
 - **Nodes**: Jobs, queues, schedulers, handlers
-- **Edges**: Trigger relationships, shared resources
+- **Edges**: Trigger relationships, shared resources (Jobs/schedulers: cron queues, listeners)
 - **Purpose**: Background processing flow
 
 **ORM Graph:**
+
 - **Nodes**: Entities, tables, relationships
-- **Edges**: Foreign keys, associations, inheritance
+- **Edges**: Foreign keys, associations, inheritance (ORM entities: models↔tables)
 - **Purpose**: Data model understanding
 
 ## MCP Integration
@@ -293,7 +320,11 @@ interface MCPResources {
 ```typescript
 interface MCPTools {
   // Code search with citations
-  search_code(query: string, repo_id: string, topK?: number): {
+  search_code(
+    query: string,
+    repo_id: string,
+    topK?: number
+  ): {
     results: {
       file_path: string;
       line_number: number;
@@ -324,11 +355,7 @@ interface MCPTools {
   };
 
   // Impact analysis (blast radius)
-  impact_of(change: {
-    symbol_id?: string;
-    file_path?: string;
-    description: string;
-  }): {
+  impact_of(change: { symbol_id?: string; file_path?: string; description: string }): {
     affected_symbols: string[];
     affected_routes: string[];
     affected_jobs: string[];
@@ -337,7 +364,11 @@ interface MCPTools {
   };
 
   // External documentation search
-  search_docs(query: string, pkg: string, version?: string): {
+  search_docs(
+    query: string,
+    pkg: string,
+    version?: string
+  ): {
     results: {
       content: string;
       url: string;
@@ -346,14 +377,20 @@ interface MCPTools {
   };
 
   // Specification management
-  diff_spec_vs_code(feature_id: string, repo_id: string): {
+  diff_spec_vs_code(
+    feature_id: string,
+    repo_id: string
+  ): {
     missing_endpoints: string[];
     schema_drift: object[];
     unreferenced_code: string[];
     test_coverage_gaps: string[];
   };
 
-  generate_reverse_prd(feature_id: string, repo_id: string): {
+  generate_reverse_prd(
+    feature_id: string,
+    repo_id: string
+  ): {
     prd: string;
     user_stories: string[];
     api_contract: object;
@@ -367,9 +404,11 @@ interface MCPTools {
 **Sequential Stack Implementation Strategy**: Following the principle of "start with one stack", we implement language support in phases to ensure solid foundation and learnings from each stack before expanding.
 
 ### Phase 1: JavaScript/TypeScript Foundation (Months 1-2)
+
 **Goal**: Basic parsing and storage infrastructure with JS/TS focus
 
 **Deliverables:**
+
 - Tree-sitter integration for JavaScript/TypeScript
 - PostgreSQL schema setup with pgvector
 - Basic file and symbol graph building
@@ -378,15 +417,18 @@ interface MCPTools {
 - Command-line tool for repository analysis
 
 **Success Criteria:**
+
 - Can parse Vue.js, Next.js, and Node.js projects and extract file/symbol relationships
 - Accurately maps ES6 imports, CommonJS requires, and dynamic imports
 - MCP server responds to basic queries
 - Database stores and retrieves parsed data efficiently
 
 ### Phase 2: JavaScript/TypeScript Framework Analysis (Months 2-3)
+
 **Goal**: Framework-aware parsing for JavaScript/TypeScript applications
 
 **Deliverables:**
+
 - Vue.js component and router analysis (pages/, components/, composables/)
 - Next.js pages and API routes detection (pages/, app/, api/)
 - Node.js Express/Fastify route detection
@@ -396,15 +438,18 @@ interface MCPTools {
 - Route mapping visualization for JS frameworks
 
 **Success Criteria:**
+
 - Can map HTTP routes to handler functions in Next.js and Node.js
 - Identifies Vue/React component dependencies and composition patterns
 - Detects Vue composables, React hooks, and Node.js middleware chains
 - Search returns relevant results with file/line citations
 
 ### Phase 3: Advanced JavaScript/TypeScript Graphs (Months 3-4)
+
 **Goal**: Complete JavaScript/TypeScript ecosystem understanding
 
 **Deliverables:**
+
 - Background job detection (Node.js worker threads, job queues)
 - Database ORM mapping (Prisma, TypeORM, Sequelize relationships)
 - Test-to-code linkage (Jest, Vitest, Cypress, Playwright)
@@ -414,15 +459,18 @@ interface MCPTools {
 - Monorepo structure analysis (nx, lerna, turborepo)
 
 **Success Criteria:**
+
 - Can trace data flow from HTTP request to database in JS/TS frameworks
 - Identifies all consumers of a changed interface/type/composable/hook
 - Maps test coverage to business functionality
 - Handles complex monorepo dependencies and workspace relationships
 
 ### Phase 4: PHP Support (Months 4-5)
+
 **Goal**: Add Laravel/PHP framework support
 
 **Deliverables:**
+
 - Tree-sitter integration for PHP
 - Laravel route and controller detection (web.php, api.php, controllers)
 - Laravel Eloquent model relationship mapping
@@ -431,15 +479,18 @@ interface MCPTools {
 - Test-to-code linkage (PHPUnit)
 
 **Success Criteria:**
+
 - Can parse Laravel projects and extract routes, controllers, models
 - Maps Laravel's service container and dependency injection
 - Identifies Laravel jobs, queues, and scheduled tasks
 - Handles Laravel-specific patterns (facades, service providers)
 
 ### Phase 5: C# Support (Months 5-6)
+
 **Goal**: Add Godot/C# game engine support
 
 **Deliverables:**
+
 - Tree-sitter integration for C#
 - Godot scene (.tscn) and script (.cs) relationships
 - Godot signal system detection and connections
@@ -448,15 +499,18 @@ interface MCPTools {
 - Game-specific testing frameworks integration
 
 **Success Criteria:**
+
 - Can parse Godot projects and map scenes to scripts
 - Identifies signal connections and node relationships
 - Maps resource usage and autoload dependencies
 - Understands Godot-specific inheritance patterns
 
 ### Phase 6: Python Support (Months 6-7)
+
 **Goal**: Add Django/FastAPI/Flask support
 
 **Deliverables:**
+
 - Tree-sitter integration for Python
 - Django URL patterns and view detection
 - Django model and ORM relationship mapping
@@ -465,15 +519,18 @@ interface MCPTools {
 - Test-to-code linkage (pytest)
 
 **Success Criteria:**
+
 - Can parse Django projects and map URLs to views and models
 - Identifies FastAPI routes, dependencies, and Pydantic models
 - Maps Python async task dependencies and execution flows
 - Handles Python-specific patterns (decorators, context managers)
 
 ### Phase 7: AI-Powered Analysis (Months 7-8)
+
 **Goal**: Semantic understanding and impact analysis across all stacks
 
 **Deliverables:**
+
 - Vector embeddings for code and documentation
 - AI-generated summaries for symbols/files/features
 - `impact_of` tool with blast radius calculation
@@ -481,14 +538,17 @@ interface MCPTools {
 - Purpose, side effects, and invariant detection
 
 **Success Criteria:**
+
 - Can predict which code will break from a change across all languages
 - Generates accurate summaries of code functionality
 - Search understands semantic similarity, not just keywords
 
 ### Phase 8: Forward Specifications & Drift Detection (Months 8-9)
+
 **Goal**: Requirements → implementation workflow and sync maintenance
 
 **Deliverables:**
+
 - Problem statement → PRD generation
 - API contract generation from requirements
 - Spec vs. code comparison algorithms
@@ -497,6 +557,7 @@ interface MCPTools {
 - Integration with issue tracking (GitHub, Jira)
 
 **Success Criteria:**
+
 - Can generate detailed specifications from feature requests
 - Detects when implemented features diverge from specifications
 - Provides actionable recommendations for alignment
@@ -505,6 +566,7 @@ interface MCPTools {
 ## Framework-Specific Parsers
 
 ### Vue.js Detection
+
 ```typescript
 interface VueParser {
   detectComponents(): {
@@ -560,6 +622,7 @@ interface VueParser {
 ```
 
 ### Godot C# Detection
+
 ```typescript
 interface GodotParser {
   detectScenes(): {
@@ -604,7 +667,7 @@ interface GodotParser {
   }[];
 
   detectResources(): {
-    type: 'texture' | 'audio' | 'scene' | 'script';
+    type: "texture" | "audio" | "scene" | "script";
     filePath: string;
     usedBy: string[];
   }[];
@@ -612,6 +675,7 @@ interface GodotParser {
 ```
 
 ### Django Detection
+
 ```typescript
 interface DjangoParser {
   detectUrls(): {
@@ -629,7 +693,7 @@ interface DjangoParser {
       name: string;
       type: string;
       relationship?: {
-        type: 'ForeignKey' | 'ManyToMany' | 'OneToOne';
+        type: "ForeignKey" | "ManyToMany" | "OneToOne";
         target: string;
       };
     }[];
@@ -641,7 +705,7 @@ interface DjangoParser {
 
   detectViews(): {
     name: string;
-    type: 'function' | 'class';
+    type: "function" | "class";
     methods?: string[]; // for class-based views
     permissions: string[];
     middleware: string[];
@@ -658,6 +722,7 @@ interface DjangoParser {
 ```
 
 ### FastAPI Detection
+
 ```typescript
 interface FastAPIParser {
   detectRoutes(): {
@@ -683,12 +748,13 @@ interface FastAPIParser {
     name: string;
     function: string;
     dependencies: string[]; // nested dependencies
-    scope: 'function' | 'path' | 'global';
+    scope: "function" | "path" | "global";
   }[];
 }
 ```
 
 ### Laravel Detection
+
 ```typescript
 interface LaravelParser {
   detectRoutes(): {
@@ -715,7 +781,7 @@ interface LaravelParser {
     namespace: string;
     methods: {
       name: string;
-      visibility: 'public' | 'private' | 'protected';
+      visibility: "public" | "private" | "protected";
       parameters: string[];
       returnType?: string;
     }[];
@@ -728,7 +794,7 @@ interface LaravelParser {
     table: string;
     fillable: string[];
     relationships: {
-      type: 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
+      type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany";
       related: string;
       method: string;
     }[];
@@ -748,16 +814,21 @@ interface LaravelParser {
 }
 ```
 
-
 ## Search Implementation
 
 ### Hybrid Search Strategy
+
+**Storage/Search**: Postgres + pgvector for embeddings; Full-Text Search (FTS) for keywords; simple Reciprocal Rank Fusion (RRF) to blend scores.
+
+**Key principle**: Store per-symbol summaries in the DB; don't bury them in markdown wikis.
+
 ```sql
--- Combine vector similarity with lexical matching
+-- Combine vector similarity with lexical matching using RRF
 WITH vector_search AS (
   SELECT
     id, target_id, target_type,
-    1 - (embedding <=> query_embedding) as vector_score
+    1 - (embedding <=> query_embedding) as vector_score,
+    ROW_NUMBER() OVER (ORDER BY embedding <=> query_embedding) as vector_rank
   FROM summaries
   WHERE embedding <=> query_embedding < 0.3
   ORDER BY embedding <=> query_embedding
@@ -767,7 +838,8 @@ lexical_search AS (
   SELECT
     id, target_id, target_type,
     ts_rank(to_tsvector('english', purpose || ' ' || inputs || ' ' || outputs),
-            plainto_tsquery('english', $1)) as lexical_score
+            plainto_tsquery('english', $1)) as lexical_score,
+    ROW_NUMBER() OVER (ORDER BY ts_rank(...) DESC) as lexical_rank
   FROM summaries
   WHERE to_tsvector('english', purpose || ' ' || inputs || ' ' || outputs)
         @@ plainto_tsquery('english', $1)
@@ -775,17 +847,20 @@ lexical_search AS (
 )
 SELECT
   s.id, s.target_id, s.target_type,
-  COALESCE(v.vector_score, 0) * 0.4 + COALESCE(l.lexical_score, 0) * 0.6 as final_score
+  -- Simple RRF: 1/(k + rank) where k=60
+  (1.0 / (60 + COALESCE(v.vector_rank, 100))) +
+  (1.0 / (60 + COALESCE(l.lexical_rank, 100))) as rrf_score
 FROM summaries s
 LEFT JOIN vector_search v ON s.id = v.id
 LEFT JOIN lexical_search l ON s.id = l.id
 WHERE v.id IS NOT NULL OR l.id IS NOT NULL
-ORDER BY final_score DESC;
+ORDER BY rrf_score DESC;
 ```
 
 ## Impact Analysis Algorithm
 
 ### Blast Radius Calculation
+
 ```typescript
 interface ImpactAnalysis {
   calculateBlastRadius(change: ChangeDescription): BlastRadius {
@@ -842,6 +917,7 @@ interface ImpactAnalysis {
 ## Specification Generation
 
 ### PRD Generation Template
+
 ```typescript
 interface PRDGenerator {
   generatePRD(problemStatement: string): ProductRequirementDocument {
@@ -891,6 +967,7 @@ interface PRDGenerator {
 ## Testing Strategy
 
 ### Test Pyramid
+
 ```
 ┌─────────────────────────────┐
 │         E2E Tests           │ ← Full workflow testing
@@ -907,26 +984,28 @@ interface PRDGenerator {
 ### Test Categories
 
 **Parser Correctness Tests:**
+
 ```typescript
-describe('NextJSParser', () => {
-  it('should detect API routes in pages directory', () => {
-    const parser = new NextJSParser('/path/to/nextjs-project');
+describe("NextJSParser", () => {
+  it("should detect API routes in pages directory", () => {
+    const parser = new NextJSParser("/path/to/nextjs-project");
     const routes = parser.detectRoutes();
 
     expect(routes.apiRoutes).toContainEqual({
-      path: '/api/users/[id]',
-      filePath: 'pages/api/users/[id].ts',
-      method: 'GET',
-      handler: 'getUserById'
+      path: "/api/users/[id]",
+      filePath: "pages/api/users/[id].ts",
+      method: "GET",
+      handler: "getUserById",
     });
   });
 });
 ```
 
 **Graph Building Tests:**
+
 ```typescript
-describe('SymbolGraphBuilder', () => {
-  it('should build correct call relationships', () => {
+describe("SymbolGraphBuilder", () => {
+  it("should build correct call relationships", () => {
     const code = `
       function a() { b(); }
       function b() { c(); }
@@ -935,57 +1014,59 @@ describe('SymbolGraphBuilder', () => {
 
     const graph = SymbolGraphBuilder.build(code);
 
-    expect(graph.getDependencies('a')).toContain('b');
-    expect(graph.getDependencies('b')).toContain('c');
-    expect(graph.getCallers('c')).toContain('b');
+    expect(graph.getDependencies("a")).toContain("b");
+    expect(graph.getDependencies("b")).toContain("c");
+    expect(graph.getCallers("c")).toContain("b");
   });
 });
 ```
 
 **Impact Analysis Tests:**
+
 ```typescript
-describe('ImpactAnalysis', () => {
-  it('should calculate correct blast radius', async () => {
+describe("ImpactAnalysis", () => {
+  it("should calculate correct blast radius", async () => {
     // Given a known codebase with documented dependencies
-    const repo = await TestRepository.load('sample-nextjs-app');
+    const repo = await TestRepository.load("sample-nextjs-app");
     const analyzer = new ImpactAnalyzer(repo);
 
     // When analyzing impact of changing a core utility function
     const impact = await analyzer.calculateBlastRadius({
-      symbol_id: 'utils/validation/validateEmail',
-      change_type: 'signature_change'
+      symbol_id: "utils/validation/validateEmail",
+      change_type: "signature_change",
     });
 
     // Then should identify all affected routes and components
-    expect(impact.affected_routes).toContain('/api/auth/signup');
-    expect(impact.affected_symbols).toContain('components/SignupForm');
+    expect(impact.affected_routes).toContain("/api/auth/signup");
+    expect(impact.affected_symbols).toContain("components/SignupForm");
     expect(impact.confidence).toBeGreaterThan(0.8);
   });
 });
 ```
 
 **MCP Integration Tests:**
+
 ```typescript
-describe('MCP Server', () => {
-  it('should respond to search_code requests', async () => {
+describe("MCP Server", () => {
+  it("should respond to search_code requests", async () => {
     const server = new MCPServer();
     await server.initialize(testRepository);
 
     const response = await server.handleRequest({
-      method: 'tools/call',
+      method: "tools/call",
       params: {
-        name: 'search_code',
+        name: "search_code",
         arguments: {
-          query: 'user authentication',
-          repo_id: 'test-repo'
-        }
-      }
+          query: "user authentication",
+          repo_id: "test-repo",
+        },
+      },
     });
 
-    expect(response.result).toHaveProperty('results');
+    expect(response.result).toHaveProperty("results");
     expect(response.result.results).toHaveLength(greaterThan(0));
-    expect(response.result.results[0]).toHaveProperty('file_path');
-    expect(response.result.results[0]).toHaveProperty('line_number');
+    expect(response.result.results[0]).toHaveProperty("file_path");
+    expect(response.result.results[0]).toHaveProperty("line_number");
   });
 });
 ```
@@ -993,6 +1074,7 @@ describe('MCP Server', () => {
 ## Performance Requirements
 
 ### Scalability Targets
+
 - **Repository Size**: Up to 1M lines of code
 - **Parse Time**: < 5 minutes for full analysis
 - **Search Response**: < 500ms for typical queries
@@ -1000,6 +1082,7 @@ describe('MCP Server', () => {
 - **Concurrent Users**: 50+ developers simultaneously
 
 ### Optimization Strategies
+
 - **Incremental Parsing**: Only re-process changed files
 - **Caching**: Cache expensive operations (embeddings, summaries)
 - **Indexing**: Optimize database queries with proper indexes
@@ -1009,12 +1092,14 @@ describe('MCP Server', () => {
 ## Security Considerations
 
 ### Data Protection
+
 - **Code Isolation**: Sandbox execution environments
 - **Access Control**: Role-based repository access
 - **Audit Logging**: Track all code analysis and queries
 - **Encryption**: Encrypt sensitive code at rest and in transit
 
 ### Privacy Controls
+
 - **Sensitive Data**: Detect and exclude secrets, credentials, PII
 - **Compliance**: Support GDPR, SOC2, HIPAA requirements
 - **Data Retention**: Configurable retention policies
@@ -1023,6 +1108,7 @@ describe('MCP Server', () => {
 ## Monitoring & Observability
 
 ### Key Metrics
+
 ```typescript
 interface SystemMetrics {
   // Performance metrics
@@ -1048,6 +1134,7 @@ interface SystemMetrics {
 ```
 
 ### Health Checks
+
 - Database connectivity and performance
 - MCP server responsiveness
 - Parser success rates by language
@@ -1057,9 +1144,10 @@ interface SystemMetrics {
 ## Deployment Architecture
 
 ### Infrastructure Components
+
 ```yaml
 # Docker Compose example
-version: '3.8'
+version: "3.8"
 services:
   # Core application
   claude-compass:
@@ -1099,21 +1187,25 @@ services:
 ### Deployment Options
 
 **1. Self-Hosted (Enterprise)**
+
 - Full control over code and data
 - Deploy on-premises or private cloud
 - Custom security and compliance controls
 
 **2. Cloud SaaS (Teams)**
+
 - Multi-tenant architecture
 - Automatic scaling and updates
 - Pay-per-repository pricing
 
 **3. Hybrid (Large Organizations)**
+
 - Local parsing for sensitive code
 - Cloud analytics and search
 - Federated across multiple locations
 
 **4. Desktop (Individual Developers)**
+
 - Local-only processing
 - No network dependencies
 - Integration with local editors
@@ -1123,17 +1215,20 @@ services:
 ### Target Market Segments
 
 **Individual Developers ($9/month)**
+
 - Personal repositories only
 - Basic framework support
 - Local processing
 
 **Small Teams ($29/user/month)**
+
 - Up to 10 repositories
 - Advanced framework support
 - Cloud processing and search
 - Team collaboration features
 
 **Enterprise ($199/user/month)**
+
 - Unlimited repositories
 - Multi-language support
 - On-premises deployment
@@ -1143,57 +1238,89 @@ services:
 ### ROI Justification
 
 **Cost Savings:**
+
 - Reduced debugging time: 2-4 hours/developer/week
 - Faster onboarding: 50% reduction in ramp-up time
 - Fewer production incidents: 30% reduction in bugs
 - Improved code reviews: 25% faster review cycles
 
 **Revenue Impact:**
+
 - Faster feature delivery: 15% improvement in velocity
 - Better code quality: Reduced technical debt
 - Developer satisfaction: Lower turnover costs
 
+## What Didn't Work (Lessons Learned)
+
+**Critical insights from real-world implementation - don't repeat these mistakes:**
+
+### Technical Approaches That Failed
+
+**AST-only maps**: Too brittle for frameworks with "magic" - you need route/DI/job/entity extraction beyond pure syntax analysis. Frameworks like Laravel, Django, and Next.js use conventions and runtime magic that ASTs can't capture.
+
+**Search without structure**: Embeddings alone return nice snippets but miss the blast radius. You need the graph relationships to understand "what breaks if I change this?"
+
+**Docs-only approach**: Forward specs are necessary, but without reverse understanding of the actual codebase, they drift immediately and become useless.
+
+### Current Limitations (Work in Progress)
+
+**Dynamic code**: Reflection, dynamic imports, and runtime-generated code still need a light runtime trace mode to capture relationships that static analysis misses.
+
+**Monorepo boundaries**: Scale is manageable, but ownership boundaries (who owns what edge) need clear policies and tooling.
+
+**Test linkage**: Mapping tests → stories → routes works well, but flaky test detection tied to impact analysis is still WIP.
+
+### Why "Better Prompts" Wasn't Enough
+
+Without structure (graphs, edges, summaries) and proper distribution (MCP), prompts just push the guessing problem upstream. The model needs the same structured context that a senior engineer carries in their head - not just more words.
+
 ## Risk Management
 
 ### Technical Risks
+
 - **Parsing Accuracy**: Framework changes breaking detection logic
-  - *Mitigation*: Automated testing, community contributions
+  - _Mitigation_: Automated testing, community contributions
 - **Performance**: Large repositories causing slowdowns
-  - *Mitigation*: Incremental processing, caching strategies
+  - _Mitigation_: Incremental processing, caching strategies
 - **Accuracy**: AI-generated summaries being incorrect
-  - *Mitigation*: Human review workflows, confidence scoring
+  - _Mitigation_: Human review workflows, confidence scoring
 
 ### Business Risks
+
 - **Competition**: Existing tools adding similar features
-  - *Mitigation*: Focus on integration and user experience
+  - _Mitigation_: Focus on integration and user experience
 - **Adoption**: Developers preferring manual processes
-  - *Mitigation*: Gradual introduction, clear value demonstration
+  - _Mitigation_: Gradual introduction, clear value demonstration
 - **Privacy**: Concerns about code analysis and storage
-  - *Mitigation*: Transparent privacy controls, local deployment options
+  - _Mitigation_: Transparent privacy controls, local deployment options
 
 ### Operational Risks
+
 - **Scalability**: Unable to handle growth in usage
-  - *Mitigation*: Cloud-native architecture, horizontal scaling
+  - _Mitigation_: Cloud-native architecture, horizontal scaling
 - **Reliability**: System downtime affecting development workflows
-  - *Mitigation*: High availability design, monitoring, SLAs
+  - _Mitigation_: High availability design, monitoring, SLAs
 - **Security**: Code leakage or unauthorized access
-  - *Mitigation*: Security audits, encryption, access controls
+  - _Mitigation_: Security audits, encryption, access controls
 
 ## Success Metrics
 
 ### Developer Experience
+
 - Time to understand new codebase: < 2 hours (vs 2 days)
 - Confidence in refactoring: 90% of developers feel confident
 - Bug introduction rate: 50% reduction in breaking changes
 - Documentation freshness: 90% of specs match implementation
 
 ### System Performance
+
 - Parse accuracy: 95% of relationships correctly identified
 - Search relevance: 85% of queries return useful results
 - Response time: 95% of queries under 500ms
 - Availability: 99.9% uptime SLA
 
 ### Business Impact
+
 - Developer productivity: 20% improvement in feature delivery
 - Code quality: 30% reduction in technical debt
 - Team onboarding: 50% faster new developer productivity
@@ -1202,18 +1329,21 @@ services:
 ## Future Enhancements
 
 ### Advanced Features (Year 2)
+
 - **Runtime Tracing**: Dynamic analysis for reflection-heavy code
 - **Multi-Repository**: Cross-service dependency tracking
 - **Performance Analysis**: Identify performance bottlenecks
 - **Security Analysis**: Detect security vulnerabilities
 
 ### AI Improvements (Year 2-3)
+
 - **Custom Models**: Fine-tuned embeddings for code domains
 - **Code Generation**: Generate implementations from specs
 - **Automated Refactoring**: Suggest and implement improvements
 - **Intelligent Testing**: Generate test cases from specifications
 
 ### Integration Ecosystem (Year 3+)
+
 - **IDE Extensions**: Deep integration with VS Code, IntelliJ, etc.
 - **CI/CD Pipelines**: Automated analysis in build processes
 - **Project Management**: Integration with Jira, Linear, Asana
@@ -1222,34 +1352,44 @@ services:
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js 18+
 - PostgreSQL 15+ with pgvector extension
 - Git repositories to analyze
 - OpenAI API key (for embeddings)
 
-### Quick Start
+### Quick Start (Recommended Approach)
+
+**If you want to try something similar, follow this battle-tested approach:**
+
 ```bash
-# Clone and setup
+# 1. Start with one stack (e.g., Vue.js, Next.js + NestJS or Django or Spring)
 git clone https://github.com/your-org/claude-compass
 cd claude-compass
 npm install
 
-# Setup database
+# 2. Setup database with vector support
 createdb claude_compass
 psql claude_compass -c "CREATE EXTENSION vector;"
 npm run migrate
 
-# Index your first repository
-npm run analyze -- --repo /path/to/your/nextjs-project
+# 3. Build 3 edges first - this is 80% of "what breaks if..."
+# - Routes (HTTP endpoints → handlers)
+# - DI/beans/providers (dependency injection)
+# - Jobs/schedulers (background tasks)
+npm run analyze -- --repo /path/to/your/project --focus=routes,di,jobs
 
-# Start MCP server
+# 4. Add your first MCP tools
 npm run mcp-server
 
-# Connect with Claude Code
+# 5. Wire the server into AI client early so you feel the UX
 # Add MCP server configuration to your Claude Code settings
 ```
 
+**Key principle**: Get search_code, who_calls, and impact_of working first. Store per-symbol summaries in the DB from day one.
+
 ### Development Environment
+
 ```bash
 # Install development dependencies
 npm install --save-dev
