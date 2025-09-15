@@ -47,11 +47,11 @@ AI assistants suffer from "context starvation" - they make decisions without und
 - **MCP Server**: Node.js/TypeScript implementation
 - **Vector Embeddings**: OpenAI Ada v2 or similar
 
-**Supported Languages (Initial):**
-- JavaScript/TypeScript (Next.js, NestJS, React)
-- Python (Django, FastAPI, Flask)
-- Java (Spring Boot, Spring Framework)
-- C# (.NET Core, ASP.NET)
+**Supported Languages & Frameworks (Initial):**
+- **Python** (Django, FastAPI, Flask)
+- **PHP** (Laravel)
+- **C#** (Godot game engine)
+- **JavaScript/TypeScript** (Vue.js, Node.js)
 
 ### Database Schema
 
@@ -368,14 +368,14 @@ interface MCPTools {
 **Goal**: Basic parsing and storage infrastructure
 
 **Deliverables:**
-- Tree-sitter integration for JavaScript/TypeScript
+- Tree-sitter integration for Python, PHP, C#, and JavaScript/TypeScript
 - PostgreSQL schema setup with pgvector
 - Basic file and symbol graph building
 - Simple MCP server with `get_file` and `get_symbol` tools
 - Command-line tool for repository analysis
 
 **Success Criteria:**
-- Can parse a Next.js project and extract file/symbol relationships
+- Can parse Python, Laravel, Godot, and Vue projects and extract file/symbol relationships
 - MCP server responds to basic queries
 - Database stores and retrieves parsed data efficiently
 
@@ -383,30 +383,35 @@ interface MCPTools {
 **Goal**: Framework-aware parsing for web applications
 
 **Deliverables:**
-- Next.js route detection (pages/ and app/ directories)
-- NestJS decorator parsing (controllers, services, modules)
-- Basic dependency injection graph
+- Python Django/FastAPI route and view detection
+- Laravel route and controller detection (web.php, api.php, controllers)
+- Vue.js component and router analysis (pages/, components/, composables/)
+- Godot C# scene and script relationships (*.tscn, *.cs files)
+- Basic dependency injection graph for web frameworks
 - `search_code` tool with lexical search
 - Route mapping visualization
 
 **Success Criteria:**
-- Can map HTTP routes to handler functions
-- Identifies service dependencies in DI frameworks
-- Search returns relevant results with file/line citations
+- Can map HTTP routes to handler functions in Python and Laravel
+- Identifies Vue component dependencies and Godot scene relationships
+- Search returns relevant results with file/line citations across all frameworks
 
 ### Phase 3: Advanced Graphs (Months 3-4)
 **Goal**: Complete framework ecosystem understanding
 
 **Deliverables:**
-- Background job detection (cron, queues, event handlers)
-- ORM entity relationship mapping (Prisma, TypeORM, Sequelize)
-- Test-to-code linkage (Jest, Cypress, Playwright)
-- Enhanced symbol relationships (inheritance, interfaces)
+- Background job detection (Laravel queues, Celery tasks)
+- ORM entity relationship mapping (Django ORM, Laravel Eloquent, SQLAlchemy)
+- Test-to-code linkage (pytest, PHPUnit, Vue Test Utils, Godot test framework)
+- Enhanced symbol relationships (inheritance, interfaces, traits, Vue composables)
+- Godot scene hierarchy and signal connections
 - `who_calls` and `list_dependencies` tools
+- Package manager integration (pip, Composer, npm)
 
 **Success Criteria:**
-- Can trace data flow from HTTP request to database
-- Identifies all consumers of a changed interface
+- Can trace data flow from HTTP request to database in web frameworks
+- Identifies all consumers of a changed interface/class/trait/composable
+- Maps Godot scene dependencies and signal flows
 - Maps test coverage to business functionality
 
 ### Phase 4: AI-Powered Analysis (Months 4-5)
@@ -454,20 +459,22 @@ interface MCPTools {
 - Provides actionable recommendations for alignment
 - Reduces manual effort to keep documentation current
 
-### Phase 7: Multi-Language Support (Months 7-8)
-**Goal**: Expand beyond JavaScript ecosystem
+### Phase 7: Advanced Framework Features (Months 7-8)
+**Goal**: Deep framework-specific analysis and optimizations
 
 **Deliverables:**
-- Python support (Django, FastAPI, Flask)
-- Java support (Spring Boot, Spring Framework)
-- C# support (.NET Core, ASP.NET)
-- Language-agnostic graph representations
-- Cross-language dependency tracking
+- Vue 3 Composition API advanced analysis (reactive dependencies, lifecycle hooks)
+- Godot multiplayer and networking pattern detection
+- Django admin interface auto-generation mapping
+- Laravel service provider and facade pattern analysis
+- Python async/await pattern detection
+- Cross-framework API integration tracking
 
 **Success Criteria:**
-- Works effectively with polyglot repositories
-- Maintains same functionality across all supported languages
-- Can trace dependencies across language boundaries
+- Accurately maps Vue reactivity and component lifecycle dependencies
+- Identifies Godot networking architecture and multiplayer patterns
+- Tracks Laravel facades to underlying service implementations
+- Maps Python async task dependencies and execution flows
 
 ### Phase 8: Enterprise Features (Months 8-9)
 **Goal**: Production-ready deployment and scaling
@@ -486,71 +493,109 @@ interface MCPTools {
 
 ## Framework-Specific Parsers
 
-### Next.js Detection
+### Vue.js Detection
 ```typescript
-interface NextJSParser {
+interface VueParser {
+  detectComponents(): {
+    name: string;
+    filePath: string;
+    props: {
+      name: string;
+      type: string;
+      required: boolean;
+      default?: any;
+    }[];
+    emits: string[];
+    slots: string[];
+    composables: string[]; // useComposable imports
+    dependencies: string[]; // imported components
+  }[];
+
   detectRoutes(): {
-    // pages/ directory routes
-    pageRoutes: {
-      path: string; // /api/users/[id]
-      filePath: string; // pages/api/users/[id].ts
-      method: string[]; // GET, POST, etc.
-      handler: string; // function name
+    // Vue Router routes
+    routes: {
+      path: string; // '/users/:id'
+      component: string; // 'UserDetail.vue'
+      name?: string;
+      children?: string[];
+      guards: string[]; // beforeEnter, meta.requiresAuth
     }[];
 
-    // app/ directory routes
-    appRoutes: {
-      path: string; // /dashboard/users
-      filePath: string; // app/dashboard/users/page.tsx
-      layout?: string; // layout component
-      loading?: string; // loading component
-    }[];
-
-    // API routes
-    apiRoutes: {
+    // Nuxt pages/ directory routes
+    pageRoutes?: {
       path: string;
-      method: string;
-      handler: string;
+      filePath: string; // pages/users/[id].vue
+      layout?: string;
       middleware: string[];
     }[];
   };
 
-  detectMiddleware(): {
-    global: string[]; // middleware.ts
-    routeSpecific: Map<string, string[]>;
-  };
+  detectComposables(): {
+    name: string;
+    filePath: string; // composables/useAuth.js
+    returns: string[];
+    dependencies: string[];
+    reactiveRefs: string[];
+  }[];
+
+  detectStores(): {
+    name: string; // Pinia stores
+    state: string[];
+    getters: string[];
+    actions: string[];
+    dependencies: string[];
+  }[];
 }
 ```
 
-### NestJS Detection
+### Godot C# Detection
 ```typescript
-interface NestJSParser {
-  detectModules(): {
+interface GodotParser {
+  detectScenes(): {
     name: string;
-    filePath: string;
-    imports: string[];
-    controllers: string[];
-    providers: string[];
-    exports: string[];
-  }[];
-
-  detectControllers(): {
-    name: string;
-    prefix: string; // @Controller('users')
-    methods: {
+    filePath: string; // scenes/Player.tscn
+    rootNode: string;
+    children: {
       name: string;
-      route: string; // @Get(':id')
-      method: string; // GET, POST, etc.
-      guards: string[]; // @UseGuards()
-      interceptors: string[]; // @UseInterceptors()
+      type: string;
+      script?: string;
+    }[];
+    signals: {
+      name: string;
+      parameters: string[];
+      connections: {
+        target: string;
+        method: string;
+      }[];
     }[];
   }[];
 
-  detectServices(): {
+  detectScripts(): {
     name: string;
-    injectable: boolean;
-    dependencies: string[]; // constructor injection
-    scope?: string; // REQUEST, TRANSIENT
+    filePath: string; // scripts/Player.cs
+    extends: string; // Node2D, RigidBody2D
+    exports: {
+      name: string;
+      type: string;
+    }[];
+    methods: {
+      name: string;
+      virtual: boolean; // _ready(), _process()
+      signals: string[]; // EmitSignal calls
+    }[];
+    nodeReferences: string[]; // GetNode calls
+  }[];
+
+  detectAutoloads(): {
+    name: string;
+    script: string;
+    singleton: boolean;
+  }[];
+
+  detectResources(): {
+    type: 'texture' | 'audio' | 'scene' | 'script';
+    filePath: string;
+    usedBy: string[];
   }[];
 }
 ```
@@ -590,8 +635,108 @@ interface DjangoParser {
     permissions: string[];
     middleware: string[];
   }[];
+
+  detectAdmin(): {
+    model: string;
+    admin_class: string;
+    list_display: string[];
+    search_fields: string[];
+    filters: string[];
+  }[];
 }
 ```
+
+### FastAPI Detection
+```typescript
+interface FastAPIParser {
+  detectRoutes(): {
+    path: string; // '/users/{user_id}'
+    method: string; // GET, POST, etc.
+    function_name: string;
+    dependencies: string[]; // Depends() injections
+    response_model?: string;
+    tags: string[];
+  }[];
+
+  detectModels(): {
+    name: string; // Pydantic models
+    fields: {
+      name: string;
+      type: string;
+      validation: string[];
+    }[];
+    inheritance: string[];
+  }[];
+
+  detectDependencies(): {
+    name: string;
+    function: string;
+    dependencies: string[]; // nested dependencies
+    scope: 'function' | 'path' | 'global';
+  }[];
+}
+```
+
+### Laravel Detection
+```typescript
+interface LaravelParser {
+  detectRoutes(): {
+    // Route definitions from web.php, api.php
+    routes: {
+      method: string; // GET, POST, PUT, DELETE
+      uri: string; // 'users/{id}'
+      controller: string; // 'UserController@show'
+      middleware: string[]; // ['auth', 'verified']
+      name?: string; // route name
+    }[];
+
+    // Resource routes
+    resourceRoutes: {
+      resource: string; // 'users'
+      controller: string; // 'UserController'
+      only?: string[];
+      except?: string[];
+    }[];
+  };
+
+  detectControllers(): {
+    name: string;
+    namespace: string;
+    methods: {
+      name: string;
+      visibility: 'public' | 'private' | 'protected';
+      parameters: string[];
+      returnType?: string;
+    }[];
+    middleware: string[];
+    traits: string[];
+  }[];
+
+  detectModels(): {
+    name: string;
+    table: string;
+    fillable: string[];
+    relationships: {
+      type: 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
+      related: string;
+      method: string;
+    }[];
+    casts: Record<string, string>;
+    traits: string[];
+  }[];
+
+  detectServices(): {
+    name: string;
+    namespace: string;
+    bindings: {
+      abstract: string;
+      concrete: string;
+      singleton: boolean;
+    }[];
+  };
+}
+```
+
 
 ## Search Implementation
 
