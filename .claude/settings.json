@@ -1,0 +1,92 @@
+{
+    "permissions": {
+        "allow": [
+            "WebFetch(domain:docs.anthropic.com)",
+            "Bash(rm:*)",
+            "WebFetch(domain:github.com)",
+            "mcp__context7__resolve-library-id",
+            "mcp__context7__get-library-docs",
+            "WebFetch(domain:www.npmjs.com)",
+            "mcp__filesystem__list_directory",
+            "Bash(grep:*)",
+            "Bash(git add:*)",
+            "mcp__filesystem__edit_file",
+            "WebFetch(domain:js.devexpress.com)",
+            "WebFetch(domain:devexpress.github.io)",
+            "mcp__filesystem__search_files",
+            "Bash(npx devextreme-cli build-theme:*)",
+            "Bash(mv:*)",
+            "mcp__puppeteer__puppeteer_navigate",
+            "mcp__puppeteer__puppeteer_screenshot",
+            "mcp__puppeteer__puppeteer_click",
+            "mcp__puppeteer__puppeteer_evaluate",
+            "Bash(sed:*)",
+            "mcp__puppeteer__puppeteer_fill",
+            "mcp__gitlab__search_repositories",
+            "WebFetch(domain:gitlab.indigital.gr)",
+            "mcp__gitlab__list_issues",
+            "Bash(git push:*)",
+            "Bash(find:*)",
+            "mcp__gitlab__get_project",
+            "Bash(rg:*)",
+            "WebFetch(domain:cortexjs.io)",
+            "Bash(git commit:*)",
+            "Bash(./release.sh:*)",
+            "Bash(php artisan:*)",
+            "mcp__gitlab__get_issue",
+            "mcp__gitlab__update_issue",
+            "mcp__gitlab__list_projects",
+            "mcp__gitlab__list_labels",
+            "mcp__gitlab__create_note",
+            "mcp__gitlab__create_issue",
+            "Bash(php:*)",
+            "Bash(git rm:*)",
+            "mcp__sequential-thinking__sequentialthinking",
+            "Bash(git checkout:*)",
+            "Bash(git pull:*)",
+            "Bash(sudo supervisorctl restart:*)",
+            "WebFetch(domain:simple-bench.com)",
+            "mcp__mcp-deepwiki__deepwiki_fetch",
+            "WebFetch(domain:grafana.com)",
+            "mcp__memory__create_entities",
+            "mcp__memory__add_observations",
+            "mcp__memory__read_graph",
+            "mcp__memory__delete_entities",
+            "mcp__memory__search_nodes",
+            "mcp__memory__delete_observations",
+            "mcp__memory__search_nodes",
+            "mcp__memory__open_nodes",
+            "mcp__ide__getDiagnostics",
+            "Bash(diff:*)",
+            "Bash(git reset:*)",
+            "mcp__memory__create_relations"
+        ],
+        "deny": [
+            "Bash(npm run type-check:*)",
+            "Bash(npm run dev:*)",
+            "Bash(npm run build:*)"
+        ]
+    },
+    "statusLine": {
+        "type": "command",
+        "command": "bun x ccusage statusline"
+    },
+    "enableAllProjectMcpServers": true,
+    "enabledMcpjsonServers": [
+        "context7",
+        "sequential-thinking"
+    ],
+    "hooks": {
+        "PreToolUse": [],
+        "UserPromptSubmit": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "uv run .claude/hooks/task_hard_prep_hook.py"
+                    }
+                ]
+            }
+        ]
+    }
+}
