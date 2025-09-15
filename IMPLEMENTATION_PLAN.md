@@ -47,11 +47,11 @@ AI assistants suffer from "context starvation" - they make decisions without und
 - **MCP Server**: Node.js/TypeScript implementation
 - **Vector Embeddings**: OpenAI Ada v2 or similar
 
-**Supported Languages & Frameworks (Initial):**
-- **Python** (Django, FastAPI, Flask)
-- **PHP** (Laravel)
-- **C#** (Godot game engine)
-- **JavaScript/TypeScript** (Vue.js, Node.js)
+**Supported Languages & Frameworks (Sequential Implementation):**
+- **Phase 1**: **JavaScript/TypeScript** (Vue.js, Node.js, Next.js)
+- **Phase 2**: **PHP** (Laravel)
+- **Phase 3**: **C#** (Godot game engine)
+- **Phase 4**: **Python** (Django, FastAPI, Flask)
 
 ### Database Schema
 
@@ -364,58 +364,114 @@ interface MCPTools {
 
 ## Implementation Phases
 
-### Phase 1: Core Foundation (Months 1-2)
-**Goal**: Basic parsing and storage infrastructure
+**Sequential Stack Implementation Strategy**: Following the principle of "start with one stack", we implement language support in phases to ensure solid foundation and learnings from each stack before expanding.
+
+### Phase 1: JavaScript/TypeScript Foundation (Months 1-2)
+**Goal**: Basic parsing and storage infrastructure with JS/TS focus
 
 **Deliverables:**
-- Tree-sitter integration for Python, PHP, C#, and JavaScript/TypeScript
+- Tree-sitter integration for JavaScript/TypeScript
 - PostgreSQL schema setup with pgvector
 - Basic file and symbol graph building
+- JavaScript/TypeScript import/export relationship mapping
 - Simple MCP server with `get_file` and `get_symbol` tools
 - Command-line tool for repository analysis
 
 **Success Criteria:**
-- Can parse Python, Laravel, Godot, and Vue projects and extract file/symbol relationships
+- Can parse Vue.js, Next.js, and Node.js projects and extract file/symbol relationships
+- Accurately maps ES6 imports, CommonJS requires, and dynamic imports
 - MCP server responds to basic queries
 - Database stores and retrieves parsed data efficiently
 
-### Phase 2: Framework Analysis (Months 2-3)
-**Goal**: Framework-aware parsing for web applications
+### Phase 2: JavaScript/TypeScript Framework Analysis (Months 2-3)
+**Goal**: Framework-aware parsing for JavaScript/TypeScript applications
 
 **Deliverables:**
-- Python Django/FastAPI route and view detection
-- Laravel route and controller detection (web.php, api.php, controllers)
 - Vue.js component and router analysis (pages/, components/, composables/)
-- Godot C# scene and script relationships (*.tscn, *.cs files)
-- Basic dependency injection graph for web frameworks
+- Next.js pages and API routes detection (pages/, app/, api/)
+- Node.js Express/Fastify route detection
+- React component and hook analysis
+- JavaScript/TypeScript dependency injection patterns
 - `search_code` tool with lexical search
-- Route mapping visualization
+- Route mapping visualization for JS frameworks
 
 **Success Criteria:**
-- Can map HTTP routes to handler functions in Python and Laravel
-- Identifies Vue component dependencies and Godot scene relationships
-- Search returns relevant results with file/line citations across all frameworks
+- Can map HTTP routes to handler functions in Next.js and Node.js
+- Identifies Vue/React component dependencies and composition patterns
+- Detects Vue composables, React hooks, and Node.js middleware chains
+- Search returns relevant results with file/line citations
 
-### Phase 3: Advanced Graphs (Months 3-4)
-**Goal**: Complete framework ecosystem understanding
+### Phase 3: Advanced JavaScript/TypeScript Graphs (Months 3-4)
+**Goal**: Complete JavaScript/TypeScript ecosystem understanding
 
 **Deliverables:**
-- Background job detection (Laravel queues, Celery tasks)
-- ORM entity relationship mapping (Django ORM, Laravel Eloquent, SQLAlchemy)
-- Test-to-code linkage (pytest, PHPUnit, Vue Test Utils, Godot test framework)
-- Enhanced symbol relationships (inheritance, interfaces, traits, Vue composables)
-- Godot scene hierarchy and signal connections
+- Background job detection (Node.js worker threads, job queues)
+- Database ORM mapping (Prisma, TypeORM, Sequelize relationships)
+- Test-to-code linkage (Jest, Vitest, Cypress, Playwright)
+- Enhanced symbol relationships (inheritance, interfaces, Vue composables, React hooks)
+- Package manager integration (npm, yarn, pnpm dependencies)
 - `who_calls` and `list_dependencies` tools
-- Package manager integration (pip, Composer, npm)
+- Monorepo structure analysis (nx, lerna, turborepo)
 
 **Success Criteria:**
-- Can trace data flow from HTTP request to database in web frameworks
-- Identifies all consumers of a changed interface/class/trait/composable
-- Maps Godot scene dependencies and signal flows
+- Can trace data flow from HTTP request to database in JS/TS frameworks
+- Identifies all consumers of a changed interface/type/composable/hook
 - Maps test coverage to business functionality
+- Handles complex monorepo dependencies and workspace relationships
 
-### Phase 4: AI-Powered Analysis (Months 4-5)
-**Goal**: Semantic understanding and impact analysis
+### Phase 4: PHP Support (Months 4-5)
+**Goal**: Add Laravel/PHP framework support
+
+**Deliverables:**
+- Tree-sitter integration for PHP
+- Laravel route and controller detection (web.php, api.php, controllers)
+- Laravel Eloquent model relationship mapping
+- Laravel service provider and dependency injection analysis
+- Laravel job queue and scheduler detection
+- Test-to-code linkage (PHPUnit)
+
+**Success Criteria:**
+- Can parse Laravel projects and extract routes, controllers, models
+- Maps Laravel's service container and dependency injection
+- Identifies Laravel jobs, queues, and scheduled tasks
+- Handles Laravel-specific patterns (facades, service providers)
+
+### Phase 5: C# Support (Months 5-6)
+**Goal**: Add Godot/C# game engine support
+
+**Deliverables:**
+- Tree-sitter integration for C#
+- Godot scene (.tscn) and script (.cs) relationships
+- Godot signal system detection and connections
+- Godot node hierarchy and resource dependencies
+- Godot autoload and singleton pattern detection
+- Game-specific testing frameworks integration
+
+**Success Criteria:**
+- Can parse Godot projects and map scenes to scripts
+- Identifies signal connections and node relationships
+- Maps resource usage and autoload dependencies
+- Understands Godot-specific inheritance patterns
+
+### Phase 6: Python Support (Months 6-7)
+**Goal**: Add Django/FastAPI/Flask support
+
+**Deliverables:**
+- Tree-sitter integration for Python
+- Django URL patterns and view detection
+- Django model and ORM relationship mapping
+- FastAPI route and dependency injection analysis
+- Python async/await pattern detection
+- Test-to-code linkage (pytest)
+
+**Success Criteria:**
+- Can parse Django projects and map URLs to views and models
+- Identifies FastAPI routes, dependencies, and Pydantic models
+- Maps Python async task dependencies and execution flows
+- Handles Python-specific patterns (decorators, context managers)
+
+### Phase 7: AI-Powered Analysis (Months 7-8)
+**Goal**: Semantic understanding and impact analysis across all stacks
 
 **Deliverables:**
 - Vector embeddings for code and documentation
@@ -425,71 +481,26 @@ interface MCPTools {
 - Purpose, side effects, and invariant detection
 
 **Success Criteria:**
-- Can predict which code will break from a change
+- Can predict which code will break from a change across all languages
 - Generates accurate summaries of code functionality
 - Search understands semantic similarity, not just keywords
 
-### Phase 5: Forward Specifications (Months 5-6)
-**Goal**: Requirements → implementation workflow
+### Phase 8: Forward Specifications & Drift Detection (Months 8-9)
+**Goal**: Requirements → implementation workflow and sync maintenance
 
 **Deliverables:**
 - Problem statement → PRD generation
 - API contract generation from requirements
-- Database schema generation from business rules
-- Clickable prototype generation
-- Spec-driven development workflow
+- Spec vs. code comparison algorithms
+- Drift detection and reporting
+- Git hook integration for automatic re-indexing
+- Integration with issue tracking (GitHub, Jira)
 
 **Success Criteria:**
 - Can generate detailed specifications from feature requests
-- Specifications provide clear implementation guidance
-- Generated artifacts are technically accurate
-
-### Phase 6: Sync & Drift Detection (Months 6-7)
-**Goal**: Maintain spec-code alignment over time
-
-**Deliverables:**
-- Git hook integration for automatic re-indexing
-- Spec vs. code comparison algorithms
-- Drift detection and reporting
-- Integration with issue tracking (GitHub, Jira)
-- Automated spec update suggestions
-
-**Success Criteria:**
 - Detects when implemented features diverge from specifications
 - Provides actionable recommendations for alignment
 - Reduces manual effort to keep documentation current
-
-### Phase 7: Advanced Framework Features (Months 7-8)
-**Goal**: Deep framework-specific analysis and optimizations
-
-**Deliverables:**
-- Vue 3 Composition API advanced analysis (reactive dependencies, lifecycle hooks)
-- Godot multiplayer and networking pattern detection
-- Django admin interface auto-generation mapping
-- Laravel service provider and facade pattern analysis
-- Python async/await pattern detection
-- Cross-framework API integration tracking
-
-**Success Criteria:**
-- Accurately maps Vue reactivity and component lifecycle dependencies
-- Identifies Godot networking architecture and multiplayer patterns
-- Tracks Laravel facades to underlying service implementations
-- Maps Python async task dependencies and execution flows
-
-### Phase 8: Enterprise Features (Months 8-9)
-**Goal**: Production-ready deployment and scaling
-
-**Deliverables:**
-- Multi-tenant architecture
-- Role-based access control
-- Audit logging and compliance
-- Horizontal scaling support
-- Enterprise integrations (LDAP, SAML)
-
-**Success Criteria:**
-- Handles multiple teams and repositories securely
-- Scales to enterprise-size codebases
-- Meets security and compliance requirements
 
 ## Framework-Specific Parsers
 
