@@ -15,7 +15,7 @@ module.exports = {
       max: 10
     },
     migrations: {
-      directory: './dist/database/migrations',
+      directory: './dist/src/database/migrations',
       tableName: 'knex_migrations',
       extension: 'js',
       loadExtensions: ['.js']
@@ -36,7 +36,7 @@ module.exports = {
       max: 5
     },
     migrations: {
-      directory: './dist/database/migrations',
+      directory: './dist/src/database/migrations',
       tableName: 'knex_migrations',
       extension: 'js',
       loadExtensions: ['.js']
@@ -51,7 +51,7 @@ module.exports = {
       max: 20
     },
     migrations: {
-      directory: './dist/database/migrations',
+      directory: './dist/src/database/migrations',
       tableName: 'knex_migrations',
       extension: 'js',
       loadExtensions: ['.js']
