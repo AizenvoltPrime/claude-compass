@@ -684,12 +684,10 @@ export class GraphBuilder {
   private shouldIncludeFile(filePath: string, options: BuildOptions): boolean {
     const ext = path.extname(filePath);
 
-    if (options.fileExtensions && !options.fileExtensions.includes(ext)) {
-      return false;
-    }
+    // Use provided extensions if specified, otherwise fall back to defaults
+    const allowedExtensions = options.fileExtensions || ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue'];
 
-    const defaultExtensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'];
-    if (!defaultExtensions.includes(ext)) {
+    if (!allowedExtensions.includes(ext)) {
       return false;
     }
 
@@ -733,6 +731,8 @@ export class GraphBuilder {
       case '.ts':
       case '.tsx':
         return 'typescript';
+      case '.vue':
+        return 'vue';
       default:
         return 'unknown';
     }

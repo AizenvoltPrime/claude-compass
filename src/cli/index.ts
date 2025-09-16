@@ -28,7 +28,7 @@ program
   .option('--chunking-threshold <size>', 'File size to start chunking', '51200') // 50KB
   .option('--warn-threshold <size>', 'File size to warn about', '2097152') // 2MB
   .option('--max-files <count>', 'Maximum number of files to process', '10000')
-  .option('--extensions <list>', 'File extensions to analyze (comma-separated)', '.js,.jsx,.ts,.tsx,.mjs,.cjs')
+  .option('--extensions <list>', 'File extensions to analyze (comma-separated)', '.js,.jsx,.ts,.tsx,.mjs,.cjs,.vue')
   .option('--compassignore <path>', 'Path to .compassignore file', '.compassignore')
   .option('--chunk-overlap <lines>', 'Overlap lines between chunks', '100')
   .option('--encoding-fallback <encoding>', 'Fallback encoding for problematic files', 'iso-8859-1')
