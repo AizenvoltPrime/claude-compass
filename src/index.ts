@@ -6,7 +6,21 @@
  */
 
 // Re-export all modules for library usage
-export * from './parsers';
+export {
+  BaseParser,
+  ParserFactory,
+  JavaScriptParser,
+  TypeScriptParser,
+  BaseFrameworkParser,
+  VueParser,
+  NextJSParser,
+  ReactParser,
+  NodeJSParser,
+  FrameworkDetector,
+  MultiParser,
+  getParserForFile,
+  getSupportedLanguages
+} from './parsers';
 export * from './database';
 export * from './graph';
 export * from './mcp';
@@ -16,5 +30,4 @@ export * from './utils';
 export { GraphBuilder } from './graph/builder';
 export { ClaudeCompassMCPServer } from './mcp/server';
 export { databaseService } from './database/services';
-export { getParserForFile, getSupportedLanguages } from './parsers';
 export { logger, config } from './utils';

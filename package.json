@@ -2,16 +2,16 @@
   "name": "claude-compass",
   "version": "0.1.0",
   "description": "AI-native development environment that gives AI assistants complete contextual understanding of codebases",
-  "main": "dist/cli/index.js",
+  "main": "dist/src/cli/index.js",
   "bin": {
-    "claude-compass": "./dist/cli/index.js"
+    "claude-compass": "./dist/src/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/cli/index.js",
-    "analyze": "node dist/cli/index.js analyze",
-    "mcp-server": "node dist/mcp/server.js",
+    "start": "node dist/src/cli/index.js",
+    "analyze": "node dist/src/cli/index.js analyze",
+    "mcp-server": "node dist/src/mcp/server.js",
     "migrate:latest": "knex migrate:latest",
     "migrate:rollback": "knex migrate:rollback",
     "migrate:make": "knex migrate:make",

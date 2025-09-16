@@ -40,12 +40,111 @@ export interface ParsedExport {
   line_number: number;
 }
 
+// Framework-specific entity interfaces
+export interface FrameworkEntity {
+  type: string;
+  name: string;
+  filePath: string;
+  metadata?: Record<string, any>;
+}
+
+export interface VueComponent extends FrameworkEntity {
+  type: 'component';
+  props: PropDefinition[];
+  emits: string[];
+  slots: string[];
+  composables: string[];
+  template_dependencies: string[];
+}
+
+export interface ReactComponent extends FrameworkEntity {
+  type: 'component';
+  componentType: 'function' | 'class';
+  props: PropDefinition[];
+  hooks: string[];
+  jsxDependencies: string[];
+}
+
+export interface VueComposable extends FrameworkEntity {
+  type: 'composable';
+  returns: string[];
+  dependencies: string[];
+  reactive_refs: string[];
+}
+
+export interface ReactHook extends FrameworkEntity {
+  type: 'hook';
+  returns: string[];
+  dependencies: string[];
+}
+
+export interface ReactHOC extends FrameworkEntity {
+  type: 'hoc';
+  wrapsComponent: boolean;
+  returnsComponent: boolean;
+}
+
+export interface VueRoute extends FrameworkEntity {
+  type: 'route';
+  path: string;
+  component?: string;
+}
+
+export interface PiniaStore extends FrameworkEntity {
+  type: 'store';
+  state: string[];
+  getters: string[];
+  actions: string[];
+}
+
+export interface NextJSRoute extends FrameworkEntity {
+  type: 'nextjs-page-route' | 'nextjs-api-route' | 'page' | 'layout' | 'loading' | 'error' | 'not-found' | 'template' | 'api-route';
+  path: string;
+  method?: string;
+  component?: string;
+  handler?: string;
+  dynamicSegments: string[];
+  framework: 'nextjs';
+}
+
+export interface ExpressRoute extends FrameworkEntity {
+  type: 'express-route';
+  path: string;
+  method: string;
+  handler?: string;
+  middleware: string[];
+  framework: 'express';
+}
+
+export interface FastifyRoute extends FrameworkEntity {
+  type: 'fastify-route';
+  path: string;
+  method: string;
+  handler?: string;
+  middleware: string[];
+  framework: 'fastify';
+}
+
+export interface PropDefinition {
+  name: string;
+  type?: string;
+  required: boolean;
+  default?: any;
+  description?: string;
+}
+
+// Framework parser result extension
+export interface FrameworkParseResult {
+  entities: FrameworkEntity[];
+}
+
 export interface ParseResult {
   symbols: ParsedSymbol[];
   dependencies: ParsedDependency[];
   imports: ParsedImport[];
   exports: ParsedExport[];
   errors: ParseError[];
+  frameworkEntities?: FrameworkEntity[];
 }
 
 export interface ParseError {
@@ -146,14 +245,19 @@ export abstract class BaseParser {
       }
 
       const tree = this.parser.parse(normalizedContent);
-      if (tree.rootNode.hasError) {
-        this.syntaxErrorCount++;
-        // Only log syntax errors at debug level to reduce noise
-        this.logger.debug('Syntax tree contains errors', {
-          errorCount: this.countTreeErrors(tree.rootNode)
-        });
+      if (tree && tree.rootNode) {
+        if (tree.rootNode.hasError) {
+          this.syntaxErrorCount++;
+          // Only log syntax errors at debug level to reduce noise
+          this.logger.debug('Syntax tree contains errors', {
+            errorCount: this.countTreeErrors(tree.rootNode)
+          });
+        }
+        return tree;
+      } else {
+        this.logger.error('Failed to parse content: tree or rootNode is null');
+        return null;
       }
-      return tree;
     } catch (error) {
       this.logger.error('Failed to parse content', { error: (error as Error).message });
       return null;
@@ -395,6 +499,10 @@ export class ParserFactory {
   static createParser(language: string): BaseParser | null {
     const factory = this.parsers.get(language);
     return factory ? factory() : null;
+  }
+
+  static getParser(language: string): BaseParser | null {
+    return this.createParser(language);
   }
 
   static getParserForFile(filePath: string): BaseParser | null {

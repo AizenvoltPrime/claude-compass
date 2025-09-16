@@ -15,6 +15,22 @@ import {
   SymbolWithFile,
   SymbolWithFileAndRepository,
   DependencyWithSymbols,
+  // Framework-specific imports
+  Route,
+  Component,
+  Composable,
+  FrameworkMetadata,
+  CreateRoute,
+  CreateComponent,
+  CreateComposable,
+  CreateFrameworkMetadata,
+  RouteWithSymbol,
+  ComponentWithSymbol,
+  ComposableWithSymbol,
+  ComponentTree,
+  RouteSearchOptions,
+  ComponentSearchOptions,
+  ComposableSearchOptions,
 } from './models';
 import { createComponentLogger } from '../utils/logger';
 
@@ -574,6 +590,402 @@ export class DatabaseService {
     logger.info('Closing database connection');
     await this.db.destroy();
     logger.info('Database connection closed');
+  }
+
+  // Framework-specific operations
+
+  // Route operations
+  async createRoute(data: CreateRoute): Promise<Route> {
+    logger.debug('Creating route', { path: data.path, method: data.method, framework: data.framework_type });
+
+    const [route] = await this.db('routes')
+      .insert(data)
+      .returning('*');
+
+    return route as Route;
+  }
+
+  async getRoute(id: number): Promise<Route | null> {
+    const route = await this.db('routes')
+      .where({ id })
+      .first();
+    return route as Route || null;
+  }
+
+  async getRouteWithSymbol(id: number): Promise<RouteWithSymbol | null> {
+    const result = await this.db('routes')
+      .leftJoin('symbols', 'routes.handler_symbol_id', 'symbols.id')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .leftJoin('repositories', 'routes.repo_id', 'repositories.id')
+      .select(
+        'routes.*',
+        'symbols.id as symbol_id',
+        'symbols.name as symbol_name',
+        'symbols.signature as symbol_signature',
+        'symbols.start_line as symbol_start_line',
+        'files.path as file_path',
+        'files.language as file_language',
+        'repositories.name as repo_name',
+        'repositories.path as repo_path'
+      )
+      .where('routes.id', id)
+      .first();
+
+    if (!result) return null;
+
+    const route = {
+      id: result.id,
+      repo_id: result.repo_id,
+      path: result.path,
+      method: result.method,
+      handler_symbol_id: result.handler_symbol_id,
+      framework_type: result.framework_type,
+      middleware: result.middleware,
+      dynamic_segments: result.dynamic_segments,
+      auth_required: result.auth_required,
+      created_at: result.created_at,
+      updated_at: result.updated_at,
+    } as RouteWithSymbol;
+
+    if (result.symbol_id) {
+      route.handler_symbol = {
+        id: result.symbol_id,
+        file_id: result.file_id,
+        name: result.symbol_name,
+        signature: result.symbol_signature,
+        start_line: result.symbol_start_line,
+        file: {
+          id: result.file_id,
+          path: result.file_path,
+          language: result.file_language,
+        },
+      } as SymbolWithFile;
+    }
+
+    if (result.repo_name) {
+      route.repository = {
+        id: result.repo_id,
+        name: result.repo_name,
+        path: result.repo_path,
+      } as Repository;
+    }
+
+    return route;
+  }
+
+  async getRoutesByFramework(repoId: number, framework: string): Promise<Route[]> {
+    const routes = await this.db('routes')
+      .where({ repo_id: repoId, framework_type: framework })
+      .orderBy('path');
+    return routes as Route[];
+  }
+
+  async getRoutesByRepository(repoId: number): Promise<Route[]> {
+    const routes = await this.db('routes')
+      .where({ repo_id: repoId })
+      .orderBy(['framework_type', 'path']);
+    return routes as Route[];
+  }
+
+  async getAllRoutes(repoId?: number): Promise<Route[]> {
+    let query = this.db('routes').orderBy(['repo_id', 'framework_type', 'path']);
+
+    if (repoId) {
+      query = query.where({ repo_id: repoId });
+    }
+
+    const routes = await query;
+    return routes as Route[];
+  }
+
+  async findRouteByPath(repoId: number, path: string, method: string): Promise<Route | null> {
+    const route = await this.db('routes')
+      .where({ repo_id: repoId, path, method })
+      .first();
+    return route as Route || null;
+  }
+
+  async searchRoutes(options: RouteSearchOptions): Promise<Route[]> {
+    let query = this.db('routes').select('*');
+
+    if (options.repo_id) {
+      query = query.where('repo_id', options.repo_id);
+    }
+
+    if (options.framework) {
+      query = query.where('framework_type', options.framework);
+    }
+
+    if (options.method) {
+      query = query.where('method', options.method.toUpperCase());
+    }
+
+    if (options.query) {
+      query = query.where(builder => {
+        builder
+          .where('path', 'ilike', `%${options.query}%`)
+          .orWhereRaw("middleware::text ILIKE ?", [`%${options.query}%`]);
+      });
+    }
+
+    const routes = await query
+      .orderBy('path')
+      .limit(options.limit || 50);
+
+    return routes as Route[];
+  }
+
+  // Component operations
+  async createComponent(data: CreateComponent): Promise<Component> {
+    logger.debug('Creating component', { symbol_id: data.symbol_id, type: data.component_type });
+
+    const [component] = await this.db('components')
+      .insert(data)
+      .returning('*');
+
+    return component as Component;
+  }
+
+  async getComponent(id: number): Promise<Component | null> {
+    const component = await this.db('components')
+      .where({ id })
+      .first();
+    return component as Component || null;
+  }
+
+  async getComponentWithSymbol(id: number): Promise<ComponentWithSymbol | null> {
+    const result = await this.db('components')
+      .leftJoin('symbols', 'components.symbol_id', 'symbols.id')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .leftJoin('repositories', 'components.repo_id', 'repositories.id')
+      .select(
+        'components.*',
+        'symbols.id as symbol_id',
+        'symbols.name as symbol_name',
+        'symbols.signature as symbol_signature',
+        'symbols.start_line as symbol_start_line',
+        'files.path as file_path',
+        'files.language as file_language',
+        'repositories.name as repo_name',
+        'repositories.path as repo_path'
+      )
+      .where('components.id', id)
+      .first();
+
+    if (!result) return null;
+
+    const component = { ...result } as ComponentWithSymbol;
+
+    if (result.symbol_id) {
+      component.symbol = {
+        id: result.symbol_id,
+        name: result.symbol_name,
+        signature: result.symbol_signature,
+        start_line: result.symbol_start_line,
+        file: {
+          path: result.file_path,
+          language: result.file_language,
+        },
+      } as SymbolWithFile;
+    }
+
+    if (result.repo_name) {
+      component.repository = {
+        id: result.repo_id,
+        name: result.repo_name,
+        path: result.repo_path,
+      } as Repository;
+    }
+
+    return component;
+  }
+
+  async getComponentsByType(repoId: number, type: string): Promise<Component[]> {
+    const components = await this.db('components')
+      .where({ repo_id: repoId, component_type: type })
+      .orderBy('id');
+    return components as Component[];
+  }
+
+  async getComponentsByRepository(repoId: number): Promise<Component[]> {
+    const components = await this.db('components')
+      .where({ repo_id: repoId })
+      .orderBy(['component_type', 'id']);
+    return components as Component[];
+  }
+
+  async getComponentHierarchy(componentId: number): Promise<ComponentTree | null> {
+    const component = await this.getComponent(componentId);
+    if (!component) return null;
+
+    // Get children components
+    const children = await this.db('components')
+      .where({ parent_component_id: componentId });
+
+    // Get parent component
+    let parent = null;
+    if (component.parent_component_id) {
+      parent = await this.getComponent(component.parent_component_id);
+    }
+
+    return {
+      ...component,
+      children: await Promise.all(children.map(child => this.getComponentHierarchy(child.id))),
+      parent,
+    } as ComponentTree;
+  }
+
+  async findComponentByName(repoId: number, name: string): Promise<Component | null> {
+    const component = await this.db('components')
+      .leftJoin('symbols', 'components.symbol_id', 'symbols.id')
+      .where({
+        'components.repo_id': repoId,
+        'symbols.name': name,
+      })
+      .select('components.*')
+      .first();
+
+    return component as Component || null;
+  }
+
+  async searchComponents(options: ComponentSearchOptions): Promise<Component[]> {
+    let query = this.db('components')
+      .leftJoin('symbols', 'components.symbol_id', 'symbols.id')
+      .select('components.*');
+
+    if (options.repo_id) {
+      query = query.where('components.repo_id', options.repo_id);
+    }
+
+    if (options.component_type) {
+      query = query.where('components.component_type', options.component_type);
+    }
+
+    if (options.query) {
+      query = query.where('symbols.name', 'ilike', `%${options.query}%`);
+    }
+
+    const components = await query
+      .orderBy('symbols.name')
+      .limit(options.limit || 50);
+
+    return components as Component[];
+  }
+
+  // Composable operations
+  async createComposable(data: CreateComposable): Promise<Composable> {
+    logger.debug('Creating composable', { symbol_id: data.symbol_id, type: data.composable_type });
+
+    const [composable] = await this.db('composables')
+      .insert(data)
+      .returning('*');
+
+    return composable as Composable;
+  }
+
+  async getComposable(id: number): Promise<Composable | null> {
+    const composable = await this.db('composables')
+      .where({ id })
+      .first();
+    return composable as Composable || null;
+  }
+
+  async getComposablesByType(repoId: number, type: string): Promise<Composable[]> {
+    const composables = await this.db('composables')
+      .where({ repo_id: repoId, composable_type: type })
+      .orderBy('id');
+    return composables as Composable[];
+  }
+
+  async getComposablesByRepository(repoId: number): Promise<Composable[]> {
+    const composables = await this.db('composables')
+      .where({ repo_id: repoId })
+      .orderBy(['composable_type', 'id']);
+    return composables as Composable[];
+  }
+
+  async searchComposables(options: ComposableSearchOptions): Promise<Composable[]> {
+    let query = this.db('composables')
+      .leftJoin('symbols', 'composables.symbol_id', 'symbols.id')
+      .select('composables.*');
+
+    if (options.repo_id) {
+      query = query.where('composables.repo_id', options.repo_id);
+    }
+
+    if (options.composable_type) {
+      query = query.where('composables.composable_type', options.composable_type);
+    }
+
+    if (options.query) {
+      query = query.where('symbols.name', 'ilike', `%${options.query}%`);
+    }
+
+    const composables = await query
+      .orderBy('symbols.name')
+      .limit(options.limit || 50);
+
+    return composables as Composable[];
+  }
+
+  // Framework metadata operations
+  async storeFrameworkMetadata(data: CreateFrameworkMetadata): Promise<FrameworkMetadata> {
+    logger.debug('Storing framework metadata', { framework: data.framework_type, repo_id: data.repo_id });
+
+    // Try to find existing metadata first
+    const existingMetadata = await this.db('framework_metadata')
+      .where({ repo_id: data.repo_id, framework_type: data.framework_type })
+      .first();
+
+    if (existingMetadata) {
+      // Update existing metadata
+      const [metadata] = await this.db('framework_metadata')
+        .where({ id: existingMetadata.id })
+        .update({ ...data, updated_at: new Date() })
+        .returning('*');
+      return metadata as FrameworkMetadata;
+    } else {
+      // Insert new metadata
+      const [metadata] = await this.db('framework_metadata')
+        .insert(data)
+        .returning('*');
+      return metadata as FrameworkMetadata;
+    }
+  }
+
+  async getFrameworkStack(repoId: number): Promise<FrameworkMetadata[]> {
+    const metadata = await this.db('framework_metadata')
+      .where({ repo_id: repoId })
+      .orderBy('framework_type');
+    return metadata as FrameworkMetadata[];
+  }
+
+  async getFrameworkMetadata(repoId: number, frameworkType: string): Promise<FrameworkMetadata | null> {
+    const metadata = await this.db('framework_metadata')
+      .where({ repo_id: repoId, framework_type: frameworkType })
+      .first();
+    return metadata as FrameworkMetadata || null;
+  }
+
+  // Enhanced symbol search with framework context
+  async findSymbolByName(repoId: number, name: string): Promise<SymbolWithFile | null> {
+    const result = await this.db('symbols')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select('symbols.*', 'files.path as file_path', 'files.language as file_language')
+      .where('files.repo_id', repoId)
+      .where('symbols.name', name)
+      .first();
+
+    if (!result) return null;
+
+    return {
+      ...result,
+      file: {
+        id: result.file_id,
+        path: result.file_path,
+        language: result.file_language,
+      },
+    } as SymbolWithFile;
   }
 }
 
