@@ -73,6 +73,18 @@ export enum Visibility {
   PROTECTED = 'protected',
 }
 
+// File dependency for file-to-file relationships (imports, requires, etc.)
+export interface FileDependency {
+  id: number;
+  from_file_id: number;
+  to_file_id: number;
+  dependency_type: DependencyType;
+  line_number?: number;
+  confidence: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export enum DependencyType {
   CALLS = 'calls',
   IMPORTS = 'imports',
@@ -117,6 +129,14 @@ export interface CreateSymbol {
 export interface CreateDependency {
   from_symbol_id: number;
   to_symbol_id: number;
+  dependency_type: DependencyType;
+  line_number?: number;
+  confidence?: number;
+}
+
+export interface CreateFileDependency {
+  from_file_id: number;
+  to_file_id: number;
   dependency_type: DependencyType;
   line_number?: number;
   confidence?: number;

@@ -9,6 +9,8 @@ import {
   CreateFile,
   CreateSymbol,
   CreateDependency,
+  CreateFileDependency,
+  FileDependency,
   FileWithRepository,
   SymbolWithFile,
   SymbolWithFileAndRepository,
@@ -72,6 +74,32 @@ export class DatabaseService {
     return repository as Repository || null;
   }
 
+  async getRepositoryByName(name: string): Promise<Repository | null> {
+    const repository = await this.db('repositories')
+      .where({ name })
+      .first();
+
+    if (repository && repository.framework_stack && typeof repository.framework_stack === 'string') {
+      repository.framework_stack = JSON.parse(repository.framework_stack);
+    }
+
+    return repository as Repository || null;
+  }
+
+  async getAllRepositories(): Promise<Repository[]> {
+    const repositories = await this.db('repositories')
+      .select('*')
+      .orderBy('name');
+
+    // Parse framework_stack JSON for all repositories
+    return repositories.map(repo => {
+      if (repo.framework_stack && typeof repo.framework_stack === 'string') {
+        repo.framework_stack = JSON.parse(repo.framework_stack);
+      }
+      return repo as Repository;
+    });
+  }
+
   async updateRepository(id: number, data: Partial<CreateRepository>): Promise<Repository | null> {
     const [repository] = await this.db('repositories')
       .where({ id })
@@ -85,6 +113,53 @@ export class DatabaseService {
       .where({ id })
       .del();
     return deletedCount > 0;
+  }
+
+  // Change detection queries for incremental updates
+  async getRepositoryLastIndexed(repositoryId: number): Promise<Date | null> {
+    const repo = await this.db('repositories')
+      .select('last_indexed')
+      .where('id', repositoryId)
+      .first();
+    return repo?.last_indexed || null;
+  }
+
+  async findModifiedFilesSince(repositoryId: number, since: Date): Promise<File[]> {
+    const files = await this.db('files')
+      .where('repo_id', repositoryId)
+      .where('last_modified', '>', since)
+      .select('*');
+    return files as File[];
+  }
+
+  async findFilesNotInDatabase(repositoryId: number, currentFilePaths: string[]): Promise<string[]> {
+    if (currentFilePaths.length === 0) {
+      return [];
+    }
+
+    const existingFiles = await this.db('files')
+      .where('repo_id', repositoryId)
+      .whereIn('path', currentFilePaths)
+      .select('path');
+
+    const existingPaths = existingFiles.map(f => f.path);
+    return currentFilePaths.filter(path => !existingPaths.includes(path));
+  }
+
+  async findOrphanedFiles(repositoryId: number, currentFilePaths: string[]): Promise<File[]> {
+    if (currentFilePaths.length === 0) {
+      // If no current files, all existing files are orphaned
+      return await this.db('files')
+        .where('repo_id', repositoryId)
+        .select('*') as File[];
+    }
+
+    const orphanedFiles = await this.db('files')
+      .where('repo_id', repositoryId)
+      .whereNotIn('path', currentFilePaths)
+      .select('*');
+
+    return orphanedFiles as File[];
   }
 
   // File operations
@@ -161,6 +236,15 @@ export class DatabaseService {
   }
 
   // Symbol operations
+  async getSymbolsByRepository(repoId: number): Promise<Symbol[]> {
+    const symbols = await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .select('symbols.*')
+      .orderBy('symbols.name');
+    return symbols as Symbol[];
+  }
+
   async createSymbol(data: CreateSymbol): Promise<Symbol> {
     logger.debug('Creating symbol', { name: data.name, type: data.symbol_type, file_id: data.file_id });
     const [symbol] = await this.db('symbols')
@@ -288,6 +372,31 @@ export class DatabaseService {
       .merge(['line_number', 'confidence', 'updated_at'])
       .returning('*');
     return results as Dependency[];
+  }
+
+  // File dependency operations
+  async createFileDependencies(dependencies: CreateFileDependency[]): Promise<FileDependency[]> {
+    if (dependencies.length === 0) return [];
+
+    logger.debug('Creating file dependencies in batch', { count: dependencies.length });
+
+    // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
+    const results = await this.db('file_dependencies')
+      .insert(dependencies)
+      .onConflict(['from_file_id', 'to_file_id', 'dependency_type'])
+      .merge(['line_number', 'confidence', 'updated_at'])
+      .returning('*');
+
+    return results as FileDependency[];
+  }
+
+  async getFileDependenciesByRepository(repoId: number): Promise<FileDependency[]> {
+    const dependencies = await this.db('file_dependencies')
+      .join('files as from_files', 'file_dependencies.from_file_id', 'from_files.id')
+      .join('files as to_files', 'file_dependencies.to_file_id', 'to_files.id')
+      .where('from_files.repo_id', repoId)
+      .select('file_dependencies.*');
+    return dependencies as FileDependency[];
   }
 
   async getDependenciesFrom(symbolId: number): Promise<DependencyWithSymbols[]> {
@@ -434,6 +543,24 @@ export class DatabaseService {
       logger.error('Failed to delete repository completely', { repositoryId, error });
       throw error;
     }
+  }
+
+  async deleteRepositoryByName(name: string): Promise<boolean> {
+    logger.info('Deleting repository by name', { name });
+
+    const repository = await this.getRepositoryByName(name);
+    if (!repository) {
+      logger.warn('Repository not found', { name });
+      return false;
+    }
+
+    logger.info('Repository found, proceeding with deletion', {
+      name,
+      repositoryId: repository.id,
+      path: repository.path
+    });
+
+    return await this.deleteRepositoryCompletely(repository.id);
   }
 
   // Utility methods
