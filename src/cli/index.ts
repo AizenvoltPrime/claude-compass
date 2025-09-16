@@ -6,6 +6,7 @@ import { GraphBuilder } from '../graph';
 import { DatabaseService, databaseService } from '../database';
 import { ClaudeCompassMCPServer } from '../mcp';
 import { logger, config } from '../utils';
+import { FileSizeUtils, DEFAULT_POLICY } from '../config/file-size-policy';
 const chalk = require('chalk');
 const ora = require('ora');
 
@@ -23,9 +24,15 @@ program
   .argument('<path>', 'Path to the repository to analyze')
   .option('--no-test-files', 'Exclude test files from analysis')
   .option('--include-node-modules', 'Include node_modules in analysis (not recommended)')
-  .option('--max-file-size <size>', 'Maximum file size to process in bytes', '1048576') // 1MB
+  .option('--max-file-size <size>', 'Maximum file size to process in bytes', '20971520') // 20MB
+  .option('--chunking-threshold <size>', 'File size to start chunking', '51200') // 50KB
+  .option('--warn-threshold <size>', 'File size to warn about', '2097152') // 2MB
   .option('--max-files <count>', 'Maximum number of files to process', '10000')
   .option('--extensions <list>', 'File extensions to analyze (comma-separated)', '.js,.jsx,.ts,.tsx,.mjs,.cjs')
+  .option('--compassignore <path>', 'Path to .compassignore file', '.compassignore')
+  .option('--chunk-overlap <lines>', 'Overlap lines between chunks', '100')
+  .option('--encoding-fallback <encoding>', 'Fallback encoding for problematic files', 'iso-8859-1')
+  .option('--parallel-parsing', 'Enable parallel file parsing', false)
   .option('--verbose', 'Enable verbose logging')
   .action(async (repositoryPath, options) => {
     if (options.verbose) {
@@ -48,9 +55,21 @@ program
       const buildOptions = {
         includeTestFiles: options.testFiles !== false,
         includeNodeModules: options.includeNodeModules === true,
-        maxFileSize: parseInt(options.maxFileSize),
         maxFiles: parseInt(options.maxFiles),
         fileExtensions: options.extensions.split(','),
+
+        chunkOverlapLines: parseInt(options.chunkOverlap),
+        encodingFallback: options.encodingFallback,
+        compassignorePath: options.compassignore,
+        enableParallelParsing: options.parallelParsing === true,
+
+        // File size policy options (using aggressive preset)
+        fileSizePolicy: {
+          ...DEFAULT_POLICY,
+          ...(options.maxFileSize ? { maxFileSize: parseInt(options.maxFileSize) } : {}),
+          ...(options.chunkingThreshold ? { chunkingThreshold: parseInt(options.chunkingThreshold) } : {}),
+          ...(options.warnThreshold ? { warnThreshold: parseInt(options.warnThreshold) } : {})
+        }
       };
 
       console.log(chalk.blue('\nStarting repository analysis...'));

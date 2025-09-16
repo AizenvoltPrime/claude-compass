@@ -7,15 +7,23 @@ import { getParserForFile, ParseResult } from '../parsers';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
 import { createComponentLogger } from '../utils/logger';
+import { FileSizeManager, FileSizePolicy, DEFAULT_POLICY } from '../config/file-size-policy';
+import { EncodingConverter } from '../utils/encoding-converter';
+import { CompassIgnore } from '../utils/compassignore';
 
 const logger = createComponentLogger('graph-builder');
 
 export interface BuildOptions {
   includeTestFiles?: boolean;
   includeNodeModules?: boolean;
-  maxFileSize?: number;
   maxFiles?: number;
   fileExtensions?: string[];
+
+  fileSizePolicy?: FileSizePolicy;
+  chunkOverlapLines?: number;
+  encodingFallback?: string;
+  compassignorePath?: string;
+  enableParallelParsing?: boolean;
 }
 
 export interface BuildResult {
@@ -388,13 +396,22 @@ export class GraphBuilder {
     options: BuildOptions
   ): Promise<Array<{ path: string; relativePath: string }>> {
     const files: Array<{ path: string; relativePath: string }> = [];
+    const compassIgnore = await this.loadCompassIgnore(repositoryPath, options);
 
     const traverse = async (currentPath: string): Promise<void> => {
       const stats = await fs.stat(currentPath);
 
       if (stats.isDirectory()) {
-        // Skip certain directories
         const dirName = path.basename(currentPath);
+        const relativePath = path.relative(repositoryPath, currentPath);
+
+        // Check .compassignore patterns first
+        if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
+          this.logger.debug('Directory ignored by .compassignore', { path: relativePath });
+          return;
+        }
+
+        // Then check built-in skip logic
         if (this.shouldSkipDirectory(dirName, options)) {
           return;
         }
@@ -407,16 +424,30 @@ export class GraphBuilder {
         }
 
       } else if (stats.isFile()) {
+        const relativePath = path.relative(repositoryPath, currentPath);
+
+        // Check .compassignore patterns first
+        if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
+          this.logger.debug('File ignored by .compassignore', { path: relativePath });
+          return;
+        }
+
+        // Then check built-in include logic
         if (this.shouldIncludeFile(currentPath, options)) {
           files.push({
             path: currentPath,
-            relativePath: path.relative(repositoryPath, currentPath)
+            relativePath: relativePath
           });
         }
       }
     };
 
     await traverse(repositoryPath);
+
+    this.logger.info('File discovery completed', {
+      totalFiles: files.length,
+      patternsUsed: compassIgnore.getPatterns()
+    });
 
     // Limit the number of files if specified
     if (options.maxFiles && files.length > options.maxFiles) {
@@ -425,6 +456,49 @@ export class GraphBuilder {
     }
 
     return files;
+  }
+
+  /**
+   * Load CompassIgnore configuration from repository directory
+   */
+  private async loadCompassIgnore(repositoryPath: string, options: BuildOptions): Promise<CompassIgnore> {
+    if (options.compassignorePath) {
+      // Use custom path if provided
+      const customPath = path.isAbsolute(options.compassignorePath)
+        ? options.compassignorePath
+        : path.join(repositoryPath, options.compassignorePath);
+      const compassIgnore = await CompassIgnore.fromFile(customPath);
+
+      // Add default patterns if no custom .compassignore file exists
+      if (!await this.fileExists(customPath)) {
+        compassIgnore.addPatterns(require('../utils/compassignore').DEFAULT_IGNORE_PATTERNS);
+      }
+
+      return compassIgnore;
+    }
+
+    // Use default .compassignore in repository root, with fallback to default patterns
+    const compassIgnore = await CompassIgnore.fromDirectory(repositoryPath);
+    const compassIgnorePath = path.join(repositoryPath, '.compassignore');
+
+    // If no .compassignore file exists, add default patterns
+    if (!await this.fileExists(compassIgnorePath)) {
+      compassIgnore.addPatterns(require('../utils/compassignore').DEFAULT_IGNORE_PATTERNS);
+    }
+
+    return compassIgnore;
+  }
+
+  /**
+   * Check if file exists
+   */
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.stat(filePath);
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   private async parseFiles(
@@ -441,21 +515,15 @@ export class GraphBuilder {
           continue;
         }
 
-        const content = await fs.readFile(file.path, 'utf-8');
-
-        if (content.length > options.maxFileSize!) {
-          this.logger.warn('File exceeds size limit', {
-            path: file.path,
-            size: content.length
-          });
-          continue;
+        const content = await this.readFileWithEncodingRecovery(file.path, options);
+        if (!content) {
+          continue; // File was rejected due to encoding issues
         }
 
-        const parseResult = await parser.parseFile(file.path, content, {
-          includePrivateSymbols: true,
-          includeTestFiles: options.includeTestFiles,
-          maxFileSize: options.maxFileSize
-        });
+        const parseResult = await this.processFileWithSizePolicy(file, content, parser, options);
+        if (!parseResult) {
+          continue; // File was rejected by size policy
+        }
 
         results.push({
           ...parseResult,
@@ -720,13 +788,130 @@ export class GraphBuilder {
     }
   }
 
+  /**
+   * Read file with encoding recovery support
+   */
+  private async readFileWithEncodingRecovery(
+    filePath: string,
+    options: BuildOptions
+  ): Promise<string | null> {
+    try {
+      // First attempt: Standard UTF-8 read
+      const content = await fs.readFile(filePath, 'utf-8');
+
+      // Quick encoding issue check
+      if (!content.includes('\uFFFD')) {
+        return content;
+      }
+
+      // Encoding recovery needed
+      this.logger.info('Attempting encoding recovery', { filePath });
+      const buffer = await fs.readFile(filePath);
+      const recovered = await EncodingConverter.convertToUtf8(buffer);
+      return recovered;
+    } catch (error) {
+      this.logger.warn('File reading failed', { filePath, error: (error as Error).message });
+      return null;
+    }
+  }
+
+  /**
+   * Process file with unified size policy
+   */
+  private async processFileWithSizePolicy(
+    file: { path: string; relativePath?: string },
+    content: string,
+    parser: any,
+    options: BuildOptions
+  ): Promise<ParseResult | null> {
+    // Create file size manager with policy
+    const fileSizePolicy = options.fileSizePolicy || this.createDefaultFileSizePolicy(options);
+    const sizeManager = new FileSizeManager(fileSizePolicy);
+    const action = sizeManager.getRecommendedAction(content.length);
+
+    switch (action) {
+      case 'reject':
+        this.logger.warn('File rejected due to size policy', {
+          path: file.path,
+          size: content.length
+        });
+        return null;
+
+      case 'skip':
+        this.logger.info('File skipped due to size policy', {
+          path: file.path,
+          size: content.length
+        });
+        return null;
+
+      case 'chunk':
+        // Use chunked parsing
+        const parseOptions = {
+          includePrivateSymbols: true,
+          includeTestFiles: options.includeTestFiles,
+          enableChunking: true,
+          enableEncodingRecovery: true,
+          chunkSize: fileSizePolicy.chunkingThreshold,
+          chunkOverlapLines: options.chunkOverlapLines || 100
+        };
+        return await parser.parseFile(file.path, content, parseOptions);
+
+      case 'truncate':
+        // This case should no longer occur since truncation is replaced with chunking
+        this.logger.warn('Truncate action requested but using chunking instead', {
+          path: file.path,
+          size: content.length
+        });
+        // Fall through to chunked parsing
+        const fallbackParseOptions = {
+          includePrivateSymbols: true,
+          includeTestFiles: options.includeTestFiles,
+          enableChunking: true,
+          enableEncodingRecovery: true,
+          chunkSize: fileSizePolicy.truncationFallback,
+          chunkOverlapLines: options.chunkOverlapLines || 100
+        };
+        return await parser.parseFile(file.path, content, fallbackParseOptions);
+
+      case 'warn':
+        this.logger.warn('Processing large file', {
+          path: file.path,
+          size: content.length
+        });
+        // Fall through to normal processing
+
+      case 'process':
+      default:
+        // All files use enhanced parsing
+        return await parser.parseFile(file.path, content, {
+          includePrivateSymbols: true,
+          includeTestFiles: options.includeTestFiles,
+          enableChunking: true,
+          enableEncodingRecovery: true,
+          chunkOverlapLines: options.chunkOverlapLines || 100
+        });
+    }
+  }
+
+  /**
+   * Create default file size policy
+   */
+  private createDefaultFileSizePolicy(options: BuildOptions): FileSizePolicy {
+    return { ...DEFAULT_POLICY };
+  }
+
   private validateOptions(options: BuildOptions): Required<BuildOptions> {
     return {
       includeTestFiles: options.includeTestFiles ?? true,
       includeNodeModules: options.includeNodeModules ?? false,
-      maxFileSize: options.maxFileSize ?? 1024 * 1024, // 1MB
       maxFiles: options.maxFiles ?? 10000,
-      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']
+      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'],
+
+      fileSizePolicy: options.fileSizePolicy || this.createDefaultFileSizePolicy(options),
+      chunkOverlapLines: options.chunkOverlapLines ?? 100,
+      encodingFallback: options.encodingFallback ?? 'iso-8859-1',
+      compassignorePath: options.compassignorePath,
+      enableParallelParsing: options.enableParallelParsing ?? false
     };
   }
 }

@@ -437,20 +437,25 @@ interface MCPTools {
 - ✅ Logger implementation with component-specific logging
 
 **Critical Parser & Analysis Improvements (September 2025):**
-- ✅ **Smart Size Limit Handling**: Added Tree-sitter size limit detection (32K characters)
-- ✅ **Intelligent Truncation**: Implemented safe-point truncation to preserve symbol extraction
-- ✅ **Large File Support**: Vehicle master detail template (38K chars) now parses successfully
+- ✅ **Smart Size Limit Handling**: Added Tree-sitter size limit detection (28K characters)
+- ✅ **Chunked Parsing System**: Implemented robust chunked parsing for large files with size validation
+- ✅ **Large File Support**: Files up to 20MB now parse successfully via chunked approach
 - ✅ **Clean Re-Analysis**: Fixed data accumulation issue with proper cleanup on re-analysis
 - ✅ **Database Cleanup**: Added `cleanupRepositoryData()` and `deleteRepositoryCompletely()` methods
 - ✅ **Production Robustness**: Parser handles encoding issues, binary content, and malformed files
-- ✅ **Comprehensive Logging**: Enhanced parser logs show truncation details and processing stats
+- ✅ **Bundle File Filtering**: Automatic filtering of minified and generated files
+- ✅ **Comprehensive Logging**: Enhanced parser logs show chunking details and processing stats
 - ✅ **Transaction Safety**: Database operations use proper transactions with foreign key respect
+- ✅ **Encoding Recovery**: Advanced encoding detection and conversion pipeline
 
 **Parser Robustness Enhancements:**
 - ✅ **Content Validation**: Binary detection, encoding issue detection, null byte handling
 - ✅ **Smart Error Recovery**: Parser continues processing when individual files fail
 - ✅ **Batch Processing**: Symbol and dependency creation optimized for large codebases
 - ✅ **Memory Management**: Signature truncation prevents PostgreSQL query size issues
+- ✅ **File Size Policy**: Unified size management with configurable thresholds and actions
+- ✅ **CompassIgnore Support**: GitIgnore-style patterns with automatic default filtering
+- ✅ **Chunk Size Validation**: Iterative size reduction to ensure Tree-sitter compatibility
 
 ### Phase 2: JavaScript/TypeScript Framework Analysis (Months 2-3)
 

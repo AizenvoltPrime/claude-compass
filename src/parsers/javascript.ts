@@ -7,14 +7,21 @@ import {
   ParsedImport,
   ParsedExport,
   ParseResult,
-  ParseOptions
+  ParseOptions,
+  ParseError
 } from './base';
+import {
+  ChunkedParser,
+  MergedParseResult,
+  ChunkedParseOptions,
+  ChunkResult
+} from './chunked-parser';
 import { SymbolType, DependencyType } from '../database/models';
 
 /**
- * JavaScript-specific parser using Tree-sitter
+ * JavaScript-specific parser using Tree-sitter with chunked parsing support
  */
-export class JavaScriptParser extends BaseParser {
+export class JavaScriptParser extends ChunkedParser {
   constructor() {
     const parser = new Parser();
     parser.setLanguage(JavaScript);
@@ -27,25 +34,30 @@ export class JavaScriptParser extends BaseParser {
 
   async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
     const validatedOptions = this.validateOptions(options);
+    const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
-    // Check file size limit
-    if (content.length > validatedOptions.maxFileSize!) {
-      this.logger.warn('File exceeds size limit', { filePath, size: content.length });
-      return {
-        symbols: [],
-        dependencies: [],
-        imports: [],
-        exports: [],
-        errors: [{
-          message: 'File too large to parse',
-          line: 1,
-          column: 1,
-          severity: 'warning'
-        }]
-      };
+    // Check if chunking should be used and is enabled
+    if (chunkedOptions.enableChunking !== false &&
+        content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
+      const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
+      return this.convertMergedResult(chunkedResult);
     }
 
-    const tree = this.parseContent(content);
+    // For smaller files or when chunking is disabled, use direct parsing
+    return this.parseFileDirectly(filePath, content, chunkedOptions);
+  }
+
+  /**
+   * Parse file directly without chunking (internal method to avoid recursion)
+   */
+  protected async parseFileDirectly(
+    filePath: string,
+    content: string,
+    options?: ChunkedParseOptions
+  ): Promise<ParseResult> {
+    const validatedOptions = this.validateOptions(options);
+
+    const tree = this.parseContent(content, validatedOptions);
     if (!tree) {
       return {
         symbols: [],
@@ -454,5 +466,189 @@ export class JavaScriptParser extends BaseParser {
     }
 
     return signature;
+  }
+
+  /**
+   * Find optimal chunk boundaries for JavaScript/TypeScript content
+   * Returns array of character positions where chunks should end, in order of preference
+   */
+  protected getChunkBoundaries(content: string, maxChunkSize: number): number[] {
+    const boundaries: number[] = [];
+
+    // Search within 85% of max size for safe boundaries
+    const searchLimit = Math.floor(maxChunkSize * 0.85);
+    const searchContent = content.substring(0, Math.min(searchLimit, content.length));
+
+    // JavaScript-specific boundary patterns in order of preference
+    const boundaryPatterns = [
+      // End of function/class/interface definitions with proper closure
+      /}\s*(?:;)?\s*(?:\n\s*\n|\n\s*\/\/|\n\s*\/\*)/g,  // Closing brace with semicolon and spacing
+
+      // End of export statements
+      /export\s+(?:default\s+)?(?:function|class|const|let|var)\s+\w+[^}]*}\s*(?:;)?\s*\n/g,
+
+      // End of complete function declarations
+      /function\s+\w+\s*\([^)]*\)\s*{[^}]*}\s*(?:;)?\s*\n/g,
+
+      // End of arrow function assignments
+      /(?:const|let|var)\s+\w+\s*=\s*\([^)]*\)\s*=>\s*{[^}]*}\s*(?:;)?\s*\n/g,
+
+      // End of class definitions
+      /class\s+\w+(?:\s+extends\s+\w+)?\s*{[^}]*}\s*\n/g,
+
+      // End of complete variable declarations with complex objects
+      /(?:const|let|var)\s+\w+\s*=\s*{[^}]*}\s*(?:;)?\s*\n/g,
+
+      // End of IIFE (Immediately Invoked Function Expression)
+      /\}\s*\)\s*\(\s*[^)]*\s*\)\s*(?:;)?\s*\n/g,
+
+      // End of object method definitions
+      /\w+\s*:\s*function\s*\([^)]*\)\s*{[^}]*}\s*,?\s*\n/g,
+
+      // End of complete statements with semicolons
+      /;\s*\n\s*\n/g,
+
+      // Simple closing braces with newlines
+      /}\s*\n/g
+    ];
+
+    // Find all potential boundaries
+    for (const pattern of boundaryPatterns) {
+      let match;
+      while ((match = pattern.exec(searchContent)) !== null) {
+        const position = match.index + match[0].length;
+        if (position > 100 && position < searchLimit) { // Ensure reasonable minimum chunk size
+          boundaries.push(position);
+        }
+      }
+    }
+
+    // Sort boundaries by position (descending - prefer later boundaries for larger chunks)
+    return [...new Set(boundaries)].sort((a, b) => b - a);
+  }
+
+  /**
+   * Merge results from multiple chunks, handling duplicates and cross-chunk references
+   */
+  protected mergeChunkResults(chunks: ParseResult[], chunkMetadata: ChunkResult[]): MergedParseResult {
+    const allSymbols: ParsedSymbol[] = [];
+    const allDependencies: ParsedDependency[] = [];
+    const allImports: ParsedImport[] = [];
+    const allExports: ParsedExport[] = [];
+    const allErrors: ParseError[] = [];
+
+    // Collect all results
+    for (const chunk of chunks) {
+      allSymbols.push(...chunk.symbols);
+      allDependencies.push(...chunk.dependencies);
+      allImports.push(...chunk.imports);
+      allExports.push(...chunk.exports);
+      allErrors.push(...chunk.errors);
+    }
+
+    // Remove duplicates using inherited utility methods
+    const mergedSymbols = this.removeDuplicateSymbols(allSymbols);
+    const mergedDependencies = this.removeDuplicateDependencies(allDependencies);
+    const mergedImports = this.removeDuplicateImports(allImports);
+    const mergedExports = this.removeDuplicateExports(allExports);
+
+    // Detect cross-chunk references
+    const crossChunkReferences = this.detectCrossChunkReferences(mergedSymbols, mergedDependencies, chunkMetadata);
+
+    return {
+      symbols: mergedSymbols,
+      dependencies: mergedDependencies,
+      imports: mergedImports,
+      exports: mergedExports,
+      errors: allErrors,
+      chunksProcessed: chunks.length,
+      metadata: {
+        totalChunks: chunkMetadata.length,
+        duplicatesRemoved: (allSymbols.length - mergedSymbols.length) +
+                          (allDependencies.length - mergedDependencies.length),
+        crossChunkReferencesFound: crossChunkReferences
+      }
+    };
+  }
+
+  /**
+   * Convert MergedParseResult to regular ParseResult
+   */
+  protected convertMergedResult(mergedResult: MergedParseResult): ParseResult {
+    return {
+      symbols: mergedResult.symbols,
+      dependencies: mergedResult.dependencies,
+      imports: mergedResult.imports,
+      exports: mergedResult.exports,
+      errors: mergedResult.errors
+    };
+  }
+
+  /**
+   * Remove duplicate imports across chunks
+   */
+  private removeDuplicateImports(imports: ParsedImport[]): ParsedImport[] {
+    const seen = new Map<string, ParsedImport>();
+
+    for (const imp of imports) {
+      const key = `${imp.source}:${imp.imported_names.join(',')}:${imp.import_type}:${imp.line_number}`;
+      if (!seen.has(key)) {
+        seen.set(key, imp);
+      }
+    }
+
+    return Array.from(seen.values());
+  }
+
+  /**
+   * Remove duplicate exports across chunks
+   */
+  private removeDuplicateExports(exports: ParsedExport[]): ParsedExport[] {
+    const seen = new Map<string, ParsedExport>();
+
+    for (const exp of exports) {
+      const key = `${exp.exported_names.join(',')}:${exp.export_type}:${exp.source || ''}:${exp.line_number}`;
+      if (!seen.has(key)) {
+        seen.set(key, exp);
+      }
+    }
+
+    return Array.from(seen.values());
+  }
+
+  /**
+   * Detect references that span across chunks
+   */
+  private detectCrossChunkReferences(
+    symbols: ParsedSymbol[],
+    dependencies: ParsedDependency[],
+    chunkMetadata: ChunkResult[]
+  ): number {
+    let crossReferences = 0;
+
+    for (const dep of dependencies) {
+      const fromSymbol = symbols.find(s => s.name === dep.from_symbol);
+      const toSymbol = symbols.find(s => s.name === dep.to_symbol);
+
+      if (fromSymbol && toSymbol) {
+        // Find which chunks these symbols belong to
+        const fromChunk = chunkMetadata.findIndex(chunk =>
+          dep.line_number >= chunk.startLine && dep.line_number <= chunk.endLine
+        );
+        const toChunkFrom = chunkMetadata.findIndex(chunk =>
+          fromSymbol.start_line >= chunk.startLine && fromSymbol.start_line <= chunk.endLine
+        );
+        const toChunkTo = chunkMetadata.findIndex(chunk =>
+          toSymbol.start_line >= chunk.startLine && toSymbol.start_line <= chunk.endLine
+        );
+
+        // If symbols are in different chunks, it's a cross-chunk reference
+        if (toChunkFrom !== toChunkTo && toChunkFrom !== -1 && toChunkTo !== -1) {
+          crossReferences++;
+        }
+      }
+    }
+
+    return crossReferences;
   }
 }
