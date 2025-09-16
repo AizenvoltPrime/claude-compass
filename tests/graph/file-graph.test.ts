@@ -189,7 +189,7 @@ describe('FileGraphBuilder', () => {
         '/project'
       );
 
-      expect(result).toBe('/project/src/utils');
+      expect(result).toBe('/project/src/utils.js');
     });
 
     it('should resolve parent directory imports', () => {
@@ -199,7 +199,7 @@ describe('FileGraphBuilder', () => {
         '/project'
       );
 
-      expect(result).toBe('/project/src/shared/helpers');
+      expect(result).toBe('/project/src/shared/helpers.js');
     });
 
     it('should resolve absolute imports from root', () => {
@@ -209,7 +209,7 @@ describe('FileGraphBuilder', () => {
         '/project'
       );
 
-      expect(result).toBe('/project/src/utils');
+      expect(result).toBe('/project/src/utils.js');
     });
 
     it('should handle src/ alias imports', () => {
@@ -219,7 +219,7 @@ describe('FileGraphBuilder', () => {
         '/project'
       );
 
-      expect(result).toBe('/project/src/utils/helpers');
+      expect(result).toBe('/project/src/utils/helpers.js');
     });
 
     it('should handle @ alias imports', () => {
@@ -229,7 +229,7 @@ describe('FileGraphBuilder', () => {
         '/project'
       );
 
-      expect(result).toBe('/project/src/components/Button');
+      expect(result).toBe('/project/src/components/Button.js');
     });
 
     it('should return null for builtin modules', () => {

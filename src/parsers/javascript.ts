@@ -36,6 +36,22 @@ export class JavaScriptParser extends ChunkedParser {
     const validatedOptions = this.validateOptions(options);
     const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
+    // Check file size limit first
+    if (validatedOptions.maxFileSize && content.length > validatedOptions.maxFileSize) {
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [{
+          message: `File is too large (${content.length} bytes, limit: ${validatedOptions.maxFileSize} bytes)`,
+          line: 1,
+          column: 1,
+          severity: 'error'
+        }]
+      };
+    }
+
     // Check if chunking should be used and is enabled
     if (chunkedOptions.enableChunking !== false &&
         content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
@@ -58,7 +74,7 @@ export class JavaScriptParser extends ChunkedParser {
     const validatedOptions = this.validateOptions(options);
 
     const tree = this.parseContent(content, validatedOptions);
-    if (!tree) {
+    if (!tree || !tree.rootNode) {
       return {
         symbols: [],
         dependencies: [],
@@ -251,6 +267,12 @@ export class JavaScriptParser extends ChunkedParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+
+    // Skip constructor methods - they are part of the class definition
+    if (name === 'constructor') {
+      return null;
+    }
+
     const signature = this.extractFunctionSignature(node, content);
 
     // Determine visibility
@@ -299,31 +321,59 @@ export class JavaScriptParser extends ChunkedParser {
   }
 
   private extractImportStatement(node: Parser.SyntaxNode, content: string): ParsedImport | null {
-    const sourceNode = node.childForFieldName('source');
-    if (!sourceNode) return null;
-
-    const source = this.getNodeText(sourceNode, content).replace(/['"]/g, '');
     const importedNames: string[] = [];
     let importType: 'named' | 'default' | 'namespace' | 'side_effect' = 'side_effect';
+    let source = '';
 
-    const importClause = node.child(1);
-    if (importClause) {
-      if (importClause.type === 'import_specifier') {
-        importType = 'named';
-        const imported = importClause.childForFieldName('name');
-        if (imported) {
-          importedNames.push(this.getNodeText(imported, content));
-        }
-      } else if (importClause.type === 'identifier') {
+    // Check if this is a side effect import (no import clause)
+    const secondChild = node.child(1);
+    if (!secondChild) return null;
+
+    if (secondChild.type === 'string') {
+      // Side effect import: import './styles.css';
+      source = this.getNodeText(secondChild, content).replace(/['"]/g, '');
+      importType = 'side_effect';
+    } else if (secondChild.type === 'import_clause') {
+      // Import with clause: import React from 'react'; or import { useState } from 'react';
+      const sourceNode = node.child(3); // Source is at position 3 for imports with clauses
+      if (!sourceNode || sourceNode.type !== 'string') return null;
+
+      source = this.getNodeText(sourceNode, content).replace(/['"]/g, '');
+
+      // Analyze the import clause to determine type and extract names
+      const clauseChild = secondChild.child(0);
+      if (!clauseChild) return null;
+
+      if (clauseChild.type === 'identifier') {
+        // Default import: import React from 'react';
         importType = 'default';
-        importedNames.push(this.getNodeText(importClause, content));
-      } else if (importClause.type === 'namespace_import') {
+        importedNames.push(this.getNodeText(clauseChild, content));
+      } else if (clauseChild.type === 'named_imports') {
+        // Named import: import { useState, useEffect } from 'react';
+        importType = 'named';
+
+        // Extract all import specifiers
+        for (let i = 0; i < clauseChild.childCount; i++) {
+          const child = clauseChild.child(i);
+          if (child.type === 'import_specifier') {
+            const nameNode = child.child(0); // The identifier is the first child
+            if (nameNode && nameNode.type === 'identifier') {
+              importedNames.push(this.getNodeText(nameNode, content));
+            }
+          }
+        }
+      } else if (clauseChild.type === 'namespace_import') {
+        // Namespace import: import * as utils from './utils';
         importType = 'namespace';
-        const alias = importClause.childForFieldName('alias');
-        if (alias) {
-          importedNames.push(this.getNodeText(alias, content));
+
+        // The alias is the last child of namespace_import
+        const aliasNode = clauseChild.child(clauseChild.childCount - 1);
+        if (aliasNode && aliasNode.type === 'identifier') {
+          importedNames.push(this.getNodeText(aliasNode, content));
         }
       }
+    } else {
+      return null; // Unknown import structure
     }
 
     return {
@@ -346,10 +396,10 @@ export class JavaScriptParser extends ChunkedParser {
       }
 
       const args = node.childForFieldName('arguments');
-      if (!args || args.children.length === 0) continue;
+      if (!args || args.namedChildCount === 0) continue;
 
-      const firstArg = args.children[0];
-      if (firstArg.type !== 'string') continue;
+      const firstArg = args.namedChild(0);
+      if (!firstArg || firstArg.type !== 'string') continue;
 
       const source = this.getNodeText(firstArg, content).replace(/['"]/g, '');
 
@@ -376,10 +426,10 @@ export class JavaScriptParser extends ChunkedParser {
       }
 
       const args = node.childForFieldName('arguments');
-      if (!args || args.children.length === 0) continue;
+      if (!args || args.namedChildCount === 0) continue;
 
-      const firstArg = args.children[0];
-      if (firstArg.type !== 'string') continue;
+      const firstArg = args.namedChild(0);
+      if (!firstArg || firstArg.type !== 'string') continue;
 
       const source = this.getNodeText(firstArg, content).replace(/['"]/g, '');
 

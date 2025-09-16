@@ -2,7 +2,7 @@
 
 > An AI-native development environment that solves the "context starvation" problem by giving AI assistants the same contextual understanding that senior engineers carry mentally.
 
-**🎉 Phase 1 Complete!** - JavaScript/TypeScript foundation with MCP integration and enhanced parser robustness is ready for production use.
+**🎉 Phase 2 Complete!** - Full JavaScript/TypeScript framework analysis with Vue.js, Next.js, React, and Node.js support is ready for production use.
 
 ## What is Claude Compass?
 
@@ -43,10 +43,12 @@ AI assistants suffer from **context starvation** - they make decisions without u
 ### Supported Frameworks
 
 **Sequential Implementation:**
-- **Phase 1**: ✅ **JavaScript/TypeScript** (Vue.js, Next.js, React, Node.js) - **COMPLETED** with enhanced parser robustness
-- **Phase 2**: **PHP** (Laravel)
-- **Phase 3**: **C#** (Godot game engine)
-- **Phase 4**: **Python** (Django, FastAPI, Flask)
+- **Phase 1**: ✅ **JavaScript/TypeScript Foundation** - **COMPLETED** with enhanced parser robustness
+- **Phase 2**: ✅ **JavaScript/TypeScript Framework Analysis** (Vue.js, Next.js, React, Node.js) - **COMPLETED**
+- **Phase 3**: **Advanced JavaScript/TypeScript Graphs** (Background jobs, ORM mapping, test linkage)
+- **Phase 4**: **PHP** (Laravel)
+- **Phase 5**: **C#** (Godot game engine)
+- **Phase 6**: **Python** (Django, FastAPI, Flask)
 
 ## Architecture
 
@@ -80,8 +82,14 @@ npm run migrate:latest
 # Analyze your codebase
 npm run analyze /path/to/your/project
 
+# Clear existing repository analysis
+./dist/cli/index.js clear your-repo-name --yes
+
 # Start MCP server for AI integration
 npm run mcp-server
+
+# Test framework detection and parsing
+npm test
 ```
 
 **📚 For detailed setup instructions, troubleshooting, and advanced features, see [GETTING_STARTED.md](./GETTING_STARTED.md)**
@@ -90,8 +98,8 @@ npm run mcp-server
 
 **Sequential Stack Implementation:**
 1. ✅ **Phase 1**: JavaScript/TypeScript Foundation - **COMPLETED**
-2. **Phase 2**: JS/TS Framework Analysis (In Progress)
-3. **Phase 3**: Advanced JS/TS Graphs
+2. ✅ **Phase 2**: JS/TS Framework Analysis - **COMPLETED**
+3. **Phase 3**: Advanced JS/TS Graphs (In Progress)
 4. **Phase 4**: PHP Support (Laravel)
 5. **Phase 5**: C# Support (Godot)
 6. **Phase 6**: Python Support (Django, FastAPI, Flask)
