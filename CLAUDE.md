@@ -56,13 +56,13 @@ npm start search <query>  # Search for symbols in analyzed codebases
 
 ```bash
 # Analyze with options
-./dist/cli/index.js analyze /path/to/project --verbose --no-test-files
+./dist/src/cli/index.js analyze /path/to/project --verbose --no-test-files
 
 # Search with filters
-./dist/cli/index.js search "useState" --type function --exported-only
+./dist/src/cli/index.js search "useState" --type function --exported-only
 
 # Start MCP server
-./dist/cli/index.js mcp-server --port 3000 --verbose
+./dist/src/cli/index.js mcp-server --port 3000 --verbose
 ```
 
 ## Architecture Overview

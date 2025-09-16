@@ -66,17 +66,17 @@ npx tsc
 npm run analyze /path/to/your/nextjs-project
 
 # Or using the built CLI
-./dist/cli/index.js analyze /path/to/your/project --verbose
+./dist/src/cli/index.js analyze /path/to/your/project --verbose
 ```
 
 ### 5. Clear Previous Analysis (Optional)
 
 ```bash
 # Clear existing repository analysis
-./dist/cli/index.js clear your-repo-name --yes
+./dist/src/cli/index.js clear your-repo-name --yes
 
 # Or clear all repositories
-./dist/cli/index.js clear --all --yes
+./dist/src/cli/index.js clear --all --yes
 ```
 
 ### 6. Test Framework Parsing
@@ -107,8 +107,8 @@ npm run start search "useState"
 npm run start search "User" --type class --exported-only
 
 # Search for framework-specific entities
-./dist/cli/index.js search "router" --type route
-./dist/cli/index.js search "useEffect" --type hook
+./dist/src/cli/index.js search "router" --type route
+./dist/src/cli/index.js search "useEffect" --type hook
 ```
 
 ## Project Structure
@@ -364,7 +364,7 @@ npx tsc
 ### Permission Issues
 ```bash
 # Make CLI executable
-chmod +x dist/cli/index.js
+chmod +x dist/src/cli/index.js
 ```
 
 ## Contributing
