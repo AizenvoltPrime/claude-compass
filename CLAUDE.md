@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Compass is an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of codebases. It builds dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
 
-**Current Status**: Phase 1 complete - JavaScript/TypeScript foundation with MCP integration ready for production use.
+**Current Status**: Phase 1 complete - JavaScript/TypeScript foundation with MCP integration and enhanced parser robustness ready for production use.
 
 ## Essential Commands
 
@@ -65,6 +65,9 @@ npm start search <query>  # Search for symbols in analyzed codebases
 
 1. **Parsers** (`src/parsers/`): Tree-sitter based language parsing
    - JavaScript/TypeScript support with ES6, CommonJS, dynamic imports
+   - Chunked parsing for large files (>28KB) with size validation
+   - Encoding detection and recovery for problematic files
+   - Bundle file filtering to skip minified/generated content
    - Extracts symbols, dependencies, and relationships
 
 2. **Database** (`src/database/`): PostgreSQL with pgvector extension

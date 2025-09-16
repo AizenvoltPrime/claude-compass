@@ -1,6 +1,8 @@
 import Parser from 'tree-sitter';
 import { SymbolType, DependencyType, CreateSymbol, CreateDependency } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
+import { EncodingConverter } from '../utils/encoding-converter';
+import * as fs from 'fs/promises';
 
 const logger = createComponentLogger('parser-base');
 
@@ -57,6 +59,11 @@ export interface ParseOptions {
   includePrivateSymbols?: boolean;
   includeTestFiles?: boolean;
   maxFileSize?: number;
+  enableChunking?: boolean;
+  enableEncodingRecovery?: boolean;
+  chunkSize?: number;
+  chunkOverlapLines?: number;
+  preserveContext?: boolean;
 }
 
 /**
@@ -94,7 +101,7 @@ export abstract class BaseParser {
   /**
    * Parse content and return the syntax tree
    */
-  protected parseContent(content: string): Parser.Tree | null {
+  protected parseContent(content: string, options?: ParseOptions): Parser.Tree | null {
     try {
       // Validate content before parsing
       if (!content || typeof content !== 'string') {
@@ -126,30 +133,18 @@ export abstract class BaseParser {
       // Normalize line endings to prevent parser issues
       const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // Check for Tree-sitter size limitation (around 30-35K characters)
-      const TREE_SITTER_SIZE_LIMIT = 32000;
-      let contentToParse = normalizedContent;
+      // Check for Tree-sitter size limitation (28KB)
+      const TREE_SITTER_SIZE_LIMIT = 28000;
 
       if (normalizedContent.length > TREE_SITTER_SIZE_LIMIT) {
-        this.logger.warn('Content exceeds Tree-sitter size limit, attempting smart truncation', {
+        this.logger.error('Content exceeds Tree-sitter limit and should be chunked at parser level', {
           originalSize: normalizedContent.length,
           limit: TREE_SITTER_SIZE_LIMIT
         });
-
-        const truncated = this.truncateAtSafePoint(normalizedContent, TREE_SITTER_SIZE_LIMIT);
-        if (truncated) {
-          contentToParse = truncated;
-          this.logger.info('Successfully truncated content at safe point', {
-            originalSize: normalizedContent.length,
-            truncatedSize: contentToParse.length
-          });
-        } else {
-          this.logger.warn('Could not find safe truncation point, using hard limit');
-          contentToParse = normalizedContent.substring(0, TREE_SITTER_SIZE_LIMIT);
-        }
+        throw new Error(`File content too large (${normalizedContent.length} bytes). Use ChunkedParser for files over ${TREE_SITTER_SIZE_LIMIT} bytes.`);
       }
 
-      const tree = this.parser.parse(contentToParse);
+      const tree = this.parser.parse(normalizedContent);
       if (tree.rootNode.hasError) {
         this.logger.warn('Syntax tree contains errors', {
           errorCount: this.countTreeErrors(tree.rootNode)
@@ -158,6 +153,56 @@ export abstract class BaseParser {
       return tree;
     } catch (error) {
       this.logger.error('Failed to parse content', { error: (error as Error).message });
+      return null;
+    }
+  }
+
+
+  /**
+   * Enhanced encoding detection and recovery pipeline
+   * Replaces the original hasEncodingIssues method with recovery capability
+   */
+  protected async recoverEncodingIssues(
+    filePath: string,
+    content: string,
+    options?: ParseOptions
+  ): Promise<string | null> {
+    // Step 1: Detect issues using existing logic
+    if (!this.hasEncodingIssues(content)) {
+      return content;
+    }
+
+    // Step 2: Attempt recovery if enabled
+    if (options?.enableEncodingRecovery === false) {
+      return null; // Existing behavior - skip file
+    }
+
+    try {
+      this.logger.info('Attempting encoding recovery', { filePath });
+
+      // Re-read file as buffer for proper encoding detection
+      const buffer = await fs.readFile(filePath);
+      const encodingResult = await EncodingConverter.detectEncoding(buffer);
+
+      if (encodingResult.confidence > 0.7) {
+        const recovered = await EncodingConverter.convertToUtf8(buffer, encodingResult.detectedEncoding);
+        this.logger.info('Encoding recovery successful', {
+          filePath,
+          detectedEncoding: encodingResult.detectedEncoding,
+          confidence: encodingResult.confidence
+        });
+        return recovered;
+      } else {
+        this.logger.warn('Low confidence encoding detection, skipping recovery', {
+          filePath,
+          confidence: encodingResult.confidence,
+          detectedEncoding: encodingResult.detectedEncoding
+        });
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.warn('Encoding recovery failed', { filePath, error: (error as Error).message });
       return null;
     }
   }
@@ -312,60 +357,6 @@ export abstract class BaseParser {
            parentNode.type === 'export_declaration';
   }
 
-  /**
-   * Smart truncation at safe points to avoid cutting off important symbols
-   */
-  private truncateAtSafePoint(content: string, maxLength: number): string | null {
-    if (content.length <= maxLength) return content;
-
-    // Calculate a safe range to look for truncation points (85% of maxLength)
-    const safeSearchEnd = Math.floor(maxLength * 0.85);
-    const searchRange = content.substring(0, safeSearchEnd);
-
-    // Look for safe truncation points in order of preference
-    const safePoints = [
-      // End of function/class/interface definitions with closing brace and semicolon
-      searchRange.lastIndexOf(';\n\n'),
-      searchRange.lastIndexOf('};\n'),
-      searchRange.lastIndexOf('}\n\n'),
-      // End of export statements
-      searchRange.lastIndexOf('\nexport '),
-      // End of function declarations
-      searchRange.lastIndexOf('\nfunction '),
-      searchRange.lastIndexOf('\nconst '),
-      searchRange.lastIndexOf('\nlet '),
-      searchRange.lastIndexOf('\nvar '),
-      // End of class/interface declarations
-      searchRange.lastIndexOf('\nclass '),
-      searchRange.lastIndexOf('\ninterface '),
-      searchRange.lastIndexOf('\ntype '),
-      // Simple closing braces
-      searchRange.lastIndexOf('}\n'),
-      searchRange.lastIndexOf('}\r\n')
-    ];
-
-    // Find the best truncation point
-    const validPoints = safePoints.filter(point => point > 0);
-
-    if (validPoints.length === 0) {
-      this.logger.warn('No safe truncation points found');
-      return null;
-    }
-
-    const bestPoint = Math.max(...validPoints);
-
-    // Add a few characters to include the newline/delimiter
-    const truncateAt = bestPoint + (content.charAt(bestPoint) === ';' ? 2 : 1);
-
-    this.logger.debug('Found safe truncation point', {
-      originalLength: content.length,
-      truncateAt,
-      contextBefore: content.substring(Math.max(0, bestPoint - 50), bestPoint),
-      contextAfter: content.substring(bestPoint, bestPoint + 20)
-    });
-
-    return content.substring(0, truncateAt);
-  }
 
   /**
    * Validate parse options

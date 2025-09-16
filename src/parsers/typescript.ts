@@ -6,6 +6,7 @@ import {
   ParseResult,
   ParseOptions
 } from './base';
+import { ChunkedParseOptions } from './chunked-parser';
 import { SymbolType } from '../database/models';
 
 /**
@@ -24,19 +25,6 @@ export class TypeScriptParser extends JavaScriptParser {
     return ['.ts', '.tsx'];
   }
 
-  async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
-    // Use the parent method but add TypeScript-specific processing
-    const result = await super.parseFile(filePath, content, options);
-
-    // Add TypeScript-specific symbols
-    const tree = this.parseContent(content);
-    if (tree) {
-      const tsSymbols = this.extractTypeScriptSymbols(tree.rootNode, content);
-      result.symbols.push(...tsSymbols);
-    }
-
-    return result;
-  }
 
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
     const symbols = super.extractSymbols(rootNode, content);
@@ -240,5 +228,112 @@ export class TypeScriptParser extends JavaScriptParser {
 
     // Fall back to parent class implementation
     return super.isSymbolExported(node, symbolName, content);
+  }
+
+  /**
+   * Enhanced chunk boundaries for TypeScript content
+   * Adds TypeScript-specific boundary detection to JavaScript patterns
+   */
+  protected getChunkBoundaries(content: string, maxChunkSize: number): number[] {
+    // Get JavaScript boundaries first
+    const jsChunks = super.getChunkBoundaries(content, maxChunkSize);
+
+    // Search within 85% of max size for safe boundaries
+    const searchLimit = Math.floor(maxChunkSize * 0.85);
+    const searchContent = content.substring(0, Math.min(searchLimit, content.length));
+
+    // Additional TypeScript-specific boundary patterns
+    const tsPatterns = [
+      // End of interface declarations
+      /interface\s+\w+(?:\s*<[^>]*>)?(?:\s+extends\s+[^{]+)?\s*{[^}]*}\s*\n/g,
+
+      // End of type alias declarations
+      /type\s+\w+(?:\s*<[^>]*>)?\s*=\s*[^;]+;\s*\n/g,
+
+      // End of namespace declarations
+      /namespace\s+\w+\s*{[^}]*}\s*\n/g,
+
+      // End of enum declarations
+      /enum\s+\w+\s*{[^}]*}\s*\n/g,
+
+      // End of abstract class declarations
+      /abstract\s+class\s+\w+(?:\s+extends\s+\w+)?(?:\s+implements\s+[^{]+)?\s*{[^}]*}\s*\n/g,
+
+      // End of decorator statements
+      /@\w+(?:\([^)]*\))?\s*\n(?=(?:export\s+)?(?:class|function|interface|type))/g,
+
+      // End of generic function declarations
+      /function\s+\w+\s*<[^>]*>\s*\([^)]*\)\s*:\s*[^{]+\s*{[^}]*}\s*\n/g,
+
+      // End of method signatures in interfaces
+      /\w+\s*\([^)]*\)\s*:\s*[^;]+;\s*\n/g,
+
+      // End of property declarations with types
+      /(?:readonly\s+)?\w+\s*:\s*[^;=]+(?:;|=\s*[^;]+;)\s*\n/g,
+
+      // End of import/export with type annotations
+      /(?:import|export)\s+(?:type\s+)?{[^}]*}\s+from\s+['"][^'"]+['"];\s*\n/g,
+
+      // End of module declarations
+      /declare\s+module\s+['"][^'"]+['"]\s*{[^}]*}\s*\n/g,
+
+      // End of ambient declarations
+      /declare\s+(?:const|let|var|function|class|interface|namespace)\s+[^;]+;?\s*\n/g
+    ];
+
+    const tsBoundaries: number[] = [];
+
+    // Find TypeScript-specific boundaries
+    for (const pattern of tsPatterns) {
+      let match;
+      while ((match = pattern.exec(searchContent)) !== null) {
+        const position = match.index + match[0].length;
+        if (position > 100 && position < searchLimit) { // Ensure reasonable minimum chunk size
+          tsBoundaries.push(position);
+        }
+      }
+    }
+
+    // Merge and optimize boundaries
+    return this.optimizeChunkBoundaries([...jsChunks, ...tsBoundaries], content);
+  }
+
+  /**
+   * Optimize chunk boundaries by removing overlapping or too-close boundaries
+   */
+  private optimizeChunkBoundaries(boundaries: number[], content: string): number[] {
+    const uniqueBoundaries = [...new Set(boundaries)].sort((a, b) => b - a);
+    const optimized: number[] = [];
+
+    let lastBoundary = Number.MAX_SAFE_INTEGER;
+    for (const boundary of uniqueBoundaries) {
+      // Ensure boundaries are at least 1000 characters apart to avoid tiny chunks
+      if (lastBoundary - boundary > 1000) {
+        optimized.push(boundary);
+        lastBoundary = boundary;
+      }
+    }
+
+    return optimized;
+  }
+
+  /**
+   * Override parseFile to handle TypeScript-specific chunking
+   */
+  async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
+    const validatedOptions = this.validateOptions(options);
+    const chunkedOptions = validatedOptions as ChunkedParseOptions;
+
+    // Enhanced TypeScript chunking threshold (higher due to type complexity)
+    const tsChunkThreshold = Math.floor((chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE) * 1.1);
+
+    // Always use chunking for large TypeScript files
+    if (content.length > tsChunkThreshold) {
+      const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
+      return this.convertMergedResult(chunkedResult);
+    }
+
+    // Use parent implementation for smaller files
+    return super.parseFile(filePath, content, options);
   }
 }
