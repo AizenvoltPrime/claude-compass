@@ -19,9 +19,34 @@ const consoleFormat = winston.format.combine(
   winston.format.timestamp({
     format: 'HH:mm:ss',
   }),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    const metaStr = Object.keys(meta).length > 0 ? `\n${JSON.stringify(meta, null, 2)}` : '';
-    return `${timestamp} [${level}]: ${message}${metaStr}`;
+  winston.format.printf(({ timestamp, level, message, component, ...meta }) => {
+    // Only include essential metadata in console output to reduce noise
+    const essentialMeta = Object.keys(meta).filter(key =>
+      !['service', 'component'].includes(key) &&
+      !['patterns', 'patternsUsed', 'options'].includes(key)
+    );
+
+    let output = `${timestamp} [${level}]: ${message}`;
+
+    // Add component if present and different from service
+    if (component && component !== 'claude-compass') {
+      output += ` (${component})`;
+    }
+
+    // Only add essential metadata (file counts, error counts, etc.)
+    if (essentialMeta.length > 0) {
+      const essentialData = essentialMeta.reduce((acc, key) => {
+        acc[key] = meta[key];
+        return acc;
+      }, {} as any);
+
+      // Only show if it's small and useful
+      if (JSON.stringify(essentialData).length < 200) {
+        output += ` ${JSON.stringify(essentialData)}`;
+      }
+    }
+
+    return output;
   })
 );
 

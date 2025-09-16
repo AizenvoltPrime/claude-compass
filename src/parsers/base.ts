@@ -73,6 +73,7 @@ export abstract class BaseParser {
   protected parser: Parser;
   protected language: string;
   protected logger: any;
+  private syntaxErrorCount = 0;
 
   constructor(parser: Parser, language: string) {
     this.parser = parser;
@@ -146,7 +147,9 @@ export abstract class BaseParser {
 
       const tree = this.parser.parse(normalizedContent);
       if (tree.rootNode.hasError) {
-        this.logger.warn('Syntax tree contains errors', {
+        this.syntaxErrorCount++;
+        // Only log syntax errors at debug level to reduce noise
+        this.logger.debug('Syntax tree contains errors', {
           errorCount: this.countTreeErrors(tree.rootNode)
         });
       }
@@ -367,6 +370,15 @@ export abstract class BaseParser {
       includeTestFiles: options.includeTestFiles ?? true,
       maxFileSize: options.maxFileSize ?? 1024 * 1024, // 1MB default
     };
+  }
+
+  /**
+   * Get syntax error summary and reset counter
+   */
+  protected getSyntaxErrorSummary(): { count: number } {
+    const summary = { count: this.syntaxErrorCount };
+    this.syntaxErrorCount = 0; // Reset for next file
+    return summary;
   }
 }
 

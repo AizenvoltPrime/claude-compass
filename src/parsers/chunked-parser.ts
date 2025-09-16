@@ -73,7 +73,7 @@ export abstract class ChunkedParser extends BaseParser {
     const chunkSize = options?.chunkSize || this.DEFAULT_CHUNK_SIZE;
     const overlapLines = options?.chunkOverlapLines || this.DEFAULT_OVERLAP_LINES;
 
-    this.logger.info('Starting chunked parsing', {
+    this.logger.debug('Starting chunked parsing', {
       filePath,
       fileSize: content.length,
       chunkSize,
@@ -94,11 +94,7 @@ export abstract class ChunkedParser extends BaseParser {
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
 
-        this.logger.debug(`Processing chunk ${i + 1}/${chunks.length}`, {
-          chunkIndex: i,
-          chunkSize: chunk.content.length,
-          lineRange: `${chunk.startLine}-${chunk.endLine}`
-        });
+        // Removed verbose per-chunk logging to reduce noise
 
         try {
           const chunkResult = await this.parseChunk(chunk, filePath, options);

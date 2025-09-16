@@ -32,7 +32,7 @@ export function createDatabaseConnection(): Knex {
       directory: './src/database/migrations',
       tableName: 'knex_migrations',
     },
-    debug: config.nodeEnv === 'development',
+    debug: false, // Disable SQL query logging to reduce noise
   };
 
   db = knex(connectionConfig);

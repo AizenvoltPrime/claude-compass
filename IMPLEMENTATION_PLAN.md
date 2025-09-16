@@ -452,7 +452,7 @@ interface MCPTools {
 - ✅ **Content Validation**: Binary detection, encoding issue detection, null byte handling
 - ✅ **Smart Error Recovery**: Parser continues processing when individual files fail
 - ✅ **Batch Processing**: Symbol and dependency creation optimized for large codebases
-- ✅ **Memory Management**: Signature truncation prevents PostgreSQL query size issues
+- ✅ **Memory Management**: Batch processing optimized for large codebases with proper transaction handling
 - ✅ **File Size Policy**: Unified size management with configurable thresholds and actions
 - ✅ **CompassIgnore Support**: GitIgnore-style patterns with automatic default filtering
 - ✅ **Chunk Size Validation**: Iterative size reduction to ensure Tree-sitter compatibility
