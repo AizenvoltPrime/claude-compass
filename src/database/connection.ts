@@ -29,8 +29,10 @@ export function createDatabaseConnection(): Knex {
       idleTimeoutMillis: 600000,
     },
     migrations: {
-      directory: './src/database/migrations',
+      directory: './dist/src/database/migrations',
       tableName: 'knex_migrations',
+      extension: 'js',
+      loadExtensions: ['.js']
     },
     debug: false, // Disable SQL query logging to reduce noise
   };
