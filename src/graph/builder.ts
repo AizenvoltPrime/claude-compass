@@ -67,6 +67,20 @@ export class GraphBuilder {
       // Create or get repository record
       const repository = await this.ensureRepository(repositoryPath);
 
+      // Automatically detect if incremental analysis is possible
+      if (repository.last_indexed) {
+        this.logger.info('Previous analysis detected, using incremental analysis mode');
+        return await this.performIncrementalAnalysis(repositoryPath, repository, validatedOptions);
+      } else {
+        this.logger.info('No previous analysis found, performing full analysis');
+      }
+
+      // Full analysis path - clean up existing data for fresh analysis
+      this.logger.info('Performing full analysis, cleaning up existing data', {
+        repositoryId: repository.id
+      });
+      await this.dbService.cleanupRepositoryData(repository.id);
+
       // Discover and process files
       const files = await this.discoverFiles(repositoryPath, validatedOptions);
       this.logger.info(`Discovered ${files.length} files`);
@@ -103,7 +117,15 @@ export class GraphBuilder {
       const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
 
-      await this.dbService.createDependencies([...fileDependencies, ...symbolDependencies]);
+      // Store file dependencies in separate table
+      if (fileDependencies.length > 0) {
+        await this.dbService.createFileDependencies(fileDependencies);
+      }
+
+      // Store symbol dependencies
+      if (symbolDependencies.length > 0) {
+        await this.dbService.createDependencies(symbolDependencies);
+      }
 
       // Update repository with analysis results
       await this.dbService.updateRepository(repository.id, {
@@ -132,6 +154,168 @@ export class GraphBuilder {
       this.logger.error('Repository analysis failed', { error });
       throw error;
     }
+  }
+
+  /**
+   * Detect files that have changed since last analysis
+   */
+  private async detectChangedFiles(
+    repositoryPath: string,
+    repository: Repository,
+    options: BuildOptions
+  ): Promise<string[]> {
+    const changedFiles: string[] = [];
+
+    try {
+      // Get last analysis timestamp from repository metadata
+      const lastIndexed = repository.last_indexed;
+      if (!lastIndexed) {
+        // No previous analysis - all files are "changed"
+        this.logger.info('No previous analysis found, treating all files as changed');
+        const allFiles = await this.discoverFiles(repositoryPath, options);
+        return allFiles.map(f => f.path);
+      }
+
+      this.logger.info('Detecting changes since last analysis', {
+        lastIndexed: lastIndexed.toISOString()
+      });
+
+      // Discover all current files
+      const currentFiles = await this.discoverFiles(repositoryPath, options);
+
+      // Check each file's modification time
+      for (const fileInfo of currentFiles) {
+        try {
+          const stats = await fs.stat(fileInfo.path);
+          if (stats.mtime > lastIndexed) {
+            changedFiles.push(fileInfo.path);
+            this.logger.debug('File changed since last analysis', {
+              file: fileInfo.relativePath,
+              lastModified: stats.mtime.toISOString(),
+              lastAnalyzed: lastIndexed.toISOString()
+            });
+          }
+        } catch (error) {
+          // File might have been deleted, skip it
+          this.logger.warn('Error checking file modification time', {
+            file: fileInfo.path,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      this.logger.info('Change detection completed', {
+        totalFiles: currentFiles.length,
+        changedFiles: changedFiles.length
+      });
+
+      return changedFiles;
+
+    } catch (error) {
+      this.logger.error('Error during change detection, falling back to full analysis', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // Fallback: return all files for full analysis
+      const allFiles = await this.discoverFiles(repositoryPath, options);
+      return allFiles.map(f => f.path);
+    }
+  }
+
+  /**
+   * Perform incremental analysis on a repository
+   */
+  private async performIncrementalAnalysis(
+    repositoryPath: string,
+    repository: Repository,
+    options: BuildOptions
+  ): Promise<BuildResult> {
+    this.logger.info('Starting incremental analysis', {
+      repositoryId: repository.id,
+      repositoryPath
+    });
+
+    // Detect changed files
+    const changedFiles = await this.detectChangedFiles(repositoryPath, repository, options);
+
+    if (changedFiles.length === 0) {
+      this.logger.info('No changed files detected, skipping analysis');
+
+      // Return current graph state - need to fetch data from database
+      const dbFiles = await this.dbService.getFilesByRepository(repository.id);
+      const symbols = await this.dbService.getSymbolsByRepository(repository.id);
+
+      // Create empty maps for unchanged files (no new imports/exports)
+      const importsMap = new Map<number, any[]>();
+      const exportsMap = new Map<number, any[]>();
+      const dependenciesMap = new Map<number, any[]>();
+
+      const fileGraph = await this.fileGraphBuilder.buildFileGraph(
+        repository,
+        dbFiles,
+        importsMap,
+        exportsMap
+      );
+      const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
+        symbols,
+        dependenciesMap
+      );
+
+      return {
+        repository,
+        filesProcessed: 0,
+        symbolsExtracted: 0,
+        dependenciesCreated: 0,
+        fileGraph,
+        symbolGraph,
+        errors: []
+      };
+    }
+
+    this.logger.info(`Processing ${changedFiles.length} changed files`);
+
+    // Re-analyze only changed files
+    const partialResult = await this.reanalyzeFiles(repository.id, changedFiles, options);
+
+    // Rebuild graphs with updated data - fetch all current data from database
+    const dbFiles = await this.dbService.getFilesByRepository(repository.id);
+    const symbols = await this.dbService.getSymbolsByRepository(repository.id);
+
+    // Create empty maps for graph building (symbols/dependencies are in database)
+    const importsMap = new Map<number, any[]>();
+    const exportsMap = new Map<number, any[]>();
+    const dependenciesMap = new Map<number, any[]>();
+
+    const fileGraph = await this.fileGraphBuilder.buildFileGraph(
+      repository,
+      dbFiles,
+      importsMap,
+      exportsMap
+    );
+    const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
+      symbols,
+      dependenciesMap
+    );
+
+    // Update repository timestamp
+    await this.dbService.updateRepository(repository.id, {
+      last_indexed: new Date()
+    });
+
+    this.logger.info('Incremental analysis completed', {
+      filesProcessed: partialResult.filesProcessed || 0,
+      symbolsExtracted: partialResult.symbolsExtracted || 0,
+      errors: partialResult.errors?.length || 0
+    });
+
+    return {
+      repository,
+      filesProcessed: partialResult.filesProcessed || 0,
+      symbolsExtracted: partialResult.symbolsExtracted || 0,
+      dependenciesCreated: 0, // Will be calculated from graph
+      fileGraph,
+      symbolGraph,
+      errors: partialResult.errors || []
+    };
   }
 
   /**
@@ -192,18 +376,6 @@ export class GraphBuilder {
       this.logger.info('Created new repository', {
         name,
         path: absolutePath,
-        id: repository.id
-      });
-    } else {
-      // Repository exists - clean up old data for fresh analysis
-      this.logger.info('Repository exists, cleaning up old data for re-analysis', {
-        id: repository.id,
-        path: absolutePath
-      });
-
-      await this.dbService.cleanupRepositoryData(repository.id);
-
-      this.logger.info('Repository data cleanup completed', {
         id: repository.id
       });
     }

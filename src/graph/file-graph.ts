@@ -1,6 +1,6 @@
 import path from 'path';
 import { ParsedImport, ParsedExport } from '../parsers/base';
-import { File, Repository, CreateDependency, DependencyType } from '../database/models';
+import { File, Repository, CreateFileDependency, DependencyType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 
 const logger = createComponentLogger('file-graph');
@@ -66,8 +66,8 @@ export class FileGraphBuilder {
   createFileDependencies(
     fileGraph: FileGraphData,
     fileIdMap: Map<string, number>
-  ): CreateDependency[] {
-    const dependencies: CreateDependency[] = [];
+  ): CreateFileDependency[] {
+    const dependencies: CreateFileDependency[] = [];
 
     for (const edge of fileGraph.edges) {
       const fromFile = fileGraph.nodes.find(n => n.id === edge.from);
@@ -76,8 +76,8 @@ export class FileGraphBuilder {
       if (!fromFile || !toFile) continue;
 
       dependencies.push({
-        from_symbol_id: edge.from,
-        to_symbol_id: edge.to,
+        from_file_id: edge.from,
+        to_file_id: edge.to,
         dependency_type: DependencyType.IMPORTS,
         line_number: edge.lineNumber,
         confidence: edge.isDynamic ? 0.8 : 1.0

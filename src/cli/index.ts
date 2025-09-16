@@ -57,7 +57,7 @@ program
       console.log(chalk.gray(`Repository: ${repositoryPath}`));
       console.log(chalk.gray(`Options: ${JSON.stringify(buildOptions, null, 2)}`));
 
-      // Run analysis
+      // Run analysis (GraphBuilder will automatically detect if incremental is possible)
       spinner.start('Analyzing repository...');
 
       const startTime = Date.now();
@@ -309,6 +309,105 @@ program
     } catch (error) {
       spinner.fail('Rollback failed');
       console.error(chalk.red('\n❌ Rollback error:'));
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      // Close database connection even in error case
+      try {
+        await databaseService.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
+      process.exit(1);
+    }
+  });
+
+// Clear repository data command
+program
+  .command('clear')
+  .description('Clear all data for a repository by name')
+  .argument('<name>', 'Repository name to clear')
+  .option('--yes', 'Skip confirmation prompt')
+  .action(async (repositoryName, options) => {
+    const spinner = ora('Initializing...').start();
+
+    try {
+      spinner.text = 'Connecting to database...';
+
+      // Check if repository exists
+      const repository = await databaseService.getRepositoryByName(repositoryName);
+
+      if (!repository) {
+        spinner.fail('Repository not found');
+        console.error(chalk.red(`\n❌ Repository "${repositoryName}" not found in database`));
+
+        // Show available repositories
+        const allRepos = await databaseService.getAllRepositories();
+        if (allRepos.length > 0) {
+          console.log(chalk.gray('\nAvailable repositories:'));
+          allRepos.forEach(repo => {
+            console.log(chalk.gray(`  - ${repo.name} (${repo.path})`));
+          });
+        } else {
+          console.log(chalk.gray('\nNo repositories found in database'));
+        }
+
+        await databaseService.close();
+        process.exit(1);
+      }
+
+      spinner.stop();
+
+      // Show repository info
+      console.log(chalk.blue('\nRepository found:'));
+      console.log(chalk.gray(`  Name: ${repository.name}`));
+      console.log(chalk.gray(`  Path: ${repository.path}`));
+      console.log(chalk.gray(`  ID: ${repository.id}`));
+      if (repository.last_indexed) {
+        console.log(chalk.gray(`  Last analyzed: ${repository.last_indexed.toISOString()}`));
+      }
+
+      // Confirmation prompt (unless --yes flag is used)
+      if (!options.yes) {
+        const readline = require('readline');
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+
+        const answer = await new Promise<string>((resolve) => {
+          rl.question(chalk.yellow('\n⚠️  This will permanently delete all data for this repository. Continue? (y/N): '), resolve);
+        });
+
+        rl.close();
+
+        if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+          console.log(chalk.gray('\nOperation cancelled'));
+          await databaseService.close();
+          return;
+        }
+      }
+
+      // Perform deletion
+      const deleteSpinner = ora('Deleting repository data...').start();
+
+      const success = await databaseService.deleteRepositoryByName(repositoryName);
+
+      if (success) {
+        deleteSpinner.succeed('Repository data cleared successfully');
+        console.log(chalk.green(`\n✅ All data for repository "${repositoryName}" has been cleared!`));
+      } else {
+        deleteSpinner.fail('Failed to clear repository data');
+        console.error(chalk.red(`\n❌ Failed to clear data for repository "${repositoryName}"`));
+        process.exit(1);
+      }
+
+      // Close database connection
+      await databaseService.close();
+
+    } catch (error) {
+      spinner.fail('Clear operation failed');
+      console.error(chalk.red('\n❌ Clear operation error:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
 
       // Close database connection even in error case

@@ -67,13 +67,29 @@ export class SymbolGraphBuilder {
    * Create dependencies for database storage
    */
   createSymbolDependencies(symbolGraph: SymbolGraphData): CreateDependency[] {
-    return symbolGraph.edges.map(edge => ({
-      from_symbol_id: edge.from,
-      to_symbol_id: edge.to,
-      dependency_type: edge.type,
-      line_number: edge.lineNumber,
-      confidence: edge.confidence
-    }));
+    // Get all valid symbol IDs from the graph nodes
+    const validSymbolIds = new Set(symbolGraph.nodes.map(node => node.id));
+
+    return symbolGraph.edges
+      .filter(edge => {
+        // Only include dependencies where both symbols exist in the graph
+        const isValid = validSymbolIds.has(edge.from) && validSymbolIds.has(edge.to);
+        if (!isValid) {
+          this.logger.warn('Filtering out dependency with invalid symbol reference', {
+            from: edge.from,
+            to: edge.to,
+            type: edge.type
+          });
+        }
+        return isValid;
+      })
+      .map(edge => ({
+        from_symbol_id: edge.from,
+        to_symbol_id: edge.to,
+        dependency_type: edge.type,
+        line_number: edge.lineNumber,
+        confidence: edge.confidence
+      }));
   }
 
   /**
