@@ -258,18 +258,12 @@ export class DatabaseService {
 
     logger.debug('Creating symbols in batch', { count: symbols.length });
 
-    // Break into smaller batches to avoid PostgreSQL query size limits
-    const BATCH_SIZE = 50; // Further reduced batch size
+    // Break into smaller batches for better memory management and transaction performance
+    const BATCH_SIZE = 50;
     const results: Symbol[] = [];
 
     for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-      const batch = symbols.slice(i, i + BATCH_SIZE).map(symbol => ({
-        ...symbol,
-        // Truncate signature to prevent PostgreSQL query size issues
-        signature: symbol.signature && symbol.signature.length > 1000
-          ? symbol.signature.substring(0, 997) + '...'
-          : symbol.signature
-      }));
+      const batch = symbols.slice(i, i + BATCH_SIZE);
 
       logger.debug(`Processing symbol batch ${i / BATCH_SIZE + 1}/${Math.ceil(symbols.length / BATCH_SIZE)}`, {
         batchSize: batch.length

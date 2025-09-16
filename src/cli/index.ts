@@ -74,7 +74,7 @@ program
 
       console.log(chalk.blue('\nStarting repository analysis...'));
       console.log(chalk.gray(`Repository: ${repositoryPath}`));
-      console.log(chalk.gray(`Options: ${JSON.stringify(buildOptions, null, 2)}`));
+      // Simplified options output - removed verbose JSON dump
 
       // Run analysis (GraphBuilder will automatically detect if incremental is possible)
       spinner.start('Analyzing repository...');

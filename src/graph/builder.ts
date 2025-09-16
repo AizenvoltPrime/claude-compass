@@ -65,8 +65,8 @@ export class GraphBuilder {
     const startTime = Date.now();
 
     this.logger.info('Starting repository analysis', {
-      path: repositoryPath,
-      options
+      path: repositoryPath
+      // Removed detailed options logging to reduce noise
     });
 
     const validatedOptions = this.validateOptions(options);
