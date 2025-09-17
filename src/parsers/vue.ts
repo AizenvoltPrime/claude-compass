@@ -17,7 +17,7 @@ import {
   ParsedDependency,
   ParsedSymbol,
 } from './base';
-import { DependencyType } from '../database/models';
+import { DependencyType, SymbolType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
 
@@ -110,6 +110,12 @@ export class VueParser extends BaseFrameworkParser {
           exports = this.extractExports(tree.rootNode, scriptContent!);
           dependencies = this.extractDependencies(tree.rootNode, scriptContent!);
 
+          // Extract template symbols using lightweight parsing
+          if (sections.template) {
+            const templateSymbols = this.extractTemplateSymbols(sections.template);
+            symbols.push(...templateSymbols);
+          }
+
           if (tree.rootNode.hasError) {
             errors.push({
               message: 'Syntax errors in Vue script section',
@@ -127,6 +133,10 @@ export class VueParser extends BaseFrameworkParser {
           severity: 'error' as const,
         });
       }
+    } else if (sections.template) {
+      // Handle template-only Vue files
+      const templateSymbols = this.extractTemplateSymbols(sections.template);
+      symbols.push(...templateSymbols);
     }
 
     // Detect framework entities
@@ -489,6 +499,12 @@ export class VueParser extends BaseFrameworkParser {
         templateRefs = this.extractTemplateRefs(sections.template);
         dynamicComponents = this.extractDynamicComponents(sections.template);
         eventHandlers = this.extractEventHandlers(sections.template);
+
+        // Extract template symbols using lightweight parsing
+        if (sections.template) {
+          const templateSymbols = this.extractTemplateSymbols(sections.template);
+          scriptSymbols.push(...templateSymbols);
+        }
       }
 
       // Extract slots from template
@@ -3149,6 +3165,41 @@ export class VueParser extends BaseFrameworkParser {
         }
       }
 
+      // Vue Composition API lifecycle hooks and callbacks: onMounted(() => {}), watch(() => {}), etc.
+      if (node.type === 'call_expression') {
+        const functionNode = node.childForFieldName('function');
+        if (functionNode && functionNode.type === 'identifier') {
+          const functionName = functionNode.text;
+
+          // Check if this is a Vue lifecycle hook or composable that takes a callback
+          const vueCallbacks = [
+            'onMounted', 'onUnmounted', 'onUpdated', 'onCreated', 'onBeforeMount', 'onBeforeUpdate',
+            'onBeforeUnmount', 'onActivated', 'onDeactivated', 'onErrorCaptured',
+            'watch', 'watchEffect', 'computed', 'readonly', 'customRef'
+          ];
+
+          if (vueCallbacks.includes(functionName)) {
+            // Get the first argument which should be the callback function
+            const argumentsNode = node.childForFieldName('arguments');
+            if (argumentsNode && argumentsNode.childCount > 0) {
+              const callbackNode = argumentsNode.child(1); // Skip opening paren, get first argument
+
+              // Check if the callback is an arrow function or regular function
+              if (callbackNode && (callbackNode.type === 'arrow_function' || callbackNode.type === 'function_expression')) {
+                symbols.push({
+                  name: `${functionName}_callback`,
+                  symbol_type: 'function',
+                  start_line: callbackNode.startPosition?.row + 1 || 1,
+                  end_line: callbackNode.endPosition?.row + 1 || 1,
+                  is_exported: false,
+                  signature: this.getVueNodeText(callbackNode)
+                });
+              }
+            }
+          }
+        }
+      }
+
       // Traverse children
       for (let i = 0; i < node.childCount; i++) {
         const child = node.child(i);
@@ -3374,7 +3425,7 @@ export class VueParser extends BaseFrameworkParser {
   // Missing helper methods for enhanced Vue parser functionality
 
   /**
-   * Extract SFC sections from Vue file
+   * Extract SFC sections from Vue file using lightweight regex parsing
    */
   private extractSFCSections(content: string): {
     template?: string;
@@ -3418,6 +3469,104 @@ export class VueParser extends BaseFrameworkParser {
     }
 
     return sections;
+  }
+
+  /**
+   * Extract template symbols using lightweight regex patterns
+   */
+  private extractTemplateSymbols(template: string): ParsedSymbol[] {
+    const symbols: ParsedSymbol[] = [];
+
+    if (!template) {
+      return symbols;
+    }
+
+    try {
+      // Extract custom components (PascalCase or kebab-case)
+      const componentRegex = /<([A-Z][a-zA-Z0-9]*|[a-z-]+(?:-[a-z]+)+)/g;
+      let match;
+      while ((match = componentRegex.exec(template)) !== null) {
+        const componentName = match[1];
+        symbols.push({
+          name: componentName,
+          symbol_type: SymbolType.CLASS,
+          start_line: this.getLineFromIndex(template, match.index),
+          end_line: this.getLineFromIndex(template, match.index),
+          is_exported: false,
+          signature: `<${componentName}>`,
+        });
+      }
+
+      // Extract template refs
+      const refRegex = /ref=["']([^"']+)["']/g;
+      while ((match = refRegex.exec(template)) !== null) {
+        const refName = match[1];
+        symbols.push({
+          name: refName,
+          symbol_type: SymbolType.VARIABLE,
+          start_line: this.getLineFromIndex(template, match.index),
+          end_line: this.getLineFromIndex(template, match.index),
+          is_exported: false,
+          signature: `ref="${refName}"`,
+        });
+      }
+
+      // Extract v-model variables
+      const vModelRegex = /v-model=["']([^"']+)["']/g;
+      while ((match = vModelRegex.exec(template)) !== null) {
+        const varName = match[1];
+        symbols.push({
+          name: varName,
+          symbol_type: SymbolType.VARIABLE,
+          start_line: this.getLineFromIndex(template, match.index),
+          end_line: this.getLineFromIndex(template, match.index),
+          is_exported: false,
+          signature: `v-model="${varName}"`,
+        });
+      }
+
+      // Extract interpolated variables {{ variable }}
+      const interpolationRegex = /\{\{\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\}\}/g;
+      while ((match = interpolationRegex.exec(template)) !== null) {
+        const varName = match[1];
+        if (!this.isJavaScriptKeyword(varName)) {
+          symbols.push({
+            name: varName,
+            symbol_type: SymbolType.VARIABLE,
+            start_line: this.getLineFromIndex(template, match.index),
+            end_line: this.getLineFromIndex(template, match.index),
+            is_exported: false,
+            signature: `{{ ${varName} }}`,
+          });
+        }
+      }
+
+    } catch (error) {
+      logger.warn(`Error extracting template symbols: ${error}`);
+    }
+
+    return symbols;
+  }
+
+  /**
+   * Get line number from string index
+   */
+  private getLineFromIndex(content: string, index: number): number {
+    return content.substring(0, index).split('\n').length;
+  }
+
+  /**
+   * Check if a string is a JavaScript keyword
+   */
+  private isJavaScriptKeyword(word: string): boolean {
+    const keywords = new Set([
+      'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
+      'do', 'switch', 'case', 'break', 'continue', 'try', 'catch', 'finally',
+      'throw', 'new', 'this', 'typeof', 'instanceof', 'in', 'of', 'true', 'false',
+      'null', 'undefined', 'void', 'delete', 'class', 'extends', 'super', 'static'
+    ]);
+
+    return keywords.has(word);
   }
 
   /**
