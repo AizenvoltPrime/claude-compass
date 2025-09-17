@@ -182,13 +182,28 @@ npm run mcp-server        # Start MCP server for AI integration
 - No vector search capabilities yet
 - No monorepo structure analysis
 
-**Planned Features** (Phase 3+):
+**Planned Features** (Prioritized for Vue + Laravel + Godot):
 
+**Phase 3 - Advanced Vue/TypeScript (PRIORITY):**
+- Test-to-code linkage (Vitest, Jest, Cypress, Playwright) - **Critical for Vue/Vite testing**
+- Enhanced Vue composables relationship mapping - **Essential for Vue.js**
+- Package manager integration (npm, yarn, pnpm) - **Vite dependency tracking**
 - Background job detection and queue analysis
-- Database ORM mapping and relationship detection
-- Test-to-code linkage (Jest, Vitest, Cypress, Playwright)
 - Enhanced `who_calls` and `list_dependencies` tools
-- Package manager integration and monorepo analysis
-- Vector search with embeddings
-- PHP/Laravel support
-- Advanced impact analysis and drift detection
+
+**Phase 4 - PHP/Laravel Support (HIGH PRIORITY):**
+- Laravel route and controller detection
+- Laravel Eloquent model relationship mapping
+- Laravel job queue and scheduler detection
+- Laravel service provider and dependency injection analysis
+
+**Phase 5 - Vue ↔ Laravel Integration (HIGH PRIORITY):**
+- Cross-stack dependency tracking (TypeScript interfaces ↔ PHP DTOs)
+- Full-stack impact analysis and blast radius calculation
+
+**Phase 6-7 - AI & Specifications (HIGH PRIORITY):**
+- Vector search with embeddings for full-stack understanding
+- Forward specifications and drift detection
+
+**Phase 8 - C#/Godot Support (MEDIUM PRIORITY):**
+- Game development framework support

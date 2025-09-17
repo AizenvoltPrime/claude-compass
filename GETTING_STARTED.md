@@ -331,17 +331,27 @@ Phase 2 successfully meets all success criteria:
 - 💻 **CLI Interface**: Full-featured command-line tool with repository management
 - 🧪 **Testing**: Comprehensive test coverage with 100% framework parser pass rate
 
-## Next Steps (Phase 3)
+## Next Steps (Prioritized Roadmap)
 
-The framework foundation is complete for Phase 3 implementation:
+The framework foundation is complete for focused implementation:
 
+### Phase 3: Advanced Vue/TypeScript Graphs - **PRIORITY**
+- Test-to-code linkage (Vitest, Jest, Cypress, Playwright) - **Critical for Vue/Vite testing**
+- Enhanced Vue composables relationship mapping - **Essential for Vue.js**
+- Package manager integration (npm, yarn, pnpm) - **Vite dependency tracking**
 - Background job detection (Node.js worker threads, job queues)
-- Database ORM mapping (Prisma, TypeORM, Sequelize)
-- Test-to-code linkage (Jest, Vitest, Cypress, Playwright)
 - Enhanced `who_calls` and `list_dependencies` tools
-- Package manager integration and monorepo analysis
-- Vector search capabilities
-- Advanced impact analysis
+
+### Phase 4: PHP/Laravel Support - **HIGH PRIORITY**
+- Laravel route and controller detection
+- Laravel Eloquent model relationship mapping - **Critical for backend**
+- Laravel job queue and scheduler detection
+- Laravel service provider and dependency injection analysis
+
+### Phase 5: Vue ↔ Laravel Integration - **HIGH PRIORITY**
+- Cross-stack dependency tracking (TypeScript interfaces ↔ PHP DTOs)
+- Frontend API calls mapped to Laravel controller methods
+- Full-stack impact analysis and blast radius calculation
 
 ## Troubleshooting
 
