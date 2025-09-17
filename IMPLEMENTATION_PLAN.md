@@ -31,18 +31,15 @@ AI assistants suffer from "context starvation" - they make decisions without und
 ### Core Components
 
 1. **Reverse-Map Reality from Code**
-
    - Parse codebases with Tree-sitter
    - Build multiple graph types (files, symbols, framework-specific)
    - Generate dependency-aware summaries
 
 2. **Generate Forward Specifications**
-
    - Transform problem statements into PRDs, user stories, schemas, prototypes
    - Use as guardrails during implementation
 
 3. **MCP Integration**
-
    - Expose graphs and tools via Model Context Protocol
    - Enable AI assistants to query ground truth instead of guessing
 
@@ -258,7 +255,7 @@ CREATE TABLE spec_drift (
 ```typescript
 interface MCPResources {
   // Repository metadata
-  "repo://files": {
+  'repo://files': {
     id: string;
     path: string;
     language: string;
@@ -266,10 +263,10 @@ interface MCPResources {
   }[];
 
   // Symbol definitions with location info
-  "graph://symbols": {
+  'graph://symbols': {
     id: string;
     name: string;
-    type: "function" | "class" | "interface" | "variable";
+    type: 'function' | 'class' | 'interface' | 'variable';
     file_path: string;
     start_line: number;
     end_line: number;
@@ -277,21 +274,21 @@ interface MCPResources {
   }[];
 
   // Framework-specific graphs
-  "graph://routes": {
+  'graph://routes': {
     path: string;
     method: string;
     handler: string;
     middleware: string[];
   }[];
 
-  "graph://di": {
+  'graph://di': {
     provider: string;
     provides: string;
     dependencies: string[];
     scope: string;
   }[];
 
-  "graph://jobs": {
+  'graph://jobs': {
     name: string;
     trigger: string;
     schedule?: string;
@@ -299,7 +296,7 @@ interface MCPResources {
   }[];
 
   // AI-generated documentation
-  "kb://summaries": {
+  'kb://summaries': {
     target: string;
     purpose: string;
     inputs: string;
@@ -308,7 +305,7 @@ interface MCPResources {
   }[];
 
   // External library documentation
-  "docs://{pkg}@{version}": {
+  'docs://{pkg}@{version}': {
     content: string;
     source_url: string;
   }[];
@@ -349,7 +346,7 @@ interface MCPTools {
   list_dependencies(symbol_id: string): {
     dependencies: {
       symbol_id: string;
-      type: "calls" | "imports" | "inherits";
+      type: 'calls' | 'imports' | 'inherits';
       file_path: string;
     }[];
   };
@@ -424,6 +421,7 @@ interface MCPTools {
 - ✅ Database stores and retrieves parsed data efficiently
 
 **Additional Enhancements Implemented:**
+
 - ✅ Comprehensive MCP tools: `get_file`, `get_symbol`, `search_code`, `who_calls`, `list_dependencies`
 - ✅ Advanced resource endpoints: repositories, file graph, symbol graph
 - ✅ Production-ready error handling with JSON-RPC 2.0 compliance
@@ -437,6 +435,7 @@ interface MCPTools {
 - ✅ Logger implementation with component-specific logging
 
 **Critical Parser & Analysis Improvements (September 2025):**
+
 - ✅ **Smart Size Limit Handling**: Added Tree-sitter size limit detection (28K characters)
 - ✅ **Chunked Parsing System**: Implemented robust chunked parsing for large files with size validation
 - ✅ **Large File Support**: Files up to 20MB now parse successfully via chunked approach
@@ -449,6 +448,7 @@ interface MCPTools {
 - ✅ **Encoding Recovery**: Advanced encoding detection and conversion pipeline
 
 **Parser Robustness Enhancements:**
+
 - ✅ **Content Validation**: Binary detection, encoding issue detection, null byte handling
 - ✅ **Smart Error Recovery**: Parser continues processing when individual files fail
 - ✅ **Batch Processing**: Symbol and dependency creation optimized for large codebases
@@ -479,6 +479,7 @@ interface MCPTools {
 - ✅ Search returns relevant results with file/line citations
 
 **Additional Enhancements Implemented:**
+
 - ✅ **Framework Detection System**: Evidence-based detection with confidence scoring
 - ✅ **Database Schema**: Complete framework entities (routes, components, composables, metadata)
 - ✅ **Advanced Parsing Features**: Dynamic routes, data fetching methods, auth patterns, validation
@@ -491,63 +492,125 @@ interface MCPTools {
 - ✅ **Production Robustness**: Encoding detection, malformed code handling, large file support
 
 **Framework-Specific Achievements:**
+
 - ✅ **Vue.js**: SFC parsing, Vue Router, Pinia/Vuex, composables, reactive refs
 - ✅ **Next.js**: Pages/App router, API routes, middleware, ISR, client/server components
 - ✅ **React**: Functional/class components, custom hooks, memo/forwardRef, context
 - ✅ **Node.js**: Express/Fastify routes, middleware factories, controllers, validation patterns
 
 **Quality Metrics:**
+
 - ✅ **Test Coverage**: 13/13 framework detector tests, 12/12 React tests, 15/15 Next.js tests
 - ✅ **Integration**: TypeScript compilation success, backward compatibility maintained
 - ✅ **Performance**: Chunked parsing for large files, optimized database operations
 - ✅ **Reliability**: Comprehensive error handling, graceful failure modes
 
-### Phase 3: Advanced JavaScript/TypeScript Graphs (Months 3-4)
+### Phase 3: Advanced JavaScript/TypeScript Graphs (Months 3-4) - PRIORITY
 
-**Goal**: Complete JavaScript/TypeScript ecosystem understanding
+**Goal**: Complete JavaScript/TypeScript ecosystem understanding for Vue/Vite workflows
 
-**Deliverables:**
+**Deliverables (Focused on your tech stack):**
 
-- Background job detection (Node.js worker threads, job queues)
-- Database ORM mapping (Prisma, TypeORM, Sequelize relationships)
-- Test-to-code linkage (Jest, Vitest, Cypress, Playwright)
-- Enhanced symbol relationships (inheritance, interfaces, Vue composables, React hooks)
-- Package manager integration (npm, yarn, pnpm dependencies)
-- `who_calls` and `list_dependencies` tools
-- Monorepo structure analysis (nx, lerna, turborepo)
+- Background job detection (Node.js worker threads, job queues) - **Relevant for Node.js backends**
+- Test-to-code linkage (Jest, Vitest, Cypress, Playwright) - **Critical for Vue/Vite testing**
+- Enhanced symbol relationships (inheritance, interfaces, Vue composables) - **Essential for Vue.js**
+- Package manager integration (npm, yarn, pnpm dependencies) - **Vite dependency tracking**
+- `who_calls` and `list_dependencies` tools enhancement
+- Monorepo structure analysis (nx, lerna, turborepo) - **If using monorepos**
 
 **Success Criteria:**
 
-- Can trace data flow from HTTP request to database in JS/TS frameworks
-- Identifies all consumers of a changed interface/type/composable/hook
-- Maps test coverage to business functionality
-- Handles complex monorepo dependencies and workspace relationships
+- Can trace data flow from HTTP request to database in Vue/Node.js applications
+- Identifies all consumers of a changed Vue composable or TypeScript interface
+- Maps Vitest/Jest test coverage to Vue components and business functionality
+- Handles Vite build dependencies and workspace relationships
 
-### Phase 4: PHP Support (Months 4-5)
+### Phase 4: PHP/Laravel Support (Months 4-5) - HIGH PRIORITY
 
-**Goal**: Add Laravel/PHP framework support
+**Goal**: Add Laravel/PHP framework support for backend services
 
-**Deliverables:**
+**Deliverables (Tailored for Laravel):**
 
 - Tree-sitter integration for PHP
 - Laravel route and controller detection (web.php, api.php, controllers)
-- Laravel Eloquent model relationship mapping
+- Laravel Eloquent model relationship mapping - **Critical for your backend**
 - Laravel service provider and dependency injection analysis
-- Laravel job queue and scheduler detection
-- Test-to-code linkage (PHPUnit)
+- Laravel job queue and scheduler detection - **Important for background processing**
+- Test-to-code linkage (PHPUnit, Pest)
+- Laravel Blade template analysis and component mapping
 
 **Success Criteria:**
 
 - Can parse Laravel projects and extract routes, controllers, models
-- Maps Laravel's service container and dependency injection
+- Maps Laravel's service container and dependency injection patterns
 - Identifies Laravel jobs, queues, and scheduled tasks
-- Handles Laravel-specific patterns (facades, service providers)
+- Handles Laravel-specific patterns (facades, service providers, middleware)
+- Connects Laravel API routes to Vue.js frontend consumption
 
-### Phase 5: C# Support (Months 5-6)
+### Phase 5: Vue.js ↔ Laravel Integration (Months 5-6) - HIGH PRIORITY
+
+**Goal**: Cross-stack integration and full-stack dependency tracking
+
+**Deliverables:**
+
+- Vue.js ↔ Laravel API mapping (frontend calls to backend endpoints)
+- Vite build process integration with Laravel asset compilation
+- Cross-language dependency tracking (TypeScript interfaces ↔ PHP DTOs)
+- End-to-end test mapping (Cypress tests ↔ Laravel features ↔ Vue components)
+- Full-stack impact analysis (change in Laravel model affects which Vue components)
+
+**Success Criteria:**
+
+- Can trace a change from Laravel Eloquent model to affected Vue components
+- Maps frontend API calls to specific Laravel controller methods
+- Understands shared data structures between TypeScript and PHP
+- Provides full-stack blast radius analysis
+
+### Phase 6: AI-Powered Analysis (Months 6-7) - HIGH PRIORITY
+
+**Goal**: Semantic understanding and impact analysis for Vue + Laravel stack
+
+**Deliverables:**
+
+- Vector embeddings for code and documentation
+- AI-generated summaries for symbols/files/features
+- `impact_of` tool with blast radius calculation across Vue ↔ Laravel
+- Hybrid vector + lexical search
+- Purpose, side effects, and invariant detection
+- Full-stack semantic search (find Laravel endpoints that handle user authentication)
+
+**Success Criteria:**
+
+- Can predict which Vue components will break from Laravel API changes
+- Generates accurate summaries of full-stack features
+- Search understands semantic similarity across TypeScript and PHP
+- Provides intelligent impact analysis for cross-stack changes
+
+### Phase 7: Forward Specifications & Drift Detection (Months 7-8) - HIGH PRIORITY
+
+**Goal**: Requirements → implementation workflow and sync maintenance for full-stack features
+
+**Deliverables:**
+
+- Problem statement → PRD generation for Vue + Laravel features
+- API contract generation from requirements (OpenAPI + TypeScript types)
+- Spec vs. code comparison algorithms (Vue components vs Laravel endpoints)
+- Drift detection and reporting across frontend/backend
+- Git hook integration for automatic re-indexing
+- Integration with issue tracking (GitHub, Jira)
+
+**Success Criteria:**
+
+- Can generate detailed specifications for full-stack features
+- Detects when Vue components diverge from Laravel API contracts
+- Provides actionable recommendations for frontend/backend alignment
+- Reduces manual effort to keep API documentation current
+
+### Phase 8: C#/Godot Support (Months 8-9) - MEDIUM PRIORITY
 
 **Goal**: Add Godot/C# game engine support
 
-**Deliverables:**
+**Deliverables (Game development focus):**
 
 - Tree-sitter integration for C#
 - Godot scene (.tscn) and script (.cs) relationships
@@ -562,64 +625,6 @@ interface MCPTools {
 - Identifies signal connections and node relationships
 - Maps resource usage and autoload dependencies
 - Understands Godot-specific inheritance patterns
-
-### Phase 6: Python Support (Months 6-7)
-
-**Goal**: Add Django/FastAPI/Flask support
-
-**Deliverables:**
-
-- Tree-sitter integration for Python
-- Django URL patterns and view detection
-- Django model and ORM relationship mapping
-- FastAPI route and dependency injection analysis
-- Python async/await pattern detection
-- Test-to-code linkage (pytest)
-
-**Success Criteria:**
-
-- Can parse Django projects and map URLs to views and models
-- Identifies FastAPI routes, dependencies, and Pydantic models
-- Maps Python async task dependencies and execution flows
-- Handles Python-specific patterns (decorators, context managers)
-
-### Phase 7: AI-Powered Analysis (Months 7-8)
-
-**Goal**: Semantic understanding and impact analysis across all stacks
-
-**Deliverables:**
-
-- Vector embeddings for code and documentation
-- AI-generated summaries for symbols/files/features
-- `impact_of` tool with blast radius calculation
-- Hybrid vector + lexical search
-- Purpose, side effects, and invariant detection
-
-**Success Criteria:**
-
-- Can predict which code will break from a change across all languages
-- Generates accurate summaries of code functionality
-- Search understands semantic similarity, not just keywords
-
-### Phase 8: Forward Specifications & Drift Detection (Months 8-9)
-
-**Goal**: Requirements → implementation workflow and sync maintenance
-
-**Deliverables:**
-
-- Problem statement → PRD generation
-- API contract generation from requirements
-- Spec vs. code comparison algorithms
-- Drift detection and reporting
-- Git hook integration for automatic re-indexing
-- Integration with issue tracking (GitHub, Jira)
-
-**Success Criteria:**
-
-- Can generate detailed specifications from feature requests
-- Detects when implemented features diverge from specifications
-- Provides actionable recommendations for alignment
-- Reduces manual effort to keep documentation current
 
 ## Framework-Specific Parsers
 
@@ -725,7 +730,7 @@ interface GodotParser {
   }[];
 
   detectResources(): {
-    type: "texture" | "audio" | "scene" | "script";
+    type: 'texture' | 'audio' | 'scene' | 'script';
     filePath: string;
     usedBy: string[];
   }[];
@@ -751,7 +756,7 @@ interface DjangoParser {
       name: string;
       type: string;
       relationship?: {
-        type: "ForeignKey" | "ManyToMany" | "OneToOne";
+        type: 'ForeignKey' | 'ManyToMany' | 'OneToOne';
         target: string;
       };
     }[];
@@ -763,7 +768,7 @@ interface DjangoParser {
 
   detectViews(): {
     name: string;
-    type: "function" | "class";
+    type: 'function' | 'class';
     methods?: string[]; // for class-based views
     permissions: string[];
     middleware: string[];
@@ -806,7 +811,7 @@ interface FastAPIParser {
     name: string;
     function: string;
     dependencies: string[]; // nested dependencies
-    scope: "function" | "path" | "global";
+    scope: 'function' | 'path' | 'global';
   }[];
 }
 ```
@@ -839,7 +844,7 @@ interface LaravelParser {
     namespace: string;
     methods: {
       name: string;
-      visibility: "public" | "private" | "protected";
+      visibility: 'public' | 'private' | 'protected';
       parameters: string[];
       returnType?: string;
     }[];
@@ -852,7 +857,7 @@ interface LaravelParser {
     table: string;
     fillable: string[];
     relationships: {
-      type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany";
+      type: 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
       related: string;
       method: string;
     }[];
@@ -1044,16 +1049,16 @@ interface PRDGenerator {
 **Parser Correctness Tests:**
 
 ```typescript
-describe("NextJSParser", () => {
-  it("should detect API routes in pages directory", () => {
-    const parser = new NextJSParser("/path/to/nextjs-project");
+describe('NextJSParser', () => {
+  it('should detect API routes in pages directory', () => {
+    const parser = new NextJSParser('/path/to/nextjs-project');
     const routes = parser.detectRoutes();
 
     expect(routes.apiRoutes).toContainEqual({
-      path: "/api/users/[id]",
-      filePath: "pages/api/users/[id].ts",
-      method: "GET",
-      handler: "getUserById",
+      path: '/api/users/[id]',
+      filePath: 'pages/api/users/[id].ts',
+      method: 'GET',
+      handler: 'getUserById',
     });
   });
 });
@@ -1062,8 +1067,8 @@ describe("NextJSParser", () => {
 **Graph Building Tests:**
 
 ```typescript
-describe("SymbolGraphBuilder", () => {
-  it("should build correct call relationships", () => {
+describe('SymbolGraphBuilder', () => {
+  it('should build correct call relationships', () => {
     const code = `
       function a() { b(); }
       function b() { c(); }
@@ -1072,9 +1077,9 @@ describe("SymbolGraphBuilder", () => {
 
     const graph = SymbolGraphBuilder.build(code);
 
-    expect(graph.getDependencies("a")).toContain("b");
-    expect(graph.getDependencies("b")).toContain("c");
-    expect(graph.getCallers("c")).toContain("b");
+    expect(graph.getDependencies('a')).toContain('b');
+    expect(graph.getDependencies('b')).toContain('c');
+    expect(graph.getCallers('c')).toContain('b');
   });
 });
 ```
@@ -1082,21 +1087,21 @@ describe("SymbolGraphBuilder", () => {
 **Impact Analysis Tests:**
 
 ```typescript
-describe("ImpactAnalysis", () => {
-  it("should calculate correct blast radius", async () => {
+describe('ImpactAnalysis', () => {
+  it('should calculate correct blast radius', async () => {
     // Given a known codebase with documented dependencies
-    const repo = await TestRepository.load("sample-nextjs-app");
+    const repo = await TestRepository.load('sample-nextjs-app');
     const analyzer = new ImpactAnalyzer(repo);
 
     // When analyzing impact of changing a core utility function
     const impact = await analyzer.calculateBlastRadius({
-      symbol_id: "utils/validation/validateEmail",
-      change_type: "signature_change",
+      symbol_id: 'utils/validation/validateEmail',
+      change_type: 'signature_change',
     });
 
     // Then should identify all affected routes and components
-    expect(impact.affected_routes).toContain("/api/auth/signup");
-    expect(impact.affected_symbols).toContain("components/SignupForm");
+    expect(impact.affected_routes).toContain('/api/auth/signup');
+    expect(impact.affected_symbols).toContain('components/SignupForm');
     expect(impact.confidence).toBeGreaterThan(0.8);
   });
 });
@@ -1105,26 +1110,26 @@ describe("ImpactAnalysis", () => {
 **MCP Integration Tests:**
 
 ```typescript
-describe("MCP Server", () => {
-  it("should respond to search_code requests", async () => {
+describe('MCP Server', () => {
+  it('should respond to search_code requests', async () => {
     const server = new MCPServer();
     await server.initialize(testRepository);
 
     const response = await server.handleRequest({
-      method: "tools/call",
+      method: 'tools/call',
       params: {
-        name: "search_code",
+        name: 'search_code',
         arguments: {
-          query: "user authentication",
-          repo_id: "test-repo",
+          query: 'user authentication',
+          repo_id: 'test-repo',
         },
       },
     });
 
-    expect(response.result).toHaveProperty("results");
+    expect(response.result).toHaveProperty('results');
     expect(response.result.results).toHaveLength(greaterThan(0));
-    expect(response.result.results[0]).toHaveProperty("file_path");
-    expect(response.result.results[0]).toHaveProperty("line_number");
+    expect(response.result.results[0]).toHaveProperty('file_path');
+    expect(response.result.results[0]).toHaveProperty('line_number');
   });
 });
 ```
@@ -1205,7 +1210,7 @@ interface SystemMetrics {
 
 ```yaml
 # Docker Compose example
-version: "3.8"
+version: '3.8'
 services:
   # Core application
   claude-compass:
@@ -1239,7 +1244,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/claude_compass
     ports:
-      - "3000:3000"
+      - '3000:3000'
 ```
 
 ### Deployment Options
@@ -1472,12 +1477,14 @@ npm run build
 ### Completed Phases
 
 **✅ Phase 1: JavaScript/TypeScript Foundation (Months 1-2)** - COMPLETED
+
 - All core parsing infrastructure with robust error handling
 - MCP server with 5 tools and 3 resources
 - Production-ready chunked parsing for large files
 - Comprehensive database schema with migrations
 
 **✅ Phase 2: JavaScript/TypeScript Framework Analysis (Months 2-3)** - COMPLETED
+
 - Complete framework detection and parsing system
 - Vue.js, Next.js, React, and Node.js support
 - Advanced route analysis and component mapping
@@ -1486,12 +1493,14 @@ npm run build
 ### Next Steps
 
 **🎯 Phase 3: Advanced JavaScript/TypeScript Graphs (Months 3-4)** - READY TO START
+
 - Background job detection and ORM mapping
 - Enhanced symbol relationships and test linkage
 - Package manager and monorepo analysis
 - Complete ecosystem understanding
 
 **📋 Immediate Priorities for Phase 3:**
+
 1. Implement background job detection (Node.js worker threads, job queues)
 2. Add database ORM mapping (Prisma, TypeORM, Sequelize)
 3. Build test-to-code linkage (Jest, Vitest, Cypress, Playwright)
