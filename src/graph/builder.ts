@@ -121,7 +121,7 @@ export class GraphBuilder {
       // Build graphs
       const importsMap = this.createImportsMap(dbFiles, parseResults);
       const exportsMap = this.createExportsMap(dbFiles, parseResults);
-      const dependenciesMap = this.createDependenciesMap(symbols, parseResults);
+      const dependenciesMap = this.createDependenciesMap(symbols, parseResults, dbFiles);
 
       const fileGraph = await this.fileGraphBuilder.buildFileGraph(
         repository,
@@ -850,32 +850,51 @@ export class GraphBuilder {
     return map;
   }
 
-  private createDependenciesMap(symbols: Symbol[], parseResults: Array<ParseResult & { filePath: string }>) {
+  private createDependenciesMap(symbols: Symbol[], parseResults: Array<ParseResult & { filePath: string }>, dbFiles: File[]) {
     const map = new Map();
 
-    const allDependencies = parseResults.flatMap(r => r.dependencies)
-      .filter(d => d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== '');
+    // Create a file-to-symbols map for efficient lookup
+    const fileToSymbolsMap = new Map<string, Symbol[]>();
+
+    // Create a mapping from file_id to file path
+    const fileIdToPathMap = new Map<number, string>();
+    for (const file of dbFiles) {
+      fileIdToPathMap.set(file.id, file.path);
+    }
 
     for (const symbol of symbols) {
-      const outgoingDeps = allDependencies.filter(d => d.from_symbol === symbol.name);
-      const incomingDeps = allDependencies.filter(d => d.to_symbol === symbol.name);
-
-      for (const incomingDep of incomingDeps) {
-        if (!incomingDep.from_symbol || incomingDep.from_symbol.trim() === '') {
-          continue;
+      const filePath = fileIdToPathMap.get(symbol.file_id);
+      if (filePath) {
+        if (!fileToSymbolsMap.has(filePath)) {
+          fileToSymbolsMap.set(filePath, []);
         }
-
-        let sourceSymbol = symbols.find(s => s.name === incomingDep.from_symbol);
-        if (!sourceSymbol) {
-          continue;
-        }
-
-        const existingDeps = map.get(sourceSymbol.id) || [];
-        existingDeps.push(incomingDep);
-        map.set(sourceSymbol.id, existingDeps);
+        fileToSymbolsMap.get(filePath)!.push(symbol);
       }
+    }
 
-      map.set(symbol.id, outgoingDeps);
+    // Process dependencies with file context preserved
+    for (const parseResult of parseResults) {
+      const filePath = parseResult.filePath;
+      const fileSymbols = fileToSymbolsMap.get(filePath) || [];
+
+      const dependencies = parseResult.dependencies
+        .filter(d => d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== '');
+
+      for (const dependency of dependencies) {
+        // Find the specific symbol that contains this dependency call
+        // Must match: name, file, and line range
+        const containingSymbol = fileSymbols.find(symbol =>
+          symbol.name === dependency.from_symbol &&
+          dependency.line_number >= symbol.start_line &&
+          dependency.line_number <= symbol.end_line
+        );
+
+        if (containingSymbol) {
+          const existingDeps = map.get(containingSymbol.id) || [];
+          existingDeps.push(dependency);
+          map.set(containingSymbol.id, existingDeps);
+        }
+      }
     }
 
     return map;
