@@ -1,6 +1,7 @@
-import { Symbol, CreateDependency, DependencyType, SymbolType } from '../database/models';
-import { ParsedDependency } from '../parsers/base';
+import { Symbol, CreateDependency, DependencyType, SymbolType, File } from '../database/models';
+import { ParsedDependency, ParsedImport, ParsedExport } from '../parsers/base';
 import { createComponentLogger } from '../utils/logger';
+import { SymbolResolver, ResolvedDependency } from './symbol-resolver';
 
 const logger = createComponentLogger('symbol-graph');
 
@@ -36,9 +37,11 @@ export interface CallChain {
 
 export class SymbolGraphBuilder {
   private logger: any;
+  private symbolResolver: SymbolResolver;
 
   constructor() {
     this.logger = logger;
+    this.symbolResolver = new SymbolResolver();
   }
 
   /**
@@ -46,14 +49,26 @@ export class SymbolGraphBuilder {
    */
   async buildSymbolGraph(
     symbols: Symbol[],
-    dependenciesMap: Map<number, ParsedDependency[]>
+    dependenciesMap: Map<number, ParsedDependency[]>,
+    files: File[] = [],
+    importsMap: Map<number, ParsedImport[]> = new Map(),
+    exportsMap: Map<number, ParsedExport[]> = new Map()
   ): Promise<SymbolGraphData> {
     this.logger.info('Building symbol graph', {
-      symbolCount: symbols.length
+      symbolCount: symbols.length,
+      fileCount: files.length
     });
 
     const nodes = this.createSymbolNodes(symbols);
-    const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes);
+
+    // Initialize symbol resolver with file context if available
+    if (files.length > 0) {
+      this.symbolResolver.initialize(files, symbols, importsMap, exportsMap);
+      const stats = this.symbolResolver.getResolutionStats();
+      this.logger.info('Symbol resolver initialized', stats);
+    }
+
+    const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0);
 
     this.logger.info('Symbol graph built', {
       nodeCount: nodes.length,
@@ -328,29 +343,90 @@ export class SymbolGraphBuilder {
   private createSymbolEdges(
     symbols: Symbol[],
     dependenciesMap: Map<number, ParsedDependency[]>,
-    nodes: SymbolNode[]
+    nodes: SymbolNode[],
+    useFileAwareResolution: boolean = false
   ): SymbolEdge[] {
     const edges: SymbolEdge[] = [];
-    const nameToSymbolMap = this.createNameToSymbolMap(nodes);
 
-    for (const symbol of symbols) {
-      const dependencies = dependenciesMap.get(symbol.id) || [];
+    if (useFileAwareResolution) {
+      // Use file-aware symbol resolution
+      this.logger.info('Using file-aware symbol resolution');
 
-      for (const dep of dependencies) {
-        const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
+      // Group dependencies by file to resolve them with proper context
+      const dependenciesByFile = new Map<number, { symbol: Symbol; dependencies: ParsedDependency[] }[]>();
 
-        for (const targetSymbol of targetSymbols) {
-          if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
+      for (const symbol of symbols) {
+        const dependencies = dependenciesMap.get(symbol.id) || [];
+        if (dependencies.length > 0) {
+          const fileList = dependenciesByFile.get(symbol.file_id) || [];
+          fileList.push({ symbol, dependencies });
+          dependenciesByFile.set(symbol.file_id, fileList);
+        }
+      }
+
+      // Resolve dependencies for each file
+      for (const [fileId, symbolDeps] of dependenciesByFile) {
+        const allDepsForFile = symbolDeps.flatMap(sd =>
+          sd.dependencies.map(dep => ({ ...dep, from_symbol_id: sd.symbol.id }))
+        );
+
+        const resolved = this.symbolResolver.resolveDependencies(fileId, allDepsForFile);
+
+        for (const resolution of resolved) {
+          // Skip self-references for non-call dependencies
+          if (resolution.fromSymbol.id === resolution.toSymbol.id &&
+              resolution.originalDependency.dependency_type !== DependencyType.CALLS) {
             continue;
           }
 
           edges.push({
-            from: symbol.id,
-            to: targetSymbol.id,
-            type: dep.dependency_type,
-            lineNumber: dep.line_number,
-            confidence: dep.confidence
+            from: resolution.fromSymbol.id,
+            to: resolution.toSymbol.id,
+            type: resolution.originalDependency.dependency_type,
+            lineNumber: resolution.originalDependency.line_number,
+            confidence: resolution.confidence
           });
+        }
+      }
+
+      this.logger.info('File-aware resolution completed', {
+        filesProcessed: dependenciesByFile.size,
+        edgesCreated: edges.length
+      });
+    } else {
+      // Fallback to legacy name-based resolution (with warnings)
+      this.logger.warn('Using legacy name-based symbol resolution - may produce false dependencies');
+
+      const nameToSymbolMap = this.createNameToSymbolMap(nodes);
+
+      for (const symbol of symbols) {
+        const dependencies = dependenciesMap.get(symbol.id) || [];
+
+        for (const dep of dependencies) {
+          const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
+
+          // Warn about potential false positives when multiple symbols match
+          if (targetSymbols.length > 1) {
+            this.logger.warn('Multiple symbols found for dependency - potential false positive', {
+              symbolName: dep.to_symbol,
+              matchCount: targetSymbols.length,
+              sourceFile: symbol.file_id
+            });
+          }
+
+          for (const targetSymbol of targetSymbols) {
+            if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
+              continue;
+            }
+
+            edges.push({
+              from: symbol.id,
+              to: targetSymbol.id,
+              type: dep.dependency_type,
+              lineNumber: dep.line_number,
+              confidence: dep.confidence || 0.5
+            });
+          }
         }
       }
     }
