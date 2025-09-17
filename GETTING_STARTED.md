@@ -73,7 +73,7 @@ npm run analyze /path/to/your/nextjs-project
 
 ```bash
 # Clear existing repository analysis
-./dist/src/cli/index.js clear your-repo-name --yes
+./dist/src/cli/index.js clear <repository-name> --yes
 
 # Or clear all repositories
 ./dist/src/cli/index.js clear --all --yes
@@ -207,7 +207,7 @@ claude-compass migrate:rollback
 claude-compass stats
 
 # Clear repository analysis
-claude-compass clear <repo-name> [--yes]
+claude-compass clear <repository-name> [--yes]
 
 # Clear all repositories
 claude-compass clear --all [--yes]
