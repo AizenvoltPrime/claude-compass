@@ -132,7 +132,10 @@ export class GraphBuilder {
 
       const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
         symbols,
-        dependenciesMap
+        dependenciesMap,
+        dbFiles,
+        importsMap,
+        exportsMap
       );
 
       // Store dependencies
@@ -279,7 +282,10 @@ export class GraphBuilder {
       );
       const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
         symbols,
-        dependenciesMap
+        dependenciesMap,
+        dbFiles,
+        importsMap,
+        exportsMap
       );
 
       return {
@@ -315,7 +321,10 @@ export class GraphBuilder {
     );
     const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
       symbols,
-      dependenciesMap
+      dependenciesMap,
+      dbFiles,
+      importsMap,
+      exportsMap
     );
 
     // Update repository timestamp
