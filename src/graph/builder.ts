@@ -4,6 +4,16 @@ import { execSync } from 'child_process';
 import { Repository, File, Symbol, CreateFile, CreateSymbol } from '../database/models';
 import { DatabaseService } from '../database/services';
 import { getParserForFile, ParseResult } from '../parsers';
+import {
+  VueComponent,
+  ReactComponent,
+  VueComposable,
+  ReactHook,
+  NextJSRoute,
+  ExpressRoute,
+  FastifyRoute,
+  VueRoute
+} from '../parsers/base';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
 import { createComponentLogger } from '../utils/logger';
@@ -103,6 +113,9 @@ export class GraphBuilder {
       // Store files and symbols in database
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
       const symbols = await this.storeSymbols(dbFiles, parseResults);
+
+      // Store framework entities
+      await this.storeFrameworkEntities(repository.id, symbols, parseResults);
 
       // Build graphs
       const importsMap = this.createImportsMap(dbFiles, parseResults);
@@ -352,6 +365,9 @@ export class GraphBuilder {
     // Update existing files or create new ones
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
     const symbols = await this.storeSymbols(dbFiles, parseResults);
+
+    // Store framework entities for changed files
+    await this.storeFrameworkEntities(repositoryId, symbols, parseResults);
 
     return {
       filesProcessed: files.length,
@@ -625,6 +641,177 @@ export class GraphBuilder {
     }
 
     return await this.dbService.createSymbols(allSymbols);
+  }
+
+  private async storeFrameworkEntities(
+    repositoryId: number,
+    symbols: Symbol[],
+    parseResults: Array<ParseResult & { filePath: string }>
+  ): Promise<void> {
+    this.logger.info('Storing framework entities', {
+      repositoryId,
+      parseResultsCount: parseResults.length
+    });
+
+    for (const parseResult of parseResults) {
+
+      // Skip if no framework entities
+      if (!parseResult.frameworkEntities || parseResult.frameworkEntities.length === 0) {
+        continue;
+      }
+
+      // Find symbols for this parse result's file by matching the file path
+      // Note: symbols should have been stored with file_id pointing to files that match parseResult.filePath
+      const fileSymbols = symbols.filter(s => {
+        // We need to find the file record that matches this symbol's file_id and see if its path matches parseResult.filePath
+        // Since we don't have direct access to files here, let's match by parse result symbols instead
+        return parseResult.symbols.some(ps => ps.name === s.name && ps.symbol_type === s.symbol_type);
+      });
+
+
+      for (const entity of parseResult.frameworkEntities) {
+        try {
+          // Find matching symbol for this entity
+          let matchingSymbol = fileSymbols.find(s =>
+            s.name === entity.name ||
+            entity.name.includes(s.name) ||
+            s.name.includes(entity.name)
+          );
+
+          if (!matchingSymbol) {
+            // Create a synthetic symbol for this framework entity
+
+            // First, get the file ID for this parse result
+            const files = await this.dbService.getFilesByRepository(repositoryId);
+            const matchingFile = files.find(f => f.path === parseResult.filePath);
+
+            if (!matchingFile) {
+              this.logger.warn('Could not find file record for framework entity', {
+                filePath: parseResult.filePath
+              });
+              continue;
+            }
+
+            // Create symbol for the framework entity
+            const syntheticSymbol = await this.dbService.createSymbol({
+              file_id: matchingFile.id,
+              name: entity.name,
+              symbol_type: 'component' as any, // Vue components, React components etc.
+              start_line: 1, // Default to start of file
+              end_line: 1,
+              is_exported: true, // Framework entities are typically exported
+              signature: `${entity.type} ${entity.name}`
+            });
+
+            matchingSymbol = syntheticSymbol;
+          }
+
+
+          // Store different types of framework entities based on specific interfaces
+          if (this.isRouteEntity(entity)) {
+            const routeEntity = entity as NextJSRoute | ExpressRoute | FastifyRoute | VueRoute;
+            await this.dbService.createRoute({
+              repo_id: repositoryId,
+              path: routeEntity.path || '/',
+              method: (routeEntity as any).method || 'GET',
+              handler_symbol_id: matchingSymbol.id,
+              framework_type: (routeEntity as any).framework || 'unknown',
+              middleware: (routeEntity as any).middleware || [],
+              dynamic_segments: (routeEntity as any).dynamicSegments || [],
+              auth_required: false // Not available in current interfaces
+            });
+          } else if (this.isVueComponent(entity)) {
+            const vueEntity = entity as VueComponent;
+            await this.dbService.createComponent({
+              repo_id: repositoryId,
+              symbol_id: matchingSymbol.id,
+              component_type: 'vue' as any,
+              props: vueEntity.props || [],
+              emits: vueEntity.emits || [],
+              slots: vueEntity.slots || [],
+              hooks: [],
+              template_dependencies: vueEntity.template_dependencies || []
+            });
+          } else if (this.isReactComponent(entity)) {
+            const reactEntity = entity as ReactComponent;
+            await this.dbService.createComponent({
+              repo_id: repositoryId,
+              symbol_id: matchingSymbol.id,
+              component_type: 'react' as any,
+              props: reactEntity.props || [],
+              emits: [],
+              slots: [],
+              hooks: reactEntity.hooks || [],
+              template_dependencies: reactEntity.jsxDependencies || []
+            });
+          } else if (this.isVueComposable(entity)) {
+            const composableEntity = entity as VueComposable;
+            await this.dbService.createComposable({
+              repo_id: repositoryId,
+              symbol_id: matchingSymbol.id,
+              composable_type: 'vue' as any,
+              returns: composableEntity.returns || [],
+              dependencies: composableEntity.dependencies || [],
+              reactive_refs: composableEntity.reactive_refs || [],
+              dependency_array: []
+            });
+          } else if (this.isReactHook(entity)) {
+            const hookEntity = entity as ReactHook;
+            await this.dbService.createComposable({
+              repo_id: repositoryId,
+              symbol_id: matchingSymbol.id,
+              composable_type: 'react' as any,
+              returns: hookEntity.returns || [],
+              dependencies: hookEntity.dependencies || [],
+              reactive_refs: [],
+              dependency_array: []
+            });
+          } else {
+            this.logger.debug('Unknown framework entity type', {
+              type: entity.type,
+              name: entity.name,
+              filePath: parseResult.filePath
+            });
+          }
+        } catch (error) {
+          this.logger.error('Failed to store framework entity', {
+            entityType: entity.type,
+            entityName: entity.name,
+            filePath: parseResult.filePath,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+    }
+  }
+
+  // Type guards for framework entities
+  private isRouteEntity(entity: any): entity is NextJSRoute | ExpressRoute | FastifyRoute | VueRoute {
+    return entity.type === 'route' ||
+           entity.type === 'nextjs-page-route' ||
+           entity.type === 'nextjs-api-route' ||
+           entity.type === 'express-route' ||
+           entity.type === 'fastify-route' ||
+           'path' in entity;
+  }
+
+  private isVueComponent(entity: any): entity is VueComponent {
+    // Vue components are identified by type 'component' and being in a .vue file
+    return entity.type === 'component' &&
+           entity.filePath &&
+           entity.filePath.endsWith('.vue');
+  }
+
+  private isReactComponent(entity: any): entity is ReactComponent {
+    return entity.type === 'component' && 'componentType' in entity && 'hooks' in entity && 'jsxDependencies' in entity;
+  }
+
+  private isVueComposable(entity: any): entity is VueComposable {
+    return entity.type === 'composable' && 'reactive_refs' in entity;
+  }
+
+  private isReactHook(entity: any): entity is ReactHook {
+    return entity.type === 'hook' && 'returns' in entity && 'dependencies' in entity;
   }
 
   private createImportsMap(files: File[], parseResults: Array<ParseResult & { filePath: string }>) {
