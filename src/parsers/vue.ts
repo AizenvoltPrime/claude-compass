@@ -14,7 +14,10 @@ import {
   VueRoute,
   PiniaStore,
   PropDefinition,
+  ParsedDependency,
+  ParsedSymbol,
 } from './base';
+import { DependencyType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
 
@@ -25,6 +28,7 @@ const logger = createComponentLogger('vue-parser');
  */
 export class VueParser extends BaseFrameworkParser {
   private typescriptParser: Parser;
+  private extractedSymbols: ParsedSymbol[] = [];
 
   constructor(parser: Parser) {
     super(parser, 'vue');
@@ -3155,15 +3159,95 @@ export class VueParser extends BaseFrameworkParser {
     };
 
     traverse(rootNode);
+
+    // Store extracted symbols for use in dependency extraction
+    this.extractedSymbols = symbols;
+
     return symbols;
   }
 
   /**
    * Extract dependencies from AST
    */
-  protected extractDependencies(rootNode: any, content: string): any[] {
-    // For Vue, dependencies are handled in detectFrameworkEntities
-    return [];
+  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    // Extract function calls including method calls on stores/composables
+    const callNodes = this.findNodesOfType(rootNode, 'call_expression');
+    for (const node of callNodes) {
+      const dependency = this.extractCallDependency(node, content);
+      if (dependency) {
+        // Override the dependency type to use proper enum
+        dependency.dependency_type = DependencyType.CALLS;
+        dependencies.push(dependency);
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Override extractCallDependency to properly extract method names from member expressions
+   * and identify the actual calling function
+   */
+  protected extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+    const functionNode = node.childForFieldName('function');
+    if (!functionNode) return null;
+
+    let functionName: string;
+
+    if (functionNode.type === 'identifier') {
+      // Simple function call: functionName()
+      functionName = this.getNodeText(functionNode, content);
+    } else if (functionNode.type === 'member_expression') {
+      // Method call: obj.method() - extract just the method name
+      const propertyNode = functionNode.childForFieldName('property');
+      if (!propertyNode) return null;
+      functionName = this.getNodeText(propertyNode, content);
+    } else {
+      return null;
+    }
+
+    // Skip common built-in methods to reduce noise
+    const skipMethods = ['console', 'log', 'error', 'warn', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'toString', 'valueOf'];
+    if (skipMethods.includes(functionName)) return null;
+
+    // Find the actual containing function instead of using generic "caller"
+    const callerName = this.findContainingFunction(node, content);
+
+    return {
+      from_symbol: callerName,
+      to_symbol: functionName,
+      dependency_type: DependencyType.CALLS,
+      line_number: node.startPosition.row + 1,
+      confidence: 1.0
+    };
+  }
+
+  /**
+   * Find the containing function for a call expression node by traversing up the AST
+   */
+  private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {
+    const callLine = callNode.startPosition.row + 1;
+
+    // Find all extracted symbols that contain this line
+    const candidateSymbols = this.extractedSymbols.filter(symbol =>
+      symbol.start_line <= callLine && callLine <= symbol.end_line
+    );
+
+    if (candidateSymbols.length === 0) {
+      // No containing symbol found, fall back to script_setup
+      return 'script_setup';
+    }
+
+    // Return the most specific (smallest range) symbol
+    candidateSymbols.sort((a, b) => {
+      const rangeA = a.end_line - a.start_line;
+      const rangeB = b.end_line - b.start_line;
+      return rangeA - rangeB;
+    });
+
+    return candidateSymbols[0].name;
   }
 
   /**

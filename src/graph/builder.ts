@@ -12,7 +12,8 @@ import {
   NextJSRoute,
   ExpressRoute,
   FastifyRoute,
-  VueRoute
+  VueRoute,
+  ParsedDependency
 } from '../parsers/base';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
@@ -843,13 +844,29 @@ export class GraphBuilder {
   private createDependenciesMap(symbols: Symbol[], parseResults: Array<ParseResult & { filePath: string }>) {
     const map = new Map();
 
+    const allDependencies = parseResults.flatMap(r => r.dependencies)
+      .filter(d => d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== '');
+
     for (const symbol of symbols) {
-      // Find the corresponding parse result
-      const file = parseResults.find(r => r.symbols.some(s => s.name === symbol.name));
-      if (file) {
-        const dependencies = file.dependencies.filter(d => d.from_symbol === symbol.name);
-        map.set(symbol.id, dependencies);
+      const outgoingDeps = allDependencies.filter(d => d.from_symbol === symbol.name);
+      const incomingDeps = allDependencies.filter(d => d.to_symbol === symbol.name);
+
+      for (const incomingDep of incomingDeps) {
+        if (!incomingDep.from_symbol || incomingDep.from_symbol.trim() === '') {
+          continue;
+        }
+
+        let sourceSymbol = symbols.find(s => s.name === incomingDep.from_symbol);
+        if (!sourceSymbol) {
+          continue;
+        }
+
+        const existingDeps = map.get(sourceSymbol.id) || [];
+        existingDeps.push(incomingDep);
+        map.set(sourceSymbol.id, existingDeps);
       }
+
+      map.set(symbol.id, outgoingDeps);
     }
 
     return map;
@@ -980,7 +997,7 @@ export class GraphBuilder {
    */
   private async readFileWithEncodingRecovery(
     filePath: string,
-    options: BuildOptions
+    _options: BuildOptions
   ): Promise<string | null> {
     try {
       // First attempt: Standard UTF-8 read
@@ -1083,7 +1100,7 @@ export class GraphBuilder {
   /**
    * Create default file size policy
    */
-  private createDefaultFileSizePolicy(options: BuildOptions): FileSizePolicy {
+  private createDefaultFileSizePolicy(_options: BuildOptions): FileSizePolicy {
     return { ...DEFAULT_POLICY };
   }
 
