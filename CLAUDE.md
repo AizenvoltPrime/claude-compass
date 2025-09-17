@@ -22,16 +22,6 @@ npm run clean             # Remove dist/ directory
 
 ```bash
 npm test                  # Run all tests
-npm run test:watch        # Run tests in watch mode
-npm run test:coverage     # Run tests with coverage report
-```
-
-### Code Quality
-
-```bash
-npm run lint              # Lint TypeScript files
-npm run lint:fix          # Lint and auto-fix issues
-npm run format            # Format code with Prettier
 ```
 
 ### Database Operations
@@ -49,7 +39,6 @@ npm run migrate:make <name> # Create new migration
 ```bash
 npm run analyze <path>    # Analyze a codebase and build graphs
 npm run mcp-server        # Start MCP server for AI integration
-npm start search <query>  # Search for symbols in analyzed codebases
 ```
 
 ### CLI Usage Examples
@@ -60,6 +49,9 @@ npm start search <query>  # Search for symbols in analyzed codebases
 
 # Search with filters
 ./dist/src/cli/index.js search "useState" --type function --exported-only
+
+# Clear repository data (with confirmation prompt bypass)
+./dist/src/cli/index.js clear <repository-name> --yes
 
 # Start MCP server
 ./dist/src/cli/index.js mcp-server --port 3000 --verbose
@@ -120,8 +112,7 @@ npm start search <query>  # Search for symbols in analyzed codebases
 ### After Making Changes
 
 1. Run tests: `npm test`
-2. Check linting: `npm run lint`
-3. Verify build: `npx tsc`
+2. Verify build: `npx tsc`
 
 ### Working with Database
 

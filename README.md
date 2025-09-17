@@ -83,7 +83,7 @@ npm run migrate:latest
 npm run analyze /path/to/your/project
 
 # Clear existing repository analysis
-./dist/src/cli/index.js clear your-repo-name --yes
+./dist/src/cli/index.js clear <repository-name> --yes
 
 # Start MCP server for AI integration
 npm run mcp-server
