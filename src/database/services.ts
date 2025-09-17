@@ -375,13 +375,24 @@ export class DatabaseService {
 
     logger.debug('Creating dependencies in batch', { count: dependencies.length });
 
-    // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
-    const results = await this.db('dependencies')
-      .insert(dependencies)
-      .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type'])
-      .merge(['line_number', 'confidence', 'updated_at'])
-      .returning('*');
-    return results as Dependency[];
+    // Process in chunks to avoid PostgreSQL parameter limits
+    const BATCH_SIZE = 1000;
+    const results: Dependency[] = [];
+
+    for (let i = 0; i < dependencies.length; i += BATCH_SIZE) {
+      const chunk = dependencies.slice(i, i + BATCH_SIZE);
+
+      // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
+      const chunkResults = await this.db('dependencies')
+        .insert(chunk)
+        .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type'])
+        .merge(['line_number', 'confidence', 'updated_at'])
+        .returning('*');
+
+      results.push(...(chunkResults as Dependency[]));
+    }
+
+    return results;
   }
 
   // File dependency operations

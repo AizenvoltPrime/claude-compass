@@ -1,5 +1,5 @@
 import { Symbol, CreateDependency, DependencyType, SymbolType } from '../database/models';
-import { ParsedSymbol, ParsedDependency } from '../parsers/base';
+import { ParsedDependency } from '../parsers/base';
 import { createComponentLogger } from '../utils/logger';
 
 const logger = createComponentLogger('symbol-graph');
@@ -337,11 +337,9 @@ export class SymbolGraphBuilder {
       const dependencies = dependenciesMap.get(symbol.id) || [];
 
       for (const dep of dependencies) {
-        // Find the target symbol by name
         const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
 
         for (const targetSymbol of targetSymbols) {
-          // Skip self-references unless it's a recursive call
           if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
             continue;
           }
