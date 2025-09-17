@@ -13,7 +13,7 @@
     },
     "claude-compass": {
       "command": "node",
-      "args": ["/home/astefanopoulos/Documents/claude-compass/dist/mcp/server.js"],
+      "args": ["/home/astefanopoulos/Documents/claude-compass/dist/src/mcp/server.js"],
       "env": {
         "DATABASE_URL": "postgresql://claude_compass:password@localhost:5432/claude_compass"
       }
