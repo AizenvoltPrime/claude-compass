@@ -187,6 +187,17 @@ export class ORMParser extends BaseFrameworkParser {
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
     logger.debug('Parsing ORM file', { filePath });
 
+    // Handle empty content early to avoid parse errors
+    if (!content || content.trim().length === 0) {
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: []
+      };
+    }
+
     // Call parent's parseFile method to handle framework entity detection
     const baseResult = await super.parseFile(filePath, content, options);
 
@@ -196,6 +207,9 @@ export class ORMParser extends BaseFrameworkParser {
     const imports: any[] = [...baseResult.imports];
     const exports: any[] = [...baseResult.exports];
     const errors: any[] = [...baseResult.errors];
+
+    // Track ORM entity names to avoid conflicts with base parser symbols
+    const ormEntityNames: Set<string> = new Set();
 
     try {
       // Detect ORM systems from imports and patterns
@@ -210,45 +224,66 @@ export class ORMParser extends BaseFrameworkParser {
       for (const orm of detectedORMs) {
         switch (orm) {
           case ORMType.PRISMA:
-            await this.parsePrismaSchema(filePath, content, symbols, dependencies);
+            await this.parsePrismaSchema(filePath, content, symbols, dependencies, ormEntityNames);
             break;
           case ORMType.TYPEORM:
-            await this.parseTypeORMEntity(filePath, content, symbols, dependencies);
+            await this.parseTypeORMEntity(filePath, content, symbols, dependencies, ormEntityNames);
             break;
           case ORMType.SEQUELIZE:
-            await this.parseSequelizeModel(filePath, content, symbols, dependencies);
+            await this.parseSequelizeModel(filePath, content, symbols, dependencies, ormEntityNames);
             break;
           case ORMType.MONGOOSE:
-            await this.parseMongooseSchema(filePath, content, symbols, dependencies);
+            await this.parseMongooseSchema(filePath, content, symbols, dependencies, ormEntityNames);
             break;
           case ORMType.OBJECTION:
-            await this.parseObjectionModel(filePath, content, symbols, dependencies);
+            await this.parseObjectionModel(filePath, content, symbols, dependencies, ormEntityNames);
             break;
           case ORMType.MIKRO_ORM:
-            await this.parseMikroORMEntity(filePath, content, symbols, dependencies);
+            await this.parseMikroORMEntity(filePath, content, symbols, dependencies, ormEntityNames);
             break;
         }
       }
 
+      // Remove base parser symbols that conflict with ORM entities
+      // This ensures ORM symbols take precedence over base parser symbols
+      const filteredSymbols = symbols.filter(symbol => {
+        if (ormEntityNames.has(symbol.name)) {
+          // Keep only ORM_ENTITY symbols, remove base parser symbols with same name
+          return symbol.symbol_type === SymbolType.ORM_ENTITY;
+        }
+        return true;
+      });
+
       logger.debug('ORM parsing completed', {
         filePath,
         detectedORMs: Array.from(this.detectedORMs),
-        symbolsFound: symbols.length
+        symbolsFound: filteredSymbols.length,
+        ormEntities: Array.from(ormEntityNames)
       });
+
+      // Return merged result with framework entities from base class
+      return {
+        ...baseResult,
+        symbols: filteredSymbols,
+        dependencies,
+        imports,
+        exports,
+        errors
+      };
 
     } catch (error) {
       logger.error('Error parsing ORM file', { filePath, error: error.message });
-    }
 
-    // Return merged result with framework entities from base class
-    return {
-      ...baseResult,
-      symbols,
-      dependencies,
-      imports,
-      exports,
-      errors
-    };
+      // Return merged result with framework entities from base class
+      return {
+        ...baseResult,
+        symbols,
+        dependencies,
+        imports,
+        exports,
+        errors
+      };
+    }
   }
 
   private detectORMSystems(content: string, fileName: string): ORMType[] {
@@ -293,7 +328,7 @@ export class ORMParser extends BaseFrameworkParser {
     return ormTypes;
   }
 
-  private async parsePrismaSchema(filePath: string, content: string, symbols: any[], dependencies: any[]): Promise<void> {
+  private async parsePrismaSchema(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
     logger.debug('Parsing Prisma schema', { filePath });
 
     // Parse Prisma models
@@ -329,6 +364,9 @@ export class ORMParser extends BaseFrameworkParser {
 
       this.entities.push(entity);
 
+      // Track this entity name to avoid conflicts with base parser
+      ormEntityNames.add(modelName);
+
       // Create symbol for the model
       symbols.push({
         name: modelName,
@@ -337,9 +375,6 @@ export class ORMParser extends BaseFrameworkParser {
         end_line: this.getLineNumber(modelMatch.index! + modelMatch[0].length, content),
         is_exported: true
       });
-
-      // Store entity for later use
-      this.entities.push(entity);
     }
 
     // Parse enums
@@ -426,7 +461,7 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseTypeORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[]): Promise<void> {
+  private async parseTypeORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
     logger.debug('Parsing TypeORM entity', { filePath });
 
     // Find entity class
@@ -468,14 +503,15 @@ export class ORMParser extends BaseFrameworkParser {
 
     this.entities.push(entity);
 
+    // Track this entity name to avoid conflicts with base parser
+    ormEntityNames.add(entityName);
+
     symbols.push({
       name: entityName,
       symbol_type: SymbolType.ORM_ENTITY,
       start_line: this.getLineNumber(entityMatch.index!, content),
       is_exported: true
     });
-
-    this.entities.push(entity);
   }
 
   private parseTypeORMRelationships(content: string, entity: ORMEntity): void {
@@ -503,7 +539,7 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseSequelizeModel(filePath: string, content: string, symbols: any[], dependencies: any[]): Promise<void> {
+  private async parseSequelizeModel(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
     logger.debug('Parsing Sequelize model', { filePath });
 
     // Find model definition
@@ -535,13 +571,14 @@ export class ORMParser extends BaseFrameworkParser {
 
     this.entities.push(entity);
 
+    // Track this entity name to avoid conflicts with base parser
+    ormEntityNames.add(modelName);
+
     symbols.push({
       name: modelName,
       symbol_type: SymbolType.ORM_ENTITY,
       is_exported: true
     });
-
-    this.entities.push(entity);
   }
 
   private parseSequelizeFields(content: string, entity: ORMEntity): void {
@@ -590,7 +627,7 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseMongooseSchema(filePath: string, content: string, symbols: any[], dependencies: any[]): Promise<void> {
+  private async parseMongooseSchema(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
     logger.debug('Parsing Mongoose schema', { filePath });
 
     // Find schema definition
@@ -621,13 +658,14 @@ export class ORMParser extends BaseFrameworkParser {
 
     this.entities.push(entity);
 
+    // Track this entity name to avoid conflicts with base parser
+    ormEntityNames.add(modelName);
+
     symbols.push({
       name: modelName,
       symbol_type: SymbolType.ORM_ENTITY,
       is_exported: true
     });
-
-    this.entities.push(entity);
   }
 
   private parseMongooseSchemaFields(content: string, entity: ORMEntity): void {
@@ -668,7 +706,7 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseObjectionModel(filePath: string, content: string, symbols: any[], dependencies: any[]): Promise<void> {
+  private async parseObjectionModel(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
     logger.debug('Parsing Objection.js model', { filePath });
 
     const modelMatch = content.match(/class\s+(\w+)\s+extends\s+Model/);
@@ -700,13 +738,14 @@ export class ORMParser extends BaseFrameworkParser {
 
     this.entities.push(entity);
 
+    // Track this entity name to avoid conflicts with base parser
+    ormEntityNames.add(modelName);
+
     symbols.push({
       name: modelName,
       symbol_type: SymbolType.ORM_ENTITY,
       is_exported: true
     });
-
-    this.entities.push(entity);
   }
 
   private parseObjectionJsonSchema(content: string, entity: ORMEntity): void {
@@ -773,7 +812,7 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseMikroORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[]): Promise<void> {
+  private async parseMikroORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
     logger.debug('Parsing MikroORM entity', { filePath });
 
     const entityMatch = content.match(/@Entity\s*(?:\([^)]*\))?\s*(?:export\s+)?class\s+(\w+)/);
@@ -814,13 +853,14 @@ export class ORMParser extends BaseFrameworkParser {
 
     this.entities.push(entity);
 
+    // Track this entity name to avoid conflicts with base parser
+    ormEntityNames.add(entityName);
+
     symbols.push({
       name: entityName,
       symbol_type: SymbolType.ORM_ENTITY,
       is_exported: true
     });
-
-    this.entities.push(entity);
   }
 
   private parseMikroORMRelationships(content: string, entity: ORMEntity): void {
