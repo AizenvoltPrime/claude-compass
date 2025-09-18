@@ -1,5 +1,5 @@
 import { DatabaseService } from '../database/services';
-import { DependencyType } from '../database/models';
+import { DependencyType, DependencyWithSymbols, SymbolWithFile } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { transitiveAnalyzer, TransitiveAnalysisOptions } from '../graph/transitive-analyzer';
 
@@ -328,59 +328,46 @@ export class McpTools {
 
     // Phase 3: Implement indirect callers (transitive dependencies)
     if (validatedArgs.include_indirect) {
-      this.logger.debug('Performing transitive caller analysis', { symbol_id: validatedArgs.symbol_id });
-
-      const transitiveOptions: TransitiveAnalysisOptions = {
-        maxDepth: 10, // Reasonable default depth
-        includeTypes: validatedArgs.dependency_type ? [validatedArgs.dependency_type as DependencyType] : undefined,
-        confidenceThreshold: 0.1 // Filter out low-confidence relationships
-      };
+      this.logger.debug('Performing manual transitive caller analysis', { symbol_id: validatedArgs.symbol_id });
 
       try {
-        const transitiveResult = await transitiveAnalyzer.getTransitiveCallers(
-          validatedArgs.symbol_id,
-          transitiveOptions
-        );
+        // Manual implementation: Find callers of direct callers (second-level callers)
+        const directCallerIds = callers.map(c => c.from_symbol?.id).filter(Boolean) as number[];
+        const transitiveCallers: DependencyWithSymbols[] = [];
 
-        // Merge direct callers with transitive results
-        const transitiveCallers = transitiveResult.results.map(result => ({
-          id: result.symbolId, // Use actual symbol ID
-          from_symbol_id: result.symbolId,
-          to_symbol_id: validatedArgs.symbol_id,
-          dependency_type: DependencyType.CALLS, // Use standard dependency type
-          line_number: null,
-          confidence: result.totalConfidence,
-          created_at: new Date(),
-          updated_at: new Date(),
-          from_symbol: {
-            id: result.symbolId,
-            file_id: 0, // Default
-            name: 'Unknown', // Will be resolved in practice
-            symbol_type: 'function' as any,
-            start_line: undefined,
-            end_line: undefined,
-            is_exported: false,
-            visibility: undefined,
-            signature: undefined,
-            created_at: new Date(),
-            updated_at: new Date(),
-            file: undefined
-          },
-          to_symbol: undefined
-        }));
+        for (const callerId of directCallerIds) {
+          // Find who calls each direct caller
+          const secondLevelCallers = await this.dbService.getDependenciesTo(callerId);
 
-        // Add transitive callers to the results
-        callers = [...callers, ...transitiveCallers];
+          // Filter by dependency type if specified
+          const filteredSecondLevel = validatedArgs.dependency_type
+            ? secondLevelCallers.filter(dep => dep.dependency_type === validatedArgs.dependency_type as DependencyType)
+            : secondLevelCallers;
 
-        this.logger.debug('Transitive caller analysis completed', {
+          // Add second-level callers as transitive results
+          transitiveCallers.push(...filteredSecondLevel);
+        }
+
+        // Remove duplicates and avoid including symbols that are already direct callers
+        const directCallerIdsSet = new Set(directCallerIds);
+        const uniqueTransitiveCallers = transitiveCallers.filter((caller, index, arr) => {
+          // Remove duplicates by ID
+          const isUnique = arr.findIndex(c => c.from_symbol?.id === caller.from_symbol?.id) === index;
+          // Exclude if it's already a direct caller
+          const isNotDirectCaller = !directCallerIdsSet.has(caller.from_symbol?.id || -1);
+          return isUnique && isNotDirectCaller;
+        });
+
+        callers = [...callers, ...uniqueTransitiveCallers];
+
+        this.logger.debug('Manual transitive caller analysis completed', {
           symbol_id: validatedArgs.symbol_id,
-          direct_callers: callers.length - transitiveCallers.length,
-          transitive_callers: transitiveCallers.length,
-          max_depth_reached: transitiveResult.maxDepthReached,
-          execution_time_ms: transitiveResult.executionTimeMs
+          direct_callers: directCallerIds.length,
+          transitive_callers: uniqueTransitiveCallers.length,
+          total_callers: callers.length
         });
       } catch (error) {
-        this.logger.error('Transitive caller analysis failed', {
+        this.logger.error('Manual transitive caller analysis failed', {
           symbol_id: validatedArgs.symbol_id,
           error: error.message
         });
@@ -454,32 +441,47 @@ export class McpTools {
           transitiveOptions
         );
 
-        // Merge direct dependencies with transitive results
-        const transitiveDependencies = transitiveResult.results.map(result => ({
-          id: result.symbolId, // Use actual symbol ID
-          from_symbol_id: validatedArgs.symbol_id,
-          to_symbol_id: result.symbolId,
-          dependency_type: DependencyType.CALLS, // Use standard dependency type
-          line_number: null,
-          confidence: result.totalConfidence,
-          created_at: new Date(),
-          updated_at: new Date(),
-          from_symbol: undefined,
-          to_symbol: {
+        // Debug the transitive result structure for dependencies
+        this.logger.debug('Transitive dependency result structure', {
+          resultCount: transitiveResult.results.length,
+          sampleResult: transitiveResult.results[0] ? {
+            symbolId: transitiveResult.results[0].symbolId,
+            depth: transitiveResult.results[0].depth,
+            dependenciesCount: transitiveResult.results[0].dependencies.length,
+            firstDependency: transitiveResult.results[0].dependencies[0] ? {
+              to_symbol_id: transitiveResult.results[0].dependencies[0].to_symbol_id,
+              to_symbol_exists: !!transitiveResult.results[0].dependencies[0].to_symbol,
+              to_symbol_name: transitiveResult.results[0].dependencies[0].to_symbol?.name
+            } : null
+          } : null
+        });
+
+        // Merge direct dependencies with transitive results - use already resolved data from transitive analyzer
+        const transitiveDependencies = transitiveResult.results.map(result => {
+          // Use the already-resolved symbol data from the transitive analyzer
+          const toSymbol = result.dependencies[0]?.to_symbol;
+
+          if (!toSymbol) {
+            this.logger.warn('Transitive dependency result missing to_symbol', {
+              symbolId: result.symbolId,
+              dependenciesLength: result.dependencies.length
+            });
+            return null;
+          }
+
+          return {
             id: result.symbolId,
-            file_id: 0, // Default
-            name: 'Unknown', // Will be resolved in practice
-            symbol_type: 'function' as any,
-            start_line: undefined,
-            end_line: undefined,
-            is_exported: false,
-            visibility: undefined,
-            signature: undefined,
+            from_symbol_id: validatedArgs.symbol_id,
+            to_symbol_id: result.symbolId,
+            dependency_type: DependencyType.CALLS,
+            line_number: result.dependencies[0].line_number,
+            confidence: result.totalConfidence,
             created_at: new Date(),
             updated_at: new Date(),
-            file: undefined
-          }
-        }));
+            from_symbol: undefined,
+            to_symbol: toSymbol
+          };
+        }).filter(Boolean); // Remove null entries
 
         // Add transitive dependencies to the results
         dependencies = [...dependencies, ...transitiveDependencies];
