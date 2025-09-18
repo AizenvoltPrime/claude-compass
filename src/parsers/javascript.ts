@@ -137,6 +137,17 @@ export class JavaScriptParser extends ChunkedParser {
       if (symbol) symbols.push(symbol);
     }
 
+    // Extract standalone arrow functions (not assigned to variables)
+    const arrowNodes = this.findNodesOfType(rootNode, 'arrow_function');
+    for (const node of arrowNodes) {
+      // Skip arrow functions that are already captured as variable assignments
+      if (node.parent?.type !== 'variable_declarator' && node.parent?.type !== 'assignment_expression') {
+        const symbol = this.extractArrowFunctionSymbol(node, content);
+        if (symbol) symbols.push(symbol);
+      }
+    }
+
+
     return symbols;
   }
 
@@ -297,6 +308,46 @@ export class JavaScriptParser extends ChunkedParser {
     };
   }
 
+  private extractArrowFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+    return {
+      name: 'arrow_function',
+      symbol_type: SymbolType.FUNCTION,
+      start_line: node.startPosition.row + 1,
+      end_line: node.endPosition.row + 1,
+      is_exported: false,
+      visibility: 'private',
+      signature: this.getNodeText(node, content).substring(0, 100)
+    };
+  }
+
+  /**
+   * Find the containing function for a call expression node by traversing up the AST
+   */
+  private findContainingFunction(callNode: Parser.SyntaxNode): string {
+    let parent = callNode.parent;
+
+    // Walk up the AST to find containing function or method
+    while (parent) {
+      if (parent.type === 'function_declaration' || parent.type === 'function_expression' ||
+          parent.type === 'arrow_function' || parent.type === 'method_definition') {
+        // Extract name from the function node
+        if (parent.type === 'function_declaration') {
+          const nameNode = parent.childForFieldName('name');
+          if (nameNode) return nameNode.text;
+        }
+        if (parent.type === 'method_definition') {
+          const keyNode = parent.childForFieldName('key');
+          if (keyNode) return keyNode.text;
+        }
+        // For arrow functions and function expressions, return a generic name
+        return parent.type === 'arrow_function' ? 'arrow_function' : 'function_expression';
+      }
+      parent = parent.parent;
+    }
+
+    return 'global';
+  }
+
   private extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) return null;
@@ -314,8 +365,10 @@ export class JavaScriptParser extends ChunkedParser {
       return null;
     }
 
+    const callerName = this.findContainingFunction(node);
+
     return {
-      from_symbol: '', // Will be set by the caller who knows the current symbol
+      from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
