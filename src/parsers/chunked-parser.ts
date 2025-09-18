@@ -307,8 +307,8 @@ export abstract class ChunkedParser extends BaseParser {
     options?: ChunkedParseOptions
   ): Promise<ParseResult> {
     // Default implementation uses direct parsing to avoid recursion
-    // Force non-chunked parsing for individual chunks
-    const nonChunkedOptions = { ...options, enableChunking: false };
+    // Force non-chunked parsing for individual chunks and bypass size limits
+    const nonChunkedOptions = { ...options, enableChunking: false, bypassSizeLimit: true };
     return this.parseFileDirectly(chunkFilePath, content, nonChunkedOptions);
   }
 

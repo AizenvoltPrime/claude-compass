@@ -166,6 +166,18 @@ export class SymbolResolver {
     sourceContext: SymbolResolutionContext,
     targetSymbolName: string
   ): Symbol | null {
+    // Check if this is an object.method pattern (e.g., "areasStore.getAreas")
+    if (targetSymbolName.includes('.')) {
+      const memberExpressionSymbol = this.resolveMemberExpression(sourceContext, targetSymbolName);
+      if (memberExpressionSymbol) {
+        this.logger.debug('Resolved member expression symbol', {
+          symbolName: targetSymbolName,
+          filePath: sourceContext.filePath
+        });
+        return memberExpressionSymbol;
+      }
+    }
+
     // 1. First check local file scope
     const localSymbol = sourceContext.symbols.find(s => s.name === targetSymbolName);
     if (localSymbol) {
@@ -215,6 +227,141 @@ export class SymbolResolver {
         filePath: sourceContext.filePath,
         exportCount: exportedOptions.length
       });
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve member expressions like "areasStore.getAreas"
+   */
+  private resolveMemberExpression(
+    sourceContext: SymbolResolutionContext,
+    memberExpression: string
+  ): Symbol | null {
+    const dotIndex = memberExpression.indexOf('.');
+    if (dotIndex === -1) return null;
+
+    const objectName = memberExpression.substring(0, dotIndex);
+    const methodName = memberExpression.substring(dotIndex + 1);
+
+    this.logger.debug('Resolving member expression', {
+      fullExpression: memberExpression,
+      objectName,
+      methodName,
+      filePath: sourceContext.filePath
+    });
+
+    // Strategy 1: Check if objectName is directly imported
+    for (const importDecl of sourceContext.imports) {
+      if (this.importIncludesSymbol(importDecl, objectName)) {
+        // Find the target file that exports this object
+        const targetSymbol = this.findMethodInImportedObject(importDecl, objectName, methodName);
+        if (targetSymbol) {
+          this.logger.debug('Resolved member expression via direct import', {
+            objectName,
+            methodName,
+            targetFile: targetSymbol.file_id
+          });
+          return targetSymbol;
+        }
+      }
+    }
+
+    // Strategy 2: Check for store patterns (useAreasStore -> areasStore.getAreas)
+    const storeMethodSymbol = this.resolveStoreMethodFromExpression(sourceContext, objectName, methodName);
+    if (storeMethodSymbol) {
+      this.logger.debug('Resolved member expression via store pattern', {
+        objectName,
+        methodName,
+        targetFile: storeMethodSymbol.file_id
+      });
+      return storeMethodSymbol;
+    }
+
+    // Strategy 3: Look for object declarations in local file
+    const localObject = sourceContext.symbols.find(s => s.name === objectName);
+    if (localObject) {
+      // Check if there's a method with the target name in the same file
+      const localMethod = sourceContext.symbols.find(s =>
+        s.name === methodName &&
+        (s.symbol_type === 'method' || s.symbol_type === 'function')
+      );
+      if (localMethod) {
+        this.logger.debug('Resolved member expression in local scope', {
+          objectName,
+          methodName
+        });
+        return localMethod;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Find a method in an imported object
+   */
+  private findMethodInImportedObject(
+    importDecl: ParsedImport,
+    objectName: string,
+    methodName: string
+  ): Symbol | null {
+    // Find symbols that match the method name from exported symbols
+    const exportedOptions = this.exportedSymbols.get(methodName) || [];
+
+    for (const exported of exportedOptions) {
+      const fileContext = this.fileContexts.get(exported.fromFile);
+      if (fileContext) {
+        // Check if this file could be the source of the import
+        // This is a simplified check - in a full implementation we'd resolve the import path
+        const hasObjectWithMethod = fileContext.symbols.some(s =>
+          s.name === methodName &&
+          (s.symbol_type === 'method' || s.symbol_type === 'function')
+        );
+
+        if (hasObjectWithMethod) {
+          return exported.symbol;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve store method from member expression (enhanced store pattern resolution)
+   */
+  private resolveStoreMethodFromExpression(
+    sourceContext: SymbolResolutionContext,
+    objectName: string,
+    methodName: string
+  ): Symbol | null {
+    // Check if objectName matches a store pattern (e.g., "areasStore" from "useAreasStore")
+    const storeFactory = this.inferStoreFactoryFromObjectName(objectName);
+    if (storeFactory) {
+      // Check if this store factory is imported
+      const hasStoreImport = sourceContext.imports.some(imp =>
+        this.importIncludesSymbol(imp, storeFactory)
+      );
+
+      if (hasStoreImport) {
+        const storeName = this.getStoreNameFromFactory(storeFactory);
+        return this.findStoreMethod(storeName, methodName);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Infer store factory name from object name (e.g., "areasStore" -> "useAreasStore")
+   */
+  private inferStoreFactoryFromObjectName(objectName: string): string | null {
+    // Pattern: "areasStore" -> "useAreasStore"
+    if (objectName.endsWith('Store')) {
+      const baseName = objectName.substring(0, objectName.length - 5); // Remove "Store"
+      return `use${baseName.charAt(0).toUpperCase()}${baseName.slice(1)}Store`;
     }
 
     return null;

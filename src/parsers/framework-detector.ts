@@ -113,6 +113,62 @@ export class FrameworkDetector {
         features: ['express-routes', 'middleware', 'rest-api']
       },
       baseConfidence: 0.6
+    },
+
+    // Test Frameworks
+    {
+      name: 'test-framework',
+      patterns: {
+        dependencies: ['jest', 'vitest', 'cypress', 'playwright', 'mocha', 'jasmine', '@testing-library/react'],
+        devDependencies: ['jest', 'vitest', 'cypress', 'playwright', 'mocha', 'jasmine', '@types/jest'],
+        files: ['jest.config.js', 'vitest.config.js', 'cypress.json', 'playwright.config.js'],
+        directories: ['tests', 'test', '__tests__', 'cypress', 'e2e'],
+        configs: ['jest.config.js', 'vitest.config.js', 'cypress.json', 'playwright.config.js'],
+        features: ['unit-tests', 'integration-tests', 'e2e-tests', 'test-coverage']
+      },
+      baseConfidence: 0.7
+    },
+
+    // Package Managers
+    {
+      name: 'package-manager',
+      patterns: {
+        dependencies: [],
+        devDependencies: [],
+        files: ['package.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'lerna.json', 'nx.json', 'turbo.json'],
+        directories: ['packages', 'apps', 'libs', 'workspace'],
+        configs: ['lerna.json', 'nx.json', 'turbo.json', 'pnpm-workspace.yaml'],
+        features: ['workspaces', 'monorepo', 'package-management']
+      },
+      baseConfidence: 0.9
+    },
+
+    // Background Job Systems
+    {
+      name: 'background-job',
+      patterns: {
+        dependencies: ['bull', 'bullmq', 'agenda', 'bee-queue', 'kue', 'rsmq'],
+        devDependencies: ['@types/bull', '@types/agenda'],
+        files: ['worker.js', 'jobs.js', 'queue.js'],
+        directories: ['jobs', 'workers', 'queues', 'background'],
+        configs: ['bull.config.js', 'agenda.config.js'],
+        features: ['job-queues', 'worker-threads', 'job-scheduling', 'background-processing']
+      },
+      baseConfidence: 0.8
+    },
+
+    // ORM Systems
+    {
+      name: 'orm',
+      patterns: {
+        dependencies: ['prisma', 'typeorm', 'sequelize', 'mongoose', 'objection', 'mikro-orm', 'bookshelf'],
+        devDependencies: ['@types/sequelize', '@types/mongoose', 'prisma'],
+        files: ['schema.prisma', 'ormconfig.json', 'mikro-orm.config.js'],
+        directories: ['models', 'entities', 'schemas', 'prisma', 'migrations'],
+        configs: ['ormconfig.json', 'mikro-orm.config.js', 'sequelize.config.js'],
+        features: ['database-models', 'migrations', 'relationships', 'orm-mapping']
+      },
+      baseConfidence: 0.8
     }
   ];
 
@@ -625,6 +681,39 @@ export class FrameworkDetector {
               (filePath.includes('/routes/') || filePath.includes('/api/') ||
                filePath.includes('/controllers/') || filePath.includes('/middleware/'))) {
             frameworks.push('nodejs');
+          }
+          break;
+
+        case 'test-framework':
+          if (filePath.includes('.test.') || filePath.includes('.spec.') || filePath.includes('.e2e.') ||
+              filePath.includes('/tests/') || filePath.includes('/test/') || filePath.includes('/__tests__/') ||
+              filePath.includes('/cypress/') || filePath.includes('/e2e/')) {
+            frameworks.push('test-framework');
+          }
+          break;
+
+        case 'package-manager':
+          if (path.basename(filePath) === 'package.json' ||
+              filePath.includes('lerna.json') || filePath.includes('nx.json') || filePath.includes('turbo.json') ||
+              filePath.includes('pnpm-workspace.yaml')) {
+            frameworks.push('package-manager');
+          }
+          break;
+
+        case 'background-job':
+          if ((ext === '.js' || ext === '.ts') &&
+              (filePath.includes('worker') || filePath.includes('job') || filePath.includes('queue') ||
+               filePath.includes('/workers/') || filePath.includes('/jobs/') || filePath.includes('/queues/'))) {
+            frameworks.push('background-job');
+          }
+          break;
+
+        case 'orm':
+          if (ext === '.prisma' ||
+              filePath.includes('.model.') || filePath.includes('.entity.') || filePath.includes('.schema.') ||
+              filePath.includes('/models/') || filePath.includes('/entities/') || filePath.includes('/schemas/') ||
+              filePath.includes('/prisma/') || filePath.includes('ormconfig.json')) {
+            frameworks.push('orm');
           }
           break;
       }

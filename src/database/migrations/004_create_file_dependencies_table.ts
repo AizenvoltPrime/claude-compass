@@ -23,10 +23,8 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(['from_file_id', 'to_file_id', 'dependency_type']);
   });
 
-  console.log('✅ Created file_dependencies table');
 }
 
 export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('file_dependencies');
-  console.log('✅ Dropped file_dependencies table');
 }

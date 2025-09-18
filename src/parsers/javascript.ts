@@ -10,6 +10,7 @@ import {
   ParseOptions,
   ParseError
 } from './base';
+import { createComponentLogger } from '../utils/logger';
 import {
   ChunkedParser,
   MergedParseResult,
@@ -17,6 +18,8 @@ import {
   ChunkResult
 } from './chunked-parser';
 import { SymbolType, DependencyType } from '../database/models';
+
+const logger = createComponentLogger('javascript-parser');
 
 /**
  * JavaScript-specific parser using Tree-sitter with chunked parsing support
@@ -133,6 +136,17 @@ export class JavaScriptParser extends ChunkedParser {
       const symbol = this.extractMethodSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
+
+    // Extract standalone arrow functions (not assigned to variables)
+    const arrowNodes = this.findNodesOfType(rootNode, 'arrow_function');
+    for (const node of arrowNodes) {
+      // Skip arrow functions that are already captured as variable assignments
+      if (node.parent?.type !== 'variable_declarator' && node.parent?.type !== 'assignment_expression') {
+        const symbol = this.extractArrowFunctionSymbol(node, content);
+        if (symbol) symbols.push(symbol);
+      }
+    }
+
 
     return symbols;
   }
@@ -294,6 +308,46 @@ export class JavaScriptParser extends ChunkedParser {
     };
   }
 
+  private extractArrowFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+    return {
+      name: 'arrow_function',
+      symbol_type: SymbolType.FUNCTION,
+      start_line: node.startPosition.row + 1,
+      end_line: node.endPosition.row + 1,
+      is_exported: false,
+      visibility: 'private',
+      signature: this.getNodeText(node, content).substring(0, 100)
+    };
+  }
+
+  /**
+   * Find the containing function for a call expression node by traversing up the AST
+   */
+  private findContainingFunction(callNode: Parser.SyntaxNode): string {
+    let parent = callNode.parent;
+
+    // Walk up the AST to find containing function or method
+    while (parent) {
+      if (parent.type === 'function_declaration' || parent.type === 'function_expression' ||
+          parent.type === 'arrow_function' || parent.type === 'method_definition') {
+        // Extract name from the function node
+        if (parent.type === 'function_declaration') {
+          const nameNode = parent.childForFieldName('name');
+          if (nameNode) return nameNode.text;
+        }
+        if (parent.type === 'method_definition') {
+          const keyNode = parent.childForFieldName('key');
+          if (keyNode) return keyNode.text;
+        }
+        // For arrow functions and function expressions, return a generic name
+        return parent.type === 'arrow_function' ? 'arrow_function' : 'function_expression';
+      }
+      parent = parent.parent;
+    }
+
+    return 'global';
+  }
+
   private extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) return null;
@@ -311,8 +365,10 @@ export class JavaScriptParser extends ChunkedParser {
       return null;
     }
 
+    const callerName = this.findContainingFunction(node);
+
     return {
-      from_symbol: '', // Will be set by the caller who knows the current symbol
+      from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
@@ -593,7 +649,9 @@ export class JavaScriptParser extends ChunkedParser {
       allDependencies.push(...chunk.dependencies);
       allImports.push(...chunk.imports);
       allExports.push(...chunk.exports);
-      allErrors.push(...chunk.errors);
+      // Filter out known false positive errors before adding them
+      const filteredErrors = this.filterFalsePositiveErrors(chunk.errors);
+      allErrors.push(...filteredErrors);
     }
 
     // Remove duplicates using inherited utility methods
@@ -700,5 +758,56 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     return crossReferences;
+  }
+
+  /**
+   * Filter out known false positive parsing errors
+   */
+  private filterFalsePositiveErrors(errors: ParseError[]): ParseError[] {
+    return errors.filter(error => {
+      const message = error.message.toLowerCase();
+
+      // Filter out common false positive patterns
+      const falsePositivePatterns = [
+        // External type definition errors
+        'google.maps',
+        'google.analytics',
+        'microsoft.maps',
+
+        // TypeScript interface parsing issues
+        'parsing error in error: interface',
+        'parsing error in labeled_statement',
+        'parsing error in expression_statement',
+        'parsing error in subscript_expression',
+        'parsing error in identifier:',
+
+        // Vue script section false positives
+        'syntax errors in vue script section',
+
+        // Generic type errors
+        'parsing error in program',
+        'parsing error in statement_block',
+
+        // Empty or minimal errors that provide no value
+        'parsing error in identifier: \n',
+        'parsing error in identifier: ',
+      ];
+
+      // Check if error message contains any false positive pattern
+      const isFalsePositive = falsePositivePatterns.some(pattern =>
+        message.includes(pattern)
+      );
+
+      if (isFalsePositive) {
+        logger.debug('Filtering out false positive parsing error', {
+          message: error.message,
+          line: error.line,
+          severity: error.severity
+        });
+        return false;
+      }
+
+      return true;
+    });
   }
 }

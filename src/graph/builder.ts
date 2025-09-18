@@ -3,7 +3,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { Repository, File, Symbol, CreateFile, CreateSymbol } from '../database/models';
 import { DatabaseService } from '../database/services';
-import { getParserForFile, ParseResult } from '../parsers';
+import { getParserForFile, ParseResult, MultiParser } from '../parsers';
 import {
   VueComponent,
   ReactComponent,
@@ -532,21 +532,16 @@ export class GraphBuilder {
     options: BuildOptions
   ): Promise<Array<ParseResult & { filePath: string }>> {
     const results: Array<ParseResult & { filePath: string }> = [];
+    const multiParser = new MultiParser();
 
     for (const file of files) {
       try {
-        const parser = getParserForFile(file.path);
-        if (!parser) {
-          this.logger.debug('No parser found for file', { path: file.path });
-          continue;
-        }
-
         const content = await this.readFileWithEncodingRecovery(file.path, options);
         if (!content) {
           continue; // File was rejected due to encoding issues
         }
 
-        const parseResult = await this.processFileWithSizePolicy(file, content, parser, options);
+        const parseResult = await this.processFileWithSizePolicyMultiParser(file, content, multiParser, options);
         if (!parseResult) {
           continue; // File was rejected by size policy
         }
@@ -592,7 +587,9 @@ export class GraphBuilder {
       const file = files[i];
       const parseResult = parseResults[i];
 
-      if (!parseResult || parseResult.errors.some(e => e.severity === 'error')) {
+      // Skip files only if no parse result exists, but allow files with parsing errors
+      // to be stored (especially framework-specific files like .prisma, .vue, etc.)
+      if (!parseResult) {
         continue;
       }
 
@@ -776,6 +773,58 @@ export class GraphBuilder {
               reactive_refs: [],
               dependency_array: []
             });
+          } else if (this.isJobSystemEntity(entity)) {
+            // Handle background job system entities
+            const jobSystemEntity = entity as any;
+            await this.dbService.createJobQueue({
+              repo_id: repositoryId,
+              name: jobSystemEntity.name,
+              queue_type: jobSystemEntity.jobSystems?.[0] || 'bull', // Use first detected system
+              symbol_id: matchingSymbol.id,
+              config_data: jobSystemEntity.config || {}
+            });
+          } else if (this.isORMSystemEntity(entity)) {
+            // Handle ORM system entities
+            const ormSystemEntity = entity as any;
+            this.logger.debug('Creating ORM entity', {
+              entityName: ormSystemEntity.name,
+              ormType: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
+              symbolId: matchingSymbol.id,
+              entity: ormSystemEntity
+            });
+            await this.dbService.createORMEntity({
+              repo_id: repositoryId,
+              symbol_id: matchingSymbol.id,
+              entity_name: ormSystemEntity.name,
+              orm_type: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
+              fields: ormSystemEntity.metadata?.fields || {}
+            });
+          } else if (this.isTestSystemEntity(entity)) {
+            // Handle test framework system entities
+            const testSystemEntity = entity as any;
+
+            // First, get the file ID for this parse result
+            const files = await this.dbService.getFilesByRepository(repositoryId);
+            const matchingFile = files.find(f => f.path === parseResult.filePath);
+
+            if (matchingFile) {
+              await this.dbService.createTestSuite({
+                repo_id: repositoryId,
+                file_id: matchingFile.id,
+                suite_name: testSystemEntity.name,
+                framework_type: testSystemEntity.testFrameworks?.[0] || 'jest'
+              });
+            }
+          } else if (this.isPackageSystemEntity(entity)) {
+            // Handle package manager system entities
+            const packageSystemEntity = entity as any;
+            await this.dbService.createPackageDependency({
+              repo_id: repositoryId,
+              package_name: packageSystemEntity.name,
+              version_spec: packageSystemEntity.version || '1.0.0',
+              dependency_type: 'dependencies' as any,
+              package_manager: packageSystemEntity.packageManagers?.[0] || 'npm'
+            });
           } else {
             this.logger.debug('Unknown framework entity type', {
               type: entity.type,
@@ -822,6 +871,23 @@ export class GraphBuilder {
 
   private isReactHook(entity: any): entity is ReactHook {
     return entity.type === 'hook' && 'returns' in entity && 'dependencies' in entity;
+  }
+
+  // Phase 3 entity type guards
+  private isJobSystemEntity(entity: any): boolean {
+    return entity.type === 'job_system';
+  }
+
+  private isORMSystemEntity(entity: any): boolean {
+    return entity.type === 'orm_system';
+  }
+
+  private isTestSystemEntity(entity: any): boolean {
+    return entity.type === 'test_suite' || entity.type === 'test_system';
+  }
+
+  private isPackageSystemEntity(entity: any): boolean {
+    return entity.type === 'package_system' || entity.type === 'package';
   }
 
   private createImportsMap(files: File[], parseResults: Array<ParseResult & { filePath: string }>) {
@@ -1122,6 +1188,64 @@ export class GraphBuilder {
           enableEncodingRecovery: true,
           chunkOverlapLines: options.chunkOverlapLines || 100
         });
+    }
+  }
+
+  /**
+   * Process file with unified size policy using MultiParser
+   */
+  private async processFileWithSizePolicyMultiParser(
+    file: { path: string; relativePath?: string },
+    content: string,
+    multiParser: MultiParser,
+    options: BuildOptions
+  ): Promise<ParseResult | null> {
+    // Create file size manager with policy
+    const fileSizePolicy = options.fileSizePolicy || this.createDefaultFileSizePolicy(options);
+    const sizeManager = new FileSizeManager(fileSizePolicy);
+    const action = sizeManager.getRecommendedAction(content.length);
+
+    switch (action) {
+      case 'reject':
+        this.logger.warn('File rejected due to size policy', {
+          path: file.path,
+          size: content.length
+        });
+        return null;
+
+      case 'skip':
+        this.logger.info('File skipped due to size policy', {
+          path: file.path,
+          size: content.length
+        });
+        return null;
+
+      case 'chunk':
+      case 'truncate':
+      case 'warn':
+      case 'process':
+      default:
+        // Use MultiParser for comprehensive parsing including Phase 3 features
+        const parseOptions = {
+          includePrivateSymbols: true,
+          includeTestFiles: options.includeTestFiles,
+          enableChunking: action === 'chunk',
+          enableEncodingRecovery: true,
+          chunkSize: action === 'chunk' ? fileSizePolicy.chunkingThreshold : undefined,
+          chunkOverlapLines: options.chunkOverlapLines || 100
+        };
+
+        const multiResult = await multiParser.parseFile(content, file.path, parseOptions);
+
+        // Convert MultiParseResult to ParseResult
+        return {
+          symbols: multiResult.symbols,
+          dependencies: multiResult.dependencies,
+          imports: multiResult.imports,
+          exports: multiResult.exports,
+          errors: multiResult.errors,
+          frameworkEntities: multiResult.frameworkEntities || []
+        };
     }
   }
 

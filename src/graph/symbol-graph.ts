@@ -366,9 +366,7 @@ export class SymbolGraphBuilder {
 
       // Resolve dependencies for each file
       for (const [fileId, symbolDeps] of dependenciesByFile) {
-        const allDepsForFile = symbolDeps.flatMap(sd =>
-          sd.dependencies.map(dep => ({ ...dep, from_symbol_id: sd.symbol.id }))
-        );
+        const allDepsForFile = symbolDeps.flatMap(sd => sd.dependencies);
 
         const resolved = this.symbolResolver.resolveDependencies(fileId, allDepsForFile);
 

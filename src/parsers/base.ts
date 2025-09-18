@@ -163,6 +163,7 @@ export interface ParseOptions {
   chunkSize?: number;
   chunkOverlapLines?: number;
   preserveContext?: boolean;
+  bypassSizeLimit?: boolean;
 }
 
 /**
@@ -233,10 +234,10 @@ export abstract class BaseParser {
       // Normalize line endings to prevent parser issues
       const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // Check for Tree-sitter size limitation (28KB)
+      // Check for Tree-sitter size limitation (28KB) unless bypassed
       const TREE_SITTER_SIZE_LIMIT = 28000;
 
-      if (normalizedContent.length > TREE_SITTER_SIZE_LIMIT) {
+      if (!options?.bypassSizeLimit && normalizedContent.length > TREE_SITTER_SIZE_LIMIT) {
         this.logger.error('Content exceeds Tree-sitter limit and should be chunked at parser level', {
           originalSize: normalizedContent.length,
           limit: TREE_SITTER_SIZE_LIMIT
@@ -473,6 +474,7 @@ export abstract class BaseParser {
       includePrivateSymbols: options.includePrivateSymbols ?? true,
       includeTestFiles: options.includeTestFiles ?? true,
       maxFileSize: options.maxFileSize ?? 1024 * 1024, // 1MB default
+      bypassSizeLimit: options.bypassSizeLimit ?? false,
     };
   }
 

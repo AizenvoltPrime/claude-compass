@@ -78,8 +78,15 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     logger.debug(`Parsing file with ${this.frameworkType} framework context`, { filePath });
 
     try {
-      // Get base parsing result using direct parsing
-      const baseResult = await this.parseFileDirectly(filePath, content, options);
+      // Check if file needs chunked parsing due to size constraints
+      let baseResult: ParseResult;
+      if (this.shouldUseChunking(content, options)) {
+        logger.debug(`Using chunked parsing for large file`, { filePath, size: content.length });
+        baseResult = await this.parseFileInChunks(filePath, content, options);
+      } else {
+        // Get base parsing result using direct parsing
+        baseResult = await this.parseFileDirectly(filePath, content, options);
+      }
 
       // Skip framework analysis if requested or not applicable
       if (options.skipFrameworkAnalysis || !this.isFrameworkApplicable(filePath, content)) {
@@ -144,10 +151,23 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     const ext = path.extname(filePath);
     const fileName = path.basename(filePath);
 
+    logger.debug(`Checking framework applicability for ${this.frameworkType}`, {
+      filePath,
+      extension: ext,
+      patternsCount: this.patterns.length
+    });
+
     // Check file extension patterns
     const hasApplicableExtension = this.patterns.some(pattern =>
       pattern.fileExtensions.includes(ext)
     );
+
+    logger.debug(`Extension check result for ${this.frameworkType}`, {
+      filePath,
+      extension: ext,
+      hasApplicableExtension,
+      patterns: this.patterns.map(p => ({ name: p.name, extensions: p.fileExtensions }))
+    });
 
     if (!hasApplicableExtension) {
       return false;
@@ -156,11 +176,24 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     // Check content patterns
     const hasApplicableContent = this.patterns.some(pattern => {
       try {
-        return pattern.pattern.test(content);
+        const matches = pattern.pattern.test(content);
+        logger.debug(`Content pattern test for ${this.frameworkType}`, {
+          filePath,
+          patternName: pattern.name,
+          matches
+        });
+        return matches;
       } catch (error) {
         logger.warn(`Pattern test failed for ${pattern.name}`, { error });
         return false;
       }
+    });
+
+    logger.debug(`Final applicability result for ${this.frameworkType}`, {
+      filePath,
+      hasApplicableExtension,
+      hasApplicableContent,
+      result: hasApplicableContent
     });
 
     return hasApplicableContent;
@@ -385,6 +418,27 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     // Configure parser language based on file extension if the subclass supports it
     if (typeof (this as any).configureParserLanguage === 'function') {
       (this as any).configureParserLanguage(filePath);
+    }
+
+    // Defensive size check - parseFileDirectly should only be called for appropriately sized content
+    if (content.length > 28000 && !validatedOptions.bypassSizeLimit) {
+      logger.warn('parseFileDirectly called with large content without bypass flag', {
+        filePath,
+        contentSize: content.length
+      });
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [{
+          message: `Content too large (${content.length} bytes) for direct parsing`,
+          line: 1,
+          column: 1,
+          severity: 'error'
+        }],
+        frameworkEntities: []
+      };
     }
 
     const tree = this.parseContent(content, validatedOptions);
