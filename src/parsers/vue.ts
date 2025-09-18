@@ -16,6 +16,7 @@ import {
   PropDefinition,
   ParsedDependency,
   ParsedSymbol,
+  ParseResult,
 } from './base';
 import { DependencyType, SymbolType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
@@ -41,10 +42,27 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Helper method to choose the appropriate parser based on content type
    */
-  private parseScriptContent(scriptContent: string, isTypeScript: boolean): Parser.Tree {
-    return isTypeScript
-      ? this.typescriptParser.parse(scriptContent)
-      : this.parser.parse(scriptContent);
+  private parseScriptContent(scriptContent: string, isTypeScript: boolean): Parser.Tree | null {
+    // Check if content is too large for direct parsing
+    if (scriptContent.length > 28000) {
+      logger.debug('Skipping direct parsing for large Vue script content', {
+        size: scriptContent.length,
+        isTypeScript
+      });
+      return null;
+    }
+
+    // Use BaseParser's parseContent method to get proper size limit handling
+    if (isTypeScript) {
+      // Temporarily set TypeScript parser and use parseContent
+      const originalParser = this.parser;
+      this.parser = this.typescriptParser;
+      const result = this.parseContent(scriptContent);
+      this.parser = originalParser;
+      return result;
+    } else {
+      return this.parseContent(scriptContent);
+    }
   }
 
   /**
@@ -54,9 +72,9 @@ export class VueParser extends BaseFrameworkParser {
     logger.debug(`Parsing Vue file`, { filePath });
 
     try {
-      // For Vue SFCs, we need to extract script content and parse it separately
+      // For Vue SFCs, handle chunked parsing at script level if needed
       if (filePath.endsWith('.vue')) {
-        return await this.parseVueSFC(filePath, content, options);
+        return await this.parseVueSFCWithChunking(filePath, content, options);
       }
 
       // For regular JS/TS files, use base framework parser
@@ -83,6 +101,102 @@ export class VueParser extends BaseFrameworkParser {
         },
       };
     }
+  }
+
+  /**
+   * Parse Vue SFC with chunked parsing support for large script sections
+   */
+  private async parseVueSFCWithChunking(filePath: string, content: string, options: FrameworkParseOptions): Promise<ParseFileResult> {
+    const sections = this.extractSFCSections(content);
+
+    // Extract symbols, imports, etc. from script section
+    let symbols: any[] = [];
+    let imports: any[] = [];
+    let exports: any[] = [];
+    let dependencies: any[] = [];
+    let errors: any[] = [];
+
+    if (sections.script || sections.scriptSetup) {
+      const scriptContent = sections.scriptSetup || sections.script;
+
+      try {
+        const isTypeScript = sections.scriptLang === 'ts' || content.includes('lang="ts"');
+
+        // Check if script content needs chunking (force chunking for large scripts regardless of options)
+        const forceChunkingOptions = { ...options, enableChunking: true };
+        if (scriptContent && this.shouldUseChunking(scriptContent, forceChunkingOptions)) {
+          logger.debug(`Using chunked parsing for large Vue script section`, {
+            filePath,
+            scriptSize: scriptContent.length,
+            totalSize: content.length
+          });
+
+          // Create a temporary script file path for chunked parsing
+          const scriptFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
+
+          // Use chunked parsing on just the script content
+          const chunkedResult = await this.parseFileInChunks(scriptFilePath, scriptContent, options);
+
+          symbols = chunkedResult.symbols;
+          imports = chunkedResult.imports;
+          exports = chunkedResult.exports;
+          dependencies = chunkedResult.dependencies;
+          errors = chunkedResult.errors;
+        } else {
+          // Use normal parsing for smaller script sections
+          const tree = this.parseScriptContent(scriptContent!, isTypeScript);
+          if (tree?.rootNode) {
+            symbols = this.extractSymbols(tree.rootNode, scriptContent!);
+            imports = this.extractImports(tree.rootNode, scriptContent!);
+            exports = this.extractExports(tree.rootNode, scriptContent!);
+            dependencies = this.extractDependencies(tree.rootNode, scriptContent!);
+
+            if (tree.rootNode.hasError) {
+              errors.push({
+                message: 'Syntax errors in Vue script section',
+                line: 1,
+                column: 1,
+                severity: 'warning' as const,
+              });
+            }
+          }
+        }
+
+        // Extract template symbols using lightweight parsing
+        if (sections.template) {
+          const templateSymbols = this.extractTemplateSymbols(sections.template);
+          symbols.push(...templateSymbols);
+        }
+      } catch (error) {
+        errors.push({
+          message: `Script parsing error: ${error.message}`,
+          line: 1,
+          column: 1,
+          severity: 'error' as const,
+        });
+      }
+    } else if (sections.template) {
+      // Handle template-only Vue files
+      const templateSymbols = this.extractTemplateSymbols(sections.template);
+      symbols.push(...templateSymbols);
+    }
+
+    // Detect framework entities
+    const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
+
+    return {
+      symbols,
+      dependencies,
+      imports,
+      exports,
+      errors,
+      frameworkEntities: frameworkResult.entities || [],
+      metadata: {
+        framework: 'vue',
+        fileType: 'sfc',
+        isFrameworkSpecific: true,
+      },
+    };
   }
 
   /**
@@ -220,9 +334,19 @@ export class VueParser extends BaseFrameworkParser {
       try {
         // Use TypeScript parser for TS content, otherwise use JavaScript parser
         const isTypeScript = sections.scriptLang === 'ts' || content.includes('lang="ts"');
-        scriptTree = isTypeScript
-          ? this.typescriptParser.parse(scriptContent)
-          : this.parser.parse(scriptContent);
+
+        // Check if script content is too large and skip tree parsing for framework entity extraction
+        if (scriptContent.length > 28000) {
+          logger.debug(`Skipping script tree parsing for large Vue component`, {
+            filePath,
+            scriptSize: scriptContent.length
+          });
+          // For large scripts, we skip detailed parsing for framework entities
+          // The symbols will be extracted via the main parseFile path with chunking
+          scriptTree = null;
+        } else {
+          scriptTree = this.parseScriptContent(scriptContent, isTypeScript);
+        }
       } catch (error) {
         logger.warn(`Failed to parse script section for ${filePath}`, { error });
       }
@@ -613,7 +737,16 @@ export class VueParser extends BaseFrameworkParser {
     emits: string[];
     composables: string[];
   }> {
-    const tree = this.parser.parse(scriptContent);
+    // Skip detailed analysis for large scripts to avoid Tree-sitter limits
+    if (scriptContent.length > 28000) {
+      logger.debug(`Skipping detailed Vue script analysis for large file`, {
+        filePath,
+        scriptSize: scriptContent.length
+      });
+      return { props: [], emits: [], composables: [] };
+    }
+
+    const tree = this.parseContent(scriptContent);
 
     return {
       props: this.extractVueProps(tree),
@@ -1638,7 +1771,15 @@ export class VueParser extends BaseFrameworkParser {
     const lifecycleMethods: string[] = [];
 
     try {
-      const tree = this.parser.parse(scriptContent);
+      // Skip lifecycle extraction for large scripts to avoid Tree-sitter limits
+      if (scriptContent.length > 28000) {
+        logger.debug('Skipping lifecycle extraction for large Vue script', {
+          scriptSize: scriptContent.length
+        });
+        return lifecycleMethods;
+      }
+
+      const tree = this.parseContent(scriptContent);
       if (!tree?.rootNode) return lifecycleMethods;
 
       const vueLifecycleHooks = [
@@ -1751,7 +1892,16 @@ export class VueParser extends BaseFrameworkParser {
     }
 
     try {
-      const tree = this.parser.parse(content);
+      // Skip composable detection for large files to avoid Tree-sitter limits
+      if (content.length > 28000) {
+        logger.debug('Skipping composable detection for large file', {
+          filePath,
+          contentSize: content.length
+        });
+        return composables;
+      }
+
+      const tree = this.parseContent(content);
       const functions = this.findComposableFunctions(tree);
 
       for (const func of functions) {
@@ -2021,7 +2171,16 @@ export class VueParser extends BaseFrameworkParser {
     const routes: VueRoute[] = [];
 
     try {
-      const tree = this.parser.parse(content);
+      // Skip route analysis for large files to avoid Tree-sitter limits
+      if (content.length > 28000) {
+        logger.debug('Skipping route analysis for large file', {
+          filePath,
+          contentSize: content.length
+        });
+        return routes;
+      }
+
+      const tree = this.parseContent(content);
       if (!tree?.rootNode) return routes;
 
       // Find route definitions in different patterns
@@ -2255,7 +2414,16 @@ export class VueParser extends BaseFrameworkParser {
     options: FrameworkParseOptions
   ): Promise<PiniaStore[]> {
     try {
-      const tree = this.parser.parse(content);
+      // Skip store analysis for large files to avoid Tree-sitter limits
+      if (content.length > 28000) {
+        logger.debug('Skipping store analysis for large file', {
+          filePath,
+          contentSize: content.length
+        });
+        return [];
+      }
+
+      const tree = this.parseContent(content);
       if (!tree?.rootNode) return [];
 
       const storeDefinitions = this.findStoreDefinitions(tree.rootNode);
@@ -2661,7 +2829,16 @@ export class VueParser extends BaseFrameworkParser {
     options: FrameworkParseOptions
   ): Promise<VueComponent | null> {
     try {
-      const tree = this.parser.parse(content);
+      // Skip component analysis for large files to avoid Tree-sitter limits
+      if (content.length > 28000) {
+        logger.debug('Skipping component analysis for large file', {
+          filePath,
+          contentSize: content.length
+        });
+        return null;
+      }
+
+      const tree = this.parseContent(content);
       if (!tree?.rootNode) return null;
 
       const componentDefinition = this.findVueComponentDefinition(tree.rootNode);
@@ -2986,6 +3163,79 @@ export class VueParser extends BaseFrameworkParser {
       .split('-')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join('');
+  }
+
+  /**
+   * Override parseFileDirectly to handle Vue script content properly for chunked parsing
+   */
+  protected async parseFileDirectly(
+    filePath: string,
+    content: string,
+    options?: FrameworkParseOptions
+  ): Promise<ParseResult> {
+    // If this is a Vue file path (ends with .vue), treat the content as extracted script
+    if (filePath.endsWith('.vue') || filePath.includes('#chunk')) {
+      // For Vue files being chunked, the content is already extracted script content
+      // Determine if it's TypeScript based on file extension or lang attribute
+      const isTypeScript = filePath.includes('.ts') || content.includes('lang="ts"');
+
+      try {
+        const tree = this.parseScriptContent(content, isTypeScript);
+        if (!tree || !tree.rootNode) {
+          return {
+            symbols: [],
+            dependencies: [],
+            imports: [],
+            exports: [],
+            errors: [{
+              message: 'Failed to parse Vue script content',
+              line: 1,
+              column: 1,
+              severity: 'error',
+            }],
+          };
+        }
+
+        const symbols = this.extractSymbols(tree.rootNode, content);
+        const imports = this.extractImports(tree.rootNode, content);
+        const exports = this.extractExports(tree.rootNode, content);
+        const dependencies = this.extractDependencies(tree.rootNode, content);
+
+        const errors: any[] = [];
+        if (tree.rootNode.hasError) {
+          errors.push({
+            message: 'Syntax errors in Vue script content',
+            line: 1,
+            column: 1,
+            severity: 'warning' as const,
+          });
+        }
+
+        return {
+          symbols,
+          dependencies,
+          imports,
+          exports,
+          errors,
+        };
+      } catch (error) {
+        return {
+          symbols: [],
+          dependencies: [],
+          imports: [],
+          exports: [],
+          errors: [{
+            message: `Vue script parsing error: ${error.message}`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          }],
+        };
+      }
+    }
+
+    // For non-Vue files, use the parent implementation
+    return await super.parseFileDirectly(filePath, content, options);
   }
 
   /**

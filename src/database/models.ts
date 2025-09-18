@@ -65,6 +65,16 @@ export enum SymbolType {
   ENUM = 'enum',
   METHOD = 'method',
   PROPERTY = 'property',
+  // Phase 3 additions
+  JOB_QUEUE = 'job_queue',
+  JOB_DEFINITION = 'job_definition',
+  WORKER_THREAD = 'worker_thread',
+  ORM_ENTITY = 'orm_entity',
+  ORM_REPOSITORY = 'orm_repository',
+  TEST_SUITE = 'test_suite',
+  TEST_CASE = 'test_case',
+  MOCK = 'mock',
+  WORKSPACE_PROJECT = 'workspace_project',
 }
 
 export enum Visibility {
@@ -92,6 +102,20 @@ export enum DependencyType {
   IMPLEMENTS = 'implements',
   REFERENCES = 'references',
   EXPORTS = 'exports',
+  // Phase 3 additions
+  ORM_RELATION = 'orm_relation',
+  TEST_COVERS = 'test_covers',
+  PROCESSES_JOB = 'processes_job',
+  QUEUES_JOB = 'queues_job',
+  SCHEDULES_JOB = 'schedules_job',
+  BELONGS_TO = 'belongs_to',
+  HAS_MANY = 'has_many',
+  HAS_ONE = 'has_one',
+  MANY_TO_MANY = 'many_to_many',
+  MOCKS = 'mocks',
+  IMPORTS_FOR_TEST = 'imports_for_test',
+  PACKAGE_DEPENDENCY = 'package_dependency',
+  WORKSPACE_DEPENDENCY = 'workspace_dependency',
 }
 
 // Input types for creating records
@@ -338,4 +362,340 @@ export interface ComposableDependency {
   dependency_type: string;
   created_at: Date;
   updated_at: Date;
+}
+
+// Phase 3 Models - Background Jobs
+
+export interface JobQueue {
+  id: number;
+  repo_id: number;
+  name: string;
+  queue_type: JobQueueType;
+  symbol_id: number;
+  config_data: Record<string, any>;
+  redis_config?: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface JobDefinition {
+  id: number;
+  repo_id: number;
+  queue_id: number;
+  job_name: string;
+  handler_symbol_id: number;
+  schedule_pattern?: string;
+  concurrency: number;
+  retry_attempts: number;
+  job_options: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface WorkerThread {
+  id: number;
+  repo_id: number;
+  worker_file_id: number;
+  parent_symbol_id?: number;
+  worker_type: WorkerType;
+  data_schema?: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export enum JobQueueType {
+  BULL = 'bull',
+  BULLMQ = 'bullmq',
+  AGENDA = 'agenda',
+  BEE = 'bee',
+  KUE = 'kue',
+}
+
+export enum WorkerType {
+  WORKER_THREADS = 'worker_threads',
+  CLUSTER = 'cluster',
+  CHILD_PROCESS = 'child_process',
+}
+
+// Phase 3 Models - ORM Entities
+
+export interface ORMEntity {
+  id: number;
+  repo_id: number;
+  symbol_id: number;
+  entity_name: string;
+  table_name?: string;
+  orm_type: ORMType;
+  schema_file_id?: number;
+  fields: Record<string, any>;
+  indexes: any[];
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ORMRelationship {
+  id: number;
+  from_entity_id: number;
+  to_entity_id: number;
+  relationship_type: ORMRelationshipType;
+  foreign_key?: string;
+  through_table?: string;
+  inverse_relationship_id?: number;
+  confidence: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ORMRepository {
+  id: number;
+  repo_id: number;
+  symbol_id: number;
+  entity_id: number;
+  repository_type: ORMRepositoryType;
+  methods: string[];
+  created_at: Date;
+  updated_at: Date;
+}
+
+export enum ORMType {
+  PRISMA = 'prisma',
+  TYPEORM = 'typeorm',
+  SEQUELIZE = 'sequelize',
+  MONGOOSE = 'mongoose',
+}
+
+export enum ORMRelationshipType {
+  HAS_MANY = 'has_many',
+  BELONGS_TO = 'belongs_to',
+  HAS_ONE = 'has_one',
+  MANY_TO_MANY = 'many_to_many',
+}
+
+export enum ORMRepositoryType {
+  TYPEORM_REPOSITORY = 'typeorm_repository',
+  PRISMA_SERVICE = 'prisma_service',
+  SEQUELIZE_MODEL = 'sequelize_model',
+  CUSTOM_REPOSITORY = 'custom_repository',
+}
+
+// Phase 3 Models - Test Frameworks
+
+export interface TestSuite {
+  id: number;
+  repo_id: number;
+  file_id: number;
+  suite_name: string;
+  parent_suite_id?: number;
+  framework_type: TestFrameworkType;
+  start_line?: number;
+  end_line?: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface TestCase {
+  id: number;
+  repo_id: number;
+  suite_id: number;
+  symbol_id?: number;
+  test_name: string;
+  test_type: TestType;
+  start_line?: number;
+  end_line?: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface TestCoverage {
+  id: number;
+  test_case_id: number;
+  target_symbol_id: number;
+  coverage_type: TestCoverageType;
+  line_number?: number;
+  confidence: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export enum TestFrameworkType {
+  JEST = 'jest',
+  VITEST = 'vitest',
+  CYPRESS = 'cypress',
+  PLAYWRIGHT = 'playwright',
+  MOCHA = 'mocha',
+  JASMINE = 'jasmine',
+}
+
+export enum TestType {
+  UNIT = 'unit',
+  INTEGRATION = 'integration',
+  E2E = 'e2e',
+  COMPONENT = 'component',
+}
+
+export enum TestCoverageType {
+  TESTS = 'tests',
+  MOCKS = 'mocks',
+  IMPORTS_FOR_TEST = 'imports_for_test',
+  SPY = 'spy',
+}
+
+// Phase 3 Models - Package Dependencies
+
+export interface PackageDependency {
+  id: number;
+  repo_id: number;
+  package_name: string;
+  version_spec: string;
+  resolved_version?: string;
+  dependency_type: PackageDependencyType;
+  package_manager: PackageManagerType;
+  lock_file_path?: string;
+  is_workspace: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface WorkspaceProject {
+  id: number;
+  repo_id: number;
+  project_name: string;
+  project_path: string;
+  package_json_path: string;
+  parent_project_id?: number;
+  workspace_type: WorkspaceType;
+  config_data: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export enum PackageDependencyType {
+  DEPENDENCIES = 'dependencies',
+  DEV_DEPENDENCIES = 'devDependencies',
+  PEER_DEPENDENCIES = 'peerDependencies',
+  OPTIONAL_DEPENDENCIES = 'optionalDependencies',
+}
+
+export enum PackageManagerType {
+  NPM = 'npm',
+  YARN = 'yarn',
+  PNPM = 'pnpm',
+  BUN = 'bun',
+}
+
+export enum WorkspaceType {
+  NX = 'nx',
+  LERNA = 'lerna',
+  TURBOREPO = 'turborepo',
+  RUSH = 'rush',
+  YARN_WORKSPACES = 'yarn_workspaces',
+  NPM_WORKSPACES = 'npm_workspaces',
+}
+
+// Phase 3 Create Input Types
+
+export interface CreateJobQueue {
+  repo_id: number;
+  name: string;
+  queue_type: JobQueueType;
+  symbol_id: number;
+  config_data?: Record<string, any>;
+  redis_config?: Record<string, any>;
+}
+
+export interface CreateJobDefinition {
+  repo_id: number;
+  queue_id: number;
+  job_name: string;
+  handler_symbol_id: number;
+  schedule_pattern?: string;
+  concurrency?: number;
+  retry_attempts?: number;
+  job_options?: Record<string, any>;
+}
+
+export interface CreateWorkerThread {
+  repo_id: number;
+  worker_file_id: number;
+  parent_symbol_id?: number;
+  worker_type: WorkerType;
+  data_schema?: Record<string, any>;
+}
+
+export interface CreateORMEntity {
+  repo_id: number;
+  symbol_id: number;
+  entity_name: string;
+  table_name?: string;
+  orm_type: ORMType;
+  schema_file_id?: number;
+  fields?: Record<string, any>;
+  indexes?: any[];
+}
+
+export interface CreateORMRelationship {
+  from_entity_id: number;
+  to_entity_id: number;
+  relationship_type: ORMRelationshipType;
+  foreign_key?: string;
+  through_table?: string;
+  inverse_relationship_id?: number;
+  confidence?: number;
+}
+
+export interface CreateORMRepository {
+  repo_id: number;
+  symbol_id: number;
+  entity_id: number;
+  repository_type: ORMRepositoryType;
+  methods?: string[];
+}
+
+export interface CreateTestSuite {
+  repo_id: number;
+  file_id: number;
+  suite_name: string;
+  parent_suite_id?: number;
+  framework_type: TestFrameworkType;
+  start_line?: number;
+  end_line?: number;
+}
+
+export interface CreateTestCase {
+  repo_id: number;
+  suite_id: number;
+  symbol_id?: number;
+  test_name: string;
+  test_type: TestType;
+  start_line?: number;
+  end_line?: number;
+}
+
+export interface CreateTestCoverage {
+  test_case_id: number;
+  target_symbol_id: number;
+  coverage_type: TestCoverageType;
+  line_number?: number;
+  confidence?: number;
+}
+
+export interface CreatePackageDependency {
+  repo_id: number;
+  package_name: string;
+  version_spec: string;
+  resolved_version?: string;
+  dependency_type: PackageDependencyType;
+  package_manager: PackageManagerType;
+  lock_file_path?: string;
+  is_workspace?: boolean;
+}
+
+export interface CreateWorkspaceProject {
+  repo_id: number;
+  project_name: string;
+  project_path: string;
+  package_json_path: string;
+  parent_project_id?: number;
+  workspace_type: WorkspaceType;
+  config_data?: Record<string, any>;
 }

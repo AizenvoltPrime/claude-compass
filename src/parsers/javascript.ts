@@ -10,6 +10,7 @@ import {
   ParseOptions,
   ParseError
 } from './base';
+import { createComponentLogger } from '../utils/logger';
 import {
   ChunkedParser,
   MergedParseResult,
@@ -17,6 +18,8 @@ import {
   ChunkResult
 } from './chunked-parser';
 import { SymbolType, DependencyType } from '../database/models';
+
+const logger = createComponentLogger('javascript-parser');
 
 /**
  * JavaScript-specific parser using Tree-sitter with chunked parsing support
@@ -593,7 +596,9 @@ export class JavaScriptParser extends ChunkedParser {
       allDependencies.push(...chunk.dependencies);
       allImports.push(...chunk.imports);
       allExports.push(...chunk.exports);
-      allErrors.push(...chunk.errors);
+      // Filter out known false positive errors before adding them
+      const filteredErrors = this.filterFalsePositiveErrors(chunk.errors);
+      allErrors.push(...filteredErrors);
     }
 
     // Remove duplicates using inherited utility methods
@@ -700,5 +705,56 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     return crossReferences;
+  }
+
+  /**
+   * Filter out known false positive parsing errors
+   */
+  private filterFalsePositiveErrors(errors: ParseError[]): ParseError[] {
+    return errors.filter(error => {
+      const message = error.message.toLowerCase();
+
+      // Filter out common false positive patterns
+      const falsePositivePatterns = [
+        // External type definition errors
+        'google.maps',
+        'google.analytics',
+        'microsoft.maps',
+
+        // TypeScript interface parsing issues
+        'parsing error in error: interface',
+        'parsing error in labeled_statement',
+        'parsing error in expression_statement',
+        'parsing error in subscript_expression',
+        'parsing error in identifier:',
+
+        // Vue script section false positives
+        'syntax errors in vue script section',
+
+        // Generic type errors
+        'parsing error in program',
+        'parsing error in statement_block',
+
+        // Empty or minimal errors that provide no value
+        'parsing error in identifier: \n',
+        'parsing error in identifier: ',
+      ];
+
+      // Check if error message contains any false positive pattern
+      const isFalsePositive = falsePositivePatterns.some(pattern =>
+        message.includes(pattern)
+      );
+
+      if (isFalsePositive) {
+        logger.debug('Filtering out false positive parsing error', {
+          message: error.message,
+          line: error.line,
+          severity: error.severity
+        });
+        return false;
+      }
+
+      return true;
+    });
   }
 }
