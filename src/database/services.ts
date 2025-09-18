@@ -31,6 +31,43 @@ import {
   RouteSearchOptions,
   ComponentSearchOptions,
   ComposableSearchOptions,
+  // Phase 3 imports - Background Jobs
+  JobQueue,
+  JobDefinition,
+  WorkerThread,
+  CreateJobQueue,
+  CreateJobDefinition,
+  CreateWorkerThread,
+  JobQueueType,
+  WorkerType,
+  // Phase 3 imports - ORM Entities
+  ORMEntity,
+  ORMRelationship,
+  ORMRepository,
+  CreateORMEntity,
+  CreateORMRelationship,
+  CreateORMRepository,
+  ORMType,
+  ORMRelationshipType,
+  ORMRepositoryType,
+  // Phase 3 imports - Test Frameworks
+  TestSuite,
+  TestCase,
+  TestCoverage,
+  CreateTestSuite,
+  CreateTestCase,
+  CreateTestCoverage,
+  TestFrameworkType,
+  TestType,
+  TestCoverageType,
+  // Phase 3 imports - Package Dependencies
+  PackageDependency,
+  WorkspaceProject,
+  CreatePackageDependency,
+  CreateWorkspaceProject,
+  PackageDependencyType,
+  PackageManagerType,
+  WorkspaceType,
 } from './models';
 import { createComponentLogger } from '../utils/logger';
 
@@ -396,19 +433,61 @@ export class DatabaseService {
   }
 
   // File dependency operations
+
+  /**
+   * Deduplicate file dependencies by keeping the entry with highest confidence
+   * for each unique combination of from_file_id, to_file_id, dependency_type
+   */
+  private deduplicateFileDependencies(dependencies: CreateFileDependency[]): CreateFileDependency[] {
+    const uniqueMap = new Map<string, CreateFileDependency>();
+
+    for (const dep of dependencies) {
+      const key = `${dep.from_file_id}-${dep.to_file_id}-${dep.dependency_type}`;
+      const existing = uniqueMap.get(key);
+
+      // Keep the entry with higher confidence, or first entry if confidence is equal
+      if (!existing || (dep.confidence || 0) > (existing.confidence || 0)) {
+        uniqueMap.set(key, dep);
+      }
+    }
+
+    return Array.from(uniqueMap.values());
+  }
+
   async createFileDependencies(dependencies: CreateFileDependency[]): Promise<FileDependency[]> {
     if (dependencies.length === 0) return [];
 
     logger.debug('Creating file dependencies in batch', { count: dependencies.length });
 
-    // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
-    const results = await this.db('file_dependencies')
-      .insert(dependencies)
-      .onConflict(['from_file_id', 'to_file_id', 'dependency_type'])
-      .merge(['line_number', 'confidence', 'updated_at'])
-      .returning('*');
+    // Deduplicate before processing to prevent constraint violations
+    const uniqueDependencies = this.deduplicateFileDependencies(dependencies);
 
-    return results as FileDependency[];
+    if (uniqueDependencies.length !== dependencies.length) {
+      logger.warn('Removed duplicate file dependencies', {
+        original: dependencies.length,
+        unique: uniqueDependencies.length,
+        duplicatesRemoved: dependencies.length - uniqueDependencies.length
+      });
+    }
+
+    // Process in chunks to handle large datasets efficiently
+    const BATCH_SIZE = 1000;
+    const results: FileDependency[] = [];
+
+    for (let i = 0; i < uniqueDependencies.length; i += BATCH_SIZE) {
+      const chunk = uniqueDependencies.slice(i, i + BATCH_SIZE);
+
+      // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
+      const chunkResults = await this.db('file_dependencies')
+        .insert(chunk)
+        .onConflict(['from_file_id', 'to_file_id', 'dependency_type'])
+        .merge(['line_number', 'confidence', 'updated_at'])
+        .returning('*');
+
+      results.push(...(chunkResults as FileDependency[]));
+    }
+
+    return results;
   }
 
   async getFileDependenciesByRepository(repoId: number): Promise<FileDependency[]> {
@@ -997,6 +1076,384 @@ export class DatabaseService {
         language: result.file_language,
       },
     } as SymbolWithFile;
+  }
+
+  // ===== Phase 3 Service Methods =====
+
+  // Background Job Queue operations
+  async createJobQueue(data: CreateJobQueue): Promise<JobQueue> {
+    logger.debug('Creating job queue', { name: data.name, type: data.queue_type });
+    const [jobQueue] = await this.db('job_queues')
+      .insert(data)
+      .returning('*');
+    return jobQueue as JobQueue;
+  }
+
+  async getJobQueue(id: number): Promise<JobQueue | null> {
+    const jobQueue = await this.db('job_queues')
+      .where({ id })
+      .first();
+    return jobQueue as JobQueue || null;
+  }
+
+  async getJobQueuesByRepository(repoId: number): Promise<JobQueue[]> {
+    const jobQueues = await this.db('job_queues')
+      .where({ repo_id: repoId })
+      .orderBy('name');
+    return jobQueues as JobQueue[];
+  }
+
+  async getJobQueuesByType(repoId: number, queueType: JobQueueType): Promise<JobQueue[]> {
+    const jobQueues = await this.db('job_queues')
+      .where({ repo_id: repoId, queue_type: queueType })
+      .orderBy('name');
+    return jobQueues as JobQueue[];
+  }
+
+  // Job Definition operations
+  async createJobDefinition(data: CreateJobDefinition): Promise<JobDefinition> {
+    logger.debug('Creating job definition', { job_name: data.job_name, queue_id: data.queue_id });
+    const [jobDefinition] = await this.db('job_definitions')
+      .insert(data)
+      .returning('*');
+    return jobDefinition as JobDefinition;
+  }
+
+  async getJobDefinition(id: number): Promise<JobDefinition | null> {
+    const jobDefinition = await this.db('job_definitions')
+      .where({ id })
+      .first();
+    return jobDefinition as JobDefinition || null;
+  }
+
+  async getJobDefinitionsByQueue(queueId: number): Promise<JobDefinition[]> {
+    const jobDefinitions = await this.db('job_definitions')
+      .where({ queue_id: queueId })
+      .orderBy('job_name');
+    return jobDefinitions as JobDefinition[];
+  }
+
+  async getJobDefinitionsByRepository(repoId: number): Promise<JobDefinition[]> {
+    const jobDefinitions = await this.db('job_definitions')
+      .where({ repo_id: repoId })
+      .orderBy('job_name');
+    return jobDefinitions as JobDefinition[];
+  }
+
+  // Worker Thread operations
+  async createWorkerThread(data: CreateWorkerThread): Promise<WorkerThread> {
+    logger.debug('Creating worker thread', { worker_type: data.worker_type, worker_file_id: data.worker_file_id });
+    const [workerThread] = await this.db('worker_threads')
+      .insert(data)
+      .returning('*');
+    return workerThread as WorkerThread;
+  }
+
+  async getWorkerThread(id: number): Promise<WorkerThread | null> {
+    const workerThread = await this.db('worker_threads')
+      .where({ id })
+      .first();
+    return workerThread as WorkerThread || null;
+  }
+
+  async getWorkerThreadsByRepository(repoId: number): Promise<WorkerThread[]> {
+    const workerThreads = await this.db('worker_threads')
+      .where({ repo_id: repoId })
+      .orderBy('worker_type');
+    return workerThreads as WorkerThread[];
+  }
+
+  // ORM Entity operations
+  async createORMEntity(data: CreateORMEntity): Promise<ORMEntity> {
+    logger.debug('Creating ORM entity', { entity_name: data.entity_name, orm_type: data.orm_type });
+    const [ormEntity] = await this.db('orm_entities')
+      .insert(data)
+      .returning('*');
+    return ormEntity as ORMEntity;
+  }
+
+  async getORMEntity(id: number): Promise<ORMEntity | null> {
+    const ormEntity = await this.db('orm_entities')
+      .where({ id })
+      .first();
+    return ormEntity as ORMEntity || null;
+  }
+
+  async getORMEntitiesByRepository(repoId: number): Promise<ORMEntity[]> {
+    const ormEntities = await this.db('orm_entities')
+      .where({ repo_id: repoId })
+      .orderBy('entity_name');
+    return ormEntities as ORMEntity[];
+  }
+
+  async getORMEntitiesByType(repoId: number, ormType: ORMType): Promise<ORMEntity[]> {
+    const ormEntities = await this.db('orm_entities')
+      .where({ repo_id: repoId, orm_type: ormType })
+      .orderBy('entity_name');
+    return ormEntities as ORMEntity[];
+  }
+
+  async findORMEntityByName(repoId: number, entityName: string): Promise<ORMEntity | null> {
+    const ormEntity = await this.db('orm_entities')
+      .where({ repo_id: repoId, entity_name: entityName })
+      .first();
+    return ormEntity as ORMEntity || null;
+  }
+
+  // ORM Relationship operations
+  async createORMRelationship(data: CreateORMRelationship): Promise<ORMRelationship> {
+    logger.debug('Creating ORM relationship', { relationship_type: data.relationship_type, from_entity_id: data.from_entity_id, to_entity_id: data.to_entity_id });
+    const [ormRelationship] = await this.db('orm_relationships')
+      .insert(data)
+      .returning('*');
+    return ormRelationship as ORMRelationship;
+  }
+
+  async getORMRelationship(id: number): Promise<ORMRelationship | null> {
+    const ormRelationship = await this.db('orm_relationships')
+      .where({ id })
+      .first();
+    return ormRelationship as ORMRelationship || null;
+  }
+
+  async getORMRelationshipsByEntity(entityId: number): Promise<ORMRelationship[]> {
+    const relationships = await this.db('orm_relationships')
+      .where(function() {
+        this.where({ from_entity_id: entityId })
+            .orWhere({ to_entity_id: entityId });
+      })
+      .orderBy('relationship_type');
+    return relationships as ORMRelationship[];
+  }
+
+  async getORMRelationshipsByType(entityId: number, relationshipType: ORMRelationshipType): Promise<ORMRelationship[]> {
+    const relationships = await this.db('orm_relationships')
+      .where({ from_entity_id: entityId, relationship_type: relationshipType })
+      .orderBy('id');
+    return relationships as ORMRelationship[];
+  }
+
+  // ORM Repository operations
+  async createORMRepository(data: CreateORMRepository): Promise<ORMRepository> {
+    logger.debug('Creating ORM repository', { repository_type: data.repository_type, entity_id: data.entity_id });
+    const [ormRepository] = await this.db('orm_repositories')
+      .insert(data)
+      .returning('*');
+    return ormRepository as ORMRepository;
+  }
+
+  async getORMRepository(id: number): Promise<ORMRepository | null> {
+    const ormRepository = await this.db('orm_repositories')
+      .where({ id })
+      .first();
+    return ormRepository as ORMRepository || null;
+  }
+
+  async getORMRepositoriesByEntity(entityId: number): Promise<ORMRepository[]> {
+    const ormRepositories = await this.db('orm_repositories')
+      .where({ entity_id: entityId })
+      .orderBy('repository_type');
+    return ormRepositories as ORMRepository[];
+  }
+
+  // Test Suite operations
+  async createTestSuite(data: CreateTestSuite): Promise<TestSuite> {
+    logger.debug('Creating test suite', { suite_name: data.suite_name, framework_type: data.framework_type });
+    const [testSuite] = await this.db('test_suites')
+      .insert(data)
+      .returning('*');
+    return testSuite as TestSuite;
+  }
+
+  async getTestSuite(id: number): Promise<TestSuite | null> {
+    const testSuite = await this.db('test_suites')
+      .where({ id })
+      .first();
+    return testSuite as TestSuite || null;
+  }
+
+  async getTestSuitesByRepository(repoId: number): Promise<TestSuite[]> {
+    const testSuites = await this.db('test_suites')
+      .where({ repo_id: repoId })
+      .orderBy('suite_name');
+    return testSuites as TestSuite[];
+  }
+
+  async getTestSuitesByFramework(repoId: number, frameworkType: TestFrameworkType): Promise<TestSuite[]> {
+    const testSuites = await this.db('test_suites')
+      .where({ repo_id: repoId, framework_type: frameworkType })
+      .orderBy('suite_name');
+    return testSuites as TestSuite[];
+  }
+
+  async getTestSuitesByFile(fileId: number): Promise<TestSuite[]> {
+    const testSuites = await this.db('test_suites')
+      .where({ file_id: fileId })
+      .orderBy('start_line');
+    return testSuites as TestSuite[];
+  }
+
+  // Test Case operations
+  async createTestCase(data: CreateTestCase): Promise<TestCase> {
+    logger.debug('Creating test case', { test_name: data.test_name, test_type: data.test_type });
+    const [testCase] = await this.db('test_cases')
+      .insert(data)
+      .returning('*');
+    return testCase as TestCase;
+  }
+
+  async getTestCase(id: number): Promise<TestCase | null> {
+    const testCase = await this.db('test_cases')
+      .where({ id })
+      .first();
+    return testCase as TestCase || null;
+  }
+
+  async getTestCasesBySuite(suiteId: number): Promise<TestCase[]> {
+    const testCases = await this.db('test_cases')
+      .where({ suite_id: suiteId })
+      .orderBy('start_line');
+    return testCases as TestCase[];
+  }
+
+  async getTestCasesByType(repoId: number, testType: TestType): Promise<TestCase[]> {
+    const testCases = await this.db('test_cases')
+      .where({ repo_id: repoId, test_type: testType })
+      .orderBy('test_name');
+    return testCases as TestCase[];
+  }
+
+  // Test Coverage operations
+  async createTestCoverage(data: CreateTestCoverage): Promise<TestCoverage> {
+    logger.debug('Creating test coverage', { test_case_id: data.test_case_id, target_symbol_id: data.target_symbol_id, coverage_type: data.coverage_type });
+    const [testCoverage] = await this.db('test_coverage')
+      .insert(data)
+      .returning('*');
+    return testCoverage as TestCoverage;
+  }
+
+  async getTestCoverage(id: number): Promise<TestCoverage | null> {
+    const testCoverage = await this.db('test_coverage')
+      .where({ id })
+      .first();
+    return testCoverage as TestCoverage || null;
+  }
+
+  async getTestCoverageByTestCase(testCaseId: number): Promise<TestCoverage[]> {
+    const testCoverage = await this.db('test_coverage')
+      .where({ test_case_id: testCaseId })
+      .orderBy('coverage_type');
+    return testCoverage as TestCoverage[];
+  }
+
+  async getTestCoverageBySymbol(symbolId: number): Promise<TestCoverage[]> {
+    const testCoverage = await this.db('test_coverage')
+      .where({ target_symbol_id: symbolId })
+      .orderBy('coverage_type');
+    return testCoverage as TestCoverage[];
+  }
+
+  async getTestCoverageByType(testCaseId: number, coverageType: TestCoverageType): Promise<TestCoverage[]> {
+    const testCoverage = await this.db('test_coverage')
+      .where({ test_case_id: testCaseId, coverage_type: coverageType })
+      .orderBy('line_number');
+    return testCoverage as TestCoverage[];
+  }
+
+  // Package Dependency operations
+  async createPackageDependency(data: CreatePackageDependency): Promise<PackageDependency> {
+    logger.debug('Creating package dependency', { package_name: data.package_name, dependency_type: data.dependency_type });
+    const [packageDependency] = await this.db('package_dependencies')
+      .insert(data)
+      .returning('*');
+    return packageDependency as PackageDependency;
+  }
+
+  async getPackageDependency(id: number): Promise<PackageDependency | null> {
+    const packageDependency = await this.db('package_dependencies')
+      .where({ id })
+      .first();
+    return packageDependency as PackageDependency || null;
+  }
+
+  async getPackageDependenciesByRepository(repoId: number): Promise<PackageDependency[]> {
+    const packageDependencies = await this.db('package_dependencies')
+      .where({ repo_id: repoId })
+      .orderBy('package_name');
+    return packageDependencies as PackageDependency[];
+  }
+
+  async getPackageDependenciesByType(repoId: number, dependencyType: PackageDependencyType): Promise<PackageDependency[]> {
+    const packageDependencies = await this.db('package_dependencies')
+      .where({ repo_id: repoId, dependency_type: dependencyType })
+      .orderBy('package_name');
+    return packageDependencies as PackageDependency[];
+  }
+
+  async getPackageDependenciesByManager(repoId: number, packageManager: PackageManagerType): Promise<PackageDependency[]> {
+    const packageDependencies = await this.db('package_dependencies')
+      .where({ repo_id: repoId, package_manager: packageManager })
+      .orderBy('package_name');
+    return packageDependencies as PackageDependency[];
+  }
+
+  async findPackageDependency(repoId: number, packageName: string, dependencyType: PackageDependencyType): Promise<PackageDependency | null> {
+    const packageDependency = await this.db('package_dependencies')
+      .where({ repo_id: repoId, package_name: packageName, dependency_type: dependencyType })
+      .first();
+    return packageDependency as PackageDependency || null;
+  }
+
+  // Workspace Project operations
+  async createWorkspaceProject(data: CreateWorkspaceProject): Promise<WorkspaceProject> {
+    logger.debug('Creating workspace project', { project_name: data.project_name, workspace_type: data.workspace_type });
+    const [workspaceProject] = await this.db('workspace_projects')
+      .insert(data)
+      .returning('*');
+    return workspaceProject as WorkspaceProject;
+  }
+
+  async getWorkspaceProject(id: number): Promise<WorkspaceProject | null> {
+    const workspaceProject = await this.db('workspace_projects')
+      .where({ id })
+      .first();
+    return workspaceProject as WorkspaceProject || null;
+  }
+
+  async getWorkspaceProjectsByRepository(repoId: number): Promise<WorkspaceProject[]> {
+    const workspaceProjects = await this.db('workspace_projects')
+      .where({ repo_id: repoId })
+      .orderBy('project_name');
+    return workspaceProjects as WorkspaceProject[];
+  }
+
+  async getWorkspaceProjectsByType(repoId: number, workspaceType: WorkspaceType): Promise<WorkspaceProject[]> {
+    const workspaceProjects = await this.db('workspace_projects')
+      .where({ repo_id: repoId, workspace_type: workspaceType })
+      .orderBy('project_name');
+    return workspaceProjects as WorkspaceProject[];
+  }
+
+  async getRootWorkspaceProjects(repoId: number): Promise<WorkspaceProject[]> {
+    const workspaceProjects = await this.db('workspace_projects')
+      .where({ repo_id: repoId })
+      .whereNull('parent_project_id')
+      .orderBy('project_name');
+    return workspaceProjects as WorkspaceProject[];
+  }
+
+  async getChildWorkspaceProjects(parentProjectId: number): Promise<WorkspaceProject[]> {
+    const workspaceProjects = await this.db('workspace_projects')
+      .where({ parent_project_id: parentProjectId })
+      .orderBy('project_name');
+    return workspaceProjects as WorkspaceProject[];
+  }
+
+  async findWorkspaceProjectByPath(repoId: number, projectPath: string): Promise<WorkspaceProject | null> {
+    const workspaceProject = await this.db('workspace_projects')
+      .where({ repo_id: repoId, project_path: projectPath })
+      .first();
+    return workspaceProject as WorkspaceProject || null;
   }
 }
 

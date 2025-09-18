@@ -6,6 +6,10 @@ export { VueParser } from './vue';
 export { NextJSParser } from './nextjs';
 export { ReactParser } from './react';
 export { NodeJSParser } from './nodejs';
+export { TestFrameworkParser } from './test-framework';
+export { PackageManagerParser } from './package-manager';
+export { BackgroundJobParser } from './background-job';
+export { ORMParser } from './orm';
 export { FrameworkDetector } from './framework-detector';
 export { MultiParser } from './multi-parser';
 export * from './base';
@@ -20,6 +24,10 @@ import { VueParser } from './vue';
 import { NextJSParser } from './nextjs';
 import { ReactParser } from './react';
 import { NodeJSParser } from './nodejs';
+import { TestFrameworkParser } from './test-framework';
+import { PackageManagerParser } from './package-manager';
+import { BackgroundJobParser } from './background-job';
+import { ORMParser } from './orm';
 
 // Register base language parsers
 ParserFactory.registerParser('javascript', () => new JavaScriptParser());
@@ -48,6 +56,20 @@ ParserFactory.registerParser('nodejs', () => {
   const parser = new Parser();
   parser.setLanguage(JavaScript);
   return new NodeJSParser(parser);
+});
+ParserFactory.registerParser('test-framework', () => {
+  return new TestFrameworkParser();
+});
+ParserFactory.registerParser('package-manager', () => {
+  return new PackageManagerParser();
+});
+ParserFactory.registerParser('background-job', () => {
+  return new BackgroundJobParser();
+});
+ParserFactory.registerParser('orm', () => {
+  const parser = new Parser();
+  parser.setLanguage(JavaScript);
+  return new ORMParser(parser);
 });
 
 // Convenience function to get parser for file
