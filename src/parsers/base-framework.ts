@@ -11,7 +11,7 @@ import {
   ParsedExport,
   ParseError,
 } from './base';
-import { SymbolType, DependencyType } from '../database/models';
+import { SymbolType, DependencyType, Visibility } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -616,7 +616,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         start_line: node.startPosition.row + 1,
         end_line: node.endPosition.row + 1,
         is_exported: this.isExported(node),
-        visibility: 'public',
+        visibility: Visibility.PUBLIC,
         signature: content.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 100))
       };
     } catch (error) {
@@ -640,7 +640,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         start_line: node.startPosition.row + 1,
         end_line: node.endPosition.row + 1,
         is_exported: this.isExported(node),
-        visibility: 'public'
+        visibility: Visibility.PUBLIC
       };
     } catch (error) {
       return null;
@@ -663,7 +663,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         start_line: node.startPosition.row + 1,
         end_line: node.endPosition.row + 1,
         is_exported: this.isExported(node),
-        visibility: 'public'
+        visibility: Visibility.PUBLIC
       };
     } catch (error) {
       return null;

@@ -17,7 +17,7 @@ import {
   ChunkedParseOptions,
   ChunkResult
 } from './chunked-parser';
-import { SymbolType, DependencyType } from '../database/models';
+import { SymbolType, DependencyType, Visibility } from '../database/models';
 
 const logger = createComponentLogger('javascript-parser');
 
@@ -290,11 +290,11 @@ export class JavaScriptParser extends ChunkedParser {
     const signature = this.extractFunctionSignature(node, content);
 
     // Determine visibility
-    let visibility: 'public' | 'private' | 'protected' | undefined;
+    let visibility: Visibility | undefined;
     if (name.startsWith('#')) {
-      visibility = 'private';
+      visibility = Visibility.PRIVATE;
     } else if (name.startsWith('_')) {
-      visibility = 'private'; // Convention-based privacy
+      visibility = Visibility.PRIVATE; // Convention-based privacy
     }
 
     return {
@@ -315,7 +315,7 @@ export class JavaScriptParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: false,
-      visibility: 'private',
+      visibility: Visibility.PRIVATE,
       signature: this.getNodeText(node, content).substring(0, 100)
     };
   }

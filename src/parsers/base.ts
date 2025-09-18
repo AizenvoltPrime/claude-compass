@@ -1,5 +1,5 @@
 import Parser from 'tree-sitter';
-import { SymbolType, DependencyType, CreateSymbol, CreateDependency } from '../database/models';
+import { SymbolType, DependencyType, CreateSymbol, CreateDependency, Visibility } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { EncodingConverter } from '../utils/encoding-converter';
 import * as fs from 'fs/promises';
@@ -13,8 +13,9 @@ export interface ParsedSymbol {
   start_line: number;
   end_line: number;
   is_exported: boolean;
-  visibility?: 'public' | 'private' | 'protected';
+  visibility?: Visibility;
   signature?: string;
+  file_id?: number;
 }
 
 export interface ParsedDependency {
@@ -23,6 +24,9 @@ export interface ParsedDependency {
   dependency_type: DependencyType;
   line_number: number;
   confidence: number;
+  // Optional fields for database compatibility
+  from_symbol_id?: number;
+  to_symbol_id?: number;
 }
 
 export interface ParsedImport {
@@ -145,6 +149,7 @@ export interface ParseResult {
   exports: ParsedExport[];
   errors: ParseError[];
   frameworkEntities?: FrameworkEntity[];
+  success?: boolean;
 }
 
 export interface ParseError {
@@ -446,10 +451,10 @@ export abstract class BaseParser {
   /**
    * Get visibility from modifiers
    */
-  protected getVisibilityFromModifiers(modifiers: string[]): 'public' | 'private' | 'protected' | undefined {
-    if (modifiers.includes('private')) return 'private';
-    if (modifiers.includes('protected')) return 'protected';
-    if (modifiers.includes('public')) return 'public';
+  protected getVisibilityFromModifiers(modifiers: string[]): Visibility | undefined {
+    if (modifiers.includes('private')) return Visibility.PRIVATE;
+    if (modifiers.includes('protected')) return Visibility.PROTECTED;
+    if (modifiers.includes('public')) return Visibility.PUBLIC;
     return undefined;
   }
 

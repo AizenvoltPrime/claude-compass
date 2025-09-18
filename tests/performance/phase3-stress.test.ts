@@ -4,10 +4,12 @@ import { BackgroundJobParser } from '../../src/parsers/background-job';
 import { TestFrameworkParser } from '../../src/parsers/test-framework';
 import { ORMParser } from '../../src/parsers/orm';
 import { PackageManagerParser } from '../../src/parsers/package-manager';
-import { Repository, SymbolType, DependencyType } from '../../src/database/models';
+import { Repository, SymbolType, DependencyType, Visibility } from '../../src/database/models';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import Parser from 'tree-sitter';
+import JavaScript from 'tree-sitter-javascript';
 
 /**
  * Performance and Stress Tests for Phase 3 Implementation
@@ -21,6 +23,13 @@ describe('Phase 3 Performance and Stress Tests', () => {
   let transitiveAnalyzer: TransitiveAnalyzer;
   let testRepoPath: string;
   let testRepository: Repository;
+
+  // Helper function to create parser with JavaScript language
+  function createJSParser(): Parser {
+    const parser = new Parser();
+    parser.setLanguage(JavaScript);
+    return parser;
+  }
 
   // Performance thresholds (from verification plan)
   const PERFORMANCE_THRESHOLDS = {
@@ -129,7 +138,7 @@ describe('Phase 3 Performance and Stress Tests', () => {
           start_line: 1,
           end_line: 10,
           is_exported: true,
-          visibility: 'public',
+          visibility: Visibility.PUBLIC,
           signature: `function${i}(): void`
         });
 
@@ -187,7 +196,7 @@ describe('Phase 3 Performance and Stress Tests', () => {
           start_line: 1,
           end_line: 5,
           is_exported: true,
-          visibility: 'public',
+          visibility: Visibility.PUBLIC,
           signature: `node${i}(): void`
         });
 
@@ -268,7 +277,7 @@ describe('Phase 3 Performance and Stress Tests', () => {
             start_line: 1,
             end_line: 10,
             is_exported: true,
-            visibility: 'public',
+            visibility: Visibility.PUBLIC,
             signature: `memorySymbol${batch}_${i}(): void`
           });
 
@@ -331,7 +340,7 @@ describe('Phase 3 Performance and Stress Tests', () => {
           start_line: 1,
           end_line: 5,
           is_exported: true,
-          visibility: 'public',
+          visibility: Visibility.PUBLIC,
           signature: `concurrentSymbol${i}(): void`
         });
 
@@ -400,7 +409,7 @@ describe('Phase 3 Performance and Stress Tests', () => {
           start_line: 1,
           end_line: 10,
           is_exported: i % 2 === 0,
-          visibility: 'public',
+          visibility: Visibility.PUBLIC,
           signature: `dbPerfSymbol${i}(): void`
         });
 
@@ -434,11 +443,11 @@ describe('Phase 3 Performance and Stress Tests', () => {
 
       // Test various query patterns
       const queries = [
-        () => dbService.searchSymbols('dbPerfSymbol', { repo_id: testRepository.id, limit: 100 }),
-        () => dbService.searchSymbols('', { repo_id: testRepository.id, symbol_types: [SymbolType.CLASS], limit: 50 }),
-        () => dbService.searchSymbols('', { repo_id: testRepository.id, is_exported: true, limit: 200 }),
-        () => dbService.getDependencies(symbols[100].id),
-        () => dbService.getCallers(symbols[200].id)
+        () => dbService.searchSymbols('dbPerfSymbol', testRepository.id),
+        () => dbService.searchSymbols('', testRepository.id),
+        () => dbService.searchSymbols('', testRepository.id),
+        () => dbService.getDependenciesFrom(symbols[100].id),
+        () => dbService.getDependenciesTo(symbols[200].id)
       ];
 
       for (const [index, query] of queries.entries()) {
@@ -460,7 +469,7 @@ describe('Phase 3 Performance and Stress Tests', () => {
       const parsers = [
         { name: 'BackgroundJob', parser: new BackgroundJobParser(), generator: generateLargeJobFile },
         { name: 'TestFramework', parser: new TestFrameworkParser(), generator: generateLargeTestFile },
-        { name: 'ORM', parser: new ORMParser(), generator: generateLargeORMFile },
+        { name: 'ORM', parser: (() => { const p = new Parser(); p.setLanguage(JavaScript); return new ORMParser(p); })(), generator: generateLargeORMFile },
         { name: 'PackageManager', parser: new PackageManagerParser(), generator: generateLargePackageFile }
       ];
 

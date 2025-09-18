@@ -1,3 +1,5 @@
+import Parser from 'tree-sitter';
+import JavaScript from 'tree-sitter-javascript';
 import { DatabaseService } from '../../src/database/services';
 import { BackgroundJobParser } from '../../src/parsers/background-job';
 import { TestFrameworkParser } from '../../src/parsers/test-framework';
@@ -256,7 +258,9 @@ mochaDescribe('Mocha Suite', function() {
   });
 
   describe('ORM Parser Error Handling', () => {
-    const parser = new ORMParser();
+    const treeParser = new Parser();
+    treeParser.setLanguage(JavaScript);
+    const parser = new ORMParser(treeParser);
 
     it('should handle malformed entity definitions', async () => {
       const malformedORMCode = `
@@ -518,7 +522,7 @@ class Comment {
         start_line: 1,
         end_line: 5,
         is_exported: true,
-        visibility: 'public',
+        visibility: Visibility.PUBLIC,
         signature: 'testSymbol(): void'
       });
 
@@ -565,7 +569,7 @@ class Comment {
           start_line: 1,
           end_line: 3,
           is_exported: true,
-          visibility: 'public',
+          visibility: Visibility.PUBLIC,
           signature: `deepSymbol${i}(): void`
         });
 
@@ -599,7 +603,7 @@ class Comment {
       const invalidFiles = [
         { path: 'invalid-job.ts', content: 'import Bull from; // Invalid syntax', parser: new BackgroundJobParser() },
         { path: 'invalid-test.ts', content: 'describe(, () => {});', parser: new TestFrameworkParser() },
-        { path: 'invalid-orm.ts', content: '@Entity class {', parser: new ORMParser() },
+        { path: 'invalid-orm.ts', content: '@Entity class {', parser: (() => { const p = new Parser(); p.setLanguage(JavaScript); return new ORMParser(p); })() },
         { path: 'invalid.json', content: '{ invalid }', parser: new PackageManagerParser() }
       ];
 
@@ -629,7 +633,7 @@ class Comment {
         start_line: 1,
         end_line: 5,
         is_exported: true,
-        visibility: 'public',
+        visibility: Visibility.PUBLIC,
         signature: 'invalidSymbol(): void'
       };
 
@@ -691,7 +695,7 @@ class Comment {
 
       const healthCheck = async () => {
         try {
-          await dbService.searchSymbols('', { repo_id: testRepository.id, limit: 1 });
+          await dbService.searchSymbols('', testRepository.id);
           return true;
         } catch (error) {
           logger.error('Database health check failed:', error);
@@ -729,12 +733,12 @@ class Comment {
         start_line: 1,
         end_line: 5,
         is_exported: true,
-        visibility: 'public',
+        visibility: Visibility.PUBLIC,
         signature: 'consistencySymbol(): void'
       });
 
       // Verify symbol was created correctly
-      const retrievedSymbol = await dbService.getSymbolById(symbol.id);
+      const retrievedSymbol = await dbService.getSymbol(symbol.id);
       expect(retrievedSymbol).toBeDefined();
       expect(retrievedSymbol!.name).toBe('consistencySymbol');
 
@@ -752,7 +756,7 @@ class Comment {
       }
 
       // Verify the symbol still exists and is unchanged
-      const symbolAfterError = await dbService.getSymbolById(symbol.id);
+      const symbolAfterError = await dbService.getSymbol(symbol.id);
       expect(symbolAfterError).toBeDefined();
       expect(symbolAfterError!.name).toBe('consistencySymbol');
     });
