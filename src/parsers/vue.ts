@@ -3429,21 +3429,22 @@ export class VueParser extends BaseFrameworkParser {
           ];
 
           if (vueCallbacks.includes(functionName)) {
-            // Get the first argument which should be the callback function
+            // Find callback function in arguments
             const argumentsNode = node.childForFieldName('arguments');
-            if (argumentsNode && argumentsNode.childCount > 0) {
-              const callbackNode = argumentsNode.child(1); // Skip opening paren, get first argument
-
-              // Check if the callback is an arrow function or regular function
-              if (callbackNode && (callbackNode.type === 'arrow_function' || callbackNode.type === 'function_expression')) {
-                symbols.push({
-                  name: `${functionName}_callback`,
-                  symbol_type: 'function',
-                  start_line: callbackNode.startPosition?.row + 1 || 1,
-                  end_line: callbackNode.endPosition?.row + 1 || 1,
-                  is_exported: false,
-                  signature: this.getVueNodeText(callbackNode)
-                });
+            if (argumentsNode) {
+              for (let i = 0; i < argumentsNode.childCount; i++) {
+                const child = argumentsNode.child(i);
+                if (child && (child.type === 'arrow_function' || child.type === 'function_expression')) {
+                  symbols.push({
+                    name: `${functionName}_callback`,
+                    symbol_type: 'function',
+                    start_line: child.startPosition?.row + 1 || 1,
+                    end_line: child.endPosition?.row + 1 || 1,
+                    is_exported: false,
+                    signature: this.getVueNodeText(child)
+                  });
+                  break;
+                }
               }
             }
           }
