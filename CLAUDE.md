@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Compass is an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of codebases. It builds dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
 
-**Current Status**: Phase 2 complete - Full JavaScript/TypeScript framework analysis with Vue.js, Next.js, React, and Node.js support ready for production use.
+**Current Status**: Phase 3 complete - Advanced JavaScript/TypeScript analysis with background jobs, test frameworks, ORM relationships, package management, enhanced transitive analysis, and monorepo support ready for production use.
 
 ## Essential Commands
 
@@ -64,6 +64,10 @@ npm run mcp-server        # Start MCP server for AI integration
 1. **Parsers** (`src/parsers/`): Tree-sitter based language parsing
    - JavaScript/TypeScript support with ES6, CommonJS, dynamic imports
    - Framework-aware parsing for Vue.js, Next.js, React, and Node.js
+   - Background job parsing (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
+   - Test framework parsing (Jest, Vitest, Cypress, Playwright)
+   - ORM relationship parsing (Prisma, TypeORM, Sequelize, Mongoose)
+   - Package manager parsing (npm, yarn, pnpm, monorepo support)
    - Chunked parsing for large files (>28KB) with size validation
    - Encoding detection and recovery for problematic files
    - Bundle file filtering to skip minified/generated content
@@ -73,13 +77,16 @@ npm run mcp-server        # Start MCP server for AI integration
    - Knex-based migrations and connection management
    - Stores repositories, files, symbols, dependency graphs, and framework entities
    - Framework-specific tables: routes, components, composables, framework metadata
+   - Phase 3 tables: job queues, job definitions, worker threads, test suites, test cases, test coverage, ORM entities, workspace projects
 
 3. **Graph Builder** (`src/graph/`): Dependency graph construction
    - File graph: Import/export relationships between files
    - Symbol graph: Function calls, references, and inheritance
+   - Transitive analyzer: Advanced dependency traversal with cycle detection and confidence scoring
 
 4. **MCP Server** (`src/mcp/`): Model Context Protocol implementation
-   - Exposes 5 tools: get_file, get_symbol, search_code, who_calls, list_dependencies
+   - Exposes 5 enhanced tools: get_file, get_symbol, search_code, who_calls, list_dependencies
+   - Enhanced tools support transitive analysis with indirect relationships and confidence scoring
    - Provides 3 resources: repositories, file graph, symbol graph
 
 5. **CLI** (`src/cli/`): Command-line interface using Commander.js
@@ -148,12 +155,16 @@ npm run mcp-server        # Start MCP server for AI integration
 - MCP server is independent module for AI integration
 - CLI provides unified interface to all functionality
 
-## Current Capabilities (Phase 2 Complete)
+## Current Capabilities (Phase 3 Complete)
 
 **Supported Languages**: JavaScript, TypeScript, JSX, TSX, ES modules, CommonJS
 **Supported Frameworks**: Vue.js, Next.js, React, Node.js with full framework-aware parsing
-**Graph Types**: File dependencies, symbol relationships, framework entity relationships
-**AI Integration**: Full MCP server with 5 tools and 3 resources
+**Background Job Systems**: Bull, BullMQ, Agenda, Bee, Kue, Node.js Worker Threads
+**Test Frameworks**: Jest, Vitest, Cypress, Playwright, Mocha
+**ORM Systems**: Prisma, TypeORM, Sequelize, Mongoose, MikroORM
+**Package Managers**: npm, yarn, pnpm, bun with monorepo support (Nx, Lerna, Turborepo, Rush)
+**Graph Types**: File dependencies, symbol relationships, framework entity relationships, transitive analysis
+**AI Integration**: Enhanced MCP server with 5 tools supporting indirect analysis and 3 resources
 
 **Framework-Specific Features**:
 
@@ -161,6 +172,15 @@ npm run mcp-server        # Start MCP server for AI integration
 - **Next.js**: Pages/App router, API routes, middleware, ISR, client/server components
 - **React**: Functional/class components, custom hooks, memo/forwardRef, context
 - **Node.js**: Express/Fastify routes, middleware factories, controllers, validation patterns
+
+**Phase 3 Advanced Capabilities**:
+
+- **Background Jobs**: Queue detection, job definition parsing, worker thread analysis, scheduler recognition
+- **Test-to-Code Linkage**: Test coverage analysis, mock detection, test suite hierarchy, confidence scoring
+- **ORM Relationships**: Entity relationship mapping, CRUD operation detection, database schema analysis
+- **Package Dependencies**: Lock file analysis, workspace relationships, version constraint analysis
+- **Transitive Analysis**: Deep dependency traversal, cycle detection, confidence propagation, performance optimization
+- **Monorepo Support**: Workspace detection, inter-project dependencies, shared configuration analysis
 
 **Advanced Parsing Capabilities**:
 
@@ -171,25 +191,30 @@ npm run mcp-server        # Start MCP server for AI integration
 - Data fetching method detection (getStaticProps, getServerSideProps)
 - Swagger/OpenAPI documentation extraction
 - TypeScript interface and type analysis
+- Job queue configuration and processing patterns
+- Test coverage relationship mapping with confidence scores
+- Database entity relationship analysis with foreign key detection
+- Package dependency resolution with workspace support
 
 ## Limitations and Future Phases
 
 **Current Limitations**:
 
-- No background job detection (worker threads, job queues)
-- No ORM relationship mapping (Prisma, TypeORM, Sequelize)
-- No test-to-code linkage analysis
 - No vector search capabilities yet
-- No monorepo structure analysis
+- No cross-language dependency tracking (TypeScript ↔ PHP)
+- No runtime tracing for dynamic code analysis
+- No AI-powered semantic understanding
+
+**Completed Features** (Phase 3 ✅):
+
+- ✅ **Background job detection** (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
+- ✅ **ORM relationship mapping** (Prisma, TypeORM, Sequelize, Mongoose, MikroORM)
+- ✅ **Test-to-code linkage analysis** (Jest, Vitest, Cypress, Playwright with confidence scoring)
+- ✅ **Monorepo structure analysis** (Nx, Lerna, Turborepo, Rush)
+- ✅ **Enhanced transitive analysis** with cycle detection and confidence propagation
+- ✅ **Package manager integration** (npm, yarn, pnpm with workspace support)
 
 **Planned Features** (Prioritized for Vue + Laravel + Godot):
-
-**Phase 3 - Advanced Vue/TypeScript (PRIORITY):**
-- Test-to-code linkage (Vitest, Jest, Cypress, Playwright) - **Critical for Vue/Vite testing**
-- Enhanced Vue composables relationship mapping - **Essential for Vue.js**
-- Package manager integration (npm, yarn, pnpm) - **Vite dependency tracking**
-- Background job detection and queue analysis
-- Enhanced `who_calls` and `list_dependencies` tools
 
 **Phase 4 - PHP/Laravel Support (HIGH PRIORITY):**
 - Laravel route and controller detection
