@@ -358,3 +358,6 @@ if (require.main === module) {
     }
   });
 }
+
+// Export alias for backward compatibility
+export { ClaudeCompassMCPServer as MCPServer };

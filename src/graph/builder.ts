@@ -568,7 +568,8 @@ export class GraphBuilder {
             line: 0,
             column: 0,
             severity: 'error'
-          }]
+          }],
+          success: false
         });
       }
     }
@@ -1244,7 +1245,8 @@ export class GraphBuilder {
           imports: multiResult.imports,
           exports: multiResult.exports,
           errors: multiResult.errors,
-          frameworkEntities: multiResult.frameworkEntities || []
+          frameworkEntities: multiResult.frameworkEntities || [],
+          success: multiResult.errors.length === 0
         };
     }
   }

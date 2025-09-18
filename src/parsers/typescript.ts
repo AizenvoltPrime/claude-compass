@@ -7,7 +7,7 @@ import {
   ParseOptions
 } from './base';
 import { ChunkedParseOptions } from './chunked-parser';
-import { SymbolType } from '../database/models';
+import { SymbolType, Visibility } from '../database/models';
 
 /**
  * TypeScript-specific parser extending JavaScript parser
@@ -214,7 +214,7 @@ export class TypeScriptParser extends JavaScriptParser {
     return modifiers;
   }
 
-  private extractVisibility(node: Parser.SyntaxNode, content: string): 'public' | 'private' | 'protected' | undefined {
+  private extractVisibility(node: Parser.SyntaxNode, content: string): Visibility | undefined {
     const modifiers = this.extractModifiers(node, content);
     return this.getVisibilityFromModifiers(modifiers);
   }

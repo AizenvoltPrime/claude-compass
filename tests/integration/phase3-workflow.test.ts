@@ -1,3 +1,5 @@
+import Parser from 'tree-sitter';
+import JavaScript from 'tree-sitter-javascript';
 import { DatabaseService } from '../../src/database/services';
 import { BackgroundJobParser } from '../../src/parsers/background-job';
 import { TestFrameworkParser } from '../../src/parsers/test-framework';
@@ -5,7 +7,7 @@ import { ORMParser } from '../../src/parsers/orm';
 import { PackageManagerParser } from '../../src/parsers/package-manager';
 import { TransitiveAnalyzer } from '../../src/graph/transitive-analyzer';
 import { MCPServer } from '../../src/mcp/server';
-import { Repository, SymbolType, DependencyType } from '../../src/database/models';
+import { Repository, SymbolType, DependencyType, ORMType } from '../../src/database/models';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -301,15 +303,10 @@ model Order {
         });
       }
 
-      for (const entity of parseResult.frameworkEntities) {
-        await dbService.createFrameworkEntity({
-          ...entity,
-          repo_id: testRepository.id
-        });
-      }
+      // Skip framework entity creation for background job test - they're not ORM entities
 
       // Query via MCP tools
-      const searchResults = await dbService.searchSymbols('emailQueue', { repo_id: testRepository.id });
+      const searchResults = await dbService.searchSymbols('emailQueue', testRepository.id);
       expect(searchResults.length).toBeGreaterThan(0);
 
       const jobSymbol = searchResults.find(s => s.name === 'emailQueue');
@@ -362,7 +359,9 @@ model Order {
 
   describe('ORM Relationship Workflow', () => {
     it('should parse ORM models and establish entity relationships', async () => {
-      const parser = new ORMParser();
+      const treeParser = new Parser();
+      treeParser.setLanguage(JavaScript);
+      const parser = new ORMParser(treeParser);
 
       // Parse User model
       const userFilePath = join(testRepoPath, 'models', 'User.ts');
@@ -434,7 +433,7 @@ model Order {
 
       // Should detect workspace configuration
       const workspaceEntities = parseResult.frameworkEntities.filter(
-        entity => entity.entity_type === 'workspace'
+        entity => entity.type === 'workspace'
       );
       expect(workspaceEntities.length).toBeGreaterThan(0);
 
@@ -459,7 +458,7 @@ model Order {
       await setupCompleteRepository();
 
       // Find a symbol that should have transitive relationships
-      const symbols = await dbService.searchSymbols('sendWelcomeEmail', { repo_id: testRepository.id });
+      const symbols = await dbService.searchSymbols('sendWelcomeEmail', testRepository.id);
       expect(symbols.length).toBeGreaterThan(0);
 
       const userMethodSymbol = symbols.find(s => s.name === 'sendWelcomeEmail');
@@ -477,14 +476,14 @@ model Order {
       // Should trace through: User.sendWelcomeEmail -> addWelcomeEmailJob -> emailQueue -> Bull
       const transitiveSymbols = dependencyResult.results.map(r => r.symbolId);
       const allSymbols = await Promise.all(
-        transitiveSymbols.map(id => dbService.getSymbolById(id))
+        transitiveSymbols.map(id => dbService.getSymbol(id))
       );
 
       const symbolNames = allSymbols.filter(s => s).map(s => s!.name);
       expect(symbolNames).toContain('addWelcomeEmailJob');
 
       // Perform transitive caller analysis
-      const emailJobSymbols = await dbService.searchSymbols('addWelcomeEmailJob', { repo_id: testRepository.id });
+      const emailJobSymbols = await dbService.searchSymbols('addWelcomeEmailJob', testRepository.id);
       const emailJobSymbol = emailJobSymbols[0];
 
       const callerResult = await transitiveAnalyzer.getTransitiveCallers(
@@ -501,16 +500,14 @@ model Order {
       await setupCompleteRepository();
 
       // Search for test coverage of job functionality
-      const testSymbols = await dbService.searchSymbols('', {
-        repo_id: testRepository.id,
-        symbol_types: [SymbolType.TEST_SUITE]
-      });
+      const allTestSymbols = await dbService.searchSymbols('', testRepository.id);
+      const testSymbols = allTestSymbols.filter(s => s.symbol_type === SymbolType.TEST_SUITE);
 
       expect(testSymbols.length).toBeGreaterThan(0);
 
       // Find dependencies between tests and job code
       const testSymbol = testSymbols[0];
-      const testDependencies = await dbService.getDependencies(testSymbol.id);
+      const testDependencies = await dbService.getDependenciesFrom(testSymbol.id);
 
       const testCoversDeps = testDependencies.filter(
         dep => dep.dependency_type === DependencyType.TEST_COVERS
@@ -518,15 +515,13 @@ model Order {
       expect(testCoversDeps.length).toBeGreaterThan(0);
 
       // Verify ORM to job integration
-      const userSymbols = await dbService.searchSymbols('User', {
-        repo_id: testRepository.id,
-        symbol_types: [SymbolType.CLASS]
-      });
+      const allUserSymbols = await dbService.searchSymbols('User', testRepository.id);
+      const userSymbols = allUserSymbols.filter(s => s.symbol_type === SymbolType.CLASS);
 
       expect(userSymbols.length).toBeGreaterThan(0);
 
       const userSymbol = userSymbols[0];
-      const userDependencies = await dbService.getDependencies(userSymbol.id);
+      const userDependencies = await dbService.getDependenciesFrom(userSymbol.id);
 
       // Should have dependencies to job system
       const jobDeps = userDependencies.filter(dep =>
@@ -543,7 +538,7 @@ model Order {
       // Test bulk operations
       const startTime = Date.now();
 
-      const allSymbols = await dbService.searchSymbols('', { repo_id: testRepository.id });
+      const allSymbols = await dbService.searchSymbols('', testRepository.id);
       expect(allSymbols.length).toBeGreaterThan(10);
 
       // Test transitive analysis on multiple symbols
@@ -564,7 +559,7 @@ model Order {
     const parsers = {
       job: new BackgroundJobParser(),
       test: new TestFrameworkParser(),
-      orm: new ORMParser(),
+      orm: (() => { const p = new Parser(); p.setLanguage(JavaScript); return new ORMParser(p); })(),
       package: new PackageManagerParser()
     };
 
@@ -605,23 +600,30 @@ model Order {
           });
         }
 
-        // Create framework entities
-        for (const entity of parseResult.frameworkEntities) {
-          await dbService.createFrameworkEntity({
-            ...entity,
-            repo_id: testRepository.id
-          });
-        }
+        // Create framework entities based on parser type
+        if (fileInfo.parser === 'orm' && parseResult.frameworkEntities) {
+          // Map FrameworkEntity to CreateORMEntity for ORM files
+          for (const entity of parseResult.frameworkEntities) {
+            // Find the corresponding symbol for this entity
+            const entitySymbol = parseResult.symbols.find(s => s.name === entity.name);
+            if (entitySymbol) {
+              const createdSymbol = await dbService.searchSymbols(entity.name, testRepository.id);
+              const symbolWithId = createdSymbol.find(s => s.name === entity.name);
 
-        // Create dependencies (we'll resolve symbol IDs later)
-        for (const dependency of parseResult.dependencies) {
-          try {
-            await dbService.createDependency(dependency);
-          } catch (error) {
-            // Some dependencies might fail due to missing symbols, which is expected
-            console.debug('Dependency creation failed (expected):', error.message);
+              if (symbolWithId) {
+                await dbService.createORMEntity({
+                  repo_id: testRepository.id,
+                  symbol_id: symbolWithId.id,
+                  entity_name: entity.name,
+                  orm_type: entity.type === 'typeorm' ? ORMType.TYPEORM : ORMType.PRISMA, // Default mapping
+                  fields: entity.metadata
+                });
+              }
+            }
           }
         }
+
+        // Skip dependency creation - ParsedDependency needs symbol ID resolution first
       }
     }
   }
