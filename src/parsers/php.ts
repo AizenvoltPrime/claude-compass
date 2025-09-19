@@ -1,7 +1,6 @@
 import Parser from 'tree-sitter';
 import { php as PHP } from 'tree-sitter-php';
 import {
-  BaseParser,
   ParsedSymbol,
   ParsedDependency,
   ParsedImport,
@@ -10,7 +9,6 @@ import {
   ParseOptions,
   ParseError
 } from './base';
-import { createComponentLogger } from '../utils/logger';
 import {
   ChunkedParser,
   MergedParseResult,
@@ -19,12 +17,40 @@ import {
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
 
-const logger = createComponentLogger('php-parser');
+/**
+ * PHP parsing state for syntax-aware chunking
+ */
+interface PhpParseState {
+  // String state
+  inString: 'none' | 'single' | 'double' | 'heredoc' | 'nowdoc';
+  stringDelimiter: string;
+  heredocIdentifier: string;
+
+  // Comment state
+  inComment: 'none' | 'single' | 'multi';
+
+  // Nesting levels
+  braceLevel: number;
+  parenLevel: number;
+  bracketLevel: number;
+
+  // PHP context
+  inPhpTag: boolean;
+
+  // Safe boundary tracking
+  lastStatementEnd: number;     // Position after last ;
+  lastBlockEnd: number;         // Position after last }
+  lastSafeWhitespace: number;   // Position of last safe whitespace
+  lastUseBlockEnd: number;      // Position after complete use block
+}
+
 
 /**
  * PHP-specific parser using Tree-sitter with chunked parsing support
  */
 export class PHPParser extends ChunkedParser {
+  private wasChunked: boolean = false;
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(PHP);
@@ -58,11 +84,13 @@ export class PHPParser extends ChunkedParser {
     // Check if chunking should be used and is enabled
     if (chunkedOptions.enableChunking !== false &&
         content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
+      this.wasChunked = true;
       const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
       return this.convertMergedResult(chunkedResult);
     }
 
     // For smaller files or when chunking is disabled, use direct parsing
+    this.wasChunked = false;
     return this.parseFileDirectly(filePath, content, chunkedOptions);
   }
 
@@ -70,7 +98,7 @@ export class PHPParser extends ChunkedParser {
    * Parse file directly without chunking (internal method to avoid recursion)
    */
   protected async parseFileDirectly(
-    filePath: string,
+    _filePath: string,
     content: string,
     options?: ChunkedParseOptions
   ): Promise<ParseResult> {
@@ -678,52 +706,362 @@ export class PHPParser extends ChunkedParser {
   }
 
   /**
-   * Find optimal chunk boundaries for PHP content
+   * Configuration constants for chunk boundary detection
+   */
+  private static readonly CHUNK_BOUNDARY_CONFIG = {
+    MIN_CHUNK_SIZE: 1000,          // Minimum chunk size to consider
+    SAFE_BOUNDARY_BUFFER: 100,     // Buffer around boundary points
+    MAX_NESTING_DEPTH: 50,         // Maximum brace nesting to track
+    STRING_CONTEXT_SIZE: 200       // Characters to check around string boundaries
+  };
+
+
+  /**
+   * Find optimal chunk boundaries for PHP content using syntax-aware boundary detection
    */
   protected getChunkBoundaries(content: string, maxChunkSize: number): number[] {
     const boundaries: number[] = [];
-    const searchLimit = Math.floor(maxChunkSize * 0.85);
-    const searchContent = content.substring(0, Math.min(searchLimit, content.length));
+    const targetChunkSize = Math.floor(maxChunkSize * 0.85);
 
-    // PHP-specific boundary patterns
-    const boundaryPatterns = [
-      // End of class definitions
-      /class\s+\w+(?:\s+extends\s+\w+)?(?:\s+implements\s+[\w,\s]+)?\s*{[^}]*}\s*\n/g,
+    let position = 0;
+    let lastBoundary = 0;
 
-      // End of interface definitions
-      /interface\s+\w+(?:\s+extends\s+[\w,\s]+)?\s*{[^}]*}\s*\n/g,
+    while (position < content.length) {
+      const chunkStart = lastBoundary;
+      const searchLimit = chunkStart + targetChunkSize;
 
-      // End of trait definitions
-      /trait\s+\w+\s*{[^}]*}\s*\n/g,
+      if (searchLimit >= content.length) {
+        // Remaining content fits in one chunk
+        break;
+      }
 
-      // End of function definitions
-      /function\s+\w+\s*\([^)]*\)\s*{[^}]*}\s*\n/g,
+      const boundary = this.findNextSafeBoundary(content, chunkStart, searchLimit, maxChunkSize);
 
-      // End of method definitions
-      /(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)\s*{[^}]*}\s*\n/g,
-
-      // End of namespace blocks
-      /namespace\s+[\w\\]+\s*{[^}]*}\s*\n/g,
-
-      // End of use statements block
-      /use\s+[\w\\]+(?:\s+as\s+\w+)?;\s*\n\s*\n/g,
-
-      // Simple closing braces with newlines
-      /}\s*\n/g
-    ];
-
-    for (const pattern of boundaryPatterns) {
-      let match;
-      while ((match = pattern.exec(searchContent)) !== null) {
-        const position = match.index + match[0].length;
-        if (position > 100 && position < searchLimit) {
-          boundaries.push(position);
+      if (boundary > chunkStart) {
+        // Accept any valid boundary, even if it creates a small chunk
+        // Small chunks are better than syntax errors
+        boundaries.push(boundary);
+        lastBoundary = boundary;
+        position = boundary;
+      } else {
+        // No safe boundary found, use fallback
+        const fallbackBoundary = this.findFallbackBoundary(content, chunkStart, searchLimit);
+        if (fallbackBoundary > chunkStart) {
+          boundaries.push(fallbackBoundary);
+          lastBoundary = fallbackBoundary;
+          position = fallbackBoundary;
+        } else {
+          // Emergency break to avoid infinite loop
+          break;
         }
       }
     }
 
-    return [...new Set(boundaries)].sort((a, b) => b - a);
+    return boundaries;
   }
+
+  /**
+   * Find the next safe boundary position using syntax-aware parsing
+   */
+  private findNextSafeBoundary(content: string, startPos: number, searchLimit: number, maxChunkSize: number): number {
+    const state: PhpParseState = {
+      inString: 'none',
+      stringDelimiter: '',
+      heredocIdentifier: '',
+      inComment: 'none',
+      braceLevel: 0,
+      parenLevel: 0,
+      bracketLevel: 0,
+      inPhpTag: false,
+      lastStatementEnd: -1,
+      lastBlockEnd: -1,
+      lastSafeWhitespace: -1,
+      lastUseBlockEnd: -1
+    };
+
+    let useBlockStarted = false;
+    let consecutiveUseStatements = 0;
+
+    for (let i = startPos; i < Math.min(content.length, startPos + Math.floor(maxChunkSize * 1.2)); i++) {
+      const char = content[i];
+      const prevChar = i > 0 ? content[i - 1] : '';
+      const nextChar = i < content.length - 1 ? content[i + 1] : '';
+
+      // Update state based on current character
+      this.updateParseState(state, char, prevChar, nextChar, content, i);
+
+      // Track use statements
+      if (this.isStartOfUseStatement(content, i, state)) {
+        if (!useBlockStarted) {
+          useBlockStarted = true;
+          consecutiveUseStatements = 1;
+        } else {
+          consecutiveUseStatements++;
+        }
+      }
+
+      // Check for end of use block
+      if (useBlockStarted && char === ';' && state.inString === 'none' && state.inComment === 'none') {
+        // Check if next non-whitespace/comment line is not a use statement
+        const nextLineStart = this.findNextSignificantLine(content, i + 1);
+        if (nextLineStart === -1 || !this.isStartOfUseStatement(content, nextLineStart, state)) {
+          state.lastUseBlockEnd = i + 1;
+          useBlockStarted = false;
+          consecutiveUseStatements = 0;
+        }
+      }
+
+      // Track safe boundary points
+      if (this.canCreateBoundaryAt(state, i)) {
+        if (char === ';') {
+          state.lastStatementEnd = i + 1;
+        } else if (char === '}') {
+          state.lastBlockEnd = i + 1;
+        } else if (this.isWhitespace(char)) {
+          state.lastSafeWhitespace = i;
+        }
+      }
+
+      // Check if we should create a boundary
+      if (i >= searchLimit) {
+        return this.chooseBestBoundary(state, searchLimit, startPos);
+      }
+    }
+
+    // Reached end of content
+    return -1;
+  }
+
+  /**
+   * Update the parsing state based on the current character
+   */
+  private updateParseState(state: PhpParseState, char: string, prevChar: string, nextChar: string, content: string, position: number): void {
+    // Handle PHP tags
+    if (state.inString === 'none' && state.inComment === 'none') {
+      if (char === '<' && content.substr(position, 5) === '<?php') {
+        state.inPhpTag = true;
+        return;
+      } else if (char === '?' && nextChar === '>' && state.inPhpTag) {
+        state.inPhpTag = false;
+        return;
+      }
+    }
+
+    // Only process PHP syntax when inside PHP tags
+    if (!state.inPhpTag) return;
+
+    // Handle comments
+    if (state.inComment === 'none' && state.inString === 'none') {
+      if (char === '/' && nextChar === '/') {
+        state.inComment = 'single';
+        return;
+      } else if (char === '/' && nextChar === '*') {
+        state.inComment = 'multi';
+        return;
+      }
+    }
+
+    if (state.inComment === 'single' && char === '\n') {
+      state.inComment = 'none';
+      return;
+    } else if (state.inComment === 'multi' && char === '*' && nextChar === '/') {
+      state.inComment = 'none';
+      return;
+    }
+
+    // Skip processing if we're in comments
+    if (state.inComment !== 'none') return;
+
+    // Handle strings
+    if (state.inString === 'none') {
+      if (char === '"') {
+        state.inString = 'double';
+        state.stringDelimiter = '"';
+      } else if (char === "'") {
+        state.inString = 'single';
+        state.stringDelimiter = "'";
+      } else if (char === '<' && content.substr(position, 3) === '<<<') {
+        // Handle heredoc/nowdoc
+        const heredocMatch = content.substr(position).match(/^<<<\s*['"]?(\w+)['"]?\s*\n/);
+        if (heredocMatch) {
+          state.inString = heredocMatch[0].includes("'") ? 'nowdoc' : 'heredoc';
+          state.heredocIdentifier = heredocMatch[1];
+        }
+      }
+    } else {
+      // We're inside a string
+      if (state.inString === 'single' || state.inString === 'double') {
+        // Handle escaped characters
+        if (char === '\\') {
+          // Skip next character
+          return;
+        } else if (char === state.stringDelimiter && prevChar !== '\\') {
+          state.inString = 'none';
+          state.stringDelimiter = '';
+        }
+      } else if (state.inString === 'heredoc' || state.inString === 'nowdoc') {
+        // Check for heredoc/nowdoc end
+        if (char === '\n') {
+          const lineStart = position + 1;
+          if (content.substr(lineStart).startsWith(state.heredocIdentifier)) {
+            const afterIdentifier = lineStart + state.heredocIdentifier.length;
+            if (afterIdentifier >= content.length || content[afterIdentifier] === ';' || content[afterIdentifier] === '\n') {
+              state.inString = 'none';
+              state.heredocIdentifier = '';
+            }
+          }
+        }
+      }
+    }
+
+    // Skip processing if we're in strings
+    if (state.inString !== 'none') return;
+
+    // Handle nesting levels
+    if (char === '{') {
+      state.braceLevel++;
+    } else if (char === '}') {
+      state.braceLevel--;
+    } else if (char === '(') {
+      state.parenLevel++;
+    } else if (char === ')') {
+      state.parenLevel--;
+    } else if (char === '[') {
+      state.bracketLevel++;
+    } else if (char === ']') {
+      state.bracketLevel--;
+    }
+  }
+
+  /**
+   * Check if we can create a boundary at the current position
+   */
+  private canCreateBoundaryAt(state: PhpParseState, position: number): boolean {
+    return state.inString === 'none' &&
+           state.inComment === 'none' &&
+           state.braceLevel >= 0 &&
+           state.parenLevel >= 0 &&
+           state.bracketLevel >= 0 &&
+           state.inPhpTag;
+  }
+
+  /**
+   * Check if the current position is the start of a use statement
+   */
+  private isStartOfUseStatement(content: string, position: number, state: PhpParseState): boolean {
+    if (!this.canCreateBoundaryAt(state, position)) return false;
+
+    // Look for 'use ' at the start of a line (ignoring whitespace)
+    let lineStart = position;
+    while (lineStart > 0 && content[lineStart - 1] !== '\n') {
+      lineStart--;
+    }
+
+    const lineContent = content.substr(lineStart).replace(/^\s+/, '');
+    return lineContent.startsWith('use ') && !lineContent.startsWith('use function ') && !lineContent.startsWith('use const ');
+  }
+
+  /**
+   * Find the next significant (non-whitespace, non-comment) line
+   */
+  private findNextSignificantLine(content: string, startPos: number): number {
+    let pos = startPos;
+    let foundNewline = false;
+
+    while (pos < content.length) {
+      const char = content[pos];
+
+      if (char === '\n') {
+        foundNewline = true;
+        pos++;
+        continue;
+      }
+
+      if (foundNewline && !this.isWhitespace(char)) {
+        // Check if this line is a comment
+        if (char === '/' && pos + 1 < content.length && content[pos + 1] === '/') {
+          // Skip single line comment
+          while (pos < content.length && content[pos] !== '\n') {
+            pos++;
+          }
+          continue;
+        } else if (char === '/' && pos + 1 < content.length && content[pos + 1] === '*') {
+          // Skip multi-line comment
+          pos += 2;
+          while (pos + 1 < content.length) {
+            if (content[pos] === '*' && content[pos + 1] === '/') {
+              pos += 2;
+              break;
+            }
+            pos++;
+          }
+          continue;
+        }
+
+        return pos;
+      }
+
+      if (foundNewline && this.isWhitespace(char)) {
+        pos++;
+        continue;
+      }
+
+      if (!foundNewline) {
+        pos++;
+        continue;
+      }
+
+      break;
+    }
+
+    return -1;
+  }
+
+  /**
+   * Choose the best boundary point from available options
+   */
+  private chooseBestBoundary(state: PhpParseState, searchLimit: number, startPos: number): number {
+    const candidates = [
+      { pos: state.lastUseBlockEnd, priority: 1 },      // After complete use block (highest priority)
+      { pos: state.lastBlockEnd, priority: 2 },         // After method/class end
+      { pos: state.lastStatementEnd, priority: 3 },     // After statement end
+      { pos: state.lastSafeWhitespace, priority: 4 }    // At safe whitespace (lowest priority)
+    ].filter(candidate => candidate.pos > startPos && candidate.pos <= searchLimit);
+
+    if (candidates.length === 0) {
+      return -1;
+    }
+
+    // Sort by priority (lower number = higher priority)
+    candidates.sort((a, b) => a.priority - b.priority);
+
+    return candidates[0].pos;
+  }
+
+  /**
+   * Find a fallback boundary when no safe boundary is available
+   */
+  private findFallbackBoundary(content: string, startPos: number, searchLimit: number): number {
+    // Try to find at least a whitespace boundary
+    for (let i = Math.min(searchLimit, content.length - 1); i > startPos; i--) {
+      if (this.isWhitespace(content[i]) && content[i - 1] !== '\\') {
+        return i;
+      }
+    }
+
+    // Last resort: use the search limit
+    return Math.min(searchLimit, content.length);
+  }
+
+  /**
+   * Check if a character is whitespace
+   */
+  private isWhitespace(char: string): boolean {
+    return /\s/.test(char);
+  }
+
+
+
 
   /**
    * Merge results from multiple chunks
@@ -825,8 +1163,15 @@ export class PHPParser extends ChunkedParser {
           const errorKey = `${line}:${column}:${limitedErrorText}`;
           if (!seenErrors.has(errorKey)) {
             seenErrors.add(errorKey);
+            let errorMessage = `Syntax error: unexpected token '${limitedErrorText.trim()}'`;
+
+            // Add chunking context if file was processed in chunks
+            if (this.wasChunked) {
+              errorMessage += ' (Note: File was processed in chunks due to size. This may be a chunking boundary issue.)';
+            }
+
             errors.push({
-              message: `Syntax error: unexpected token '${limitedErrorText.trim()}'`,
+              message: errorMessage,
               line,
               column,
               severity: 'error'
