@@ -125,19 +125,24 @@ export class PHPParser extends ChunkedParser {
       };
     }
 
-    const symbols = this.extractSymbols(tree.rootNode, content);
-    const dependencies = this.extractDependencies(tree.rootNode, content);
-    const imports = this.extractImports(tree.rootNode, content);
-    const exports = this.extractExports(tree.rootNode, content);
-    const errors = this.extractErrors(tree.rootNode, content, tree);
+    try {
+      const symbols = this.extractSymbols(tree.rootNode, content);
+      const dependencies = this.extractDependencies(tree.rootNode, content);
+      const imports = this.extractImports(tree.rootNode, content);
+      const exports = this.extractExports(tree.rootNode, content);
+      const errors = this.extractErrors(tree.rootNode, content, tree);
 
-    return {
-      symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== 'private'),
-      dependencies,
-      imports,
-      exports,
-      errors
-    };
+      return {
+        symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== 'private'),
+        dependencies,
+        imports,
+        exports,
+        errors
+      };
+    } finally {
+      // Tree-sitter trees are automatically garbage collected in Node.js
+      // No explicit disposal needed
+    }
   }
 
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {

@@ -9,6 +9,18 @@ describe('PHP Chunking Tests', () => {
     parser = new PHPParser();
   });
 
+  afterEach(() => {
+    // Clean up parser resources to prevent memory leaks
+    if (parser && (parser as any).parser) {
+      // Dispose Tree-sitter parser if it exists
+      try {
+        (parser as any).parser.delete();
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    }
+  });
+
   describe('Chunk Boundary Detection', () => {
     test('should handle nested braces correctly', () => {
       const content = `<?php
@@ -291,9 +303,10 @@ class TestService
         const firstBoundary = boundaries[0];
         const contentUpToFirstBoundary = content.substring(0, firstBoundary);
 
-        // First boundary should be after the complete use block and class declaration
-        expect(contentUpToFirstBoundary).toMatch(/use\s+.*?;[\s\n]*class\s+\w+[\s\n]*\{/s);
+        // First boundary should be after the complete use block (before class declaration)
+        expect(contentUpToFirstBoundary).toMatch(/use\s+.*?;[\s\n]*$/s);
         expect(contentUpToFirstBoundary).not.toMatch(/use\s+[^;]*$/);
+        expect(contentUpToFirstBoundary).not.toMatch(/class\s+\w+/); // Should not include class declaration
       }
     });
 

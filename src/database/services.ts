@@ -1,5 +1,5 @@
 import type { Knex } from 'knex';
-import { getDatabaseConnection } from './connection';
+import { getDatabaseConnection, closeDatabaseConnection } from './connection';
 import {
   Repository,
   File,
@@ -678,7 +678,7 @@ export class DatabaseService {
 
   async close(): Promise<void> {
     logger.info('Closing database connection');
-    await this.db.destroy();
+    await closeDatabaseConnection();
     logger.info('Database connection closed');
   }
 
