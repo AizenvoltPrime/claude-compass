@@ -1,12 +1,17 @@
 # Getting Started with Claude Compass
 
-## Phase 3 Implementation Complete! 🎉
+## Phase 4 Implementation Complete! 🎉
 
 Welcome to Claude Compass - an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of your codebase.
 
-This Phase 3 implementation provides:
+This Phase 4 implementation provides:
 - ✅ JavaScript/TypeScript parsing with Tree-sitter
-- ✅ Framework-aware parsing for Vue.js, Next.js, React, and Node.js
+- ✅ PHP parsing with Tree-sitter and advanced chunked parsing
+- ✅ Framework-aware parsing for Vue.js, Next.js, React, Node.js, and Laravel
+- ✅ Laravel route and controller detection (web.php, api.php, controllers)
+- ✅ Laravel Eloquent model relationship mapping
+- ✅ Laravel job queue and scheduler detection
+- ✅ Laravel service provider and dependency injection analysis
 - ✅ Background job parsing (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
 - ✅ Test framework parsing (Jest, Vitest, Cypress, Playwright)
 - ✅ ORM relationship parsing (Prisma, TypeORM, Sequelize, Mongoose)
@@ -70,6 +75,9 @@ npx tsc
 # Analyze a JavaScript/TypeScript repository
 npm run analyze /path/to/your/nextjs-project
 
+# Analyze a Laravel/PHP repository
+npm run analyze /path/to/your/laravel-project
+
 # Or using the built CLI
 ./dist/src/cli/index.js analyze /path/to/your/project --verbose
 ```
@@ -95,6 +103,8 @@ npm test tests/parsers/react.test.ts
 npm test tests/parsers/nextjs.test.ts
 npm test tests/parsers/vue.test.ts
 npm test tests/parsers/nodejs.test.ts
+npm test tests/parsers/php.test.ts
+npm test tests/parsers/laravel.test.ts
 ```
 
 ### 7. Start the MCP Server
@@ -168,8 +178,8 @@ claude-compass analyze <path> [options]
 # --include-node-modules   Include node_modules (not recommended)
 # --max-file-size <size>   Max file size in bytes (default: 1MB)
 # --max-files <count>      Max files to process (default: 10,000)
-# --extensions <list>      File extensions (default: .js,.jsx,.ts,.tsx,.mjs,.cjs)
-# --frameworks <list>      Specific frameworks to analyze (vue,nextjs,react,nodejs)
+# --extensions <list>      File extensions (default: .js,.jsx,.ts,.tsx,.mjs,.cjs,.php)
+# --frameworks <list>      Specific frameworks to analyze (vue,nextjs,react,nodejs,laravel)
 # --verbose               Enable debug logging
 ```
 
@@ -195,7 +205,7 @@ claude-compass search <query> [options]
 # --repo-id <id>      Limit to specific repository
 # --type <type>       Filter by symbol type (function, class, route, component, hook)
 # --exported-only     Show only exported symbols
-# --framework <name>  Filter by framework (vue, nextjs, react, nodejs)
+# --framework <name>  Filter by framework (vue, nextjs, react, nodejs, laravel)
 # --limit <count>     Max results (default: 20)
 ```
 
@@ -310,9 +320,10 @@ NODE_ENV=development
 
 ## Success Criteria Achieved ✅
 
-Phase 3 successfully meets all success criteria:
+Phase 4 successfully meets all success criteria:
 
-- ✅ **Framework-specific parsing**: Vue.js, Next.js, React, and Node.js components, routes, and hooks
+- ✅ **Framework-specific parsing**: Vue.js, Next.js, React, Node.js, and Laravel components, routes, and hooks
+- ✅ **PHP/Laravel support**: Laravel routes, controllers, Eloquent models, job queues, service providers, middleware
 - ✅ **Background job detection**: Bull, BullMQ, Agenda, Bee, Kue, Worker Threads with configuration analysis
 - ✅ **Test-to-code linkage**: Jest, Vitest, Cypress, Playwright with coverage analysis and confidence scoring
 - ✅ **ORM relationship mapping**: Prisma, TypeORM, Sequelize, Mongoose entity relationships and CRUD operations
@@ -327,11 +338,12 @@ Phase 3 successfully meets all success criteria:
 
 ## What's Working
 
-- 🔍 **Symbol Extraction**: Functions, classes, interfaces, variables, methods, components, hooks, jobs, tests, entities
+- 🔍 **Symbol Extraction**: Functions, classes, interfaces, variables, methods, components, hooks, jobs, tests, entities (JS/TS/PHP)
 - 📦 **Import Analysis**: ES6, CommonJS, dynamic imports with path resolution
-- 🎯 **Framework Detection**: Evidence-based detection for Vue, Next.js, React, Node.js
+- 🎯 **Framework Detection**: Evidence-based detection for Vue, Next.js, React, Node.js, Laravel
 - 🧩 **Component Analysis**: Props extraction, JSX dependencies, HOC detection
-- 🚀 **Route Mapping**: Express/Fastify routes with middleware, auth, validation patterns
+- 🚀 **Route Mapping**: Express/Fastify/Laravel routes with middleware, auth, validation patterns
+- 🏛️ **Laravel Support**: Route detection (web.php, api.php), Eloquent models, job queues, service providers
 - 🎣 **Hook/Composable Parsing**: Custom hooks, Vue composables, state management
 - 📊 **Graph Building**: File, symbol, framework entity, and transitive relationships
 - ⚡ **Background Jobs**: Queue detection, job processing, worker thread analysis
@@ -357,13 +369,13 @@ All JavaScript/TypeScript capabilities are now complete. Next priorities:
 - ✅ Background job detection (Node.js worker threads, job queues)
 - ✅ Enhanced `who_calls` and `list_dependencies` tools with transitive analysis
 
-### Phase 4: PHP/Laravel Support - **HIGH PRIORITY**
-- Laravel route and controller detection
-- Laravel Eloquent model relationship mapping - **Critical for backend**
-- Laravel job queue and scheduler detection
-- Laravel service provider and dependency injection analysis
+### ✅ Phase 4: PHP/Laravel Support - **COMPLETED**
+- ✅ Laravel route and controller detection - **Critical for backend**
+- ✅ Laravel Eloquent model relationship mapping
+- ✅ Laravel job queue and scheduler detection
+- ✅ Laravel service provider and dependency injection analysis
 
-### Phase 5: Vue ↔ Laravel Integration - **HIGH PRIORITY**
+### Phase 5: Vue ↔ Laravel Integration - **NEXT PRIORITY**
 - Cross-stack dependency tracking (TypeScript interfaces ↔ PHP DTOs)
 - Frontend API calls mapped to Laravel controller methods
 - Full-stack impact analysis and blast radius calculation
@@ -409,4 +421,4 @@ The codebase follows these principles:
 
 ---
 
-**Phase 2 Complete!** 🚀 Claude Compass now provides comprehensive framework-aware analysis for JavaScript/TypeScript applications.
+**Phase 4 Complete!** 🚀 Claude Compass now provides comprehensive framework-aware analysis for JavaScript/TypeScript and PHP/Laravel applications.
