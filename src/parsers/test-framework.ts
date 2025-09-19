@@ -236,25 +236,30 @@ export class TestFrameworkParser extends BaseFrameworkParser {
     const tree = this.parseContent(content);
     if (!tree) return symbols;
 
-    // Create test suite symbol
-    const testSuiteName = path.basename(filePath, path.extname(filePath));
-    symbols.push({
-      name: testSuiteName,
-      symbol_type: SymbolType.TEST_SUITE,
-      start_line: 1,
-      end_line: content.split('\n').length,
-      is_exported: false,
-      signature: `Test Suite: ${testSuiteName} (${frameworks.join(', ')})`
-    });
+    try {
+      // Create test suite symbol
+      const testSuiteName = path.basename(filePath, path.extname(filePath));
+      symbols.push({
+        name: testSuiteName,
+        symbol_type: SymbolType.TEST_SUITE,
+        start_line: 1,
+        end_line: content.split('\n').length,
+        is_exported: false,
+        signature: `Test Suite: ${testSuiteName} (${frameworks.join(', ')})`
+      });
 
-    // Extract test cases
-    const callNodes = this.findNodesOfType(tree.rootNode, 'call_expression');
-    for (const node of callNodes) {
-      const testCase = this.extractTestCaseSymbol(node, content);
-      if (testCase) symbols.push(testCase);
+      // Extract test cases
+      const callNodes = this.findNodesOfType(tree.rootNode, 'call_expression');
+      for (const node of callNodes) {
+        const testCase = this.extractTestCaseSymbol(node, content);
+        if (testCase) symbols.push(testCase);
+      }
+
+      return symbols;
+    } finally {
+      // Tree-sitter trees are automatically garbage collected in Node.js
+      // No explicit disposal needed
     }
-
-    return symbols;
   }
 
   /**
@@ -275,17 +280,22 @@ export class TestFrameworkParser extends BaseFrameworkParser {
     const tree = this.parseContent(content);
     if (!tree) return dependencies;
 
-    // Look for test coverage relationships
-    const testSuiteName = path.basename(filePath, path.extname(filePath));
+    try {
+      // Look for test coverage relationships
+      const testSuiteName = path.basename(filePath, path.extname(filePath));
 
-    // Extract import dependencies to understand what's being tested
-    const importNodes = this.findNodesOfType(tree.rootNode, 'import_statement');
-    for (const node of importNodes) {
-      const dependency = this.extractTestCoverageDependency(node, content, testSuiteName);
-      if (dependency) dependencies.push(dependency);
+      // Extract import dependencies to understand what's being tested
+      const importNodes = this.findNodesOfType(tree.rootNode, 'import_statement');
+      for (const node of importNodes) {
+        const dependency = this.extractTestCoverageDependency(node, content, testSuiteName);
+        if (dependency) dependencies.push(dependency);
+      }
+
+      return dependencies;
+    } finally {
+      // Tree-sitter trees are automatically garbage collected in Node.js
+      // No explicit disposal needed
     }
-
-    return dependencies;
   }
 
   /**
