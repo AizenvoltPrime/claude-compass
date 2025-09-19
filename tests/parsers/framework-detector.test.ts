@@ -310,7 +310,7 @@ describe('FrameworkDetector', () => {
           { name: 'vue', confidence: 0.9, evidence: [], features: [] }
         ],
         confidence: 0.9,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       const frameworks = detector.getApplicableFrameworks('/src/App.vue', detectionResult);
@@ -326,7 +326,7 @@ describe('FrameworkDetector', () => {
           { name: 'react', confidence: 0.8, evidence: [], features: [] }
         ],
         confidence: 0.85,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       const frameworks = detector.getApplicableFrameworks('/pages/api/users.js', detectionResult);
@@ -341,7 +341,7 @@ describe('FrameworkDetector', () => {
           { name: 'react', confidence: 0.8, evidence: [], features: [] }
         ],
         confidence: 0.8,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       const frameworks = detector.getApplicableFrameworks('/src/components/Button.tsx', detectionResult);
@@ -357,7 +357,7 @@ describe('FrameworkDetector', () => {
           { name: 'react', confidence: 0.8, evidence: [], features: [] }
         ],
         confidence: 0.5,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       const frameworks = detector.getApplicableFrameworks('/src/Component.jsx', detectionResult);

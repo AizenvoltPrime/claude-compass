@@ -365,10 +365,15 @@ export class SymbolGraphBuilder {
       }
 
       // Resolve dependencies for each file
+      const nameToSymbolMap = this.createNameToSymbolMap(nodes);
+
       for (const [fileId, symbolDeps] of dependenciesByFile) {
         const allDepsForFile = symbolDeps.flatMap(sd => sd.dependencies);
 
         const resolved = this.symbolResolver.resolveDependencies(fileId, allDepsForFile);
+
+        // Track which dependencies were resolved to avoid duplicates in fallback
+        const resolvedDependencies = new Set<string>();
 
         for (const resolution of resolved) {
           // Skip self-references for non-call dependencies
@@ -384,6 +389,54 @@ export class SymbolGraphBuilder {
             lineNumber: resolution.originalDependency.line_number,
             confidence: resolution.confidence
           });
+
+          // Mark this dependency as resolved
+          const depKey = `${resolution.fromSymbol.id}->${resolution.originalDependency.to_symbol}`;
+          resolvedDependencies.add(depKey);
+        }
+
+        // Fallback for unresolved dependencies - especially important for external calls like Laravel models
+        for (const { symbol, dependencies } of symbolDeps) {
+          for (const dep of dependencies) {
+            const depKey = `${symbol.id}->${dep.to_symbol}`;
+
+            // Skip if already resolved by the symbol resolver
+            if (resolvedDependencies.has(depKey)) {
+              continue;
+            }
+
+            // Try to find target symbols using name-based lookup
+            const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
+
+            if (targetSymbols.length > 0) {
+              // Found target symbols, create edges with reduced confidence
+              for (const targetSymbol of targetSymbols) {
+                if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
+                  continue;
+                }
+
+                edges.push({
+                  from: symbol.id,
+                  to: targetSymbol.id,
+                  type: dep.dependency_type,
+                  lineNumber: dep.line_number,
+                  confidence: (dep.confidence || 0.5) * 0.8 // Reduced confidence for fallback resolution
+                });
+              }
+            } else {
+              // No target symbol found - log this for potential file dependency creation
+              // This is especially important for Laravel static method calls like User::all, User::create
+              if (dep.dependency_type === DependencyType.CALLS) {
+                this.logger.debug('No target symbol found for call dependency', {
+                  from: symbol.name,
+                  to: dep.to_symbol,
+                  line: dep.line_number,
+                  fileId: symbol.file_id
+                });
+                // These unresolved calls will be handled as file dependencies in the GraphBuilder
+              }
+            }
+          }
         }
       }
 

@@ -688,8 +688,15 @@ export class DatabaseService {
   async createRoute(data: CreateRoute): Promise<Route> {
     logger.debug('Creating route', { path: data.path, method: data.method, framework: data.framework_type });
 
+    // Convert array fields to JSON strings for JSONB columns
+    const insertData = {
+      ...data,
+      middleware: data.middleware ? JSON.stringify(data.middleware) : '[]',
+      dynamic_segments: data.dynamic_segments ? JSON.stringify(data.dynamic_segments) : '[]'
+    };
+
     const [route] = await this.db('routes')
-      .insert(data)
+      .insert(insertData)
       .returning('*');
 
     return route as Route;

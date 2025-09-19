@@ -210,10 +210,10 @@ export abstract class BaseParser {
   protected parseContent(content: string, options?: ParseOptions): Parser.Tree | null {
     try {
       // Validate content before parsing
-      if (!content || typeof content !== 'string') {
+      if (content == null || typeof content !== 'string') {
         this.logger.warn('Invalid content provided to parser', {
           contentType: typeof content,
-          isEmpty: !content
+          isEmpty: content == null
         });
         return null;
       }

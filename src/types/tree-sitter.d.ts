@@ -41,3 +41,9 @@ declare module 'tree-sitter-typescript' {
   export const typescript: Parser.Language;
   export const tsx: Parser.Language;
 }
+
+declare module 'tree-sitter-php' {
+  import Parser from 'tree-sitter';
+  export const php: Parser.Language;
+  export const php_only: Parser.Language;
+}

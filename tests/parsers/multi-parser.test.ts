@@ -65,7 +65,7 @@ describe('MultiParser', () => {
           { name: 'vue', confidence: 0.9, evidence: [], features: ['sfc'] }
         ],
         confidence: 0.9,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       mockDetector.getApplicableFrameworks.mockReturnValue(['javascript', 'vue']);
@@ -149,7 +149,7 @@ const title = ref('Hello')
           { name: 'react', confidence: 0.8, evidence: [], features: ['tsx', 'hooks'] }
         ],
         confidence: 0.8,
-        metadata: { hasPackageJson: true, hasConfigFiles: false, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
       });
 
       // Use the universal mock setup from beforeEach
@@ -221,7 +221,7 @@ export default function Button() {
       mockDetector.detectFrameworks.mockResolvedValue({
         frameworks: [],
         confidence: 0,
-        metadata: { hasPackageJson: false, hasConfigFiles: false, directoryStructure: [] }
+        metadata: { hasPackageJson: false, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
       });
 
       // Use the universal mock setup from beforeEach
@@ -265,7 +265,7 @@ export default function Button() {
       const result = await multiParser.parseFile('content', '/src/App.vue', {}, {
         frameworks: [{ name: 'vue', confidence: 0.8, evidence: [], features: [] }],
         confidence: 0.8,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       });
 
       // Should still succeed with JS parser
@@ -311,7 +311,7 @@ export default function Button() {
       const result = await multiParser.parseFile('content', '/src/Component.jsx', {}, {
         frameworks: [{ name: 'react', confidence: 0.8, evidence: [], features: [] }],
         confidence: 0.8,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       });
 
       expect(result.primaryParser).toBe('react');
@@ -326,7 +326,7 @@ export default function Button() {
           { name: 'vue', confidence: 0.9, evidence: [], features: [] }
         ],
         confidence: 0.9,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       });
 
       mockDetector.getApplicableFrameworks
@@ -392,7 +392,7 @@ export default function Button() {
       const mockResult = {
         frameworks: [{ name: 'vue', confidence: 0.9, evidence: [], features: [] }],
         confidence: 0.9,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       mockDetector.detectFrameworks.mockResolvedValue(mockResult);
@@ -407,7 +407,7 @@ export default function Button() {
       const detectionResult = {
         frameworks: [{ name: 'vue', confidence: 0.9, evidence: [], features: [] }],
         confidence: 0.9,
-        metadata: { hasPackageJson: true, hasConfigFiles: true, directoryStructure: [] }
+        metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
       mockDetector.getApplicableFrameworks.mockReturnValue(['javascript', 'vue']);
@@ -441,7 +441,7 @@ export default function Button() {
       mockDetector.detectFrameworks.mockResolvedValue({
         frameworks: [],
         confidence: 0,
-        metadata: { hasPackageJson: false, hasConfigFiles: false, directoryStructure: [] }
+        metadata: { hasPackageJson: false, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
       });
 
       const result = await multiParser.parseFile('content', '/src/unknown.xyz');
@@ -456,7 +456,7 @@ export default function Button() {
       mockDetector.detectFrameworks.mockResolvedValue({
         frameworks: [],
         confidence: 0,
-        metadata: { hasPackageJson: false, hasConfigFiles: false, directoryStructure: [] }
+        metadata: { hasPackageJson: false, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
       });
       mockDetector.getApplicableFrameworks.mockReturnValue(['nonexistent']);
 
