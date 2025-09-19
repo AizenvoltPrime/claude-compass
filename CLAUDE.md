@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Compass is an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of codebases. It builds dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
 
-**Current Status**: Phase 3 complete - Advanced JavaScript/TypeScript analysis with background jobs, test frameworks, ORM relationships, package management, enhanced transitive analysis, and monorepo support ready for production use.
+**Current Status**: Phase 4 complete - Advanced JavaScript/TypeScript and PHP/Laravel analysis with comprehensive framework support ready for production use.
 
 ## Essential Commands
 
@@ -155,10 +155,10 @@ npm run mcp-server        # Start MCP server for AI integration
 - MCP server is independent module for AI integration
 - CLI provides unified interface to all functionality
 
-## Current Capabilities (Phase 3 Complete)
+## Current Capabilities (Phase 4 Complete)
 
-**Supported Languages**: JavaScript, TypeScript, JSX, TSX, ES modules, CommonJS
-**Supported Frameworks**: Vue.js, Next.js, React, Node.js with full framework-aware parsing
+**Supported Languages**: JavaScript, TypeScript, JSX, TSX, ES modules, CommonJS, PHP
+**Supported Frameworks**: Vue.js, Next.js, React, Node.js, Laravel with full framework-aware parsing
 **Background Job Systems**: Bull, BullMQ, Agenda, Bee, Kue, Node.js Worker Threads
 **Test Frameworks**: Jest, Vitest, Cypress, Playwright, Mocha
 **ORM Systems**: Prisma, TypeORM, Sequelize, Mongoose, MikroORM
@@ -172,8 +172,9 @@ npm run mcp-server        # Start MCP server for AI integration
 - **Next.js**: Pages/App router, API routes, middleware, ISR, client/server components
 - **React**: Functional/class components, custom hooks, memo/forwardRef, context
 - **Node.js**: Express/Fastify routes, middleware factories, controllers, validation patterns
+- **Laravel**: Route detection (web.php, api.php), Eloquent models, job queues, service providers, middleware, commands
 
-**Phase 3 Advanced Capabilities**:
+**Advanced Capabilities (Phases 3-4)**:
 
 - **Background Jobs**: Queue detection, job definition parsing, worker thread analysis, scheduler recognition
 - **Test-to-Code Linkage**: Test coverage analysis, mock detection, test suite hierarchy, confidence scoring
@@ -181,6 +182,7 @@ npm run mcp-server        # Start MCP server for AI integration
 - **Package Dependencies**: Lock file analysis, workspace relationships, version constraint analysis
 - **Transitive Analysis**: Deep dependency traversal, cycle detection, confidence propagation, performance optimization
 - **Monorepo Support**: Workspace detection, inter-project dependencies, shared configuration analysis
+- **PHP/Laravel Support**: Laravel route/controller detection, Eloquent model relationships, job queues, service providers
 
 **Advanced Parsing Capabilities**:
 
@@ -201,11 +203,11 @@ npm run mcp-server        # Start MCP server for AI integration
 **Current Limitations**:
 
 - No vector search capabilities yet
-- No cross-language dependency tracking (TypeScript ↔ PHP)
+- No cross-language dependency tracking (TypeScript ↔ PHP) - Planned for Phase 5
 - No runtime tracing for dynamic code analysis
 - No AI-powered semantic understanding
 
-**Completed Features** (Phase 3 ✅):
+**Completed Features** (Phases 3-4 ✅):
 
 - ✅ **Background job detection** (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
 - ✅ **ORM relationship mapping** (Prisma, TypeORM, Sequelize, Mongoose, MikroORM)
@@ -213,16 +215,11 @@ npm run mcp-server        # Start MCP server for AI integration
 - ✅ **Monorepo structure analysis** (Nx, Lerna, Turborepo, Rush)
 - ✅ **Enhanced transitive analysis** with cycle detection and confidence propagation
 - ✅ **Package manager integration** (npm, yarn, pnpm with workspace support)
+- ✅ **PHP/Laravel Support** (Laravel routes, controllers, Eloquent models, job queues, service providers)
 
 **Planned Features** (Prioritized for Vue + Laravel + Godot):
 
-**Phase 4 - PHP/Laravel Support (HIGH PRIORITY):**
-- Laravel route and controller detection
-- Laravel Eloquent model relationship mapping
-- Laravel job queue and scheduler detection
-- Laravel service provider and dependency injection analysis
-
-**Phase 5 - Vue ↔ Laravel Integration (HIGH PRIORITY):**
+**Phase 5 - Vue ↔ Laravel Integration (NEXT PRIORITY):**
 - Cross-stack dependency tracking (TypeScript interfaces ↔ PHP DTOs)
 - Full-stack impact analysis and blast radius calculation
 
