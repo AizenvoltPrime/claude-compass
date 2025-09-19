@@ -34,14 +34,19 @@ interface PhpParseState {
   parenLevel: number;
   bracketLevel: number;
 
-  // PHP context
+  // PHP structure tracking
   inPhpTag: boolean;
+  classLevel: number;           // Nesting depth within classes
+  methodLevel: number;          // Nesting depth within methods/functions
+  topLevelBraceLevel: number;   // Track braces at top level only
 
   // Safe boundary tracking
   lastStatementEnd: number;     // Position after last ;
   lastBlockEnd: number;         // Position after last }
   lastSafeWhitespace: number;   // Position of last safe whitespace
   lastUseBlockEnd: number;      // Position after complete use block
+  lastMethodEnd: number;        // Position after complete method/function
+  lastClassEnd: number;         // Position after complete class/interface/trait
 }
 
 
@@ -773,10 +778,15 @@ export class PHPParser extends ChunkedParser {
       parenLevel: 0,
       bracketLevel: 0,
       inPhpTag: false,
+      classLevel: 0,
+      methodLevel: 0,
+      topLevelBraceLevel: 0,
       lastStatementEnd: -1,
       lastBlockEnd: -1,
       lastSafeWhitespace: -1,
-      lastUseBlockEnd: -1
+      lastUseBlockEnd: -1,
+      lastMethodEnd: -1,
+      lastClassEnd: -1
     };
 
     let useBlockStarted = false;
@@ -804,19 +814,25 @@ export class PHPParser extends ChunkedParser {
       if (useBlockStarted && char === ';' && state.inString === 'none' && state.inComment === 'none') {
         // Check if next non-whitespace/comment line is not a use statement
         const nextLineStart = this.findNextSignificantLine(content, i + 1);
-        if (nextLineStart === -1 || !this.isStartOfUseStatement(content, nextLineStart, state)) {
+        const isNextUse = nextLineStart !== -1 && this.isStartOfUseStatement(content, nextLineStart, state);
+
+        if (!isNextUse) {
           state.lastUseBlockEnd = i + 1;
           useBlockStarted = false;
           consecutiveUseStatements = 0;
         }
       }
 
-      // Track safe boundary points
+      // Track safe boundary points with improved structure awareness
       if (this.canCreateBoundaryAt(state, i)) {
         if (char === ';') {
-          state.lastStatementEnd = i + 1;
+          // Only record statement boundaries when at top level or after use statements
+          if (state.classLevel === 0 && state.methodLevel === 0) {
+            state.lastStatementEnd = i + 1;
+          }
         } else if (char === '}') {
           state.lastBlockEnd = i + 1;
+          // Method and class end boundaries are already tracked in updateParseState
         } else if (this.isWhitespace(char)) {
           state.lastSafeWhitespace = i;
         }
@@ -917,11 +933,48 @@ export class PHPParser extends ChunkedParser {
     // Skip processing if we're in strings
     if (state.inString !== 'none') return;
 
-    // Handle nesting levels
+    // Handle nesting levels and PHP structure tracking
     if (char === '{') {
       state.braceLevel++;
+
+      // Track PHP structure nesting
+      const isClass = this.isAtStartOfClassOrInterface(content, position, state);
+      const isMethod = this.isAtStartOfMethodOrFunction(content, position, state);
+
+      if (isClass) {
+        state.classLevel++;
+        state.topLevelBraceLevel++;
+      } else if (isMethod) {
+        state.methodLevel++;
+        if (state.classLevel === 0) {
+          state.topLevelBraceLevel++;
+        }
+      }
     } else if (char === '}') {
+      const wasTopLevel = (state.classLevel === 0) || (state.methodLevel > 0 && state.classLevel === 0);
+
       state.braceLevel--;
+
+      // Track structure exits
+      if (state.methodLevel > 0) {
+        state.methodLevel--;
+        if (state.methodLevel === 0) {
+          // Exiting a method/function
+          state.lastMethodEnd = position + 1;
+          if (state.classLevel === 0) {
+            state.topLevelBraceLevel--;
+          }
+        }
+      } else if (state.classLevel > 0) {
+        state.classLevel--;
+        if (state.classLevel === 0) {
+          // Exiting a class/interface/trait
+          state.lastClassEnd = position + 1;
+          state.topLevelBraceLevel--;
+        }
+      } else if (wasTopLevel) {
+        state.topLevelBraceLevel--;
+      }
     } else if (char === '(') {
       state.parenLevel++;
     } else if (char === ')') {
@@ -946,6 +999,82 @@ export class PHPParser extends ChunkedParser {
   }
 
   /**
+   * Check if current position is at the start of a class, interface, or trait
+   */
+  private isAtStartOfClassOrInterface(content: string, position: number, state: PhpParseState): boolean {
+    if (!this.canCreateBoundaryAt(state, position)) return false;
+
+    // Look backwards to find the class/interface/trait declaration
+    let searchStart = Math.max(0, position - 300); // Look back up to 300 chars
+    const searchText = content.substring(searchStart, position + 1);
+
+    // Patterns to match class/interface/trait declarations
+    const classPatterns = [
+      /\b(?:class|interface|trait)\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
+      /\b(?:abstract\s+)?class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
+      /\bfinal\s+class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m
+    ];
+
+    // Check if we're at a brace that follows a class declaration
+    if (content[position] === '{') {
+      // Look for class declaration ending just before this brace
+      const beforeBrace = content.substring(searchStart, position).replace(/\s+$/, '');
+      const bracePatterns = [
+        /\b(?:class|interface|trait)\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
+        /\b(?:abstract\s+)?class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
+        /\bfinal\s+class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/
+      ];
+
+      if (bracePatterns.some(pattern => pattern.test(beforeBrace))) {
+        return true;
+      }
+    }
+
+    return classPatterns.some(pattern => pattern.test(searchText));
+  }
+
+  /**
+   * Check if current position is at the start of a method or function
+   */
+  private isAtStartOfMethodOrFunction(content: string, position: number, state: PhpParseState): boolean {
+    if (!this.canCreateBoundaryAt(state, position)) return false;
+
+    // Look backwards to find the method/function declaration
+    let searchStart = Math.max(0, position - 500); // Look back up to 500 chars
+    const searchText = content.substring(searchStart, position + 1);
+
+    // Patterns to match function declarations (with or without the opening brace)
+    const functionPatterns = [
+      // Standard function patterns - look for the declaration, opening brace may be on next line
+      /\bfunction\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+      /\b(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+      /\b(?:public|private|protected)\s+static\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+      /\bstatic\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+      /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+      /\babstract\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?;?\s*$/m
+    ];
+
+    // Check if we're at a brace that follows a function declaration
+    if (content[position] === '{') {
+      // Look for function declaration ending just before this brace
+      const beforeBrace = content.substring(searchStart, position).replace(/\s+$/, '');
+      const bracePatterns = [
+        /\bfunction\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+        /\b(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+        /\b(?:public|private|protected)\s+static\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+        /\bstatic\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+        /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/
+      ];
+
+      if (bracePatterns.some(pattern => pattern.test(beforeBrace))) {
+        return true;
+      }
+    }
+
+    return functionPatterns.some(pattern => pattern.test(searchText));
+  }
+
+  /**
    * Check if the current position is the start of a use statement
    */
   private isStartOfUseStatement(content: string, position: number, state: PhpParseState): boolean {
@@ -958,7 +1087,20 @@ export class PHPParser extends ChunkedParser {
     }
 
     const lineContent = content.substr(lineStart).replace(/^\s+/, '');
-    return lineContent.startsWith('use ') && !lineContent.startsWith('use function ') && !lineContent.startsWith('use const ');
+    const isUseLine = lineContent.startsWith('use ') && !lineContent.startsWith('use function ') && !lineContent.startsWith('use const ');
+
+    // Only consider it a "start" if we're actually at or near the beginning of the use statement
+    // not at the end of the line (like at a semicolon)
+    if (isUseLine) {
+      const relativePosition = position - lineStart;
+      const trimmedLineStart = lineContent.length - lineContent.replace(/^\s+/, '').length;
+      const useStatementStart = lineStart + trimmedLineStart;
+
+      // Only return true if we're within the first few characters of the actual "use" keyword
+      return position >= useStatementStart && position <= useStatementStart + 10;
+    }
+
+    return false;
   }
 
   /**
@@ -1023,9 +1165,11 @@ export class PHPParser extends ChunkedParser {
   private chooseBestBoundary(state: PhpParseState, searchLimit: number, startPos: number): number {
     const candidates = [
       { pos: state.lastUseBlockEnd, priority: 1 },      // After complete use block (highest priority)
-      { pos: state.lastBlockEnd, priority: 2 },         // After method/class end
-      { pos: state.lastStatementEnd, priority: 3 },     // After statement end
-      { pos: state.lastSafeWhitespace, priority: 4 }    // At safe whitespace (lowest priority)
+      { pos: state.lastClassEnd, priority: 2 },         // After complete class/interface/trait
+      { pos: state.lastMethodEnd, priority: 3 },        // After complete method/function
+      { pos: state.lastStatementEnd, priority: 4 },     // After statement end (top-level only)
+      { pos: state.lastBlockEnd, priority: 5 },         // After any block end
+      { pos: state.lastSafeWhitespace, priority: 6 }    // At safe whitespace (lowest priority)
     ].filter(candidate => candidate.pos > startPos && candidate.pos <= searchLimit);
 
     if (candidates.length === 0) {
