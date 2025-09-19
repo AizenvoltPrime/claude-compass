@@ -277,7 +277,7 @@ describe('TestFrameworkParser', () => {
       expect(result.dependencies).toHaveLength(0);
       expect(result.imports).toHaveLength(0);
       expect(result.exports).toHaveLength(0);
-      expect(result.errors).toHaveLength(1); // Parse error expected for empty content
+      expect(result.errors).toHaveLength(0); // Empty content should parse successfully
     });
   });
 

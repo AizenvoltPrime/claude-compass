@@ -611,6 +611,7 @@ export class NextJSParser extends BaseFrameworkParser {
         if (hasDefault) {
           const exported = node.children?.find((child: any) =>
             child.type === 'function_declaration' ||
+            child.type === 'function_expression' ||
             child.type === 'identifier' ||
             child.type === 'arrow_function'
           );
@@ -618,7 +619,7 @@ export class NextJSParser extends BaseFrameworkParser {
           if (exported) {
             let name: string | undefined;
 
-            if (exported.type === 'function_declaration') {
+            if (exported.type === 'function_declaration' || exported.type === 'function_expression') {
               name = exported.children?.find((child: any) => child.type === 'identifier')?.text;
             } else if (exported.type === 'identifier') {
               name = exported.text;

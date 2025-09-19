@@ -54,16 +54,20 @@ export class MultiParser {
         const projectRoot = options.frameworkContext?.projectRoot || this.findProjectRoot(filePath);
         try {
           detectionResult = await this.detector.detectFrameworks(projectRoot);
-          logger.debug(`Detected frameworks for ${filePath}`, {
-            frameworks: detectionResult.frameworks.map(f => f.name),
-            confidence: detectionResult.confidence
-          });
+          if (detectionResult && detectionResult.frameworks) {
+            logger.debug(`Detected frameworks for ${filePath}`, {
+              frameworks: detectionResult.frameworks.map(f => f.name),
+              confidence: detectionResult.confidence
+            });
+          } else {
+            logger.debug(`No frameworks detected for ${filePath}`);
+          }
         } catch (error) {
           logger.warn(`Framework detection failed for ${filePath}`, { error: error.message });
           detectionResult = {
             frameworks: [],
             confidence: 0,
-            metadata: { hasPackageJson: false, hasConfigFiles: false, directoryStructure: [] }
+            metadata: { hasPackageJson: false, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
           };
         }
       }
@@ -120,7 +124,6 @@ export class MultiParser {
             });
             continue;
           }
-
           logger.debug(`Parsing with ${parserName}`, { filePath });
 
           let result: ParseFileResult;
@@ -175,11 +178,11 @@ export class MultiParser {
         // Add collected errors to the empty result
         if (collectedErrors.length > 0) {
           // If we have specific parser errors, filter them and use only those
-          const filteredErrors = this.filterFalsePositiveErrors(collectedErrors);
+          const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(collectedErrors));
           emptyResult.errors = filteredErrors;
         } else {
           // If no specific errors, keep the generic "All parsers failed" error
-          const filteredErrors = this.filterFalsePositiveErrors(collectedErrors);
+          const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(collectedErrors));
           emptyResult.errors.push(...filteredErrors);
         }
 
@@ -192,7 +195,7 @@ export class MultiParser {
 
       // Add any collected errors from failed parsers
       if (collectedErrors.length > 0) {
-        const filteredErrors = this.filterFalsePositiveErrors(collectedErrors);
+        const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(collectedErrors));
         mergedResult.errors.push(...filteredErrors);
       }
 
@@ -256,10 +259,18 @@ export class MultiParser {
 
     while (currentDir !== path.dirname(currentDir)) {
       try {
-        // Look for package.json as indicator of project root
+        // Look for package.json or composer.json as indicators of project root
         const packageJsonPath = path.join(currentDir, 'package.json');
-        require('fs').accessSync(packageJsonPath);
-        return currentDir;
+        const composerJsonPath = path.join(currentDir, 'composer.json');
+
+        try {
+          require('fs').accessSync(packageJsonPath);
+          return currentDir;
+        } catch (error) {
+          // If package.json not found, try composer.json
+          require('fs').accessSync(composerJsonPath);
+          return currentDir;
+        }
       } catch (error) {
         currentDir = path.dirname(currentDir);
       }
@@ -325,6 +336,15 @@ export class MultiParser {
       case '.vue':
         parsers.push('vue');
         break;
+      case '.php':
+      case '.phtml':
+      case '.php3':
+      case '.php4':
+      case '.php5':
+      case '.php7':
+      case '.phps':
+        parsers.push('php');
+        break;
       default:
         // Return empty array for unsupported file types
         break;
@@ -366,7 +386,7 @@ export class MultiParser {
    * Check if parser is a framework parser
    */
   private isFrameworkParser(parserName: string): boolean {
-    return ['vue', 'nextjs', 'react', 'nodejs', 'test-framework', 'package-manager', 'background-job', 'orm'].includes(parserName);
+    return ['vue', 'nextjs', 'react', 'nodejs', 'laravel', 'test-framework', 'package-manager', 'background-job', 'orm'].includes(parserName);
   }
 
   /**
@@ -384,7 +404,7 @@ export class MultiParser {
     const allDependencies = [...primaryResult.dependencies];
     const allImports = [...primaryResult.imports];
     const allExports = [...primaryResult.exports];
-    const allErrors = [...this.filterFalsePositiveErrors(primaryResult.errors)];
+    const allErrors = [...this.deduplicateErrors(this.filterFalsePositiveErrors(primaryResult.errors))];
     const allFrameworkEntities = [...(primaryResult.frameworkEntities || [])];
 
     for (const { result } of allResults) {
@@ -416,8 +436,8 @@ export class MultiParser {
         }
       }
 
-      // Add all errors after filtering false positives
-      const filteredErrors = this.filterFalsePositiveErrors(result.errors);
+      // Add all errors after filtering false positives and deduplicating
+      const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(result.errors));
       allErrors.push(...filteredErrors);
 
       // Add framework entities (avoid duplicates)
@@ -435,7 +455,7 @@ export class MultiParser {
       dependencies: allDependencies,
       imports: allImports,
       exports: allExports,
-      errors: allErrors,
+      errors: this.deduplicateErrors(allErrors), // Final deduplication of all collected errors
       frameworkEntities: allFrameworkEntities,
       metadata: {
         ...primaryResult.metadata
@@ -649,6 +669,22 @@ export class MultiParser {
         return false;
       }
 
+      return true;
+    });
+  }
+
+  /**
+   * Remove duplicate errors from a list of errors
+   */
+  private deduplicateErrors(errors: any[]): any[] {
+    const seen = new Set<string>();
+    return errors.filter(error => {
+      // Create a unique key based on message, line, and column
+      const key = `${error.message || ''}:${error.line || 0}:${error.column || 0}`;
+      if (seen.has(key)) {
+        return false; // Duplicate found
+      }
+      seen.add(key);
       return true;
     });
   }

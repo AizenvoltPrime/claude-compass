@@ -75,6 +75,10 @@ export enum SymbolType {
   TEST_CASE = 'test_case',
   MOCK = 'mock',
   WORKSPACE_PROJECT = 'workspace_project',
+  // Phase 4 additions - PHP/Laravel
+  TRAIT = 'trait',
+  NAMESPACE = 'namespace',
+  ATTRIBUTE = 'attribute',
 }
 
 export enum Visibility {
@@ -257,6 +261,8 @@ export enum FrameworkType {
   EXPRESS = 'express',
   FASTIFY = 'fastify',
   NUXT = 'nuxt',
+  // Phase 4 additions - PHP/Laravel
+  LARAVEL = 'laravel',
 }
 
 // Framework-specific helper types
@@ -462,6 +468,8 @@ export enum ORMType {
   TYPEORM = 'typeorm',
   SEQUELIZE = 'sequelize',
   MONGOOSE = 'mongoose',
+  // Phase 4 additions - PHP/Laravel ORM
+  ELOQUENT = 'eloquent',
 }
 
 export enum ORMRelationshipType {
@@ -524,6 +532,9 @@ export enum TestFrameworkType {
   PLAYWRIGHT = 'playwright',
   MOCHA = 'mocha',
   JASMINE = 'jasmine',
+  // Phase 4 additions - PHP testing frameworks
+  PHPUNIT = 'phpunit',
+  PEST = 'pest',
 }
 
 export enum TestType {
@@ -581,6 +592,8 @@ export enum PackageManagerType {
   YARN = 'yarn',
   PNPM = 'pnpm',
   BUN = 'bun',
+  // Phase 4 additions - PHP package manager
+  COMPOSER = 'composer',
 }
 
 export enum WorkspaceType {

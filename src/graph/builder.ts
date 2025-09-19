@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { execSync } from 'child_process';
-import { Repository, File, Symbol, CreateFile, CreateSymbol } from '../database/models';
+import { Repository, File, Symbol, CreateFile, CreateSymbol, CreateFileDependency, DependencyType } from '../database/models';
 import { DatabaseService } from '../database/services';
 import { getParserForFile, ParseResult, MultiParser } from '../parsers';
 import {
@@ -15,6 +15,7 @@ import {
   VueRoute,
   ParsedDependency
 } from '../parsers/base';
+import { LaravelRoute, LaravelController, EloquentModel } from '../parsers/laravel';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
 import { createComponentLogger } from '../utils/logger';
@@ -35,6 +36,7 @@ export interface BuildOptions {
   encodingFallback?: string;
   compassignorePath?: string;
   enableParallelParsing?: boolean;
+  forceFullAnalysis?: boolean;
 }
 
 export interface BuildResult {
@@ -86,12 +88,16 @@ export class GraphBuilder {
       // Create or get repository record
       const repository = await this.ensureRepository(repositoryPath);
 
-      // Automatically detect if incremental analysis is possible
-      if (repository.last_indexed) {
+      // Automatically detect if incremental analysis is possible (unless forced full analysis)
+      if (repository.last_indexed && !validatedOptions.forceFullAnalysis) {
         this.logger.info('Previous analysis detected, using incremental analysis mode');
         return await this.performIncrementalAnalysis(repositoryPath, repository, validatedOptions);
       } else {
-        this.logger.info('No previous analysis found, performing full analysis');
+        if (validatedOptions.forceFullAnalysis) {
+          this.logger.info('Forcing full analysis mode');
+        } else {
+          this.logger.info('No previous analysis found, performing full analysis');
+        }
       }
 
       // Full analysis path - clean up existing data for fresh analysis
@@ -142,9 +148,27 @@ export class GraphBuilder {
       const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
 
+      // Create cross-file dependencies from symbol dependencies
+      this.logger.debug('Processing cross-file dependencies', {
+        symbolDependenciesCount: symbolDependencies.length,
+        symbolsCount: symbols.length,
+        filesCount: dbFiles.length
+      });
+
+      const crossFileFileDependencies = this.createCrossFileFileDependencies(symbolDependencies, symbols, dbFiles);
+
+      // Create file dependencies for unresolved external calls (e.g., Laravel model calls)
+      const externalCallFileDependencies = this.createExternalCallFileDependencies(parseResults, dbFiles, symbols);
+
+      // Create file dependencies for external imports (e.g., Laravel facades)
+      const externalImportFileDependencies = this.createExternalImportFileDependencies(parseResults, dbFiles);
+
+      // Combine file dependencies
+      const allFileDependencies = [...fileDependencies, ...crossFileFileDependencies, ...externalCallFileDependencies, ...externalImportFileDependencies];
+
       // Store file dependencies in separate table
-      if (fileDependencies.length > 0) {
-        await this.dbService.createFileDependencies(fileDependencies);
+      if (allFileDependencies.length > 0) {
+        await this.dbService.createFileDependencies(allFileDependencies);
       }
 
       // Store symbol dependencies
@@ -424,10 +448,14 @@ export class GraphBuilder {
     const files: Array<{ path: string; relativePath: string }> = [];
     const compassIgnore = await this.loadCompassIgnore(repositoryPath, options);
 
-    const traverse = async (currentPath: string): Promise<void> => {
-      const stats = await fs.stat(currentPath);
+    this.logger.info('Starting file discovery', { repositoryPath, allowedExtensions: options.fileExtensions });
 
-      if (stats.isDirectory()) {
+    const traverse = async (currentPath: string): Promise<void> => {
+      try {
+        const stats = await fs.stat(currentPath);
+        this.logger.info('Traversing path', { path: currentPath, isDirectory: stats.isDirectory() });
+
+        if (stats.isDirectory()) {
         const dirName = path.basename(currentPath);
         const relativePath = path.relative(repositoryPath, currentPath);
 
@@ -459,12 +487,18 @@ export class GraphBuilder {
         }
 
         // Then check built-in include logic
-        if (this.shouldIncludeFile(currentPath, options)) {
+        if (this.shouldIncludeFile(currentPath, relativePath, options)) {
+          this.logger.info('Including file', { path: relativePath });
           files.push({
             path: currentPath,
             relativePath: relativePath
           });
+        } else {
+          this.logger.info('File excluded', { path: relativePath, reason: 'shouldIncludeFile returned false' });
         }
+      }
+      } catch (error) {
+        this.logger.error('Error traversing path', { path: currentPath, error: error.message });
       }
     };
 
@@ -678,9 +712,11 @@ export class GraphBuilder {
 
 
       for (const entity of parseResult.frameworkEntities) {
+        let matchingSymbol: Symbol | undefined;
         try {
+
           // Find matching symbol for this entity
-          let matchingSymbol = fileSymbols.find(s =>
+          matchingSymbol = fileSymbols.find(s =>
             s.name === entity.name ||
             entity.name.includes(s.name) ||
             s.name.includes(entity.name)
@@ -691,11 +727,47 @@ export class GraphBuilder {
 
             // First, get the file ID for this parse result
             const files = await this.dbService.getFilesByRepository(repositoryId);
-            const matchingFile = files.find(f => f.path === parseResult.filePath);
+
+            // Try multiple matching strategies to find the file
+            let matchingFile = files.find(f => f.path === parseResult.filePath);
+
+            if (!matchingFile) {
+              // Try matching by normalized paths (handles different path separators)
+              const normalizedParseResultPath = path.normalize(parseResult.filePath);
+              matchingFile = files.find(f => path.normalize(f.path) === normalizedParseResultPath);
+            }
+
+            if (!matchingFile) {
+              // Try matching by relative path (in case one is absolute and other is relative)
+              const parseResultBasename = path.basename(parseResult.filePath);
+              matchingFile = files.find(f => {
+                const dbPathBasename = path.basename(f.path);
+                // Match if basenames are the same and the relative parts match
+                if (dbPathBasename === parseResultBasename) {
+                  // Extract relative path from the full parseResult path
+                  const parseResultDir = path.dirname(parseResult.filePath);
+                  const dbPathDir = path.dirname(f.path);
+                  // Check if the directory structures match (considering both might be partial paths)
+                  return parseResultDir.endsWith(dbPathDir) || dbPathDir.endsWith(parseResultDir) ||
+                         path.basename(parseResultDir) === path.basename(dbPathDir);
+                }
+                return false;
+              });
+            }
 
             if (!matchingFile) {
               this.logger.warn('Could not find file record for framework entity', {
-                filePath: parseResult.filePath
+                filePath: parseResult.filePath,
+                normalizedFilePath: path.normalize(parseResult.filePath),
+                entityName: entity.name,
+                entityType: entity.type,
+                availableFilesCount: files.length,
+                sampleAvailableFiles: files.map(f => ({
+                  path: f.path,
+                  normalized: path.normalize(f.path)
+                })).slice(0, 5), // Show first 5 with normalized paths for debugging
+                parseResultDirectory: path.dirname(parseResult.filePath),
+                parseResultBasename: path.basename(parseResult.filePath)
               });
               continue;
             }
@@ -716,7 +788,53 @@ export class GraphBuilder {
 
 
           // Store different types of framework entities based on specific interfaces
-          if (this.isRouteEntity(entity)) {
+          // Handle Laravel entities first
+          if (this.isLaravelRoute(entity)) {
+            const laravelRoute = entity as LaravelRoute;
+            // Normalize HTTP method - convert Laravel-specific methods to standard HTTP methods
+            let normalizedMethod = laravelRoute.method;
+            if (normalizedMethod === 'RESOURCE') {
+              normalizedMethod = 'ANY'; // Resource routes handle multiple methods
+            }
+
+            await this.dbService.createRoute({
+              repo_id: repositoryId,
+              path: laravelRoute.path,
+              method: normalizedMethod,
+              handler_symbol_id: matchingSymbol.id,
+              framework_type: 'laravel',
+              middleware: laravelRoute.middleware || [],
+              dynamic_segments: [], // Laravel dynamic segments would need parsing
+              auth_required: false // Could be enhanced to check middleware for auth
+            });
+          } else if (this.isLaravelController(entity)) {
+            // Laravel controllers don't map directly to our component table
+            // Store as metadata for now
+            await this.dbService.storeFrameworkMetadata({
+              repo_id: repositoryId,
+              framework_type: 'laravel',
+              metadata: {
+                entityType: 'controller',
+                name: entity.name,
+                actions: (entity as LaravelController).actions,
+                middleware: (entity as LaravelController).middleware,
+                resourceController: (entity as LaravelController).resourceController
+              }
+            });
+          } else if (this.isEloquentModel(entity)) {
+            // Eloquent models could be stored as metadata
+            await this.dbService.storeFrameworkMetadata({
+              repo_id: repositoryId,
+              framework_type: 'laravel',
+              metadata: {
+                entityType: 'model',
+                name: entity.name,
+                tableName: (entity as EloquentModel).tableName,
+                fillable: (entity as EloquentModel).fillable,
+                relationships: (entity as EloquentModel).relationships
+              }
+            });
+          } else if (this.isRouteEntity(entity)) {
             const routeEntity = entity as NextJSRoute | ExpressRoute | FastifyRoute | VueRoute;
             await this.dbService.createRoute({
               repo_id: repositoryId,
@@ -834,11 +952,12 @@ export class GraphBuilder {
             });
           }
         } catch (error) {
-          this.logger.error('Failed to store framework entity', {
+          this.logger.error(`Failed to store ${entity.type} entity '${entity.name}': ${error instanceof Error ? error.message : String(error)}`, {
             entityType: entity.type,
             entityName: entity.name,
             filePath: parseResult.filePath,
-            error: error instanceof Error ? error.message : String(error)
+            symbolId: matchingSymbol?.id,
+            repositoryId: repositoryId
           });
         }
       }
@@ -872,6 +991,19 @@ export class GraphBuilder {
 
   private isReactHook(entity: any): entity is ReactHook {
     return entity.type === 'hook' && 'returns' in entity && 'dependencies' in entity;
+  }
+
+  // Laravel entity type guards
+  private isLaravelRoute(entity: any): entity is LaravelRoute {
+    return entity.type === 'route' && entity.framework === 'laravel';
+  }
+
+  private isLaravelController(entity: any): entity is LaravelController {
+    return entity.type === 'controller' && entity.framework === 'laravel';
+  }
+
+  private isEloquentModel(entity: any): entity is EloquentModel {
+    return entity.type === 'model' && entity.framework === 'laravel';
   }
 
   // Phase 3 entity type guards
@@ -980,32 +1112,57 @@ export class GraphBuilder {
     return dirName.startsWith('.');
   }
 
-  private shouldIncludeFile(filePath: string, options: BuildOptions): boolean {
+  private shouldIncludeFile(filePath: string, relativePath: string, options: BuildOptions): boolean {
     const ext = path.extname(filePath);
 
     // Use provided extensions if specified, otherwise fall back to defaults
-    const allowedExtensions = options.fileExtensions || ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue'];
+    const allowedExtensions = options.fileExtensions || ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php'];
+
+    this.logger.info('Checking file inclusion', {
+      filePath,
+      ext,
+      allowedExtensions,
+      includeTestFiles: options.includeTestFiles,
+      isTestFile: this.isTestFile(relativePath)
+    });
 
     if (!allowedExtensions.includes(ext)) {
+      this.logger.info('File excluded: extension not allowed', { filePath, ext, allowedExtensions });
       return false;
     }
 
-    if (!options.includeTestFiles && this.isTestFile(filePath)) {
+    if (!options.includeTestFiles && this.isTestFile(relativePath)) {
+      this.logger.info('File excluded: test file and includeTestFiles is false', { filePath, relativePath });
       return false;
     }
 
+    this.logger.info('File should be included', { filePath });
     return true;
   }
 
-  private isTestFile(filePath: string): boolean {
-    const fileName = path.basename(filePath).toLowerCase();
-    return fileName.includes('.test.') ||
-           fileName.includes('.spec.') ||
-           fileName.endsWith('.test') ||
-           fileName.endsWith('.spec') ||
-           filePath.includes('__tests__') ||
-           filePath.includes('/test/') ||
-           filePath.includes('/tests/');
+  private isTestFile(relativePath: string): boolean {
+    const fileName = path.basename(relativePath).toLowerCase();
+
+    // Check filename patterns first
+    if (fileName.includes('.test.') ||
+        fileName.includes('.spec.') ||
+        fileName.endsWith('.test') ||
+        fileName.endsWith('.spec')) {
+      return true;
+    }
+
+    // Check directory patterns within the project (relative path only)
+    const normalizedPath = relativePath.replace(/\\/g, '/');
+    const pathSegments = normalizedPath.split('/');
+
+    // Look for test directories in the project structure
+    return pathSegments.some(segment =>
+      segment === '__tests__' ||
+      segment === 'test' ||
+      segment === 'tests' ||
+      segment === 'spec' ||
+      segment === 'specs'
+    );
   }
 
   private isGeneratedFile(filePath: string): boolean {
@@ -1032,6 +1189,8 @@ export class GraphBuilder {
         return 'typescript';
       case '.vue':
         return 'vue';
+      case '.php':
+        return 'php';
       default:
         return 'unknown';
     }
@@ -1055,6 +1214,7 @@ export class GraphBuilder {
   private async detectFrameworks(repositoryPath: string): Promise<string[]> {
     const frameworks: string[] = [];
 
+    // Check for JavaScript/Node.js frameworks
     try {
       const packageJsonPath = path.join(repositoryPath, 'package.json');
       const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
@@ -1070,6 +1230,21 @@ export class GraphBuilder {
 
     } catch {
       // Ignore errors
+    }
+
+    // Check for PHP/Laravel frameworks
+    try {
+      const composerJsonPath = path.join(repositoryPath, 'composer.json');
+      const composerJson = JSON.parse(await fs.readFile(composerJsonPath, 'utf-8'));
+
+      const deps = { ...composerJson.require, ...composerJson['require-dev'] };
+
+      if (deps['laravel/framework']) frameworks.push('laravel');
+      if (deps['symfony/framework-bundle']) frameworks.push('symfony');
+      if (deps['codeigniter4/framework']) frameworks.push('codeigniter');
+
+    } catch {
+      // Ignore errors - composer.json might not exist for non-PHP projects
     }
 
     return frameworks;
@@ -1263,13 +1438,212 @@ export class GraphBuilder {
       includeTestFiles: options.includeTestFiles ?? true,
       includeNodeModules: options.includeNodeModules ?? false,
       maxFiles: options.maxFiles ?? 10000,
-      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'],
+      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php'],
 
       fileSizePolicy: options.fileSizePolicy || this.createDefaultFileSizePolicy(options),
       chunkOverlapLines: options.chunkOverlapLines ?? 100,
       encodingFallback: options.encodingFallback ?? 'iso-8859-1',
       compassignorePath: options.compassignorePath,
-      enableParallelParsing: options.enableParallelParsing ?? false
+      enableParallelParsing: options.enableParallelParsing ?? false,
+      forceFullAnalysis: options.forceFullAnalysis ?? false
     };
+  }
+
+  /**
+   * Create file dependencies for unresolved external calls (e.g., Laravel model calls)
+   */
+  private createExternalCallFileDependencies(
+    parseResults: Array<ParseResult & { filePath: string }>,
+    dbFiles: File[],
+    symbols: Symbol[]
+  ): CreateFileDependency[] {
+    const fileDependencies: CreateFileDependency[] = [];
+
+    // Create lookup maps for efficiency
+    const pathToFileId = new Map<string, number>();
+    const symbolIdToFileId = new Map<number, number>();
+
+    // Populate file mappings
+    for (const file of dbFiles) {
+      pathToFileId.set(file.path, file.id);
+    }
+
+    // Populate symbol to file mapping
+    for (const symbol of symbols) {
+      symbolIdToFileId.set(symbol.id, symbol.file_id);
+    }
+
+    // Track existing symbol dependencies to avoid duplicates
+    const existingSymbolDeps = new Set<string>();
+    // Note: We'll populate this by checking if symbols were successfully resolved
+
+    for (const parseResult of parseResults) {
+      const sourceFileId = pathToFileId.get(parseResult.filePath);
+      if (!sourceFileId) continue;
+
+      // Check each dependency to see if it was resolved to a symbol dependency
+      for (const dependency of parseResult.dependencies) {
+        // Handle both 'calls' and 'imports' dependencies for external calls
+        if (dependency.dependency_type !== 'calls' && dependency.dependency_type !== 'imports') {
+          continue;
+        }
+
+        // Check if this is likely an external call
+        // For calls: contains :: for static methods (User::all, User::create)
+        // For imports: Laravel facades and framework calls
+        const isExternalCall = dependency.to_symbol.includes('::') ||
+                               dependency.dependency_type === 'imports';
+
+        if (isExternalCall) {
+          this.logger.debug('Creating file dependency for external call', {
+            from: dependency.from_symbol,
+            to: dependency.to_symbol,
+            sourceFile: parseResult.filePath,
+            line: dependency.line_number
+          });
+
+          // Create a file dependency representing this external call
+          // The "target" will be the same file for now, representing the external call
+          fileDependencies.push({
+            from_file_id: sourceFileId,
+            to_file_id: sourceFileId, // External calls don't have a target file in our codebase
+            dependency_type: dependency.dependency_type,
+            line_number: dependency.line_number,
+            confidence: dependency.confidence || 0.8
+          });
+        }
+      }
+    }
+
+    this.logger.info('Created external call file dependencies', {
+      count: fileDependencies.length
+    });
+
+    return fileDependencies;
+  }
+
+  /**
+   * Create file dependencies for external imports (e.g., Laravel facades, npm packages)
+   */
+  private createExternalImportFileDependencies(
+    parseResults: Array<ParseResult & { filePath: string }>,
+    dbFiles: File[]
+  ): CreateFileDependency[] {
+    const fileDependencies: CreateFileDependency[] = [];
+
+    // Create lookup map for efficiency
+    const pathToFileId = new Map<string, number>();
+    for (const file of dbFiles) {
+      pathToFileId.set(file.path, file.id);
+    }
+
+    for (const parseResult of parseResults) {
+      const sourceFileId = pathToFileId.get(parseResult.filePath);
+      if (!sourceFileId) continue;
+
+      // Process imports to identify external packages
+      for (const importInfo of parseResult.imports) {
+        // Check if this is an external import (not relative/absolute path to local file)
+        const isExternalImport = !importInfo.source.startsWith('./') &&
+                                !importInfo.source.startsWith('../') &&
+                                !importInfo.source.startsWith('/') &&
+                                !importInfo.source.startsWith('src/') &&
+                                !importInfo.source.startsWith('@/');
+
+        if (isExternalImport) {
+          this.logger.debug('Creating file dependency for external import', {
+            source: importInfo.source,
+            importedNames: importInfo.imported_names,
+            sourceFile: parseResult.filePath,
+            line: importInfo.line_number
+          });
+
+          // Create a file dependency representing this external import
+          // Since we can't reference a real external file, we create a self-reference
+          // The presence of this dependency with dependency_type 'imports' indicates external usage
+          fileDependencies.push({
+            from_file_id: sourceFileId,
+            to_file_id: sourceFileId, // Self-reference to indicate external import
+            dependency_type: DependencyType.IMPORTS,
+            line_number: importInfo.line_number || 1,
+            confidence: 0.9
+          });
+        }
+      }
+    }
+
+    this.logger.info('Created external import file dependencies', {
+      count: fileDependencies.length
+    });
+
+    return fileDependencies;
+  }
+
+  /**
+   * Create file dependencies from cross-file symbol dependencies
+   */
+  private createCrossFileFileDependencies(
+    symbolDependencies: any[],
+    symbols: Symbol[],
+    dbFiles: File[]
+  ): CreateFileDependency[] {
+    const fileDependencies: CreateFileDependency[] = [];
+
+    // Create lookup maps for efficiency
+    const symbolIdToFileId = new Map<number, number>();
+    const fileIdToPath = new Map<number, string>();
+    const pathToFileId = new Map<string, number>();
+
+    // Populate symbol to file mapping
+    for (const symbol of symbols) {
+      symbolIdToFileId.set(symbol.id, symbol.file_id);
+    }
+
+    // Populate file mappings
+    for (const file of dbFiles) {
+      fileIdToPath.set(file.id, file.path);
+      pathToFileId.set(file.path, file.id);
+    }
+
+    // Log sample of symbol dependencies for debugging
+    if (symbolDependencies.length > 0) {
+      this.logger.debug('Sample symbol dependency structure', {
+        firstDependency: symbolDependencies[0],
+        dependencyKeys: Object.keys(symbolDependencies[0] || {})
+      });
+    }
+
+    // Process each symbol dependency
+    for (const symbolDep of symbolDependencies) {
+      const fromFileId = symbolIdToFileId.get(symbolDep.from_symbol_id);
+      const toFileId = symbolIdToFileId.get(symbolDep.to_symbol_id);
+
+      // Only create file dependency if symbols are in different files
+      if (fromFileId && toFileId && fromFileId !== toFileId) {
+        // Check if this file dependency already exists in our list
+        const existingDep = fileDependencies.find(
+          fd => fd.from_file_id === fromFileId &&
+                fd.to_file_id === toFileId &&
+                fd.dependency_type === symbolDep.dependency_type
+        );
+
+        if (!existingDep) {
+          fileDependencies.push({
+            from_file_id: fromFileId,
+            to_file_id: toFileId,
+            dependency_type: symbolDep.dependency_type,
+            line_number: symbolDep.line_number,
+            confidence: symbolDep.confidence
+          });
+        }
+      }
+    }
+
+    this.logger.debug('Created cross-file dependencies from symbol dependencies', {
+      symbolDependencies: symbolDependencies.length,
+      crossFileFileDependencies: fileDependencies.length
+    });
+
+    return fileDependencies;
   }
 }

@@ -84,6 +84,81 @@ function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   return args as ListDependenciesArgs;
 }
 
+// Laravel-specific tool validation functions
+function validateGetLaravelRoutesArgs(args: any): GetLaravelRoutesArgs {
+  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
+    throw new Error('repo_id must be a number');
+  }
+  if (args.path !== undefined && typeof args.path !== 'string') {
+    throw new Error('path must be a string');
+  }
+  if (args.method !== undefined && typeof args.method !== 'string') {
+    throw new Error('method must be a string');
+  }
+  if (args.middleware !== undefined && typeof args.middleware !== 'string') {
+    throw new Error('middleware must be a string');
+  }
+  if (args.controller !== undefined && typeof args.controller !== 'string') {
+    throw new Error('controller must be a string');
+  }
+  return args as GetLaravelRoutesArgs;
+}
+
+function validateGetEloquentModelsArgs(args: any): GetEloquentModelsArgs {
+  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
+    throw new Error('repo_id must be a number');
+  }
+  if (args.model_name !== undefined && typeof args.model_name !== 'string') {
+    throw new Error('model_name must be a string');
+  }
+  if (args.table_name !== undefined && typeof args.table_name !== 'string') {
+    throw new Error('table_name must be a string');
+  }
+  if (args.relationships !== undefined && !Array.isArray(args.relationships)) {
+    throw new Error('relationships must be an array');
+  }
+  return args as GetEloquentModelsArgs;
+}
+
+function validateGetLaravelControllersArgs(args: any): GetLaravelControllersArgs {
+  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
+    throw new Error('repo_id must be a number');
+  }
+  if (args.controller_name !== undefined && typeof args.controller_name !== 'string') {
+    throw new Error('controller_name must be a string');
+  }
+  if (args.action !== undefined && typeof args.action !== 'string') {
+    throw new Error('action must be a string');
+  }
+  if (args.middleware !== undefined && typeof args.middleware !== 'string') {
+    throw new Error('middleware must be a string');
+  }
+  return args as GetLaravelControllersArgs;
+}
+
+function validateSearchLaravelEntitiesArgs(args: any): SearchLaravelEntitiesArgs {
+  if (!args.query || typeof args.query !== 'string') {
+    throw new Error('query is required and must be a string');
+  }
+  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
+    throw new Error('repo_id must be a number');
+  }
+  if (args.entity_types !== undefined && !Array.isArray(args.entity_types)) {
+    throw new Error('entity_types must be an array');
+  }
+  if (args.metadata_filter !== undefined && typeof args.metadata_filter !== 'object') {
+    throw new Error('metadata_filter must be an object');
+  }
+  if (args.limit !== undefined) {
+    const limit = Number(args.limit);
+    if (isNaN(limit) || limit < 1 || limit > 200) {
+      throw new Error('limit must be a number between 1 and 200');
+    }
+    args.limit = limit;
+  }
+  return args as SearchLaravelEntitiesArgs;
+}
+
 export interface GetFileArgs {
   file_id?: number;
   file_path?: string;
@@ -114,6 +189,37 @@ export interface ListDependenciesArgs {
   symbol_id: number;
   dependency_type?: string;
   include_indirect?: boolean;
+}
+
+// Laravel-specific tool argument interfaces
+export interface GetLaravelRoutesArgs {
+  repo_id?: number;
+  path?: string;
+  method?: string;
+  middleware?: string;
+  controller?: string;
+}
+
+export interface GetEloquentModelsArgs {
+  repo_id?: number;
+  model_name?: string;
+  table_name?: string;
+  relationships?: string[];
+}
+
+export interface GetLaravelControllersArgs {
+  repo_id?: number;
+  controller_name?: string;
+  action?: string;
+  middleware?: string;
+}
+
+export interface SearchLaravelEntitiesArgs {
+  query: string;
+  repo_id?: number;
+  entity_types?: string[];
+  metadata_filter?: Record<string, any>;
+  limit?: number;
 }
 
 export class McpTools {
@@ -528,6 +634,363 @@ export class McpTools {
             filters: {
               dependency_type: validatedArgs.dependency_type,
               include_indirect: validatedArgs.include_indirect,
+            },
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  // Laravel-specific MCP tools
+  async getLaravelRoutes(args: any) {
+    const validatedArgs = validateGetLaravelRoutesArgs(args);
+    this.logger.debug('Getting Laravel routes', validatedArgs);
+
+    // Get all Laravel routes from the repository
+    let routes = [];
+    if (validatedArgs.repo_id) {
+      routes = await this.dbService.getRoutesByFramework(validatedArgs.repo_id, 'laravel');
+    } else {
+      // If no repo_id specified, get routes from all repositories
+      const repositories = await this.dbService.getAllRepositories();
+      for (const repo of repositories) {
+        const repoRoutes = await this.dbService.getRoutesByFramework(repo.id, 'laravel');
+        routes.push(...repoRoutes);
+      }
+    }
+
+    // Apply filters
+    let filteredRoutes = routes;
+
+    if (validatedArgs.path) {
+      filteredRoutes = filteredRoutes.filter(route =>
+        route.path?.includes(validatedArgs.path!) || route.name?.includes(validatedArgs.path!)
+      );
+    }
+
+    if (validatedArgs.method) {
+      filteredRoutes = filteredRoutes.filter(route =>
+        route.method?.toLowerCase() === validatedArgs.method!.toLowerCase()
+      );
+    }
+
+    if (validatedArgs.middleware) {
+      filteredRoutes = filteredRoutes.filter(route =>
+        route.middleware?.some(m => m.includes(validatedArgs.middleware!))
+      );
+    }
+
+    if (validatedArgs.controller) {
+      filteredRoutes = filteredRoutes.filter(route =>
+        route.controller?.includes(validatedArgs.controller!)
+      );
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            routes: filteredRoutes.map(route => ({
+              id: route.id,
+              path: route.path,
+              method: route.method,
+              name: route.name,
+              controller: route.controller,
+              action: route.action,
+              middleware: route.middleware || [],
+              framework_type: route.framework_type,
+              dynamic_segments: route.dynamic_segments || [],
+              file_id: route.file_id,
+            })),
+            total_routes: filteredRoutes.length,
+            filters: {
+              repo_id: validatedArgs.repo_id,
+              path: validatedArgs.path,
+              method: validatedArgs.method,
+              middleware: validatedArgs.middleware,
+              controller: validatedArgs.controller,
+            },
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  async getEloquentModels(args: any) {
+    const validatedArgs = validateGetEloquentModelsArgs(args);
+    this.logger.debug('Getting Eloquent models', validatedArgs);
+
+    // Get Laravel framework metadata (contains models)
+    let frameworkMetadata = [];
+    if (validatedArgs.repo_id) {
+      const metadata = await this.dbService.getFrameworkMetadata(validatedArgs.repo_id, 'laravel');
+      if (metadata) {
+        frameworkMetadata = [metadata];
+      }
+    } else {
+      // Get from all repositories
+      const repositories = await this.dbService.getAllRepositories();
+      for (const repo of repositories) {
+        const metadata = await this.dbService.getFrameworkMetadata(repo.id, 'laravel');
+        if (metadata) {
+          frameworkMetadata.push(metadata);
+        }
+      }
+    }
+
+    // Extract models from framework metadata
+    let models = [];
+    for (const metadata of frameworkMetadata) {
+      if (metadata.metadata && metadata.metadata.models) {
+        models.push(...metadata.metadata.models);
+      }
+    }
+
+    // Apply filters
+    let filteredModels = models;
+
+    if (validatedArgs.model_name) {
+      filteredModels = filteredModels.filter(model =>
+        model.name?.toLowerCase().includes(validatedArgs.model_name!.toLowerCase())
+      );
+    }
+
+    if (validatedArgs.table_name) {
+      filteredModels = filteredModels.filter(model =>
+        model.tableName?.toLowerCase().includes(validatedArgs.table_name!.toLowerCase())
+      );
+    }
+
+    if (validatedArgs.relationships && validatedArgs.relationships.length > 0) {
+      filteredModels = filteredModels.filter(model =>
+        model.relationships?.some(rel =>
+          validatedArgs.relationships!.some(filterRel => rel.type.includes(filterRel))
+        )
+      );
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            models: filteredModels.map(model => ({
+              name: model.name,
+              type: model.type,
+              tableName: model.tableName,
+              fillable: model.fillable || [],
+              relationships: model.relationships || [],
+              file_path: model.file_path,
+              start_line: model.start_line,
+              end_line: model.end_line,
+            })),
+            total_models: filteredModels.length,
+            filters: {
+              repo_id: validatedArgs.repo_id,
+              model_name: validatedArgs.model_name,
+              table_name: validatedArgs.table_name,
+              relationships: validatedArgs.relationships,
+            },
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  async getLaravelControllers(args: any) {
+    const validatedArgs = validateGetLaravelControllersArgs(args);
+    this.logger.debug('Getting Laravel controllers', validatedArgs);
+
+    // Get Laravel framework metadata (contains controllers)
+    let frameworkMetadata = [];
+    if (validatedArgs.repo_id) {
+      const metadata = await this.dbService.getFrameworkMetadata(validatedArgs.repo_id, 'laravel');
+      if (metadata) {
+        frameworkMetadata = [metadata];
+      }
+    } else {
+      // Get from all repositories
+      const repositories = await this.dbService.getAllRepositories();
+      for (const repo of repositories) {
+        const metadata = await this.dbService.getFrameworkMetadata(repo.id, 'laravel');
+        if (metadata) {
+          frameworkMetadata.push(metadata);
+        }
+      }
+    }
+
+    // Extract controllers from framework metadata
+    let controllers = [];
+    for (const metadata of frameworkMetadata) {
+      if (metadata.metadata && metadata.metadata.controllers) {
+        controllers.push(...metadata.metadata.controllers);
+      }
+    }
+
+    // Apply filters
+    let filteredControllers = controllers;
+
+    if (validatedArgs.controller_name) {
+      filteredControllers = filteredControllers.filter(controller =>
+        controller.name?.toLowerCase().includes(validatedArgs.controller_name!.toLowerCase())
+      );
+    }
+
+    if (validatedArgs.action) {
+      filteredControllers = filteredControllers.filter(controller =>
+        controller.actions?.some(action => action.includes(validatedArgs.action!))
+      );
+    }
+
+    if (validatedArgs.middleware) {
+      filteredControllers = filteredControllers.filter(controller =>
+        controller.middleware?.some(m => m.includes(validatedArgs.middleware!))
+      );
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            controllers: filteredControllers.map(controller => ({
+              name: controller.name,
+              type: controller.type,
+              actions: controller.actions || [],
+              middleware: controller.middleware || [],
+              resourceController: controller.resourceController || false,
+              file_path: controller.file_path,
+              start_line: controller.start_line,
+              end_line: controller.end_line,
+            })),
+            total_controllers: filteredControllers.length,
+            filters: {
+              repo_id: validatedArgs.repo_id,
+              controller_name: validatedArgs.controller_name,
+              action: validatedArgs.action,
+              middleware: validatedArgs.middleware,
+            },
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  async searchLaravelEntities(args: any) {
+    const validatedArgs = validateSearchLaravelEntitiesArgs(args);
+    this.logger.debug('Searching Laravel entities', validatedArgs);
+
+    const results = [];
+
+    // Define entity types to search
+    const entityTypes = validatedArgs.entity_types || ['route', 'model', 'controller', 'middleware', 'job', 'service_provider', 'command'];
+
+    // Search routes if included
+    if (entityTypes.includes('route')) {
+      let routes = [];
+      if (validatedArgs.repo_id) {
+        routes = await this.dbService.getRoutesByFramework(validatedArgs.repo_id, 'laravel');
+      } else {
+        const repositories = await this.dbService.getAllRepositories();
+        for (const repo of repositories) {
+          const repoRoutes = await this.dbService.getRoutesByFramework(repo.id, 'laravel');
+          routes.push(...repoRoutes);
+        }
+      }
+
+      const matchingRoutes = routes.filter(route =>
+        route.path?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
+        route.name?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
+        route.controller?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
+        route.action?.toLowerCase().includes(validatedArgs.query.toLowerCase())
+      );
+
+      results.push(...matchingRoutes.map(route => ({
+        entity_type: 'route',
+        entity_id: route.id,
+        name: route.name || route.path,
+        type: 'route',
+        path: route.path,
+        method: route.method,
+        controller: route.controller,
+        action: route.action,
+        middleware: route.middleware,
+        file_id: route.file_id,
+      })));
+    }
+
+    // Search framework metadata entities (models, controllers, etc.)
+    if (entityTypes.some(type => ['model', 'controller', 'middleware', 'job', 'service_provider', 'command'].includes(type))) {
+      let frameworkMetadata = [];
+      if (validatedArgs.repo_id) {
+        const metadata = await this.dbService.getFrameworkMetadata(validatedArgs.repo_id, 'laravel');
+        if (metadata) {
+          frameworkMetadata = [metadata];
+        }
+      } else {
+        const repositories = await this.dbService.getAllRepositories();
+        for (const repo of repositories) {
+          const metadata = await this.dbService.getFrameworkMetadata(repo.id, 'laravel');
+          if (metadata) {
+            frameworkMetadata.push(metadata);
+          }
+        }
+      }
+
+      for (const metadata of frameworkMetadata) {
+        if (metadata.metadata) {
+          // Search each entity type
+          for (const entityType of entityTypes) {
+            const entities = metadata.metadata[entityType + 's'] || metadata.metadata[entityType] || [];
+
+            const matchingEntities = entities.filter(entity =>
+              entity.name?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
+              (entity.type && entity.type.toLowerCase().includes(validatedArgs.query.toLowerCase()))
+            );
+
+            results.push(...matchingEntities.map(entity => ({
+              entity_type: entityType,
+              entity_id: entity.id || entity.name,
+              name: entity.name,
+              type: entity.type || entityType,
+              ...entity
+            })));
+          }
+        }
+      }
+    }
+
+    // Apply metadata filter if provided
+    let filteredResults = results;
+    if (validatedArgs.metadata_filter) {
+      filteredResults = results.filter(result => {
+        for (const [key, value] of Object.entries(validatedArgs.metadata_filter!)) {
+          if (result[key] !== value) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    // Apply limit
+    const limit = validatedArgs.limit || 50;
+    filteredResults = filteredResults.slice(0, limit);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            query: validatedArgs.query,
+            results: filteredResults,
+            total_results: filteredResults.length,
+            filters: {
+              repo_id: validatedArgs.repo_id,
+              entity_types: validatedArgs.entity_types,
+              metadata_filter: validatedArgs.metadata_filter,
+              limit: validatedArgs.limit,
             },
           }, null, 2),
         },

@@ -12,6 +12,7 @@ export interface FrameworkDetectionResult {
   confidence: number;
   metadata: {
     hasPackageJson: boolean;
+    hasComposerJson: boolean;
     hasConfigFiles: boolean;
     directoryStructure: string[];
   };
@@ -169,6 +170,35 @@ export class FrameworkDetector {
         features: ['database-models', 'migrations', 'relationships', 'orm-mapping']
       },
       baseConfidence: 0.8
+    },
+
+    // Laravel Framework
+    {
+      name: 'laravel',
+      patterns: {
+        dependencies: ['laravel/framework', 'illuminate/support', 'illuminate/database'],
+        devDependencies: ['phpunit/phpunit', 'mockery/mockery', 'laravel/pint', 'laravel/sail'],
+        files: ['artisan', 'composer.json', '.env.example', 'server.php'],
+        directories: ['app', 'routes', 'config', 'database', 'resources', 'storage', 'public', 'bootstrap'],
+        configs: [
+          'config/app.php',
+          'config/database.php',
+          'config/services.php',
+          'config/auth.php',
+          'routes/web.php',
+          'routes/api.php'
+        ],
+        features: [
+          'eloquent-orm',
+          'blade-templates',
+          'artisan-commands',
+          'middleware',
+          'service-providers',
+          'route-model-binding',
+          'dependency-injection'
+        ]
+      },
+      baseConfidence: 0.9
     }
   ];
 
@@ -180,6 +210,7 @@ export class FrameworkDetector {
 
     try {
       const packageJson = await this.readPackageJson(projectPath);
+      const composerJson = await this.readComposerJson(projectPath);
       const configFiles = await this.findConfigFiles(projectPath);
       const directoryStructure = await this.analyzeDirectoryStructure(projectPath);
 
@@ -189,6 +220,7 @@ export class FrameworkDetector {
         const detection = await this.detectFramework(
           pattern,
           packageJson,
+          composerJson,
           configFiles,
           directoryStructure,
           projectPath
@@ -211,6 +243,7 @@ export class FrameworkDetector {
         confidence: Math.min(overallConfidence, 1.0),
         metadata: {
           hasPackageJson: packageJson !== null,
+          hasComposerJson: composerJson !== null,
           hasConfigFiles: configFiles.length > 0,
           directoryStructure
         }
@@ -223,6 +256,7 @@ export class FrameworkDetector {
         confidence: 0,
         metadata: {
           hasPackageJson: false,
+          hasComposerJson: false,
           hasConfigFiles: false,
           directoryStructure: []
         }
@@ -236,6 +270,7 @@ export class FrameworkDetector {
   private async detectFramework(
     pattern: FrameworkPattern,
     packageJson: any,
+    composerJson: any,
     configFiles: string[],
     directoryStructure: string[],
     projectPath: string
@@ -267,6 +302,36 @@ export class FrameworkDetector {
             type: 'devDependency',
             source: 'package.json',
             value: `${dep}@${packageJson.devDependencies[dep]}`,
+            confidence: 0.6
+          });
+          confidence += 0.6;
+        }
+      }
+    }
+
+    // Check composer.json dependencies (PHP projects)
+    if (composerJson && pattern.patterns.dependencies) {
+      for (const dep of pattern.patterns.dependencies) {
+        if (composerJson.require?.[dep]) {
+          evidence.push({
+            type: 'dependency',
+            source: 'composer.json',
+            value: `${dep}@${composerJson.require[dep]}`,
+            confidence: 0.8
+          });
+          confidence += 0.8;
+        }
+      }
+    }
+
+    // Check composer.json dev dependencies (PHP projects)
+    if (composerJson && pattern.patterns.devDependencies) {
+      for (const dep of pattern.patterns.devDependencies) {
+        if (composerJson['require-dev']?.[dep]) {
+          evidence.push({
+            type: 'devDependency',
+            source: 'composer.json',
+            value: `${dep}@${composerJson['require-dev'][dep]}`,
             confidence: 0.6
           });
           confidence += 0.6;
@@ -342,6 +407,19 @@ export class FrameworkDetector {
     try {
       const packagePath = path.join(projectPath, 'package.json');
       const content = await fs.readFile(packagePath, 'utf-8');
+      return JSON.parse(content);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Read and parse composer.json
+   */
+  private async readComposerJson(projectPath: string): Promise<any | null> {
+    try {
+      const composerPath = path.join(projectPath, 'composer.json');
+      const content = await fs.readFile(composerPath, 'utf-8');
       return JSON.parse(content);
     } catch (error) {
       return null;
@@ -637,7 +715,7 @@ export class FrameworkDetector {
     const ext = path.extname(filePath);
     const frameworks: string[] = [];
 
-    // Always include base JavaScript/TypeScript parsing
+    // Always include base language parsing
     if (['.js', '.jsx'].includes(ext)) {
       frameworks.push('javascript');
     } else if (['.ts', '.tsx'].includes(ext)) {
@@ -645,6 +723,9 @@ export class FrameworkDetector {
     } else if (ext === '.vue') {
       // Vue SFCs contain JavaScript/TypeScript that needs base language parsing
       frameworks.push('javascript');
+    } else if (['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.phps'].includes(ext)) {
+      // PHP files need base PHP parsing
+      frameworks.push('php');
     }
 
     // Add framework-specific parsers based on detection and file type
@@ -685,9 +766,18 @@ export class FrameworkDetector {
           break;
 
         case 'test-framework':
-          if (filePath.includes('.test.') || filePath.includes('.spec.') || filePath.includes('.e2e.') ||
-              filePath.includes('/tests/') || filePath.includes('/test/') || filePath.includes('/__tests__/') ||
-              filePath.includes('/cypress/') || filePath.includes('/e2e/')) {
+          const fileName = path.basename(filePath);
+          const relativeToProject = this.getProjectRelativePath(filePath, detectionResult);
+
+          // Check filename patterns for test files
+          const hasTestFilename = fileName.includes('.test.') || fileName.includes('.spec.') || fileName.includes('.e2e.');
+
+          // Check if file is in a test directory relative to the project root (not absolute path)
+          const isInTestDirectory = relativeToProject.includes('/tests/') || relativeToProject.includes('/test/') ||
+                                   relativeToProject.includes('/__tests__/') || relativeToProject.includes('/cypress/') ||
+                                   relativeToProject.includes('/e2e/');
+
+          if (hasTestFilename || isInTestDirectory) {
             frameworks.push('test-framework');
           }
           break;
@@ -716,9 +806,129 @@ export class FrameworkDetector {
             frameworks.push('orm');
           }
           break;
+
+        case 'laravel':
+          if (ext === '.php') {
+            let isLaravelFile = false;
+
+            // Controller files
+            if (filePath.includes('/app/Http/Controllers/') ||
+                path.basename(filePath).endsWith('Controller.php')) {
+              isLaravelFile = true;
+            }
+            // Model files
+            if (filePath.includes('/app/Models/') ||
+                (filePath.includes('/app/') && this.hasLaravelModelPattern(filePath))) {
+              isLaravelFile = true;
+            }
+            // Route files
+            if (filePath.includes('/routes/') &&
+                (path.basename(filePath) === 'web.php' ||
+                 path.basename(filePath) === 'api.php' ||
+                 path.basename(filePath) === 'console.php')) {
+              isLaravelFile = true;
+            }
+            // Middleware files
+            if (filePath.includes('/app/Http/Middleware/') ||
+                path.basename(filePath).endsWith('Middleware.php')) {
+              isLaravelFile = true;
+            }
+            // Service provider files
+            if (filePath.includes('/app/Providers/') ||
+                path.basename(filePath).endsWith('ServiceProvider.php')) {
+              isLaravelFile = true;
+            }
+            // Migration files
+            if (filePath.includes('/database/migrations/')) {
+              isLaravelFile = true;
+            }
+            // Seeder files
+            if (filePath.includes('/database/seeders/') ||
+                path.basename(filePath).endsWith('Seeder.php')) {
+              isLaravelFile = true;
+            }
+            // Artisan command files
+            if (filePath.includes('/app/Console/Commands/') ||
+                path.basename(filePath).endsWith('Command.php')) {
+              isLaravelFile = true;
+            }
+
+            // Job files
+            if (filePath.includes('/app/Jobs/') ||
+                path.basename(filePath).endsWith('Job.php')) {
+              isLaravelFile = true;
+            }
+
+            if (isLaravelFile) {
+              // Laravel parser handles base PHP parsing internally, so remove base 'php' parser
+              const phpIndex = frameworks.indexOf('php');
+              if (phpIndex !== -1) {
+                frameworks.splice(phpIndex, 1);
+              }
+              frameworks.push('laravel');
+            }
+          }
+          break;
       }
     }
 
     return frameworks;
+  }
+
+  /**
+   * Check if a file path likely contains a Laravel model based on file patterns
+   */
+  private hasLaravelModelPattern(filePath: string): boolean {
+    // This is a simplified check that can be enhanced with actual file content analysis
+    // For now, check if it's in app/ directory and ends with .php (suggesting it might be a model)
+    return filePath.includes('/app/') && !filePath.includes('Controller') &&
+           !filePath.includes('Middleware') && !filePath.includes('Provider') &&
+           !filePath.includes('Job') && !filePath.includes('Command');
+  }
+
+  /**
+   * Get the path relative to the detected project root to avoid false positives
+   * when files are in test fixture directories
+   */
+  private getProjectRelativePath(filePath: string, detectionResult: FrameworkDetectionResult): string {
+    // Try to find the project root by looking for key files that indicate a project boundary
+    let projectRoot = filePath;
+    let currentDir = path.dirname(filePath);
+
+    // Walk up the directory tree to find project markers
+    while (currentDir !== path.dirname(currentDir)) { // Stop at filesystem root
+      // Check for common project markers
+      const markers = ['package.json', 'composer.json', '.git', 'artisan', 'next.config.js', 'vue.config.js'];
+      let foundMarker = false;
+
+      for (const marker of markers) {
+        const markerPath = path.join(currentDir, marker);
+        try {
+          // We can't use async fs.access here, so we'll do our best to infer from the directory structure
+          if (detectionResult.metadata.hasPackageJson && marker === 'package.json') {
+            projectRoot = currentDir;
+            foundMarker = true;
+            break;
+          }
+          if (detectionResult.metadata.hasComposerJson && marker === 'composer.json') {
+            projectRoot = currentDir;
+            foundMarker = true;
+            break;
+          }
+        } catch (error) {
+          // Continue searching
+        }
+      }
+
+      if (foundMarker) {
+        break;
+      }
+
+      currentDir = path.dirname(currentDir);
+    }
+
+    // Return the relative path from the project root
+    const relativePath = path.relative(projectRoot, filePath);
+    return relativePath.replace(/\\/g, '/'); // Normalize to forward slashes
   }
 }

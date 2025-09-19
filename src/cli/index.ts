@@ -7,8 +7,26 @@ import { DatabaseService, databaseService } from '../database';
 import { ClaudeCompassMCPServer } from '../mcp';
 import { logger, config } from '../utils';
 import { FileSizeUtils, DEFAULT_POLICY } from '../config/file-size-policy';
-const chalk = require('chalk');
-const ora = require('ora');
+import chalk from 'chalk';
+import ora from 'ora';
+
+// Set UTF-8 encoding for stdout and stderr
+if (process.stdout.setEncoding) {
+  process.stdout.setEncoding('utf8');
+}
+if (process.stderr.setEncoding) {
+  process.stderr.setEncoding('utf8');
+}
+
+// Check for Unicode support and provide fallbacks
+const getEmoji = (emoji: string, fallback: string): string => {
+  // Check if we're in a Unicode-capable environment
+  const supportsUnicode = process.env.TERM !== 'dumb' &&
+                         (!process.env.CI || process.env.CI === 'false') &&
+                         process.platform !== 'win32';
+
+  return supportsUnicode ? emoji : fallback;
+};
 
 const program = new Command();
 
@@ -28,7 +46,7 @@ program
   .option('--chunking-threshold <size>', 'File size to start chunking', '51200') // 50KB
   .option('--warn-threshold <size>', 'File size to warn about', '2097152') // 2MB
   .option('--max-files <count>', 'Maximum number of files to process', '10000')
-  .option('--extensions <list>', 'File extensions to analyze (comma-separated)', '.js,.jsx,.ts,.tsx,.mjs,.cjs,.vue')
+  .option('--extensions <list>', 'File extensions to analyze (comma-separated)', '.js,.jsx,.ts,.tsx,.mjs,.cjs,.vue,.php')
   .option('--compassignore <path>', 'Path to .compassignore file', '.compassignore')
   .option('--chunk-overlap <lines>', 'Overlap lines between chunks', '100')
   .option('--encoding-fallback <encoding>', 'Fallback encoding for problematic files', 'iso-8859-1')
@@ -86,18 +104,18 @@ program
       spinner.succeed('Analysis completed');
 
       // Display results
-      console.log(chalk.green('\n✅ Analysis completed successfully!'));
-      console.log(chalk.blue(`⏱️  Duration: ${(duration / 1000).toFixed(2)}s`));
-      console.log(chalk.blue(`📁 Files processed: ${result.filesProcessed}`));
-      console.log(chalk.blue(`🔍 Symbols extracted: ${result.symbolsExtracted}`));
-      console.log(chalk.blue(`🔗 Dependencies created: ${result.dependenciesCreated}`));
-      console.log(chalk.blue(`📊 File graph nodes: ${result.fileGraph.nodes.length}`));
-      console.log(chalk.blue(`📊 File graph edges: ${result.fileGraph.edges.length}`));
-      console.log(chalk.blue(`🎯 Symbol graph nodes: ${result.symbolGraph.nodes.length}`));
-      console.log(chalk.blue(`🎯 Symbol graph edges: ${result.symbolGraph.edges.length}`));
+      console.log(chalk.green(`\n${getEmoji('✅', '[OK]')} Analysis completed successfully!`));
+      console.log(chalk.blue(`${getEmoji('⏱️', 'Time:')}  Duration: ${(duration / 1000).toFixed(2)}s`));
+      console.log(chalk.blue(`${getEmoji('📁', 'Files:')} Files processed: ${result.filesProcessed}`));
+      console.log(chalk.blue(`${getEmoji('🔍', 'Symbols:')} Symbols extracted: ${result.symbolsExtracted}`));
+      console.log(chalk.blue(`${getEmoji('🔗', 'Deps:')} Dependencies created: ${result.dependenciesCreated}`));
+      console.log(chalk.blue(`${getEmoji('📊', 'Graph:')} File graph nodes: ${result.fileGraph.nodes.length}`));
+      console.log(chalk.blue(`${getEmoji('📊', 'Graph:')} File graph edges: ${result.fileGraph.edges.length}`));
+      console.log(chalk.blue(`${getEmoji('🎯', 'Graph:')} Symbol graph nodes: ${result.symbolGraph.nodes.length}`));
+      console.log(chalk.blue(`${getEmoji('🎯', 'Graph:')} Symbol graph edges: ${result.symbolGraph.edges.length}`));
 
       if (result.errors.length > 0) {
-        console.log(chalk.yellow(`\n⚠️  ${result.errors.length} errors occurred during analysis:`));
+        console.log(chalk.yellow(`\n${getEmoji('⚠️', '[WARN]')}  ${result.errors.length} errors occurred during analysis:`));
         result.errors.slice(0, 10).forEach((error, index) => {
           console.log(chalk.gray(`  ${index + 1}. ${error.filePath}: ${error.message}`));
         });
@@ -111,13 +129,14 @@ program
       console.log(chalk.white('• Start the MCP server: claude-compass mcp-server'));
       console.log(chalk.white('• Search for symbols: claude-compass search <query>'));
       console.log(chalk.white('• Show repository stats: claude-compass stats'));
+      console.log(chalk.blue(`\n${getEmoji('⏱️', 'Time:')} Total analysis time: ${(duration / 1000).toFixed(2)}s`));
 
       // Close database connection
       await databaseService.close();
 
     } catch (error) {
       spinner.fail('Analysis failed');
-      console.error(chalk.red('\n❌ Error during analysis:'));
+      console.error(chalk.red(`\n${getEmoji('❌', '[ERROR]')} Error during analysis:`));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
 
       // Close database connection even in error case
@@ -255,7 +274,7 @@ program
       // This would need additional database methods to get statistics
       spinner.succeed('Statistics loaded');
 
-      console.log(chalk.blue('\n📊 Repository Statistics'));
+      console.log(chalk.blue(`\n${getEmoji('📊', 'Stats:')} Repository Statistics`));
       console.log(chalk.yellow('Statistics feature not yet fully implemented.'));
       console.log(chalk.gray('This requires additional database methods to aggregate data.'));
 
@@ -344,8 +363,8 @@ program
 // Clear repository data command
 program
   .command('clear')
-  .description('Clear all data for a repository by name')
-  .argument('<name>', 'Repository name to clear')
+  .description('Clear all data for a repository by name, or all repositories')
+  .argument('<name>', 'Repository name to clear (use "all" to clear everything)')
   .option('--yes', 'Skip confirmation prompt')
   .action(async (repositoryName, options) => {
     const spinner = ora('Initializing...').start();
@@ -353,12 +372,67 @@ program
     try {
       spinner.text = 'Connecting to database...';
 
-      // Check if repository exists
+      // Handle "all" case
+      if (repositoryName.toLowerCase() === 'all') {
+        const allRepos = await databaseService.getAllRepositories();
+
+        if (allRepos.length === 0) {
+          spinner.succeed('No repositories to clear');
+          console.log(chalk.gray('\nNo repositories found in database'));
+          await databaseService.close();
+          return;
+        }
+
+        spinner.stop();
+
+        // Show all repositories that will be cleared
+        console.log(chalk.blue(`\nFound ${allRepos.length} repositories to clear:`));
+        allRepos.forEach(repo => {
+          console.log(chalk.gray(`  - ${repo.name} (${repo.path})`));
+        });
+
+        // Confirmation prompt (unless --yes flag is used)
+        if (!options.yes) {
+          const readline = require('readline');
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+          });
+
+          const answer = await new Promise<string>((resolve) => {
+            rl.question(chalk.yellow(`\n${getEmoji('⚠️', '[WARN]')}  This will permanently delete ALL ${allRepos.length} repositories and their data. Continue? (y/N): `), resolve);
+          });
+
+          rl.close();
+
+          if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+            console.log(chalk.gray('\nOperation cancelled.'));
+            await databaseService.close();
+            return;
+          }
+        }
+
+        // Clear all repositories
+        const clearSpinner = ora('Clearing all repositories...').start();
+
+        for (const repo of allRepos) {
+          clearSpinner.text = `Deleting ${repo.name}...`;
+          await databaseService.deleteRepositoryCompletely(repo.id);
+        }
+
+        clearSpinner.succeed(`Successfully deleted ${allRepos.length} repositories`);
+        console.log(chalk.green(`\n${getEmoji('✅', '[OK]')} All repositories have been deleted from the database.`));
+
+        await databaseService.close();
+        return;
+      }
+
+      // Check if specific repository exists
       const repository = await databaseService.getRepositoryByName(repositoryName);
 
       if (!repository) {
         spinner.fail('Repository not found');
-        console.error(chalk.red(`\n❌ Repository "${repositoryName}" not found in database`));
+        console.error(chalk.red(`\n${getEmoji('❌', '[ERROR]')} Repository "${repositoryName}" not found in database`));
 
         // Show available repositories
         const allRepos = await databaseService.getAllRepositories();
