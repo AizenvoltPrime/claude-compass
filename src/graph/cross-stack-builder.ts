@@ -1056,6 +1056,15 @@ export class CrossStackGraphBuilder {
   private async extractApiCallsFromComponents(repoId: number, vueComponents: any[]): Promise<any[]> {
     const apiCalls: any[] = [];
 
+    // Import Vue parser to use proper API call extraction
+    const { VueParser } = await import('../parsers/vue');
+    const Parser = await import('tree-sitter');
+    const JavaScript = await import('tree-sitter-javascript');
+
+    const parser = new Parser.default();
+    parser.setLanguage(JavaScript.default);
+    const vueParser = new VueParser(parser);
+
     for (const component of vueComponents) {
       try {
         // Get the file content for this component
@@ -1086,9 +1095,31 @@ export class CrossStackGraphBuilder {
           hasApiCalls: fileContent.includes('fetch(') || fileContent.includes('/api/')
         });
 
-        // Extract fetch calls from the content
-        const fetchCalls = this.extractFetchCallsFromContent(fileContent, component.filePath, component.name);
-        apiCalls.push(...fetchCalls);
+        // Use Vue parser to properly extract API calls
+        try {
+          const parseResult = await vueParser.parseFile(component.filePath, fileContent);
+          if (parseResult.frameworkEntities) {
+            const vueApiCalls = parseResult.frameworkEntities.filter(
+              (entity): entity is any => entity.type === 'api_call'
+            );
+
+            this.logger.debug('Vue parser extracted API calls', {
+              componentName: component.name,
+              apiCallsFound: vueApiCalls.length,
+              calls: vueApiCalls.map(call => ({ url: call.url, method: call.method }))
+            });
+
+            apiCalls.push(...vueApiCalls);
+          }
+        } catch (parseError) {
+          // Fallback to regex extraction if Vue parser fails
+          this.logger.warn('Vue parser failed, falling back to regex extraction', {
+            componentName: component.name,
+            error: parseError.message
+          });
+          const fetchCalls = this.extractFetchCallsFromContent(fileContent, component.filePath, component.name);
+          apiCalls.push(...fetchCalls);
+        }
 
       } catch (error) {
         this.logger.warn('Failed to extract API calls from component', {
