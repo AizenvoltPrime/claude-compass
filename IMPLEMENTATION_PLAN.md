@@ -647,40 +647,35 @@ async impactOf(change: ChangeDescription) {
 - Route and job entity tables from Phases 2-4
 - Cross-stack relationship tables from Phase 5
 
-#### 6C. Resource Implementation (Weeks 5-6) 📊 MEDIUM PRIORITY
+#### 6C. Enhanced Tools Implementation (Weeks 5-6) 🎯 HIGH PRIORITY
 
-**Current Status**: Resources are placeholders but database has rich graph data
+**Architectural Decision**: Following the Reddit author's approach, Claude Compass uses **targeted tools** instead of raw graph resource dumps. This provides better performance and more practical usage patterns.
 
-**Implementation:**
+**New Implementation Strategy:**
 
 ```typescript
-// Current: Placeholder
-async readResource(uri: string) {
-  return { contents: [{ type: 'text', text: 'Not implemented' }] };
-}
+// ✅ Current: Focused, practical tools
+search_code({ query: "validateEmail", type: "function" })
+who_calls({ symbol_id: 123, include_transitive: true })
+impact_of({ symbol_id: 456, include_routes: true, include_jobs: true })
 
-// Target: Rich graph data export
-async readResource(uri: string) {
-  switch(uri) {
-    case 'graph://symbols':
-      return await this.generateSymbolGraphData(repoId);
-    case 'graph://routes':
-      return await this.generateRouteGraphData(repoId);
-    case 'graph://jobs':
-      return await this.generateJobGraphData(repoId);
-    case 'graph://dependencies':
-      return await this.generateDependencyGraphData(repoId);
-  }
-}
+// ❌ Avoided: Data dump resources (removed by design)
+// graph://files   → Would return 50,000+ files (unusable)
+// graph://symbols → Would return massive JSON (overwhelms Claude Code)
 ```
 
-**Missing Resources to Implement:**
+**Enhanced Tools to Implement:**
 
-- `graph://files` - File dependency data
-- `graph://symbols` - Symbol dependency data
-- `graph://routes` - Framework route graphs
-- `graph://di` - Dependency injection graphs
-- `graph://jobs` - Background job graphs
+- ✅ **`impact_of`** - Comprehensive blast radius analysis (beyond cross-stack)
+- ✅ **`get_route_flow`** - Trace route → controller → service → repository
+- ✅ **`get_job_triggers`** - Background job trigger analysis
+- ✅ **`trace_data_flow`** - Data flow between symbols with confidence scoring
+
+**Architecture Benefits:**
+- **Performance**: No massive data transfers, only focused results
+- **Usability**: Claude Code gets exactly what it needs for the task
+- **Scalability**: Works with large codebases (50K+ symbols)
+- **Actionability**: Results include file paths, line numbers, context
 
 #### 6D. External Integration Foundation (Weeks 7-8) 🔗 MEDIUM PRIORITY
 
@@ -720,11 +715,12 @@ async readPackageDocs(packageName: string, version: string) {
 - ✅ Confidence scoring accurately predicts change impact risk
 - ✅ Test impact analysis shows which tests need updates for changes
 
-**Resource Success:**
+**Tools Architecture Success:**
 
-- ✅ Graph resources provide actionable data for dependency exploration
-- ✅ Framework-specific graphs (routes, jobs, DI) expose rich relationship data
-- ✅ Resources enable effective code navigation and understanding
+- ✅ Targeted tools provide focused, actionable results (vs overwhelming data dumps)
+- ✅ Performance scales to large codebases (50K+ symbols) without timeouts
+- ✅ Claude Code gets exactly the context needed for each specific task
+- ✅ Framework-aware tools expose rich relationship data through precise queries
 
 **Integration Success:**
 
@@ -1605,13 +1601,24 @@ npm run build
 
 **Cross-Stack Tools (Phase 5 - Beyond Reddit post):** 10. **`get_api_calls`** ✅ - Vue ↔ Laravel API call mapping 11. **`get_data_contracts`** ✅ - Data contract analysis with drift detection 12. **`get_cross_stack_impact`** ✅ - Cross-stack impact analysis with transitive support
 
-#### ⚠️ MCP Resources Status - Mostly Placeholders
+#### ✅ MCP Resources Status - Optimized Architecture
+
+**Architectural Decision**: Graph resources **removed by design** to follow Reddit author's proven approach.
 
 **Current Resources:**
 
-1. **`repo://repositories`** ⚠️ - Basic implementation only
-2. **`graph://files`** ❌ - Placeholder implementation
-3. **`graph://symbols`** ❌ - Placeholder implementation
+1. **`repo://repositories`** ✅ - **Fully implemented** - Provides repository list and metadata
+2. **`graph://files`** ❌ - **Removed by design** - Would return massive unusable data
+3. **`graph://symbols`** ❌ - **Removed by design** - Would overwhelm Claude Code with 50K+ symbols
+
+**Why This Architecture is Better:**
+
+- **Performance**: No 50MB+ JSON responses that timeout
+- **Usability**: Claude Code gets focused, actionable results
+- **Proven**: Matches the Reddit author's production-tested approach
+- **Scalable**: Works with enterprise codebases
+
+**Graph Data Access**: Available through **targeted tools** (`search_code`, `who_calls`, `impact_of`) that query specific graph slices.
 
 #### ❌ Missing Tools (for Complete Vision)
 
@@ -1693,7 +1700,9 @@ npm run build
 
 **🎯 Phase 6: Enhanced Impact Analysis** - IMMEDIATE PRIORITY
 
-**Primary Goal**: Bridge the gap from "excellent foundation" to "comprehensive development tool" by implementing the missing enhanced search and impact analysis features.
+**Primary Goal**: Complete the dependency analysis vision using **targeted tools architecture** that provides practical, focused results instead of overwhelming data dumps.
+
+**Architectural Approach**: Follow the Reddit author's proven pattern - graphs as internal data layer, tools as the query interface.
 
 **Specific Deliverables**:
 
@@ -1707,10 +1716,11 @@ npm run build
    - Add enhanced confidence scoring algorithms
    - Include routes, jobs, tests in impact analysis
 
-3. **Resource Implementation** (Weeks 5-6)
-   - Complete `graph://files` and `graph://symbols` resources
-   - Add framework-specific resources (`graph://routes`, `graph://di`, `graph://jobs`)
-   - Implement comprehensive graph data visualization
+3. **Enhanced Tools Implementation** (Weeks 5-6)
+   - Implement `get_route_flow` tool (route → controller → service → repository)
+   - Add `get_job_triggers` tool (background job dependency analysis)
+   - Create `trace_data_flow` tool (data flow between symbols)
+   - Build `get_framework_entities` tool (framework-specific queries)
 
 4. **External Integration Foundation** (Weeks 7-8)
    - Implement `search_docs` tool for package documentation
@@ -1721,7 +1731,8 @@ npm run build
 
 - Enhanced search provides significantly more relevant results than basic lexical search
 - `impact_of` tool provides comprehensive blast radius with confidence scoring
-- Graph resources enable effective code exploration and visualization
+- Targeted tools provide actionable results without overwhelming Claude Code
 - Search effectively finds related code across TypeScript and PHP
+- Performance scales to enterprise codebases (50K+ symbols)
 
 This comprehensive plan provides the foundation for building Claude Compass - a dependency analysis development environment that solves the context gap problem by creating comprehensive maps between code reality and AI assistant understanding.
