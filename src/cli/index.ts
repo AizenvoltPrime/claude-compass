@@ -62,7 +62,7 @@ program
   .option(
     '--extensions <list>',
     'File extensions to analyze (comma-separated)',
-    '.js,.jsx,.ts,.tsx,.mjs,.cjs,.vue,.php'
+    '.js,.jsx,.ts,.tsx,.mjs,.cjs,.vue,.php,.cs,.tscn'
   )
   .option('--compassignore <path>', 'Path to .compassignore file', '.compassignore')
   .option('--chunk-overlap <lines>', 'Overlap lines between chunks', '100')

@@ -52,6 +52,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 - ✅ **React** - Functional/class components, hooks, context, memo
 - ✅ **Node.js** - Express/Fastify routes, middleware, controllers
 - ✅ **PHP/Laravel** - Routes, Eloquent models, job queues, service providers
+- ✅ **C#/Godot** - Scene parsing (.tscn), C# script analysis, node hierarchy, autoloads
 - ✅ **Cross-stack Integration** - Vue ↔ Laravel dependency tracking and API mapping
 
 **Advanced Features:**
@@ -90,9 +91,10 @@ npm install
 npm run docker:up
 npm run migrate:latest
 
-# Analyze your codebase (JavaScript/TypeScript or PHP/Laravel)
+# Analyze your codebase (JavaScript/TypeScript, PHP/Laravel, or C#/Godot)
 npm run analyze .                              # Analyze current directory
 npm run analyze /path/to/your/project          # Analyze specific path
+npm run analyze /path/to/your/godot-project    # Analyze Godot game project
 npm run analyze . --force-full                 # Force full analysis (clears existing data)
 
 # Clear existing repository analysis
@@ -111,7 +113,7 @@ npm test
 
 **Future Development:**
 - **Specification Tracking & Drift Detection** - API contract validation and documentation integration
-- **C#/Godot Support** - Game development framework support with scene analysis
+- **Python/Django Support** - Python framework support for web development
 - **Enhanced AI Integration** - Advanced AI-powered code analysis and suggestions
 
 

@@ -66,7 +66,6 @@ export enum SymbolType {
   ENUM = 'enum',
   METHOD = 'method',
   PROPERTY = 'property',
-  // Phase 3 additions
   JOB_QUEUE = 'job_queue',
   JOB_DEFINITION = 'job_definition',
   WORKER_THREAD = 'worker_thread',
@@ -76,12 +75,15 @@ export enum SymbolType {
   TEST_CASE = 'test_case',
   MOCK = 'mock',
   WORKSPACE_PROJECT = 'workspace_project',
-  // Phase 4 additions - PHP/Laravel
   TRAIT = 'trait',
   NAMESPACE = 'namespace',
   ATTRIBUTE = 'attribute',
-  // Phase 5 additions - Cross-stack framework entities
   COMPONENT = 'component',
+  GODOT_SCENE = 'godot_scene',
+  GODOT_NODE = 'godot_node',
+  GODOT_SCRIPT = 'godot_script',
+  GODOT_AUTOLOAD = 'godot_autoload',
+  GODOT_RESOURCE = 'godot_resource',
 }
 
 export enum Visibility {
@@ -124,9 +126,14 @@ export enum DependencyType {
   PACKAGE_DEPENDENCY = 'package_dependency',
   WORKSPACE_DEPENDENCY = 'workspace_dependency',
   // Phase 5 additions - Cross-stack tracking
-  API_CALL = 'api_call',           // Vue component calls Laravel API
+  API_CALL = 'api_call', // Vue component calls Laravel API
   SHARES_SCHEMA = 'shares_schema', // TypeScript interface ↔ PHP DTO
-  FRONTEND_BACKEND = 'frontend_backend' // Generic cross-stack relationship
+  FRONTEND_BACKEND = 'frontend_backend', // Generic cross-stack relationship
+  // Phase 7 additions - C#/Godot support
+  SCENE_REFERENCE = 'scene_reference',
+  NODE_CHILD = 'node_child',
+  SIGNAL_CONNECTION = 'signal_connection',
+  SCRIPT_ATTACHMENT = 'script_attachment',
 }
 
 // Input types for creating records
@@ -270,6 +277,8 @@ export enum FrameworkType {
   NUXT = 'nuxt',
   // Phase 4 additions - PHP/Laravel
   LARAVEL = 'laravel',
+  // Phase 7 additions - C#/Godot support
+  GODOT = 'godot',
 }
 
 // Framework-specific helper types
