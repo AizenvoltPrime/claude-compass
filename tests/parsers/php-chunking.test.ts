@@ -175,7 +175,6 @@ class CommentService {
       });
 
       if (result.errors.length > 0) {
-        console.log('Errors found in large service file:', result.errors);
       }
       expect(result.errors.length).toBe(0);
       expect(result.symbols.length).toBeGreaterThan(0);

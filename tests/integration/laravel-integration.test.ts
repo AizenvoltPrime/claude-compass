@@ -38,12 +38,9 @@ describe('Laravel Integration Tests', () => {
     // Ensure test project files exist
     try {
       await setupTestLaravelProject(testProjectPath);
-      console.log('Test project setup completed successfully');
 
       // Debug: List created files
       const files = await fs.readdir(testProjectPath, { recursive: true });
-      console.log('Created files:', files.length, 'files');
-      console.log('PHP files:', files.filter(f => f.toString().endsWith('.php')));
     } catch (error) {
       console.error('Test project setup failed:', error);
       throw error;

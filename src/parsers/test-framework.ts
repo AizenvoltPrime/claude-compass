@@ -64,11 +64,11 @@ export class TestFrameworkParser extends BaseFrameworkParser {
   }
 
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-    this.logger.debug('Parsing test file', { filePath });
 
     // Check if this is a test file
     if (!this.isTestFile(filePath)) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -96,6 +96,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       const frameworkEntities = this.analyzeFrameworkEntitiesFromResult(baseResult, content, filePath);
 
       const result: ParseFileResult = {
+        filePath,
         ...baseResult,
         frameworkEntities,
         metadata: {
@@ -128,6 +129,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       const frameworkEntities = this.createTestFrameworkEntities(filePath, frameworks);
 
       return {
+        filePath,
         ...result,
         frameworkEntities,
         metadata: {
@@ -146,6 +148,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       });
 
       return {
+        filePath,
         ...result,
         frameworkEntities: [],
         metadata: {

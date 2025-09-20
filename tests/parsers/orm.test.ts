@@ -5,11 +5,17 @@ import { SymbolType, DependencyType } from '../../src/database/models';
 
 describe('ORMParser', () => {
   let parser: ORMParser;
+  let treeParser: Parser;
 
   beforeEach(() => {
-    const treeParser = new Parser();
+    treeParser = new Parser();
     treeParser.setLanguage(JavaScript);
     parser = new ORMParser(treeParser);
+  });
+
+  afterEach(() => {
+    treeParser = null as any;
+    parser = null as any;
   });
 
   describe('getSupportedExtensions', () => {

@@ -52,10 +52,16 @@ export function createDatabaseConnection(): Knex {
       password: config.database.password,
     },
     pool: {
-      min: 2,
-      max: 10,
-      acquireTimeoutMillis: 30000,
-      idleTimeoutMillis: 600000,
+      min: process.env.NODE_ENV === 'test' ? 1 : 2,
+      max: process.env.NODE_ENV === 'test' ? 5 : 10, // Increase test pool size
+      acquireTimeoutMillis: 60000, // Increase timeout to 60s
+      idleTimeoutMillis: process.env.NODE_ENV === 'test' ? 60000 : 600000,
+      createTimeoutMillis: 30000,
+      destroyTimeoutMillis: 5000,
+      reapIntervalMillis: 1000,
+      createRetryIntervalMillis: 200,
+      // Force close idle connections aggressively in tests
+      propagateCreateError: false
     },
     migrations: {
       directory: './dist/src/database/migrations',
@@ -81,15 +87,8 @@ export function createDatabaseConnection(): Knex {
 
   db = knex(connectionConfig);
 
-  // Test the connection
-  db.raw('SELECT 1')
-    .then(() => {
-      logger.info('Database connection established successfully');
-    })
-    .catch((err) => {
-      logger.error('Failed to establish database connection:', err);
-      process.exit(1);
-    });
+  // Note: Connection testing is deferred until first actual use
+  // to prevent creating persistent handles during module import
 
   return db;
 }
@@ -101,6 +100,17 @@ export function getDatabaseConnection(): Knex {
   return db;
 }
 
+export async function testDatabaseConnection(): Promise<void> {
+  const connection = getDatabaseConnection();
+  try {
+    await connection.raw('SELECT 1');
+    logger.info('Database connection established successfully');
+  } catch (err) {
+    logger.error('Failed to establish database connection:', err);
+    throw err;
+  }
+}
+
 export async function closeDatabaseConnection(): Promise<void> {
   if (db) {
     logger.info('Closing database connection');
@@ -109,13 +119,6 @@ export async function closeDatabaseConnection(): Promise<void> {
   }
 }
 
-// Graceful shutdown handling
-process.on('SIGINT', async () => {
-  await closeDatabaseConnection();
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  await closeDatabaseConnection();
-  process.exit(0);
-});
+// Note: Graceful shutdown handling is now managed by individual applications
+// rather than globally in the connection module to avoid interfering with
+// CLI tools and other applications that need to manage their own lifecycle

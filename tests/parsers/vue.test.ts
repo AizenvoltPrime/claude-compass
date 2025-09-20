@@ -2,14 +2,33 @@ import { VueParser } from '../../src/parsers/vue';
 import Parser from 'tree-sitter';
 import JavaScript from 'tree-sitter-javascript';
 import { jest } from '@jest/globals';
+import { createTestParser, cleanupTestParser, cleanupAllTestParsers } from '../utils/tree-sitter-factory';
 
 describe('VueParser', () => {
   let parser: VueParser;
+  let tsParser: Parser;
 
   beforeEach(() => {
-    const tsParser = new Parser();
-    tsParser.setLanguage(JavaScript);
+    // Create a fresh parser using the isolation factory with module cache clearing
+    tsParser = createTestParser(JavaScript, 'vue-test');
     parser = new VueParser(tsParser);
+  });
+
+  afterEach(() => {
+    // Clean up parsers using the factory
+    if (tsParser) {
+      cleanupTestParser(tsParser);
+      tsParser = null as any;
+    }
+
+    if (parser) {
+      parser = null as any;
+    }
+  });
+
+  // Clean up all test parsers after the entire suite
+  afterAll(() => {
+    cleanupAllTestParsers();
   });
 
   describe('Vue Single File Components', () => {

@@ -71,13 +71,13 @@ export class PackageManagerParser extends BaseFrameworkParser {
   }
 
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-    this.logger.debug('Parsing package management file', { filePath });
 
     const fileName = path.basename(filePath);
 
     // Check if this is a package management file
     if (!this.isPackageManagerFile(fileName)) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -115,7 +115,8 @@ export class PackageManagerParser extends BaseFrameworkParser {
           result = await this.parseMonorepoConfig(filePath, content, options);
           break;
         default:
-          result = await this.parseFileDirectly(filePath, content, options);
+          const baseResult = await this.parseFileDirectly(filePath, content, options);
+          result = { filePath, ...baseResult };
       }
 
       // Add package manager entities
@@ -131,6 +132,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
 
     } catch (error) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -215,6 +217,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
       });
 
       return {
+        filePath,
         symbols,
         dependencies,
         imports: [],
@@ -230,6 +233,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
 
     } catch (error) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -290,6 +294,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
       }
 
       return {
+        filePath,
         symbols,
         dependencies,
         imports: [],
@@ -305,6 +310,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
 
     } catch (error) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -367,6 +373,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
     });
 
     return {
+      filePath,
       symbols,
       dependencies,
       imports: [],
@@ -431,6 +438,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
     });
 
     return {
+      filePath,
       symbols,
       dependencies,
       imports: [],
@@ -484,6 +492,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
       }
 
       return {
+        filePath,
         symbols,
         dependencies,
         imports: [],
@@ -499,6 +508,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
 
     } catch (error) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],

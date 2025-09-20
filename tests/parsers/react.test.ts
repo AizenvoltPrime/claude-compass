@@ -4,11 +4,17 @@ import JavaScript from 'tree-sitter-javascript';
 
 describe('ReactParser', () => {
   let parser: ReactParser;
+  let tsParser: Parser;
 
   beforeEach(() => {
-    const tsParser = new Parser();
+    tsParser = new Parser();
     tsParser.setLanguage(JavaScript);
     parser = new ReactParser(tsParser);
+  });
+
+  afterEach(() => {
+    tsParser = null as any;
+    parser = null as any;
   });
 
   describe('React Components', () => {
@@ -102,7 +108,6 @@ class Counter extends Component {
   }
 
   componentDidMount() {
-    console.log('Counter mounted');
   }
 
   componentDidUpdate(prevProps, prevState) {

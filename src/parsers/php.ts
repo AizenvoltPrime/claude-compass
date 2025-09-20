@@ -70,6 +70,17 @@ export class PHPParser extends ChunkedParser {
     const validatedOptions = this.validateOptions(options);
     const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
+    // Check if content is valid - handle empty files gracefully
+    if (!content) {
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [], // Empty files are not an error, just return empty results
+      };
+    }
+
     // Check file size limit first
     if (validatedOptions.maxFileSize && content.length > validatedOptions.maxFileSize) {
       return {

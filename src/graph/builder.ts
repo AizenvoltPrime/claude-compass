@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { execSync } from 'child_process';
-import { Repository, File, Symbol, CreateFile, CreateSymbol, CreateFileDependency, DependencyType } from '../database/models';
+import { Repository, File, Symbol, CreateFile, CreateSymbol, CreateFileDependency, DependencyType, ApiCall, DataContract } from '../database/models';
 import { DatabaseService } from '../database/services';
 import { getParserForFile, ParseResult, MultiParser } from '../parsers';
 import {
@@ -37,6 +37,11 @@ export interface BuildOptions {
   compassignorePath?: string;
   enableParallelParsing?: boolean;
   forceFullAnalysis?: boolean;
+
+  // Phase 5 - Cross-stack analysis options
+  enableCrossStackAnalysis?: boolean;
+  detectFrameworks?: boolean;
+  verbose?: boolean;
 }
 
 export interface BuildResult {
@@ -47,12 +52,65 @@ export interface BuildResult {
   fileGraph: FileGraphData;
   symbolGraph: SymbolGraphData;
   errors: BuildError[];
+
+  // Phase 5 - Cross-stack analysis results
+  crossStackGraph?: CrossStackGraphData;
+  totalFiles?: number;
+  totalSymbols?: number;
 }
 
 export interface BuildError {
   filePath: string;
   message: string;
   stack?: string;
+}
+
+// Cross-stack graph data structure for Phase 5
+export interface CrossStackGraphData {
+  apiCallGraph?: {
+    nodes: CrossStackGraphNode[];
+    edges: CrossStackGraphEdge[];
+  };
+  dataContractGraph?: {
+    nodes: CrossStackGraphNode[];
+    edges: CrossStackGraphEdge[];
+  };
+  features?: CrossStackFeature[];
+  metadata?: {
+    averageConfidence?: number;
+    totalApiCalls?: number;
+    totalDataContracts?: number;
+    analysisTimestamp?: Date;
+  };
+}
+
+export interface CrossStackGraphNode {
+  id: string;
+  type: 'vue_component' | 'laravel_route' | 'typescript_interface' | 'php_dto' | 'api_call' | 'data_contract';
+  name: string;
+  filePath: string;
+  framework: 'vue' | 'laravel' | 'cross-stack';
+  symbolId?: number;
+  confidence?: number;
+}
+
+export interface CrossStackGraphEdge {
+  id: string;
+  from: string;
+  to: string;
+  type: 'api_call' | 'shares_schema' | 'frontend_backend';
+  confidence: number;
+  metadata?: Record<string, any>;
+}
+
+export interface CrossStackFeature {
+  id: string;
+  name: string;
+  description?: string;
+  components: CrossStackGraphNode[];
+  apiCalls: ApiCall[];
+  dataContracts: DataContract[];
+  confidence: number;
 }
 
 export class GraphBuilder {
@@ -1445,7 +1503,12 @@ export class GraphBuilder {
       encodingFallback: options.encodingFallback ?? 'iso-8859-1',
       compassignorePath: options.compassignorePath,
       enableParallelParsing: options.enableParallelParsing ?? false,
-      forceFullAnalysis: options.forceFullAnalysis ?? false
+      forceFullAnalysis: options.forceFullAnalysis ?? false,
+
+      // Phase 5 - Cross-stack analysis options
+      enableCrossStackAnalysis: options.enableCrossStackAnalysis ?? false,
+      detectFrameworks: options.detectFrameworks ?? false,
+      verbose: options.verbose ?? false
     };
   }
 

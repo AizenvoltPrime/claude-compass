@@ -79,6 +79,8 @@ export enum SymbolType {
   TRAIT = 'trait',
   NAMESPACE = 'namespace',
   ATTRIBUTE = 'attribute',
+  // Phase 5 additions - Cross-stack framework entities
+  COMPONENT = 'component',
 }
 
 export enum Visibility {
@@ -120,6 +122,10 @@ export enum DependencyType {
   IMPORTS_FOR_TEST = 'imports_for_test',
   PACKAGE_DEPENDENCY = 'package_dependency',
   WORKSPACE_DEPENDENCY = 'workspace_dependency',
+  // Phase 5 additions - Cross-stack tracking
+  API_CALL = 'api_call',           // Vue component calls Laravel API
+  SHARES_SCHEMA = 'shares_schema', // TypeScript interface ↔ PHP DTO
+  FRONTEND_BACKEND = 'frontend_backend' // Generic cross-stack relationship
 }
 
 // Input types for creating records
@@ -368,6 +374,32 @@ export interface ComposableDependency {
   dependency_type: string;
   created_at: Date;
   updated_at: Date;
+}
+
+// Phase 5 Models - Cross-Stack Tracking
+
+export interface ApiCall {
+  id: number;
+  repo_id: number;
+  frontend_symbol_id: number;
+  backend_route_id: number;
+  method: string;
+  url_pattern: string;
+  request_schema: any;
+  response_schema: any;
+  confidence: number;
+  created_at: Date;
+}
+
+export interface DataContract {
+  id: number;
+  repo_id: number;
+  name: string;
+  frontend_type_id: number;
+  backend_type_id: number;
+  schema_definition: any;
+  drift_detected: boolean;
+  last_verified: Date;
 }
 
 // Phase 3 Models - Background Jobs
@@ -711,4 +743,26 @@ export interface CreateWorkspaceProject {
   parent_project_id?: number;
   workspace_type: WorkspaceType;
   config_data?: Record<string, any>;
+}
+
+// Phase 5 Create Input Types - Cross-Stack Tracking
+
+export interface CreateApiCall {
+  repo_id: number;
+  frontend_symbol_id: number;
+  backend_route_id: number;
+  method: string;
+  url_pattern: string;
+  request_schema?: any;
+  response_schema?: any;
+  confidence?: number;
+}
+
+export interface CreateDataContract {
+  repo_id: number;
+  name: string;
+  frontend_type_id: number;
+  backend_type_id: number;
+  schema_definition?: any;
+  drift_detected?: boolean;
 }

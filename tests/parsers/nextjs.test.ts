@@ -4,11 +4,17 @@ import JavaScript from 'tree-sitter-javascript';
 
 describe('NextJSParser', () => {
   let parser: NextJSParser;
+  let tsParser: Parser;
 
   beforeEach(() => {
-    const tsParser = new Parser();
+    tsParser = new Parser();
     tsParser.setLanguage(JavaScript);
     parser = new NextJSParser(tsParser);
+  });
+
+  afterEach(() => {
+    tsParser = null as any;
+    parser = null as any;
   });
 
   describe('Pages Router', () => {

@@ -15,6 +15,12 @@ import { PHPParser } from './php';
 import { SyntaxNode } from 'tree-sitter';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
+import {
+  normalizeUrlPattern,
+  calculateUrlSimilarity,
+  UrlPattern,
+  RouteParameter,
+} from './utils/url-patterns';
 
 const logger = createComponentLogger('laravel-parser');
 
@@ -166,6 +172,47 @@ export interface LaravelObserver extends FrameworkEntity {
   model: string;
   observedEvents: string[];
   methods: string[];
+  framework: 'laravel';
+}
+
+/**
+ * Laravel API schema information extracted from controllers
+ */
+export interface LaravelApiSchema extends FrameworkEntity {
+  type: 'api_schema';
+  controllerMethod: string;
+  route: string;
+  httpMethod: string;
+  requestValidation?: ValidationRule[];
+  responseSchema?: any;
+  confidence: number;
+  location: {
+    line: number;
+    column: number;
+  };
+  framework: 'laravel';
+}
+
+/**
+ * Validation rule information from FormRequests
+ */
+export interface ValidationRule {
+  field: string;
+  rules: string[];
+  typeScriptEquivalent: string;
+  required: boolean;
+  nullable: boolean;
+}
+
+/**
+ * Laravel API response schema extracted from controllers
+ */
+export interface LaravelResponseSchema extends FrameworkEntity {
+  type: 'response_schema';
+  controllerAction: string;
+  responseType: 'json' | 'resource' | 'collection' | 'custom';
+  structure: any;
+  confidence: number;
   framework: 'laravel';
 }
 
@@ -336,6 +383,328 @@ export class LaravelParser extends BaseFrameworkParser {
   }
 
   /**
+   * Extract API schemas from Laravel controllers
+   */
+  private async extractApiSchemas(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelApiSchema[]> {
+    const apiSchemas: LaravelApiSchema[] = [];
+
+    try {
+      // Look for controller classes
+      const classNodes = this.findNodesByType(rootNode, 'class_declaration');
+
+      for (const classNode of classNodes) {
+        const className = this.getClassName(classNode, content);
+        if (className && className.includes('Controller')) {
+          const methods = this.findNodesByType(classNode, 'method_declaration');
+
+          for (const methodNode of methods) {
+            const methodName = this.getMethodName(methodNode, content);
+            if (methodName && this.isApiMethod(methodNode, content)) {
+              const schema = await this.parseApiMethodSchema(methodNode, methodName, className, content, filePath);
+              if (schema) {
+                apiSchemas.push(schema);
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to extract API schemas from ${filePath}`, { error });
+    }
+
+    return apiSchemas;
+  }
+
+  /**
+   * Parse individual API method to extract schema information
+   */
+  private async parseApiMethodSchema(
+    methodNode: SyntaxNode,
+    methodName: string,
+    className: string,
+    content: string,
+    filePath: string
+  ): Promise<LaravelApiSchema | null> {
+    try {
+      // Extract HTTP method and route information
+      const httpMethod = this.inferHttpMethod(methodName);
+      const route = this.inferRoute(className, methodName);
+
+      // Extract request validation
+      const requestValidation = this.extractRequestValidation(methodNode, content);
+
+      // Extract response schema
+      const responseSchema = this.extractResponseSchema(methodNode, content);
+
+      // Calculate confidence based on available information
+      let confidence = 0.5;
+      if (requestValidation.length > 0) confidence += 0.2;
+      if (responseSchema) confidence += 0.2;
+      if (httpMethod !== 'GET') confidence += 0.1; // Non-GET methods more likely to be API
+
+      return {
+        type: 'api_schema',
+        name: `${className}@${methodName}`,
+        filePath,
+        controllerMethod: `${className}@${methodName}`,
+        route,
+        httpMethod,
+        requestValidation: requestValidation.length > 0 ? requestValidation : undefined,
+        responseSchema,
+        confidence,
+        location: {
+          line: methodNode.startPosition.row + 1,
+          column: methodNode.startPosition.column,
+        },
+        framework: 'laravel',
+        metadata: {
+          className,
+          methodName,
+          isApiMethod: true,
+        },
+      };
+    } catch (error) {
+      logger.warn(`Failed to parse API method schema for ${methodName}`, { error });
+      return null;
+    }
+  }
+
+  /**
+   * Parse FormRequest validation rules
+   */
+  private parseFormRequestValidation(content: string, filePath: string): ValidationRule[] {
+    const validationRules: ValidationRule[] = [];
+
+    try {
+      // Look for rules() method in FormRequest classes
+      const rulesPattern = /public\s+function\s+rules\s*\(\s*\)\s*\{([^}]+)\}/g;
+      let match;
+
+      while ((match = rulesPattern.exec(content)) !== null) {
+        const rulesBody = match[1];
+
+        // Extract individual validation rules
+        const rulePattern = /['"]([^'"]+)['"]\s*=>\s*['"]([^'"]+)['"]/g;
+        let ruleMatch;
+
+        while ((ruleMatch = rulePattern.exec(rulesBody)) !== null) {
+          const field = ruleMatch[1];
+          const rules = ruleMatch[2].split('|');
+
+          const validationRule: ValidationRule = {
+            field,
+            rules,
+            typeScriptEquivalent: this.mapLaravelRulesToTypeScript(rules),
+            required: rules.includes('required'),
+            nullable: rules.includes('nullable'),
+          };
+
+          validationRules.push(validationRule);
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to parse FormRequest validation from ${filePath}`, { error });
+    }
+
+    return validationRules;
+  }
+
+  /**
+   * Helper methods for API schema extraction
+   */
+  private isApiMethod(methodNode: SyntaxNode, content: string): boolean {
+    const methodText = content.substring(methodNode.startIndex, methodNode.endIndex);
+
+    // Check for common API indicators
+    const apiIndicators = [
+      'return response()->json(',
+      'return Response::json(',
+      'return new JsonResponse(',
+      'JsonResponse',
+      'ApiResource',
+      'Resource::',
+      '->json(',
+    ];
+
+    return apiIndicators.some(indicator => methodText.includes(indicator));
+  }
+
+  private inferHttpMethod(methodName: string): string {
+    const methodName_lower = methodName.toLowerCase();
+
+    if (methodName_lower.includes('store') || methodName_lower.includes('create')) {
+      return 'POST';
+    }
+    if (methodName_lower.includes('update') || methodName_lower.includes('edit')) {
+      return 'PUT';
+    }
+    if (methodName_lower.includes('destroy') || methodName_lower.includes('delete')) {
+      return 'DELETE';
+    }
+    if (methodName_lower.includes('index') || methodName_lower.includes('show') || methodName_lower.includes('get')) {
+      return 'GET';
+    }
+
+    return 'GET'; // Default
+  }
+
+  private inferRoute(className: string, methodName: string): string {
+    // Remove "Controller" suffix
+    const resourceName = className.replace(/Controller$/, '').toLowerCase();
+
+    // Map common method names to routes
+    switch (methodName.toLowerCase()) {
+      case 'index':
+        return `/api/${resourceName}`;
+      case 'show':
+        return `/api/${resourceName}/{id}`;
+      case 'store':
+        return `/api/${resourceName}`;
+      case 'update':
+        return `/api/${resourceName}/{id}`;
+      case 'destroy':
+        return `/api/${resourceName}/{id}`;
+      default:
+        return `/api/${resourceName}/${methodName.toLowerCase()}`;
+    }
+  }
+
+  private extractRequestValidation(methodNode: SyntaxNode, content: string): ValidationRule[] {
+    const validationRules: ValidationRule[] = [];
+    const methodText = content.substring(methodNode.startIndex, methodNode.endIndex);
+
+    try {
+      // Look for FormRequest parameters
+      const formRequestPattern = /(\w+Request)\s+\$\w+/g;
+      let match;
+
+      while ((match = formRequestPattern.exec(methodText)) !== null) {
+        const requestClass = match[1];
+        // Note: In a full implementation, we would look up the FormRequest class
+        // For now, we'll return a placeholder
+        validationRules.push({
+          field: 'placeholder',
+          rules: ['required'],
+          typeScriptEquivalent: 'string',
+          required: true,
+          nullable: false,
+        });
+      }
+
+      // Also look for inline validation
+      const inlineValidationPattern = /validate\s*\(\s*\[([^\]]+)\]/g;
+      let validationMatch;
+
+      while ((validationMatch = inlineValidationPattern.exec(methodText)) !== null) {
+        const rulesText = validationMatch[1];
+        // Parse inline validation rules
+        const rulePattern = /['"]([^'"]+)['"]\s*=>\s*['"]([^'"]+)['"]/g;
+        let ruleMatch;
+
+        while ((ruleMatch = rulePattern.exec(rulesText)) !== null) {
+          const field = ruleMatch[1];
+          const rules = ruleMatch[2].split('|');
+
+          validationRules.push({
+            field,
+            rules,
+            typeScriptEquivalent: this.mapLaravelRulesToTypeScript(rules),
+            required: rules.includes('required'),
+            nullable: rules.includes('nullable'),
+          });
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to extract request validation`, { error });
+    }
+
+    return validationRules;
+  }
+
+  private extractResponseSchema(methodNode: SyntaxNode, content: string): any {
+    const methodText = content.substring(methodNode.startIndex, methodNode.endIndex);
+
+    try {
+      // Look for different response patterns
+      if (methodText.includes('Resource::collection(')) {
+        return { type: 'collection', resource: 'ApiResource' };
+      }
+      if (methodText.includes('Resource::make(') || methodText.includes('new \\w+Resource(')) {
+        return { type: 'resource', resource: 'ApiResource' };
+      }
+      if (methodText.includes('response()->json(')) {
+        // Try to extract the structure from the json() call
+        const jsonPattern = /response\(\)->json\(\s*(\{[^}]+\}|\[.*?\]|[^)]+)\)/;
+        const match = jsonPattern.exec(methodText);
+        if (match) {
+          return { type: 'json', structure: 'custom' };
+        }
+      }
+
+      return null;
+    } catch (error) {
+      logger.warn(`Failed to extract response schema`, { error });
+      return null;
+    }
+  }
+
+  private mapLaravelRulesToTypeScript(rules: string[]): string {
+    // Handle compound rules
+    if (rules.includes('nullable')) {
+      const baseType = this.getBaseTypeFromRules(rules.filter(r => r !== 'nullable'));
+      return `${baseType} | null`;
+    }
+
+    return this.getBaseTypeFromRules(rules);
+  }
+
+  private getBaseTypeFromRules(rules: string[]): string {
+    for (const rule of rules) {
+      if (rule === 'string' || rule.startsWith('max:') || rule.startsWith('min:')) {
+        return 'string';
+      }
+      if (rule === 'integer' || rule === 'numeric') {
+        return 'number';
+      }
+      if (rule === 'boolean') {
+        return 'boolean';
+      }
+      if (rule === 'array') {
+        return 'array';
+      }
+      if (rule === 'email') {
+        return 'string'; // email is still a string type
+      }
+      if (rule === 'date' || rule === 'datetime') {
+        return 'string'; // dates are usually strings in JSON
+      }
+    }
+
+    return 'any'; // Default fallback
+  }
+
+  private findNodesByType(node: SyntaxNode, type: string): SyntaxNode[] {
+    const nodes: SyntaxNode[] = [];
+
+    const traverse = (currentNode: SyntaxNode) => {
+      if (currentNode.type === type) {
+        nodes.push(currentNode);
+      }
+
+      for (let i = 0; i < currentNode.childCount; i++) {
+        const child = currentNode.child(i);
+        if (child) {
+          traverse(child);
+        }
+      }
+    };
+
+    traverse(node);
+    return nodes;
+  }
+
+
+  /**
    * Detect Laravel framework entities in the given file
    */
   async detectFrameworkEntities(
@@ -360,8 +729,13 @@ export class LaravelParser extends BaseFrameworkParser {
       }
 
       // Route files get special treatment
-      if (this.isRouteFile(filePath)) {
-        entities.push(...await this.extractLaravelRoutes(content, filePath, tree.rootNode));
+      const isRoute = this.isRouteFile(filePath);
+      logger.debug('Laravel route file check', { filePath, isRoute });
+      if (isRoute) {
+        logger.debug('Extracting Laravel routes from file', { filePath });
+        const routes = await this.extractLaravelRoutes(content, filePath, tree.rootNode);
+        logger.debug('Laravel routes extracted', { filePath, routeCount: routes.length });
+        entities.push(...routes);
       }
 
       // Extract entities based on file content and AST
@@ -383,6 +757,28 @@ export class LaravelParser extends BaseFrameworkParser {
       entities.push(...await this.extractLaravelTraits(content, filePath, tree.rootNode));
       entities.push(...await this.extractLaravelResources(content, filePath, tree.rootNode));
       entities.push(...await this.extractLaravelObservers(content, filePath, tree.rootNode));
+
+      // Extract API schemas from controller methods
+      entities.push(...await this.extractApiSchemas(content, filePath, tree.rootNode));
+
+      // Extract validation rules from FormRequest classes
+      if (filePath.includes('Request') && content.includes('FormRequest')) {
+        const validationRules = this.parseFormRequestValidation(content, filePath);
+        if (validationRules.length > 0) {
+          // Create a framework entity for the validation rules
+          const formRequestEntity: FrameworkEntity = {
+            type: 'form_request_validation',
+            name: path.basename(filePath, '.php'),
+            filePath,
+            metadata: {
+              validationRules,
+              rulesCount: validationRules.length,
+              framework: 'laravel',
+            },
+          };
+          entities.push(formRequestEntity);
+        }
+      }
 
       logger.debug(`Detected ${entities.length} Laravel entities in ${filePath}`, {
         entities: entities.map(e => ({ type: e.type, name: e.name }))
@@ -414,13 +810,17 @@ export class LaravelParser extends BaseFrameworkParser {
     ];
 
     const isLaravelPath = laravelPatterns.some(pattern => filePath.includes(pattern));
-    const hasLaravelCode = content.includes('laravel') ||
-                          content.includes('illuminate') ||
-                          content.includes('Illuminate\\') ||
-                          content.includes('App\\') ||
-                          content.includes('Route::') ||
-                          content.includes('extends Model') ||
-                          content.includes('extends Controller');
+
+    // Check if content is valid before checking Laravel patterns
+    const hasLaravelCode = content && (
+      content.includes('laravel') ||
+      content.includes('illuminate') ||
+      content.includes('Illuminate\\') ||
+      content.includes('App\\') ||
+      content.includes('Route::') ||
+      content.includes('extends Model') ||
+      content.includes('extends Controller')
+    );
 
     return filePath.endsWith('.php') && (isLaravelPath || hasLaravelCode);
   }
@@ -478,7 +878,7 @@ export class LaravelParser extends BaseFrameworkParser {
       // First child should be the class name (Route)
       // Second child should be the scope operator (::)
       // Third child should be the method name
-      if (node.children.length >= 3) {
+      if (node.children && node.children.length >= 3) {
         const className = node.children[0];
         const methodName = node.children[2];
 
@@ -1141,7 +1541,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getRouteMethod(node: SyntaxNode): string | null {
     // For scoped_call_expression, the method name is the third child
-    if (node.type === 'scoped_call_expression' && node.children.length >= 3) {
+    if (node.type === 'scoped_call_expression' && node.children && node.children.length >= 3) {
       return node.children[2].text;
     }
     return null;
@@ -1153,7 +1553,7 @@ export class LaravelParser extends BaseFrameworkParser {
   private getRoutePath(node: SyntaxNode, content: string): string | null {
     // For scoped_call_expression, find the arguments node
     const args = this.findArgumentsNode(node);
-    if (args && args.children.length > 1) {
+    if (args && args.children && args.children.length > 1) {
       // First argument is usually the path (inside parentheses)
       const pathArg = args.children[1]; // Skip the opening parenthesis
       if (pathArg.type === 'argument') {
@@ -1173,7 +1573,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getRouteHandler(node: SyntaxNode, content: string): {controller?: string, action?: string} | null {
     const args = this.findArgumentsNode(node);
-    if (args && args.children.length > 2) {
+    if (args && args.children && args.children.length > 2) {
       // Second argument is usually the handler (skip opening parenthesis and first argument)
       const handlerArg = args.children[3]; // Skip (, first arg, comma
       if (handlerArg && handlerArg.type === 'argument') {

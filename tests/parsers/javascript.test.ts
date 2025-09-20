@@ -34,7 +34,6 @@ describe('JavaScriptParser', () => {
     it('should parse simple function declaration', async () => {
       const content = `
         function hello(name) {
-          console.log('Hello, ' + name);
         }
       `;
 
@@ -174,7 +173,6 @@ describe('JavaScriptParser', () => {
     it('should handle parse errors gracefully', async () => {
       const content = `
         function incomplete( {
-          console.log('syntax error');
       `;
 
       const result = await parser.parseFile('test.js', content);

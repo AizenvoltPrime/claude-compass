@@ -73,21 +73,11 @@ export abstract class ChunkedParser extends BaseParser {
     const chunkSize = options?.chunkSize || this.DEFAULT_CHUNK_SIZE;
     const overlapLines = options?.chunkOverlapLines || this.DEFAULT_OVERLAP_LINES;
 
-    this.logger.debug('Starting chunked parsing', {
-      filePath,
-      fileSize: content.length,
-      chunkSize,
-      overlapLines
-    });
 
     try {
       // Split content into chunks
       const chunks = this.splitIntoChunks(content, chunkSize, overlapLines);
 
-      this.logger.debug('File split into chunks', {
-        totalChunks: chunks.length,
-        avgChunkSize: chunks.reduce((sum, chunk) => sum + chunk.content.length, 0) / chunks.length
-      });
 
       // Parse each chunk
       const chunkResults: ParseResult[] = [];
@@ -365,6 +355,10 @@ export abstract class ChunkedParser extends BaseParser {
    */
   protected shouldUseChunking(content: string, options?: ChunkedParseOptions): boolean {
     if (options?.enableChunking === false) {
+      return false;
+    }
+
+    if (!content) {
       return false;
     }
 
