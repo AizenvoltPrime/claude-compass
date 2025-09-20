@@ -291,17 +291,21 @@ interface MCPResources {
 
 ```typescript
 interface MCPTools {
-  // Code search with citations
+  // Hybrid vector + lexical search with framework awareness
   search_code(
     query: string,
-    repo_id: string,
+    repo_id?: string,
     topK?: number
   ): {
     results: {
+      symbol_id: string;
+      name: string;
+      type: string;
       file_path: string;
       line_number: number;
       content: string;
-      score: number;
+      framework: string;
+      relevance_score: number;
     }[];
   };
 
@@ -309,33 +313,83 @@ interface MCPTools {
   get_symbol(symbol_id: string): SymbolDetails;
   get_file(file_id: string): FileDetails;
 
-  // Dependency analysis
-  who_calls(symbol_id: string): {
+  // Dependency analysis with transitive support
+  who_calls(symbol_id: string, include_indirect?: boolean): {
     callers: {
       symbol_id: string;
+      name: string;
+      type: string;
       file_path: string;
       line_number: number;
+      relationship_type: string;
+      confidence: number;
     }[];
   };
 
-  list_dependencies(symbol_id: string): {
+  list_dependencies(symbol_id: string, include_indirect?: boolean): {
     dependencies: {
       symbol_id: string;
-      type: 'calls' | 'imports' | 'inherits';
+      name: string;
+      type: 'calls' | 'imports' | 'inherits' | 'api_call' | 'shares_schema';
       file_path: string;
+      line_number: number;
+      confidence: number;
     }[];
   };
 
-  // Impact analysis (blast radius)
-  impact_of(change: { symbol_id?: string; file_path?: string; description: string }): {
-    affected_symbols: string[];
-    affected_routes: string[];
-    affected_jobs: string[];
-    affected_tests: string[];
-    confidence: number;
+  // Comprehensive blast radius analysis
+  impact_of(change: {
+    symbol_id?: string;
+    file_path?: string;
+    description: string;
+    include_tests?: boolean;
+    include_jobs?: boolean;
+    include_routes?: boolean;
+    confidence_threshold?: number;
+  }): {
+    affected_symbols: {
+      id: string;
+      name: string;
+      type: string;
+      file_path: string;
+      impact_type: 'direct' | 'indirect' | 'cross_stack';
+      confidence: number;
+    }[];
+    affected_routes: {
+      id: string;
+      path: string;
+      method: string;
+      framework: string;
+      confidence: number;
+    }[];
+    affected_jobs: {
+      id: string;
+      name: string;
+      type: string;
+      confidence: number;
+    }[];
+    affected_tests: {
+      id: string;
+      name: string;
+      file_path: string;
+      test_type: string;
+      confidence: number;
+    }[];
+    cross_stack_relationships: {
+      frontend_symbol: string;
+      backend_symbol: string;
+      relationship_type: string;
+      confidence: number;
+    }[];
+    blast_radius_summary: {
+      total_affected: number;
+      high_confidence_count: number;
+      frameworks_affected: string[];
+      risk_level: 'low' | 'medium' | 'high' | 'critical';
+    };
   };
 
-  // External documentation search
+  // External documentation search (Phase 7)
   search_docs(
     query: string,
     pkg: string,
@@ -348,7 +402,7 @@ interface MCPTools {
     }[];
   };
 
-  // Specification management
+  // Specification management (Phase 7)
   diff_spec_vs_code(
     feature_id: string,
     repo_id: string
@@ -567,115 +621,144 @@ interface MCPTools {
 
 **Current Status**: Foundation complete, ready for enhanced impact tools
 
-**Verified Implementation Gaps** (from investigation analysis):
+**Verified Implementation Gaps** (streamlined architecture):
 
-1. **Search Enhancement**: `search_code` tool limited to PostgreSQL ilike - add full-text search capabilities
-2. **Impact Analysis**: `get_cross_stack_impact` excellent for Vue ↔ Laravel, missing broader `impact_of` tool
-3. **Resources**: Graph data exists in database but resources are placeholders
-4. **Documentation Integration**: Missing external package documentation search
+1. **Search Enhancement**: `search_code` tool limited to PostgreSQL ilike - enhance to hybrid vector+lexical search
+2. **Impact Analysis**: `get_cross_stack_impact` limited to Vue ↔ Laravel - expand to comprehensive `impact_of` tool covering all frameworks, routes, jobs, and tests
+3. **Tool Consolidation**: 12 overlapping tools need consolidation into 6 focused core tools
+4. **Documentation Integration**: Missing external package documentation search (Phase 7)
 
 **Detailed Phase 6 Implementation Plan:**
 
-#### 6A. Enhanced Search Capabilities (Weeks 1-2) 🎯 CRITICAL
+#### 6A. Tool Consolidation & Enhanced Search (Weeks 1-2) 🎯 CRITICAL
 
-**Technical Implementation:**
+**Tool Architecture Simplification:**
+
+```typescript
+// Remove 6 overlapping tools, keep 6 core tools:
+// ❌ Remove: get_laravel_routes, get_eloquent_models, get_laravel_controllers
+// ❌ Remove: search_laravel_entities, get_api_calls, get_data_contracts
+// ❌ Remove: get_cross_stack_impact
+// ✅ Keep: get_file, get_symbol, who_calls, list_dependencies
+// ⭐ Enhance: search_code → hybrid vector+lexical search
+// 🆕 Add: impact_of → comprehensive blast radius
+```
+
+**Enhanced Search Implementation:**
 
 ```typescript
 // Current: Basic lexical search
-async searchCode(query: string) {
-  return await this.dbService.searchSymbols(query); // PostgreSQL ilike only
+async searchCode(query: string, repoId?: number, limit?: number) {
+  return await this.dbService.searchSymbols(query, repoId); // PostgreSQL ilike only
 }
 
-// Target: Enhanced full-text search
-async searchCode(query: string, options: SearchOptions) {
-  const fullTextResults = await this.dbService.fullTextSearch(query);
-  const exactResults = await this.dbService.searchSymbols(query);
-  return this.mergeAndRankResults(fullTextResults, exactResults);
+// Target: Hybrid vector+lexical search with framework awareness
+async searchCode(query: string, repoId?: number, topK?: number) {
+  const vectorResults = await this.dbService.vectorSearch(query, repoId);
+  const fullTextResults = await this.dbService.fullTextSearch(query, repoId);
+  const lexicalResults = await this.dbService.lexicalSearch(query, repoId);
+
+  return this.hybridRanking(vectorResults, fullTextResults, lexicalResults, topK);
 }
 ```
 
 **Database Changes Required:**
 
-- Add full-text search indexes to symbols and files tables
-- Implement PostgreSQL full-text search with ranking
-- Add search result ranking algorithms
+- Add vector embeddings to symbols table for semantic search
+- Add full-text search indexes (PostgreSQL tsvector)
+- Implement hybrid ranking algorithm
+- Remove Laravel-specific tool dependencies
 
 **Files to Modify:**
 
-- `src/mcp/tools.ts` - Enhance search_code tool
-- `src/database/services.ts` - Add full-text search methods
-- Database migration for search indexes
+- `src/mcp/tools.ts` - Remove 6 tools, enhance search_code, add impact_of
+- `src/database/services.ts` - Add hybrid search methods
+- Database migration for vector embeddings and full-text indexes
 
-#### 6B. Complete Impact Analysis (Weeks 3-4) 🎯 HIGH PRIORITY
+#### 6B. Comprehensive Impact Analysis Tool (Weeks 3-4) 🎯 HIGH PRIORITY
 
-**Current Gap**: `get_cross_stack_impact` is excellent for Vue ↔ Laravel but we need a broader `impact_of` tool for comprehensive blast radius analysis across routes, jobs, tests.
-
-**Implementation:**
+**Replace `get_cross_stack_impact` with comprehensive `impact_of` tool:**
 
 ```typescript
-// Current: Cross-stack specific
+// Remove: Limited cross-stack tool
 async getCrossStackImpact(symbolId: number) {
   // Vue ↔ Laravel analysis only
 }
 
-// Target: Comprehensive blast radius
-async impactOf(change: ChangeDescription) {
-  const directImpact = await this.getDirectDependencies(change.symbolId);
-  const testImpact = await this.getAffectedTests(change.symbolId);
-  const routeImpact = await this.getAffectedRoutes(change.symbolId);
-  const jobImpact = await this.getAffectedJobs(change.symbolId);
-  const crossStackImpact = await this.getCrossStackImpact(change.symbolId);
+// Add: Comprehensive blast radius tool
+async impactOf(change: {
+  symbol_id?: string;
+  file_path?: string;
+  description: string;
+  include_tests?: boolean;
+  include_jobs?: boolean;
+  include_routes?: boolean;
+  confidence_threshold?: number;
+}) {
+  // Absorb functionality from removed tools:
+  // - get_cross_stack_impact → cross-stack relationships
+  // - get_api_calls → API call mapping
+  // - get_data_contracts → schema relationships
+  // - Laravel tools → route/job analysis
+
+  const symbolImpact = await this.getSymbolImpact(change.symbol_id);
+  const routeImpact = change.include_routes ? await this.getRouteImpact(change.symbol_id) : [];
+  const jobImpact = change.include_jobs ? await this.getJobImpact(change.symbol_id) : [];
+  const testImpact = change.include_tests ? await this.getTestImpact(change.symbol_id) : [];
+  const crossStackImpact = await this.getCrossStackRelationships(change.symbol_id);
 
   return {
-    blastRadius: {
-      symbols: directImpact,
-      tests: testImpact,
-      routes: routeImpact,
-      jobs: jobImpact,
-      crossStack: crossStackImpact
-    },
-    confidenceScore: this.calculateConfidence(change),
-    riskLevel: this.assessRiskLevel(change)
+    affected_symbols: symbolImpact,
+    affected_routes: routeImpact,
+    affected_jobs: jobImpact,
+    affected_tests: testImpact,
+    cross_stack_relationships: crossStackImpact,
+    blast_radius_summary: {
+      total_affected: symbolImpact.length + routeImpact.length + jobImpact.length,
+      frameworks_affected: this.getAffectedFrameworks([...symbolImpact, ...routeImpact]),
+      risk_level: this.calculateRiskLevel(symbolImpact, routeImpact, jobImpact)
+    }
   };
 }
 ```
 
-**Data Sources Available** (verified in investigation):
+**Data Sources Available** (reusing existing Phase 5 infrastructure):
 
 - Complete dependency graphs in database
-- Test-to-code linkage tables from Phase 3
-- Route and job entity tables from Phases 2-4
-- Cross-stack relationship tables from Phase 5
+- Framework metadata tables (routes, models, controllers, jobs)
+- Cross-stack relationship tables (API calls, data contracts)
+- Test-to-code linkage tables
 
-#### 6C. Enhanced Tools Implementation (Weeks 5-6) 🎯 HIGH PRIORITY
+#### 6C. Tool Simplification Complete (Weeks 5-6) 🎯 VALIDATION
 
-**Architectural Decision**: Following the Reddit author's approach, Claude Compass uses **targeted tools** instead of raw graph resource dumps. This provides better performance and more practical usage patterns.
-
-**New Implementation Strategy:**
+**Final Tool Architecture (6 Core Tools):**
 
 ```typescript
-// ✅ Current: Focused, practical tools
-search_code({ query: "validateEmail", type: "function" })
-who_calls({ symbol_id: 123, include_transitive: true })
-impact_of({ symbol_id: 456, include_routes: true, include_jobs: true })
+// ✅ Final simplified API
+1. search_code(query, repo_id?, topK?) → hybrid vector+lexical search
+2. get_file(file_id) → file details with symbols
+3. get_symbol(symbol_id) → symbol details with relationships
+4. who_calls(symbol_id, include_indirect?) → enhanced with cross-stack
+5. list_dependencies(symbol_id, include_indirect?) → enhanced with cross-stack
+6. impact_of(change) → comprehensive blast radius replacing 6 removed tools
 
-// ❌ Avoided: Data dump resources (removed by design)
-// graph://files   → Would return 50,000+ files (unusable)
-// graph://symbols → Would return massive JSON (overwhelms Claude Code)
+// ❌ Removed overlapping tools (functionality absorbed)
+// get_laravel_routes, get_eloquent_models, get_laravel_controllers
+// search_laravel_entities, get_api_calls, get_data_contracts, get_cross_stack_impact
 ```
 
-**Enhanced Tools to Implement:**
+**Validation Tasks:**
 
-- ✅ **`impact_of`** - Comprehensive blast radius analysis (beyond cross-stack)
-- ✅ **`get_route_flow`** - Trace route → controller → service → repository
-- ✅ **`get_job_triggers`** - Background job trigger analysis
-- ✅ **`trace_data_flow`** - Data flow between symbols with confidence scoring
+- ✅ **Migration Testing**: Ensure all functionality from removed tools is accessible via core 6
+- ✅ **Performance Testing**: Validate hybrid search performance vs basic lexical
+- ✅ **Integration Testing**: Verify `impact_of` covers all previous tool capabilities
+- ✅ **Documentation**: Update MCP tool definitions and examples
 
-**Architecture Benefits:**
-- **Performance**: No massive data transfers, only focused results
-- **Usability**: Claude Code gets exactly what it needs for the task
-- **Scalability**: Works with large codebases (50K+ symbols)
-- **Actionability**: Results include file paths, line numbers, context
+**Architecture Benefits Achieved:**
+- **Simplicity**: 6 focused tools vs 12 overlapping tools
+- **Performance**: Hybrid search with ranking vs basic lexical only
+- **Completeness**: Comprehensive impact analysis vs limited cross-stack only
+- **Maintainability**: Single search implementation vs multiple specialized searches
 
 #### 6D. External Integration Foundation (Weeks 7-8) 🔗 MEDIUM PRIORITY
 
@@ -703,30 +786,33 @@ async readPackageDocs(packageName: string, version: string) {
 
 **Success Criteria for Phase 6:**
 
+**Tool Consolidation Success:**
+
+- ✅ 12 overlapping tools successfully consolidated into 6 focused core tools
+- ✅ All functionality from removed tools accessible via core 6 tools
+- ✅ Simplified API reduces cognitive load while maintaining power
+- ✅ Tool removal eliminates maintenance burden of overlapping implementations
+
 **Enhanced Search Success:**
 
-- ✅ Full-text search returns significantly more relevant results than basic ilike
+- ✅ Hybrid vector+lexical search returns significantly more relevant results than basic ilike
 - ✅ Search ranking algorithms prioritize by relevance and usage frequency
-- ✅ Cross-language search finds related code across TypeScript and PHP
-
-**Impact Analysis Success:**
-
-- ✅ `impact_of` tool identifies comprehensive blast radius across framework entities
-- ✅ Confidence scoring accurately predicts change impact risk
-- ✅ Test impact analysis shows which tests need updates for changes
-
-**Tools Architecture Success:**
-
-- ✅ Targeted tools provide focused, actionable results (vs overwhelming data dumps)
+- ✅ Framework-aware search finds Laravel routes, Vue components, React hooks in unified results
 - ✅ Performance scales to large codebases (50K+ symbols) without timeouts
-- ✅ Claude Code gets exactly the context needed for each specific task
-- ✅ Framework-aware tools expose rich relationship data through precise queries
 
-**Integration Success:**
+**Comprehensive Impact Analysis Success:**
 
-- ✅ External documentation search provides relevant package help
-- ✅ Foundation established for specification management (Phase 7)
-- ✅ Enhanced features integrate seamlessly with existing MCP architecture
+- ✅ `impact_of` tool provides complete blast radius across all frameworks (not just Vue ↔ Laravel)
+- ✅ Includes routes, jobs, tests, and cross-stack relationships in single comprehensive analysis
+- ✅ Confidence scoring accurately predicts change impact risk across all entity types
+- ✅ Replaces 6 specialized tools with single powerful comprehensive tool
+
+**Architecture Success:**
+
+- ✅ Clean, focused API that's easier to understand and use
+- ✅ Better performance through consolidation vs maintaining 12 separate tools
+- ✅ Foundation ready for Phase 7 external integrations
+- ✅ Proven targeted tools pattern vs overwhelming data dumps
 
 ### Phase 7: Specification Tracking & Drift Detection (Months 7-8) - HIGH PRIORITY
 
@@ -1587,19 +1673,22 @@ npm run build
 
 ### Verified Current Implementation (Phase 5 Complete)
 
-#### ✅ MCP Tools Status - 12 Tools Implemented
+#### ✅ MCP Tools Status - 6 Core Tools (Simplified Architecture)
 
-**Core Tools (Reddit post compatible):**
+**Core Tools (Clean, focused API):**
 
 1. **`get_file`** ✅ - Fully implemented with repository and symbol inclusion
 2. **`get_symbol`** ✅ - Fully implemented with dependencies and callers
-3. **`search_code`** ⚠️ - **Basic lexical search only** (missing full-text search with ranking)
-4. **`who_calls`** ✅ - Advanced implementation with transitive analysis
-5. **`list_dependencies`** ✅ - Advanced implementation with transitive analysis
+3. **`search_code`** ⚠️ - **Needs enhancement to hybrid vector+lexical search** (currently basic lexical only)
+4. **`who_calls`** ✅ - Advanced implementation with transitive analysis and cross-stack relationships
+5. **`list_dependencies`** ✅ - Advanced implementation with transitive analysis and cross-stack relationships
+6. **`impact_of`** ❌ - **Missing comprehensive blast radius tool** (currently have limited `get_cross_stack_impact`)
 
-**Laravel-Specific Tools:** 6. **`get_laravel_routes`** ✅ - Comprehensive Laravel route analysis 7. **`get_eloquent_models`** ✅ - Eloquent model relationship mapping 8. **`get_laravel_controllers`** ✅ - Laravel controller and action analysis 9. **`search_laravel_entities`** ✅ - Laravel entity search across types
-
-**Cross-Stack Tools (Phase 5 - Beyond Reddit post):** 10. **`get_api_calls`** ✅ - Vue ↔ Laravel API call mapping 11. **`get_data_contracts`** ✅ - Data contract analysis with drift detection 12. **`get_cross_stack_impact`** ✅ - Cross-stack impact analysis with transitive support
+**Removed Tools (Functionality absorbed into core tools):**
+- ❌ `get_laravel_routes`, `get_eloquent_models`, `get_laravel_controllers` → **Absorbed into enhanced `search_code`**
+- ❌ `search_laravel_entities` → **Absorbed into enhanced `search_code`**
+- ❌ `get_api_calls`, `get_data_contracts` → **Absorbed into comprehensive `impact_of`**
+- ❌ `get_cross_stack_impact` → **Enhanced and renamed to `impact_of`**
 
 #### ✅ MCP Resources Status - Optimized Architecture
 
@@ -1620,13 +1709,16 @@ npm run build
 
 **Graph Data Access**: Available through **targeted tools** (`search_code`, `who_calls`, `impact_of`) that query specific graph slices.
 
-#### ❌ Missing Tools (for Complete Vision)
+#### ❌ Missing/Enhancement Needed (for Complete Vision)
 
-**High Priority Missing:**
+**Phase 6 Critical Enhancements:**
 
-1. **`impact_of`** - True blast radius analysis tool (vs current `get_cross_stack_impact`)
-2. **`search_docs`** - External documentation search
-3. **`diff_spec_vs_code`** - Specification drift detection
+1. **`search_code`** - **Enhance to hybrid vector+lexical search** with PostgreSQL full-text search and ranking
+2. **`impact_of`** - **Implement comprehensive blast radius tool** replacing limited `get_cross_stack_impact`
+
+**Phase 7 Additions:**
+3. **`search_docs`** - External documentation search
+4. **`diff_spec_vs_code`** - Specification drift detection
 
 ### Completed Phases (Verified)
 
