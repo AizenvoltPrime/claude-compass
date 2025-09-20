@@ -564,6 +564,29 @@ export class GraphBuilder {
   private async ensureRepository(repositoryPath: string): Promise<Repository> {
     const absolutePath = path.resolve(repositoryPath);
 
+    // Validate that the repository path exists and is a directory
+    try {
+      const stats = await fs.stat(absolutePath);
+      if (!stats.isDirectory()) {
+        throw new Error(`Repository path is not a directory: ${absolutePath}`);
+      }
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        throw new Error(`Repository path does not exist: ${absolutePath}`);
+      } else if (error.code === 'EACCES') {
+        throw new Error(`Repository path is not accessible: ${absolutePath}`);
+      } else {
+        throw error; // Re-throw other unexpected errors
+      }
+    }
+
+    // Additional check for read access
+    try {
+      await fs.access(absolutePath, fs.constants.R_OK);
+    } catch (error) {
+      throw new Error(`Repository path is not readable: ${absolutePath}`);
+    }
+
     let repository = await this.dbService.getRepositoryByPath(absolutePath);
 
     if (!repository) {
