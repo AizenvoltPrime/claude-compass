@@ -9,6 +9,7 @@ import {
   CreateFile,
   CreateSymbol,
   CreateDependency,
+  SymbolType,
   CreateFileDependency,
   FileDependency,
   FileWithRepository,
@@ -390,6 +391,41 @@ export class DatabaseService {
     const [symbol] = await this.db('symbols')
       .insert(data)
       .returning('*');
+
+    // Check if search_vector was populated by the PostgreSQL trigger
+    // If not, manually populate it (important for test environments)
+    try {
+      const symbolWithVector = await this.db('symbols')
+        .where('id', symbol.id)
+        .whereNotNull('search_vector')
+        .first();
+
+      if (!symbolWithVector) {
+        logger.debug('PostgreSQL trigger did not populate search_vector, manually creating it', {
+          symbol_id: symbol.id,
+          name: data.name
+        });
+
+        // Manually create tsvector like the trigger would
+        const searchText = [
+          data.name || '',
+          data.signature || ''
+        ].join(' ').trim();
+
+        await this.db('symbols')
+          .where('id', symbol.id)
+          .update({
+            search_vector: this.db.raw("to_tsvector('english', ?)", [searchText])
+          });
+      }
+    } catch (error) {
+      // If manual search_vector creation fails, log but don't fail the symbol creation
+      logger.warn('Failed to manually populate search_vector, search may be degraded', {
+        symbol_id: symbol.id,
+        error: (error as Error).message
+      });
+    }
+
     return symbol as Symbol;
   }
 
@@ -469,6 +505,84 @@ export class DatabaseService {
     }
 
     return results;
+  }
+
+  /**
+   * Validate that search infrastructure is working properly
+   * Creates a test symbol, verifies it can be found, then cleans up
+   * Useful for test environments to ensure search is functional
+   */
+  async validateSearchInfrastructure(repoId: number): Promise<boolean> {
+    const testSymbolName = 'TestSearchValidationSymbol_' + Date.now();
+    let testFileId: number | null = null;
+    let testSymbolId: number | null = null;
+
+    try {
+      // Create a temporary test file
+      const testFile = await this.createFile({
+        repo_id: repoId,
+        path: `/test/validation/${testSymbolName}.php`,
+        language: 'php',
+        is_generated: false,
+        is_test: true
+      });
+      testFileId = testFile.id;
+
+      // Create a test symbol
+      const testSymbol = await this.createSymbol({
+        file_id: testFileId,
+        name: testSymbolName,
+        symbol_type: SymbolType.CLASS,
+        is_exported: true,
+        signature: `class ${testSymbolName} extends TestModel`
+      });
+      testSymbolId = testSymbol.id;
+
+      // Wait a moment for any async processing
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Try to search for the test symbol using different search methods
+      const searchResults = await this.searchSymbols(testSymbolName, repoId, { limit: 10 });
+      const lexicalResults = await this.lexicalSearchSymbols(testSymbolName, repoId, { limit: 10 });
+
+      // Check if the symbol was found
+      const foundInSearch = searchResults.some(s => s.id === testSymbolId);
+      const foundInLexical = lexicalResults.some(s => s.id === testSymbolId);
+
+      logger.debug('Search infrastructure validation results', {
+        testSymbolName,
+        foundInSearch,
+        foundInLexical,
+        searchResultsCount: searchResults.length,
+        lexicalResultsCount: lexicalResults.length
+      });
+
+      return foundInSearch || foundInLexical;
+
+    } catch (error) {
+      logger.warn('Search infrastructure validation failed', {
+        error: (error as Error).message,
+        testSymbolName
+      });
+      return false;
+
+    } finally {
+      // Clean up test data
+      try {
+        if (testSymbolId) {
+          await this.db('symbols').where('id', testSymbolId).del();
+        }
+        if (testFileId) {
+          await this.db('files').where('id', testFileId).del();
+        }
+      } catch (cleanupError) {
+        logger.warn('Failed to clean up test data', {
+          error: (cleanupError as Error).message,
+          testSymbolId,
+          testFileId
+        });
+      }
+    }
   }
 
   async getSymbol(id: number): Promise<Symbol | null> {
@@ -624,7 +738,10 @@ export class DatabaseService {
     queryBuilder = queryBuilder.where(function() {
       this.where('symbols.name', 'ilike', `%${fuzzyQuery}%`)
           .orWhere('symbols.signature', 'ilike', `%${fuzzyQuery}%`)
-          .orWhere('symbols.description', 'ilike', `%${fuzzyQuery}%`);
+          .orWhere(function() {
+            this.whereNotNull('symbols.description')
+                .andWhere('symbols.description', 'ilike', `%${fuzzyQuery}%`);
+          });
     });
 
     // Apply filters
@@ -641,7 +758,41 @@ export class DatabaseService {
     }
 
     if (framework) {
-      queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
+      // Map framework to appropriate file language/path patterns
+      switch (framework.toLowerCase()) {
+        case 'laravel':
+          queryBuilder = queryBuilder.where(function() {
+            this.where('files.language', 'php')
+                .orWhere('files.path', 'ilike', '%/app/%')
+                .orWhere('files.path', 'ilike', '%laravel%');
+          });
+          break;
+        case 'vue':
+          queryBuilder = queryBuilder.where(function() {
+            this.where('files.language', 'vue')
+                .orWhere('files.path', 'ilike', '%.vue');
+          });
+          break;
+        case 'react':
+          queryBuilder = queryBuilder.where(function() {
+            this.where('files.language', 'javascript')
+                .orWhere('files.language', 'typescript')
+                .orWhere('files.path', 'ilike', '%.jsx')
+                .orWhere('files.path', 'ilike', '%.tsx');
+          });
+          break;
+        case 'node':
+          queryBuilder = queryBuilder.where(function() {
+            this.where('files.language', 'javascript')
+                .orWhere('files.language', 'typescript')
+                .orWhere('files.path', 'ilike', '%server%')
+                .orWhere('files.path', 'ilike', '%api%');
+          });
+          break;
+        default:
+          // Fallback to the original behavior for unknown frameworks
+          queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
+      }
     }
 
     // Enhanced ordering with relevance
@@ -708,7 +859,41 @@ export class DatabaseService {
       }
 
       if (framework) {
-        queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
+        // Map framework to appropriate file language/path patterns
+        switch (framework.toLowerCase()) {
+          case 'laravel':
+            queryBuilder = queryBuilder.where(function() {
+              this.where('files.language', 'php')
+                  .orWhere('files.path', 'ilike', '%/app/%')
+                  .orWhere('files.path', 'ilike', '%laravel%');
+            });
+            break;
+          case 'vue':
+            queryBuilder = queryBuilder.where(function() {
+              this.where('files.language', 'vue')
+                  .orWhere('files.path', 'ilike', '%.vue');
+            });
+            break;
+          case 'react':
+            queryBuilder = queryBuilder.where(function() {
+              this.where('files.language', 'javascript')
+                  .orWhere('files.language', 'typescript')
+                  .orWhere('files.path', 'ilike', '%.jsx')
+                  .orWhere('files.path', 'ilike', '%.tsx');
+            });
+            break;
+          case 'node':
+            queryBuilder = queryBuilder.where(function() {
+              this.where('files.language', 'javascript')
+                  .orWhere('files.language', 'typescript')
+                  .orWhere('files.path', 'ilike', '%server%')
+                  .orWhere('files.path', 'ilike', '%api%');
+            });
+            break;
+          default:
+            // Fallback to the original behavior for unknown frameworks
+            queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
+        }
       }
 
       const results = await queryBuilder
@@ -716,7 +901,20 @@ export class DatabaseService {
         .orderBy('symbols.name')
         .limit(limit);
 
-      return this.formatSymbolResults(results);
+      const formattedResults = this.formatSymbolResults(results);
+
+      // If PostgreSQL FTS returns empty results, fall back to lexical search
+      // This handles cases where search_vector is NULL (e.g., trigger not working in tests)
+      if (formattedResults.length === 0) {
+        logger.debug('PostgreSQL full-text search returned empty results, falling back to lexical search', {
+          query,
+          repoIds,
+          sanitizedQuery
+        });
+        return this.lexicalSearch(query, repoIds, options);
+      }
+
+      return formattedResults;
     } catch (error) {
       // Fallback to lexical search if PostgreSQL FTS fails (e.g., in mocked tests)
       logger.debug('PostgreSQL full-text search failed, falling back to lexical search', {
