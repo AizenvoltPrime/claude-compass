@@ -4,6 +4,8 @@
 
 Welcome to Claude Compass - an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of your codebase.
 
+**Ready for Phase 6**: Tool consolidation from 12 overlapping tools to 6 focused core tools with enhanced search and comprehensive impact analysis.
+
 This Phase 5 implementation provides:
 - ✅ JavaScript/TypeScript parsing with Tree-sitter
 - ✅ PHP parsing with Tree-sitter and advanced chunked parsing
@@ -252,28 +254,75 @@ claude-compass clear --all [--yes]
 
 The MCP server provides these tools for AI assistants:
 
-### Tools Available
+### MCP Tools Available (Current - Phase 5)
 
 1. **`get_file`** - Get file details with symbols
 2. **`get_symbol`** - Get symbol details with dependencies
-3. **`search_code`** - Search for symbols by name/pattern
-4. **`who_calls`** - Find callers of a symbol
-5. **`list_dependencies`** - List symbol dependencies
+3. **`search_code`** - Search for symbols by name/pattern (basic lexical search)
+4. **`who_calls`** - Find callers of a symbol (with transitive analysis)
+5. **`list_dependencies`** - List symbol dependencies (with transitive analysis)
+6. **`get_laravel_routes`** - Laravel route analysis
+7. **`get_eloquent_models`** - Eloquent model relationships
+8. **`get_laravel_controllers`** - Laravel controller actions
+9. **`search_laravel_entities`** - Laravel entity search
+10. **`get_api_calls`** - Vue ↔ Laravel API mapping
+11. **`get_data_contracts`** - Cross-stack data contracts
+12. **`get_cross_stack_impact`** - Cross-stack impact analysis
+
+### MCP Tools Planned (Phase 6 - Consolidated)
+
+**6 Focused Core Tools:**
+1. **`get_file`** - File details with symbols (unchanged)
+2. **`get_symbol`** - Symbol details with dependencies (unchanged)
+3. **`search_code`** - **Enhanced hybrid vector+lexical search** (replaces Laravel-specific search)
+4. **`who_calls`** - Enhanced with cross-stack relationships (unchanged)
+5. **`list_dependencies`** - Enhanced with cross-stack relationships (unchanged)
+6. **`impact_of`** - **New comprehensive blast radius tool** (replaces 6 specialized tools)
 
 ### Resources Available
 
 1. **`repo://repositories`** - List of analyzed repositories
-2. **`graph://files`** - File dependency graph
-3. **`graph://symbols`** - Symbol dependency graph
 
 ### Example MCP Usage
 
+**Current (Phase 5):**
 ```typescript
-// Connect to the MCP server and use tools
-const response = await mcpClient.callTool('search_code', {
+// Basic lexical search
+const searchResponse = await mcpClient.callTool('search_code', {
   query: 'useState',
   symbol_type: 'function',
   limit: 10
+});
+
+// Laravel-specific search
+const laravelResponse = await mcpClient.callTool('search_laravel_entities', {
+  query: 'user',
+  entity_types: ['route', 'model', 'controller']
+});
+
+// Cross-stack impact analysis
+const impactResponse = await mcpClient.callTool('get_cross_stack_impact', {
+  symbol_id: 123,
+  include_transitive: true
+});
+```
+
+**Planned (Phase 6):**
+```typescript
+// Enhanced hybrid search (replaces multiple search tools)
+const searchResponse = await mcpClient.callTool('search_code', {
+  query: 'user authentication',
+  repo_id: 123,
+  topK: 10
+});
+
+// Comprehensive blast radius (replaces 6 specialized tools)
+const impactResponse = await mcpClient.callTool('impact_of', {
+  symbol_id: 123,
+  include_routes: true,
+  include_jobs: true,
+  include_tests: true,
+  confidence_threshold: 0.7
 });
 ```
 
@@ -405,10 +454,11 @@ All JavaScript/TypeScript and Vue ↔ Laravel cross-stack capabilities are now c
 - ✅ Full-stack impact analysis and blast radius calculation
 - ✅ Cross-stack MCP tools for AI-powered full-stack analysis
 
-### Phase 6: AI-Powered Analysis - **NEXT PRIORITY**
-- Vector search with embeddings for full-stack understanding
-- AI-generated summaries for symbols/files/features
-- Enhanced impact analysis with semantic understanding
+### Phase 6: Tool Consolidation & Enhanced Impact Analysis - **NEXT PRIORITY**
+- **Tool Consolidation**: 12 overlapping tools → 6 focused core tools
+- **Enhanced Search**: Hybrid vector+lexical search with framework awareness
+- **Comprehensive Impact Analysis**: Single `impact_of` tool replacing 6 specialized tools
+- **Improved Performance**: Streamlined architecture for better maintainability
 
 ## Troubleshooting
 

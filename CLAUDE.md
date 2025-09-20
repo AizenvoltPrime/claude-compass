@@ -89,9 +89,9 @@ npm run analyze /path/to/project                     # Analyze absolute path
    - Transitive analyzer: Advanced dependency traversal with cycle detection and confidence scoring
 
 4. **MCP Server** (`src/mcp/`): Model Context Protocol implementation
-   - Exposes 12 tools: get_file, get_symbol, search_code, who_calls, list_dependencies, plus Laravel and cross-stack tools
+   - Exposes 6 core tools: get_file, get_symbol, search_code (enhanced), who_calls, list_dependencies, impact_of
    - Enhanced tools support transitive analysis with indirect relationships and confidence scoring
-   - Provides resources: repositories, file graph, symbol graph
+   - Streamlined architecture eliminates overlapping tools while maintaining full functionality
 
 5. **CLI** (`src/cli/`): Command-line interface using Commander.js
    - Repository analysis, search, and MCP server management
@@ -168,7 +168,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **ORM Systems**: Prisma, TypeORM, Sequelize, Mongoose, MikroORM
 **Package Managers**: npm, yarn, pnpm, bun with monorepo support (Nx, Lerna, Turborepo, Rush)
 **Graph Types**: File dependencies, symbol relationships, framework entity relationships, transitive analysis
-**MCP Integration**: Enhanced MCP server with 12 tools supporting comprehensive dependency analysis and framework relationships
+**MCP Integration**: Streamlined MCP server with 6 focused core tools supporting comprehensive dependency analysis and framework relationships
 
 **Framework-Specific Features**:
 
@@ -206,7 +206,8 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 **Current Limitations**:
 
-- Basic lexical search (PostgreSQL ilike) - full-text search planned for Phase 6
+- Basic lexical search (PostgreSQL ilike) - hybrid vector+lexical search planned for Phase 6
+- Limited impact analysis (cross-stack only) - comprehensive impact_of tool planned for Phase 6
 - No runtime tracing for dynamic code analysis
 - Limited to static analysis (no dynamic code execution tracing)
 
@@ -224,9 +225,10 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **Planned Features** (Prioritized for Vue + Laravel + Godot):
 
 **Phase 6 - Enhanced Impact Analysis (NEXT PRIORITY):**
-- Enhanced search with PostgreSQL full-text search and ranking
-- Comprehensive impact analysis tool (`impact_of`) for complete blast radius
-- Resource implementation for graph data visualization
+- Tool consolidation: 12 overlapping tools → 6 focused core tools
+- Enhanced search with hybrid vector+lexical search and ranking
+- Comprehensive impact analysis tool (`impact_of`) replacing multiple specialized tools
+- Streamlined architecture for better performance and maintainability
 
 **Phase 8 - C#/Godot Support (MEDIUM PRIORITY):**
 - Game development framework support
