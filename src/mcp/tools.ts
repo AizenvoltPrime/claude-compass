@@ -1066,15 +1066,35 @@ export class McpTools {
     return symbols.filter(symbol => {
       const isClass = symbol.symbol_type === 'class';
       const path = symbol.file?.path || '';
-      // More flexible path matching that works with various directory structures
-      const isInModelsDirectory = path.includes('/Models/') || path.includes('\\Models\\') ||
-                                 path.includes('/models/') || path.includes('\\models\\') ||
-                                 /[\/\\][Mm]odels[\/\\]/.test(path);
-      const hasModelSignature = symbol.signature?.includes('extends Model') ||
-                                symbol.signature?.includes('extends Authenticatable') ||
-                                symbol.signature?.includes('extends Illuminate\\Database\\Eloquent\\Model');
+      const signature = symbol.signature || '';
+      const name = symbol.name || '';
 
-      return isClass && (isInModelsDirectory || hasModelSignature);
+      // Enhanced path matching that works with various directory structures
+      const isInModelsDirectory =
+        path.includes('/Models/') || path.includes('\\Models\\') ||
+        path.includes('/models/') || path.includes('\\models\\') ||
+        /[\/\\][Mm]odels[\/\\]/.test(path) ||
+        // Additional patterns for edge cases
+        path.endsWith('/Models') || path.endsWith('\\Models') ||
+        path.endsWith('/models') || path.endsWith('\\models') ||
+        /\/app\/[^\/]*Models\//i.test(path);
+
+      // Enhanced signature matching for Laravel models
+      const hasModelSignature =
+        signature.includes('extends Model') ||
+        signature.includes('extends Authenticatable') ||
+        signature.includes('extends Illuminate\\Database\\Eloquent\\Model') ||
+        signature.includes('extends \\Illuminate\\Database\\Eloquent\\Model') ||
+        signature.includes('use Illuminate\\Database\\Eloquent\\Model') ||
+        // Check for common Laravel model traits
+        signature.includes('use Authenticatable') ||
+        signature.includes('use SoftDeletes');
+
+      // Name-based detection for models
+      const hasModelName = name.endsWith('Model') ||
+                          (isClass && /^[A-Z][a-zA-Z]*$/.test(name) && isInModelsDirectory);
+
+      return isClass && (isInModelsDirectory || hasModelSignature || hasModelName);
     });
   }
 
@@ -1082,18 +1102,45 @@ export class McpTools {
     const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
-      const isClass = symbol.symbol_type === 'class';
+      const isClass = symbol.symbol_type === 'class' || symbol.symbol_type === 'method';
       const path = symbol.file?.path || '';
-      // More flexible path matching that works with various directory structures
-      const isInControllersDirectory = path.includes('/Controllers/') || path.includes('\\Controllers\\') ||
-                                       path.includes('/controllers/') || path.includes('\\controllers\\') ||
-                                       /[\/\\][Cc]ontrollers[\/\\]/.test(path);
-      const hasControllerSignature = symbol.signature?.includes('extends Controller') ||
-                                    symbol.signature?.includes('extends BaseController') ||
-                                    symbol.signature?.includes('extends Illuminate\\Routing\\Controller');
-      const hasControllerName = symbol.name?.toLowerCase().includes('controller');
+      const signature = symbol.signature || '';
+      const name = symbol.name || '';
 
-      return isClass && (isInControllersDirectory || hasControllerSignature || hasControllerName);
+      // Enhanced path matching for controllers
+      const isInControllersDirectory =
+        path.includes('/Controllers/') || path.includes('\\Controllers\\') ||
+        path.includes('/controllers/') || path.includes('\\controllers\\') ||
+        /[\/\\][Cc]ontrollers[\/\\]/.test(path) ||
+        // Additional patterns for Laravel structure
+        path.includes('/Http/Controllers/') || path.includes('\\Http\\Controllers\\') ||
+        /\/app\/Http\/Controllers\//i.test(path) ||
+        path.endsWith('/Controllers') || path.endsWith('\\Controllers') ||
+        path.endsWith('/controllers') || path.endsWith('\\controllers');
+
+      // Enhanced signature matching for Laravel controllers
+      const hasControllerSignature =
+        signature.includes('extends Controller') ||
+        signature.includes('extends BaseController') ||
+        signature.includes('extends Illuminate\\Routing\\Controller') ||
+        signature.includes('extends \\Illuminate\\Routing\\Controller') ||
+        signature.includes('use Illuminate\\Routing\\Controller') ||
+        signature.includes('use Controller') ||
+        // Check for common Laravel controller patterns
+        signature.includes('use AuthorizesRequests') ||
+        signature.includes('use DispatchesJobs') ||
+        signature.includes('use ValidatesRequests');
+
+      // Name-based detection for controllers
+      const hasControllerName = name.toLowerCase().includes('controller') ||
+                                name.endsWith('Controller') ||
+                                (isClass && /Controller$/.test(name));
+
+      // For controller methods, check if the parent class is a controller
+      const isControllerMethod = symbol.symbol_type === 'method' && isInControllersDirectory;
+
+      return (isClass && (isInControllersDirectory || hasControllerSignature || hasControllerName)) ||
+             isControllerMethod;
     });
   }
 
@@ -1114,14 +1161,44 @@ export class McpTools {
     const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
+      const isClass = symbol.symbol_type === 'class';
       const path = symbol.file?.path || '';
-      // More flexible path matching that works with various directory structures
-      const isInJobsDirectory = path.includes('/jobs/') || path.includes('\\jobs\\') ||
-                               path.includes('/Jobs/') || path.includes('\\Jobs\\') ||
-                               /[\/\\][Jj]obs[\/\\]/.test(path);
+      const signature = symbol.signature || '';
+      const name = symbol.name || '';
 
-      return symbol.symbol_type === 'class' &&
-             (symbol.name?.toLowerCase().includes('job') || isInJobsDirectory);
+      // Enhanced path matching for jobs
+      const isInJobsDirectory =
+        path.includes('/jobs/') || path.includes('\\jobs\\') ||
+        path.includes('/Jobs/') || path.includes('\\Jobs\\') ||
+        /[\/\\][Jj]obs[\/\\]/.test(path) ||
+        // Additional patterns for Laravel job structure
+        /\/app\/Jobs\//i.test(path) ||
+        path.endsWith('/Jobs') || path.endsWith('\\Jobs') ||
+        path.endsWith('/jobs') || path.endsWith('\\jobs');
+
+      // Enhanced signature matching for Laravel jobs
+      const hasJobSignature =
+        signature.includes('implements ShouldQueue') ||
+        signature.includes('implements \\ShouldQueue') ||
+        signature.includes('implements Illuminate\\Contracts\\Queue\\ShouldQueue') ||
+        signature.includes('use ShouldQueue') ||
+        signature.includes('use Illuminate\\Contracts\\Queue\\ShouldQueue') ||
+        signature.includes('use Dispatchable') ||
+        signature.includes('use InteractsWithQueue') ||
+        signature.includes('use Queueable') ||
+        signature.includes('use SerializesModels');
+
+      // Name-based detection for jobs
+      const hasJobName = name.toLowerCase().includes('job') ||
+                        name.endsWith('Job') ||
+                        /Job$/.test(name) ||
+                        // Common job naming patterns
+                        /Process[A-Z]/.test(name) ||
+                        /Send[A-Z]/.test(name) ||
+                        /Handle[A-Z]/.test(name) ||
+                        /Execute[A-Z]/.test(name);
+
+      return isClass && (isInJobsDirectory || hasJobSignature || hasJobName);
     });
   }
 
