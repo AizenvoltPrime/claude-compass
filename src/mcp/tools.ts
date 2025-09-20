@@ -863,17 +863,37 @@ export class McpTools {
     this.logger.debug('Getting data contracts for schema', validatedArgs);
 
     try {
-      // Note: Database method currently expects symbolId, but we have schema_name
-      // This is a temporary workaround until the database method is properly implemented
+      // First, search for symbols with the given schema name
+      const symbols = await this.dbService.searchSymbols(validatedArgs.schema_name, validatedArgs.repository_id);
+
+      if (symbols.length === 0) {
+        // No symbols found with this schema name
+        const response: any = {
+          schema_name: validatedArgs.schema_name,
+          data_contracts: [],
+          total_contracts: 0,
+          error: `No symbols found matching schema name '${validatedArgs.schema_name}'`,
+          filters: {
+            schema_name: validatedArgs.schema_name,
+            repository_id: validatedArgs.repository_id,
+            include_drift_analysis: validatedArgs.include_drift_analysis,
+          },
+        };
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(response, null, 2),
+          }],
+        };
+      }
+
+      // Get contracts by schema name
       let contracts: DataContract[] = [];
       let errorMessage: string | undefined;
 
       try {
-        // Get contracts by schema name directly
         contracts = await this.dbService.getDataContractsBySchema(validatedArgs.schema_name);
-        if (contracts.length === 0) {
-          errorMessage = `No data contracts found for schema name '${validatedArgs.schema_name}'`;
-        }
       } catch (error) {
         this.logger.warn('Failed to find data contracts by schema name, returning empty result', {
           schema_name: validatedArgs.schema_name,
