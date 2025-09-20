@@ -16,6 +16,7 @@ import {
   ParsedImport,
   ParsedExport,
   ParseError,
+  ParseOptions,
 } from './base';
 import {
   MergedParseResult,
@@ -615,10 +616,105 @@ export class GodotParser extends BaseFrameworkParser {
     return path.basename(scriptPath, '.cs');
   }
 
+  // Override parseFile to handle Godot-specific files
+
+  async parseFile(filePath: string, content: string, options?: FrameworkParseOptions): Promise<ParseFileResult> {
+    const validatedOptions = this.validateOptions(options);
+
+    try {
+      // For .tscn and .godot files, use framework entity detection
+      if (filePath.endsWith('.tscn') || filePath.endsWith('.godot')) {
+        const frameworkResult = await this.detectFrameworkEntities(
+          content,
+          filePath,
+          validatedOptions as FrameworkParseOptions
+        );
+
+        return {
+          filePath,
+          symbols: [],
+          dependencies: [],
+          imports: [],
+          exports: [],
+          errors: [],
+          frameworkEntities: frameworkResult.entities,
+          success: true
+        };
+      }
+
+      // For .cs files with Godot patterns, parse as C# but add framework entities
+      if (filePath.endsWith('.cs') && this.isGodotScript(content)) {
+        const tree = this.parseContent(content, validatedOptions);
+        if (!tree || !tree.rootNode) {
+          return {
+            filePath,
+            symbols: [],
+            dependencies: [],
+            imports: [],
+            exports: [],
+            errors: [{
+              message: 'Failed to parse C# syntax tree',
+              line: 1,
+              column: 1,
+              severity: 'error'
+            }]
+          };
+        }
+
+        // Use C# parser for basic symbols and dependencies
+        const symbols = this.extractSymbols(tree.rootNode, content);
+        const dependencies = this.extractDependencies(tree.rootNode, content);
+        const imports = this.extractImports(tree.rootNode, content);
+        const exports = this.extractExports(tree.rootNode, content);
+
+        // Add Godot framework entities
+        const frameworkResult = await this.detectFrameworkEntities(
+          content,
+          filePath,
+          validatedOptions as FrameworkParseOptions
+        );
+
+        return {
+          filePath,
+          symbols,
+          dependencies,
+          imports,
+          exports,
+          errors: [],
+          frameworkEntities: frameworkResult.entities,
+          success: true
+        };
+      }
+
+      // Fallback to base implementation for other files
+      return super.parseFile(filePath, content, options);
+
+    } catch (error) {
+      logger.error('Godot parsing failed', {
+        filePath,
+        error: (error as Error).message
+      });
+
+      return {
+        filePath,
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [{
+          message: `Godot parsing failed: ${(error as Error).message}`,
+          line: 1,
+          column: 1,
+          severity: 'error'
+        }]
+      };
+    }
+  }
+
   // Required implementations from ChunkedParser
 
   getSupportedExtensions(): string[] {
-    return ['.cs', '.tscn', '.godot'];
+    return ['.tscn', '.godot'];
   }
 
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
@@ -628,9 +724,50 @@ export class GodotParser extends BaseFrameworkParser {
   }
 
   protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
-    // For .cs files, this will be handled by the C# parser
-    // For .tscn files, dependencies are scene/script relationships
-    return [];
+    const dependencies: ParsedDependency[] = [];
+
+    // Extract dependencies from .tscn files
+    if (content.includes('[gd_scene') || content.includes('[gd_resource')) {
+      // Extract external resource dependencies
+      const extResourcePattern = /\[ext_resource[^\]]*path="([^"]+)"[^\]]*id="([^"]+)"/g;
+      let match;
+      let lineNumber = 1;
+
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Reset regex for each line
+        extResourcePattern.lastIndex = 0;
+        while ((match = extResourcePattern.exec(line)) !== null) {
+          const [, resourcePath, resourceId] = match;
+
+          dependencies.push({
+            from_symbol: 'scene',
+            to_symbol: resourcePath,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: i + 1,
+            confidence: 0.9
+          });
+        }
+
+        // Extract script attachments from node sections
+        if (line.includes('script = ExtResource')) {
+          const scriptMatch = line.match(/script = ExtResource\s*\(\s*"([^"]+)"\s*\)/);
+          if (scriptMatch) {
+            dependencies.push({
+              from_symbol: 'node',
+              to_symbol: scriptMatch[1],
+              dependency_type: DependencyType.REFERENCES,
+              line_number: i + 1,
+              confidence: 0.95
+            });
+          }
+        }
+      }
+    }
+
+    return dependencies;
   }
 
   protected extractImports(rootNode: Parser.SyntaxNode, content: string): ParsedImport[] {

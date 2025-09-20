@@ -199,6 +199,28 @@ export class FrameworkDetector {
         ]
       },
       baseConfidence: 0.9
+    },
+
+    // Godot Game Engine
+    {
+      name: 'godot',
+      patterns: {
+        dependencies: [],
+        devDependencies: [],
+        files: ['project.godot', 'export_presets.cfg', 'addons/'],
+        directories: ['scenes', 'scripts', 'assets', 'addons', 'autoload'],
+        configs: ['project.godot', 'export_presets.cfg'],
+        features: [
+          'godot-scenes',
+          'csharp-scripts',
+          'gdscript',
+          'nodes',
+          'signals',
+          'autoload',
+          'scene-tree'
+        ]
+      },
+      baseConfidence: 0.95
     }
   ];
 

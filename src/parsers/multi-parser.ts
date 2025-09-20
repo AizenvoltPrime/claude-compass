@@ -346,6 +346,18 @@ export class MultiParser {
       case '.phps':
         parsers.push('php');
         break;
+      case '.cs':
+        // C# files - use C# parser by default
+        parsers.push('csharp');
+        break;
+      case '.tscn':
+        // Godot scene files
+        parsers.push('godot');
+        break;
+      case '.godot':
+        // Godot project configuration files
+        parsers.push('godot');
+        break;
       default:
         // Return empty array for unsupported file types
         break;
@@ -387,7 +399,7 @@ export class MultiParser {
    * Check if parser is a framework parser
    */
   private isFrameworkParser(parserName: string): boolean {
-    return ['vue', 'nextjs', 'react', 'nodejs', 'laravel', 'test-framework', 'package-manager', 'background-job', 'orm'].includes(parserName);
+    return ['vue', 'nextjs', 'react', 'nodejs', 'laravel', 'godot', 'test-framework', 'package-manager', 'background-job', 'orm'].includes(parserName);
   }
 
   /**
