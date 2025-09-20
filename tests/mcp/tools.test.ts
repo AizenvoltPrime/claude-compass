@@ -5,6 +5,7 @@ import { SymbolType } from '../../src/database/models';
 // Mock the database service
 const mockDatabaseService = {
   getFileWithRepository: jest.fn(),
+  getFileByPath: jest.fn(),
   getSymbolWithFile: jest.fn(),
   getSymbol: jest.fn(),
   getSymbolsByFile: jest.fn(),
@@ -98,8 +99,33 @@ describe('McpTools', () => {
       await expect(mcpTools.getFile({})).rejects.toThrow('Either file_id or file_path must be provided');
     });
 
-    it('should throw error for file_path (not yet implemented)', async () => {
-      await expect(mcpTools.getFile({ file_path: '/test.js' })).rejects.toThrow('Finding file by path not yet implemented');
+    it('should get file by path', async () => {
+      const mockFile = {
+        id: 1,
+        repo_id: 1,
+        path: '/test.js',
+        language: 'javascript',
+        repository: { id: 1, name: 'test-repo', path: '/test' }
+      };
+
+      (mockDatabaseService.getFileByPath as jest.Mock).mockResolvedValue(mockFile);
+
+      const result = await mcpTools.getFile({ file_path: '/test.js' });
+
+      expect(mockDatabaseService.getFileByPath).toHaveBeenCalledWith('/test.js');
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe('text');
+
+      const data = JSON.parse(result.content[0].text);
+      expect(data.file.id).toBe(1);
+      expect(data.file.path).toBe('/test.js');
+    });
+
+    it('should throw error for file not found by path', async () => {
+      (mockDatabaseService.getFileByPath as jest.Mock).mockResolvedValue(null);
+
+      await expect(mcpTools.getFile({ file_path: '/nonexistent.js' })).rejects.toThrow('File not found');
     });
   });
 

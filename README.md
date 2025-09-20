@@ -82,7 +82,9 @@ npm run docker:up
 npm run migrate:latest
 
 # Analyze your codebase (JavaScript/TypeScript or PHP/Laravel)
-npm run analyze /path/to/your/project
+npm run analyze .                              # Analyze current directory
+npm run analyze /path/to/your/project          # Analyze specific path
+npm run analyze . --force-full                 # Force full analysis (clears existing data)
 
 # Clear existing repository analysis
 ./dist/src/cli/index.js clear <repository-name> --yes

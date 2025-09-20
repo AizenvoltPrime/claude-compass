@@ -44,8 +44,12 @@ npm run mcp-server        # Start MCP server for AI integration
 ### CLI Usage Examples
 
 ```bash
-# Analyze with options
-./dist/src/cli/index.js analyze /path/to/project --verbose --no-test-files
+# Analyze with options (supports both relative and absolute paths)
+npm run analyze .                                    # Analyze current directory
+npm run analyze /path/to/project                     # Analyze absolute path
+./dist/src/cli/index.js analyze . --verbose          # Verbose analysis
+./dist/src/cli/index.js analyze . --force-full       # Force full analysis (clears existing data)
+./dist/src/cli/index.js analyze . --no-test-files    # Exclude test files
 
 # Search with filters
 ./dist/src/cli/index.js search "useState" --type function --exported-only

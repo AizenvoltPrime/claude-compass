@@ -271,6 +271,69 @@ export class DatabaseService {
     } as FileWithRepository;
   }
 
+  async getFileByPath(path: string): Promise<FileWithRepository | null> {
+    // Try exact path match first
+    let result = await this.db('files')
+      .leftJoin('repositories', 'files.repo_id', 'repositories.id')
+      .select('files.*', 'repositories.name as repo_name', 'repositories.path as repo_path')
+      .where('files.path', path)
+      .first();
+
+    if (result) {
+      return {
+        ...result,
+        repository: {
+          id: result.repo_id,
+          name: result.repo_name,
+          path: result.repo_path,
+        } as Repository,
+      } as FileWithRepository;
+    }
+
+    // If no exact match, try filename match (just the basename)
+    const basename = require('path').basename(path);
+    const filenameResults = await this.db('files')
+      .leftJoin('repositories', 'files.repo_id', 'repositories.id')
+      .select('files.*', 'repositories.name as repo_name', 'repositories.path as repo_path')
+      .whereRaw('files.path LIKE ?', [`%/${basename}`])
+      .limit(1);
+
+    if (filenameResults.length > 0) {
+      const result = filenameResults[0];
+      return {
+        ...result,
+        repository: {
+          id: result.repo_id,
+          name: result.repo_name,
+          path: result.repo_path,
+        } as Repository,
+      } as FileWithRepository;
+    }
+
+    // If still no match, try relative path matching (ends with the given path)
+    if (!path.startsWith('/')) {
+      const relativeResults = await this.db('files')
+        .leftJoin('repositories', 'files.repo_id', 'repositories.id')
+        .select('files.*', 'repositories.name as repo_name', 'repositories.path as repo_path')
+        .whereRaw('files.path LIKE ?', [`%/${path}`])
+        .limit(1);
+
+      if (relativeResults.length > 0) {
+        const result = relativeResults[0];
+        return {
+          ...result,
+          repository: {
+            id: result.repo_id,
+            name: result.repo_name,
+            path: result.repo_path,
+          } as Repository,
+        } as FileWithRepository;
+      }
+    }
+
+    return null;
+  }
+
   async getFilesByRepository(repoId: number): Promise<File[]> {
     const files = await this.db('files')
       .where({ repo_id: repoId })

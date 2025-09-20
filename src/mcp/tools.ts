@@ -370,8 +370,7 @@ export class McpTools {
     if (validatedArgs.file_id) {
       file = await this.dbService.getFileWithRepository(validatedArgs.file_id);
     } else if (validatedArgs.file_path) {
-      // Find file by path - this would need additional database method
-      throw new Error('Finding file by path not yet implemented');
+      file = await this.dbService.getFileByPath(validatedArgs.file_path);
     }
 
     if (!file) {
