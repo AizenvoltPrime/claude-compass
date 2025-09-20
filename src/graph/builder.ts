@@ -18,6 +18,7 @@ import {
 import { LaravelRoute, LaravelController, EloquentModel } from '../parsers/laravel';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
+import { CrossStackGraphBuilder } from './cross-stack-builder';
 import { createComponentLogger } from '../utils/logger';
 import { FileSizeManager, FileSizePolicy, DEFAULT_POLICY } from '../config/file-size-policy';
 import { EncodingConverter } from '../utils/encoding-converter';
@@ -117,12 +118,14 @@ export class GraphBuilder {
   private dbService: DatabaseService;
   private fileGraphBuilder: FileGraphBuilder;
   private symbolGraphBuilder: SymbolGraphBuilder;
+  private crossStackGraphBuilder: CrossStackGraphBuilder;
   private logger: any;
 
   constructor(dbService: DatabaseService) {
     this.dbService = dbService;
     this.fileGraphBuilder = new FileGraphBuilder();
     this.symbolGraphBuilder = new SymbolGraphBuilder();
+    this.crossStackGraphBuilder = new CrossStackGraphBuilder(dbService);
     this.logger = logger;
   }
 
@@ -247,6 +250,86 @@ export class GraphBuilder {
         symbolsExtracted: symbols.length
       });
 
+      // Phase 5 - Cross-stack analysis
+      let crossStackGraph: CrossStackGraphData | undefined;
+      if (validatedOptions.enableCrossStackAnalysis) {
+        this.logger.info('Starting cross-stack analysis', {
+          repositoryId: repository.id
+        });
+        try {
+          const fullStackGraph = await this.crossStackGraphBuilder.buildFullStackFeatureGraph(repository.id);
+
+          // Convert CrossStackGraphBuilder types to GraphBuilder types
+          const convertGraph = (graph: any) => ({
+            nodes: graph.nodes.map((node: any) => ({
+              id: node.id,
+              type: node.type,
+              name: node.name,
+              filePath: node.filePath,
+              framework: node.framework,
+              symbolId: node.metadata?.symbolId,
+              confidence: node.metadata?.confidence || 1.0
+            })),
+            edges: graph.edges.map((edge: any) => ({
+              id: edge.id,
+              from: edge.from,
+              to: edge.to,
+              type: edge.relationshipType === 'api_call' ? 'api_call' :
+                    edge.relationshipType === 'shares_schema' ? 'shares_schema' : 'frontend_backend',
+              confidence: edge.confidence,
+              metadata: edge.metadata
+            }))
+          });
+
+          crossStackGraph = {
+            apiCallGraph: convertGraph(fullStackGraph.apiCallGraph),
+            dataContractGraph: convertGraph(fullStackGraph.dataContractGraph),
+            features: fullStackGraph.features.map((feature: any) => ({
+              id: feature.id,
+              name: feature.name,
+              description: `Vue-Laravel feature: ${feature.name}`,
+              components: [
+                ...feature.vueComponents.map((c: any) => ({
+                  id: c.id,
+                  type: c.type,
+                  name: c.name,
+                  filePath: c.filePath,
+                  framework: c.framework,
+                  symbolId: c.metadata?.symbolId,
+                  confidence: c.metadata?.confidence || 1.0
+                })),
+                ...feature.laravelRoutes.map((r: any) => ({
+                  id: r.id,
+                  type: r.type,
+                  name: r.name,
+                  filePath: r.filePath,
+                  framework: r.framework,
+                  symbolId: r.metadata?.symbolId,
+                  confidence: r.metadata?.confidence || 1.0
+                }))
+              ],
+              apiCalls: [], // Will be populated from database if needed
+              dataContracts: [], // Will be populated from database if needed
+              confidence: feature.confidence
+            })),
+            metadata: {
+              averageConfidence: fullStackGraph.metadata.averageConfidence,
+              totalApiCalls: fullStackGraph.apiCallGraph.edges.length,
+              totalDataContracts: fullStackGraph.dataContractGraph.edges.length,
+              analysisTimestamp: new Date()
+            }
+          };
+          this.logger.info('Cross-stack analysis completed', {
+            apiCalls: crossStackGraph.metadata.totalApiCalls,
+            dataContracts: crossStackGraph.metadata.totalDataContracts,
+            averageConfidence: crossStackGraph.metadata.averageConfidence
+          });
+        } catch (error) {
+          this.logger.error('Cross-stack analysis failed', { error });
+          // Continue without cross-stack graph
+        }
+      }
+
       return {
         repository,
         filesProcessed: files.length,
@@ -254,7 +337,10 @@ export class GraphBuilder {
         dependenciesCreated: fileDependencies.length + symbolDependencies.length,
         fileGraph,
         symbolGraph,
-        errors
+        errors,
+        totalFiles: files.length,
+        totalSymbols: symbols.length,
+        crossStackGraph
       };
 
     } catch (error) {
@@ -377,7 +463,9 @@ export class GraphBuilder {
         dependenciesCreated: 0,
         fileGraph,
         symbolGraph,
-        errors: []
+        errors: [],
+        totalFiles: dbFiles.length,
+        totalSymbols: symbols.length
       };
     }
 
@@ -427,7 +515,9 @@ export class GraphBuilder {
       dependenciesCreated: 0, // Will be calculated from graph
       fileGraph,
       symbolGraph,
-      errors: partialResult.errors || []
+      errors: partialResult.errors || [],
+      totalFiles: dbFiles.length,
+      totalSymbols: symbols.length
     };
   }
 
