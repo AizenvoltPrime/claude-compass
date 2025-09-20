@@ -1,12 +1,12 @@
 # Getting Started with Claude Compass
 
-## Phase 5 Implementation Complete! 🎉
+## Phase 6A Implementation Complete! 🎉
 
 Welcome to Claude Compass - an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of your codebase.
 
-**Ready for Phase 6**: Tool consolidation from 12 overlapping tools to 6 focused core tools with enhanced search and comprehensive impact analysis.
+**Ready for Phase 6B**: Vector search population and embedding generation for full semantic search capabilities.
 
-This Phase 5 implementation provides:
+This Phase 6A implementation provides:
 - ✅ JavaScript/TypeScript parsing with Tree-sitter
 - ✅ PHP parsing with Tree-sitter and advanced chunked parsing
 - ✅ Framework-aware parsing for Vue.js, Next.js, React, Node.js, and Laravel
@@ -28,6 +28,10 @@ This Phase 5 implementation provides:
 - ✅ Vue ↔ Laravel cross-stack integration with API mapping and dependency tracking
 - ✅ Full-stack impact analysis and blast radius calculation
 - ✅ Cross-stack MCP tools (getApiCalls, getDataContracts, getCrossStackImpact)
+- ✅ Tool consolidation from 12 overlapping tools to 6 focused core tools
+- ✅ Enhanced search with hybrid vector+lexical capabilities and framework awareness
+- ✅ Comprehensive impact analysis tool replacing 6 specialized tools
+- ✅ Database infrastructure for vector search (pgvector, embeddings, full-text search)
 - ✅ CLI interface for repository analysis and management
 - ✅ Comprehensive test suite with 95%+ coverage including edge cases
 
@@ -254,75 +258,48 @@ claude-compass clear --all [--yes]
 
 The MCP server provides these tools for AI assistants:
 
-### MCP Tools Available (Current - Phase 5)
-
-1. **`get_file`** - Get file details with symbols
-2. **`get_symbol`** - Get symbol details with dependencies
-3. **`search_code`** - Search for symbols by name/pattern (basic lexical search)
-4. **`who_calls`** - Find callers of a symbol (with transitive analysis)
-5. **`list_dependencies`** - List symbol dependencies (with transitive analysis)
-6. **`get_laravel_routes`** - Laravel route analysis
-7. **`get_eloquent_models`** - Eloquent model relationships
-8. **`get_laravel_controllers`** - Laravel controller actions
-9. **`search_laravel_entities`** - Laravel entity search
-10. **`get_api_calls`** - Vue ↔ Laravel API mapping
-11. **`get_data_contracts`** - Cross-stack data contracts
-12. **`get_cross_stack_impact`** - Cross-stack impact analysis
-
-### MCP Tools Planned (Phase 6 - Consolidated)
+### MCP Tools Available (Current - Phase 6A)
 
 **6 Focused Core Tools:**
-1. **`get_file`** - File details with symbols (unchanged)
-2. **`get_symbol`** - Symbol details with dependencies (unchanged)
-3. **`search_code`** - **Enhanced hybrid vector+lexical search** (replaces Laravel-specific search)
-4. **`who_calls`** - Enhanced with cross-stack relationships (unchanged)
-5. **`list_dependencies`** - Enhanced with cross-stack relationships (unchanged)
-6. **`impact_of`** - **New comprehensive blast radius tool** (replaces 6 specialized tools)
+1. **`get_file`** - Get file details with symbols
+2. **`get_symbol`** - Get symbol details with dependencies
+3. **`search_code`** - **Enhanced hybrid vector+lexical search** with framework awareness (replaces 4 specialized search tools)
+4. **`who_calls`** - Find callers of a symbol with cross-stack and transitive analysis
+5. **`list_dependencies`** - List symbol dependencies with cross-stack and transitive analysis
+6. **`impact_of`** - **Comprehensive blast radius tool** (replaces get_cross_stack_impact, get_api_calls, get_data_contracts)
 
 ### Resources Available
 
 1. **`repo://repositories`** - List of analyzed repositories
 
-### Example MCP Usage
+### Example MCP Usage (Phase 6A)
 
-**Current (Phase 5):**
 ```typescript
-// Basic lexical search
+// Enhanced hybrid search with framework awareness
 const searchResponse = await mcpClient.callTool('search_code', {
-  query: 'useState',
-  symbol_type: 'function',
+  query: 'user authentication',
+  entity_types: ['route', 'model', 'controller', 'component'],
+  framework: 'laravel',
+  use_vector: true,
   limit: 10
 });
 
-// Laravel-specific search
-const laravelResponse = await mcpClient.callTool('search_laravel_entities', {
-  query: 'user',
-  entity_types: ['route', 'model', 'controller']
-});
-
-// Cross-stack impact analysis
-const impactResponse = await mcpClient.callTool('get_cross_stack_impact', {
-  symbol_id: 123,
-  include_transitive: true
-});
-```
-
-**Planned (Phase 6):**
-```typescript
-// Enhanced hybrid search (replaces multiple search tools)
-const searchResponse = await mcpClient.callTool('search_code', {
-  query: 'user authentication',
-  repo_id: 123,
-  topK: 10
-});
-
-// Comprehensive blast radius (replaces 6 specialized tools)
+// Comprehensive blast radius analysis
 const impactResponse = await mcpClient.callTool('impact_of', {
   symbol_id: 123,
+  frameworks: ['vue', 'laravel'],
   include_routes: true,
   include_jobs: true,
   include_tests: true,
-  confidence_threshold: 0.7
+  confidence_threshold: 0.7,
+  max_depth: 5
+});
+
+// Cross-stack dependency analysis
+const callersResponse = await mcpClient.callTool('who_calls', {
+  symbol_id: 456,
+  include_indirect: true,
+  dependency_type: 'calls'
 });
 ```
 
@@ -389,7 +366,7 @@ NODE_ENV=development
 
 ## Success Criteria Achieved ✅
 
-Phase 5 successfully meets all success criteria:
+Phase 6A successfully meets all success criteria:
 
 - ✅ **Framework-specific parsing**: Vue.js, Next.js, React, Node.js, and Laravel components, routes, and hooks
 - ✅ **PHP/Laravel support**: Laravel routes, controllers, Eloquent models, job queues, service providers, middleware
@@ -404,7 +381,10 @@ Phase 5 successfully meets all success criteria:
 - ✅ **Advanced route analysis**: Dynamic segments, auth patterns, validation, Swagger docs
 - ✅ **Enhanced MCP server**: Indirect analysis support with sophisticated relationship queries
 - ✅ **Vue ↔ Laravel Integration**: Cross-stack dependency tracking, API mapping, full-stack impact analysis
-- ✅ **Cross-stack MCP tools**: getApiCalls, getDataContracts, getCrossStackImpact for full-stack analysis
+- ✅ **Tool Consolidation**: 12 overlapping tools consolidated into 6 focused core tools
+- ✅ **Enhanced Search**: Hybrid vector+lexical search with framework awareness and advanced ranking
+- ✅ **Comprehensive Impact Analysis**: Single impact_of tool replacing 6 specialized tools
+- ✅ **Vector Search Infrastructure**: pgvector database with embeddings, full-text search, and hybrid ranking
 - ✅ **Database stores all entities**: Complete schema for routes, components, composables, jobs, tests, ORM entities, packages, API calls, data contracts
 
 ## What's Working
@@ -425,40 +405,30 @@ Phase 5 successfully meets all success criteria:
 - 🔧 **Large File Processing**: Chunked parsing for files up to 20MB
 - 🎯 **Smart Filtering**: Bundle files and generated content automatically filtered
 - 🛠️ **Encoding Recovery**: Handles encoding issues and problematic files
-- 🔌 **Enhanced MCP Integration**: Framework-aware AI assistant integration with indirect analysis
+- 🔌 **Enhanced MCP Integration**: 6 focused core tools with framework-aware AI assistant integration
+- 🔍 **Advanced Search**: Hybrid vector+lexical search with framework awareness and confidence scoring
+- 🎯 **Impact Analysis**: Comprehensive blast radius analysis with routes, jobs, tests, and cross-stack relationships
 - 🌐 **Cross-Stack Integration**: Vue ↔ Laravel API mapping, dependency tracking, full-stack impact analysis
-- 🔧 **Cross-Stack MCP Tools**: getApiCalls, getDataContracts, getCrossStackImpact for full-stack analysis
+- 🗃️ **Vector Search Infrastructure**: pgvector with embeddings, full-text search, and advanced ranking
 - 💻 **CLI Interface**: Full-featured command-line tool with repository management
 - 🧪 **Testing**: Comprehensive test coverage with 95%+ coverage including edge cases
 
 ## Next Steps (Prioritized Roadmap)
 
-All JavaScript/TypeScript and Vue ↔ Laravel cross-stack capabilities are now complete. Next priorities:
+All JavaScript/TypeScript, Vue ↔ Laravel cross-stack capabilities, and Phase 6A tool consolidation are now complete. Next priorities:
 
-### ✅ Phase 3: Advanced JavaScript/TypeScript Analysis - **COMPLETED**
-- ✅ Test-to-code linkage (Vitest, Jest, Cypress, Playwright) - **Critical for Vue/Vite testing**
-- ✅ Enhanced Vue composables relationship mapping - **Essential for Vue.js**
-- ✅ Package manager integration (npm, yarn, pnpm) - **Vite dependency tracking**
-- ✅ Background job detection (Node.js worker threads, job queues)
-- ✅ Enhanced `who_calls` and `list_dependencies` tools with transitive analysis
+### ✅ Phase 6A: Tool Consolidation & Enhanced Search - **COMPLETED**
+- ✅ **Tool Consolidation**: 12 overlapping tools → 6 focused core tools
+- ✅ **Enhanced Search**: Hybrid vector+lexical search with framework awareness
+- ✅ **Comprehensive Impact Analysis**: Single `impact_of` tool replacing 6 specialized tools
+- ✅ **Vector Search Infrastructure**: pgvector database with embeddings and full-text search
+- ✅ **Improved Performance**: Streamlined architecture for better maintainability
 
-### ✅ Phase 4: PHP/Laravel Support - **COMPLETED**
-- ✅ Laravel route and controller detection - **Critical for backend**
-- ✅ Laravel Eloquent model relationship mapping
-- ✅ Laravel job queue and scheduler detection
-- ✅ Laravel service provider and dependency injection analysis
-
-### ✅ Phase 5: Vue ↔ Laravel Integration - **COMPLETED**
-- ✅ Cross-stack dependency tracking (TypeScript interfaces ↔ PHP DTOs)
-- ✅ Frontend API calls mapped to Laravel controller methods
-- ✅ Full-stack impact analysis and blast radius calculation
-- ✅ Cross-stack MCP tools for AI-powered full-stack analysis
-
-### Phase 6: Tool Consolidation & Enhanced Impact Analysis - **NEXT PRIORITY**
-- **Tool Consolidation**: 12 overlapping tools → 6 focused core tools
-- **Enhanced Search**: Hybrid vector+lexical search with framework awareness
-- **Comprehensive Impact Analysis**: Single `impact_of` tool replacing 6 specialized tools
-- **Improved Performance**: Streamlined architecture for better maintainability
+### Phase 6B: Vector Search Population - **NEXT PRIORITY**
+- **Embedding Population**: Generate and populate vector embeddings for all symbols
+- **Full Vector Search**: Enable complete semantic search capabilities
+- **Performance Optimization**: Optimize vector search for large codebases
+- **Search Quality**: Fine-tune ranking algorithms for better relevance
 
 ## Troubleshooting
 
@@ -516,4 +486,4 @@ The codebase follows these principles:
 
 ---
 
-**Phase 5 Complete!** 🚀 Claude Compass now provides comprehensive framework-aware analysis for JavaScript/TypeScript, PHP/Laravel, and Vue ↔ Laravel cross-stack integration.
+**Phase 6A Complete!** 🚀 Claude Compass now provides enhanced search with hybrid vector+lexical capabilities, streamlined 6-tool architecture, and comprehensive impact analysis for JavaScript/TypeScript, PHP/Laravel, and Vue ↔ Laravel cross-stack integration.

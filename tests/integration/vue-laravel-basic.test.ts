@@ -104,34 +104,34 @@ class TestController extends Controller
   });
 
   describe('MCP tool integration', () => {
-    it('should handle getApiCalls with non-existent component', async () => {
-      const result = await mcpTools.getApiCalls({
-        component_id: 999999
-      });
-
-      expect(result.content).toHaveLength(1);
-      const content = JSON.parse(result.content[0].text);
-      expect(content.component_id).toBe(999999);
-    });
-
-    it('should handle getDataContracts with non-existent schema', async () => {
-      const result = await mcpTools.getDataContracts({
-        schema_name: 'NonExistentSchema'
-      });
-
-      expect(result.content).toHaveLength(1);
-      const content = JSON.parse(result.content[0].text);
-      expect(content.schema_name).toBe('NonExistentSchema');
-    });
-
-    it('should handle getCrossStackImpact with non-existent symbol', async () => {
-      const result = await mcpTools.getCrossStackImpact({
+    it('should handle impactOf with non-existent symbol', async () => {
+      const result = await mcpTools.impactOf({
         symbol_id: 999999
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
       expect(content.symbol_id).toBe(999999);
+    });
+
+    it('should handle impactOf with another non-existent symbol', async () => {
+      const result = await mcpTools.impactOf({
+        symbol_id: 888888
+      });
+
+      expect(result.content).toHaveLength(1);
+      const content = JSON.parse(result.content[0].text);
+      expect(content.symbol_id).toBe(888888);
+    });
+
+    it('should handle impactOf with third non-existent symbol', async () => {
+      const result = await mcpTools.impactOf({
+        symbol_id: 777777
+      });
+
+      expect(result.content).toHaveLength(1);
+      const content = JSON.parse(result.content[0].text);
+      expect(content.symbol_id).toBe(777777);
     });
   });
 

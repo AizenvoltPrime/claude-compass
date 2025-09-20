@@ -39,6 +39,7 @@ export interface Symbol {
   is_exported: boolean;
   visibility?: Visibility;
   signature?: string;
+  description?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -300,6 +301,25 @@ export interface ComposableSearchOptions {
   composable_type?: ComposableType;
   repo_id?: number;
   limit?: number;
+}
+
+// Phase 6 - Enhanced search options
+export interface SymbolSearchOptions {
+  useVector?: boolean;
+  limit?: number;
+  confidenceThreshold?: number;
+  searchMode?: 'lexical' | 'vector' | 'fulltext' | 'hybrid';
+  symbolTypes?: SymbolType[];
+  isExported?: boolean;
+  framework?: string;
+  repoIds?: number[];
+}
+
+export interface SearchResult<T = any> {
+  item: T;
+  score: number;
+  confidence: number;
+  matchType: 'lexical' | 'vector' | 'fulltext';
 }
 
 // Input types for creating framework records

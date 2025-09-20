@@ -48,16 +48,22 @@ export class ClaudeCompassMCPServer {
 
   private formatErrorResponse(code: number, message: string, data?: any) {
     return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          error: {
-            code,
-            message,
-            data
-          }
-        }, null, 2)
-      }]
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              error: {
+                code,
+                message,
+                data,
+              },
+            },
+            null,
+            2
+          ),
+        },
+      ],
     };
   }
 
@@ -134,7 +140,8 @@ export class ClaudeCompassMCPServer {
           },
           {
             name: 'search_code',
-            description: 'Search for code symbols by name or pattern',
+            description:
+              'Enhanced search for code symbols with framework awareness - absorbs get_laravel_routes, get_eloquent_models, get_laravel_controllers, and search_laravel_entities functionality',
             inputSchema: {
               type: 'object',
               properties: {
@@ -146,24 +153,69 @@ export class ClaudeCompassMCPServer {
                   type: 'number',
                   description: 'Limit search to specific repository',
                 },
+                repo_ids: {
+                  type: 'array',
+                  items: { type: 'number' },
+                  description: 'Multi-repository search (Phase 6A enhancement)',
+                },
                 symbol_type: {
                   type: 'string',
-                  enum: ['function', 'class', 'interface', 'variable', 'constant', 'type_alias', 'enum', 'method', 'property'],
+                  enum: [
+                    'function',
+                    'class',
+                    'interface',
+                    'variable',
+                    'constant',
+                    'type_alias',
+                    'enum',
+                    'method',
+                    'property',
+                  ],
                   description: 'Filter by symbol type',
+                },
+                entity_types: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: [
+                      'route',
+                      'model',
+                      'controller',
+                      'component',
+                      'job',
+                      'function',
+                      'class',
+                      'interface',
+                    ],
+                  },
+                  description:
+                    'Framework-aware entity types (Phase 6A enhancement - replaces Laravel-specific tools)',
+                },
+                framework: {
+                  type: 'string',
+                  enum: ['laravel', 'vue', 'react', 'node'],
+                  description: 'Filter by framework type (Phase 6A enhancement)',
                 },
                 is_exported: {
                   type: 'boolean',
                   description: 'Filter by exported symbols only',
                 },
+                use_vector: {
+                  type: 'boolean',
+                  description:
+                    'Enable vector search for semantic similarity (Phase 6A enhancement - future)',
+                  default: false,
+                },
                 limit: {
                   type: 'number',
                   description: 'Maximum number of results to return',
-                  default: 50,
+                  default: 100,
                   minimum: 1,
                   maximum: 200,
                 },
               },
               required: ['query'],
+              additionalProperties: false,
             },
           },
           {
@@ -178,7 +230,17 @@ export class ClaudeCompassMCPServer {
                 },
                 dependency_type: {
                   type: 'string',
-                  enum: ['calls', 'imports', 'inherits', 'implements', 'references', 'exports', 'api_call', 'shares_schema', 'frontend_backend'],
+                  enum: [
+                    'calls',
+                    'imports',
+                    'inherits',
+                    'implements',
+                    'references',
+                    'exports',
+                    'api_call',
+                    'shares_schema',
+                    'frontend_backend',
+                  ],
                   description: 'Type of dependency relationship to find',
                   default: 'calls',
                 },
@@ -215,7 +277,17 @@ export class ClaudeCompassMCPServer {
                 },
                 dependency_type: {
                   type: 'string',
-                  enum: ['calls', 'imports', 'inherits', 'implements', 'references', 'exports', 'api_call', 'shares_schema', 'frontend_backend'],
+                  enum: [
+                    'calls',
+                    'imports',
+                    'inherits',
+                    'implements',
+                    'references',
+                    'exports',
+                    'api_call',
+                    'shares_schema',
+                    'frontend_backend',
+                  ],
                   description: 'Type of dependency relationship to list',
                 },
                 include_indirect: {
@@ -233,197 +305,55 @@ export class ClaudeCompassMCPServer {
             },
           },
           {
-            name: 'get_api_calls',
-            description: 'Find API calls from Vue components to Laravel endpoints',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                component_id: {
-                  type: 'number',
-                  description: 'The ID of the Vue component symbol to find API calls for',
-                },
-                include_response_schemas: {
-                  type: 'boolean',
-                  description: 'Whether to include full response schema information',
-                  default: false,
-                },
-                repository_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
-              },
-              required: ['component_id'],
-            },
-          },
-          {
-            name: 'get_data_contracts',
-            description: 'List shared data structures between TypeScript and PHP',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                schema_name: {
-                  type: 'string',
-                  description: 'The name of the data schema/interface to analyze',
-                },
-                repository_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
-                include_drift_analysis: {
-                  type: 'boolean',
-                  description: 'Whether to include schema drift analysis between frontend and backend',
-                  default: false,
-                },
-              },
-              required: ['schema_name'],
-            },
-          },
-          {
-            name: 'get_cross_stack_impact',
-            description: 'Calculate blast radius across Vue ↔ Laravel boundaries',
+            name: 'impact_of',
+            description:
+              'Comprehensive impact analysis - calculate blast radius across all frameworks (Vue, Laravel, React, Node.js) including routes, jobs, and tests.',
             inputSchema: {
               type: 'object',
               properties: {
                 symbol_id: {
                   type: 'number',
-                  description: 'The ID of the symbol to analyze cross-stack impact for',
+                  description: 'The ID of the symbol to analyze impact for',
                 },
-                include_transitive: {
+                frameworks: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: ['vue', 'laravel', 'react', 'node'],
+                  },
+                  description: 'Multi-framework impact analysis (default: all detected frameworks)',
+                },
+                include_tests: {
                   type: 'boolean',
-                  description: 'Include transitive cross-stack impact analysis',
-                  default: false,
+                  description: 'Include test coverage impact analysis',
+                  default: true,
+                },
+                include_routes: {
+                  type: 'boolean',
+                  description: 'Include route impact analysis',
+                  default: true,
+                },
+                include_jobs: {
+                  type: 'boolean',
+                  description: 'Include background job impact analysis',
+                  default: true,
                 },
                 max_depth: {
                   type: 'number',
-                  description: 'Maximum depth for transitive analysis',
-                  default: 10,
+                  description: 'Transitive analysis depth',
+                  default: 5,
                   minimum: 1,
                   maximum: 20,
                 },
+                confidence_threshold: {
+                  type: 'number',
+                  description: 'Filter results by confidence score',
+                  default: 0.7,
+                  minimum: 0,
+                  maximum: 1,
+                },
               },
               required: ['symbol_id'],
-            },
-          },
-          {
-            name: 'get_laravel_routes',
-            description: 'Get Laravel routes with filtering options',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                repo_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
-                path: {
-                  type: 'string',
-                  description: 'Filter routes by path pattern',
-                },
-                method: {
-                  type: 'string',
-                  description: 'Filter routes by HTTP method (GET, POST, PUT, DELETE, etc.)',
-                },
-                middleware: {
-                  type: 'string',
-                  description: 'Filter routes by middleware name',
-                },
-                controller: {
-                  type: 'string',
-                  description: 'Filter routes by controller name',
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-          {
-            name: 'get_eloquent_models',
-            description: 'Get Laravel Eloquent models with relationships',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                repo_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
-                model_name: {
-                  type: 'string',
-                  description: 'Filter models by name pattern',
-                },
-                table_name: {
-                  type: 'string',
-                  description: 'Filter models by table name',
-                },
-                relationships: {
-                  type: 'array',
-                  items: {
-                    type: 'string',
-                  },
-                  description: 'Filter models by relationship types (hasMany, belongsTo, etc.)',
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-          {
-            name: 'get_laravel_controllers',
-            description: 'Get Laravel controllers with actions and middleware',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                repo_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
-                controller_name: {
-                  type: 'string',
-                  description: 'Filter controllers by name pattern',
-                },
-                action: {
-                  type: 'string',
-                  description: 'Filter controllers by action name',
-                },
-                middleware: {
-                  type: 'string',
-                  description: 'Filter controllers by middleware name',
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-          {
-            name: 'search_laravel_entities',
-            description: 'Search across all Laravel entities (routes, models, controllers, etc.)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                query: {
-                  type: 'string',
-                  description: 'Search query to match against entity names and properties',
-                },
-                repo_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
-                entity_types: {
-                  type: 'array',
-                  items: {
-                    type: 'string',
-                    enum: ['route', 'model', 'controller', 'middleware', 'job', 'service_provider', 'command'],
-                  },
-                  description: 'Filter by specific Laravel entity types',
-                },
-                metadata_filter: {
-                  type: 'object',
-                  description: 'Additional metadata filters as key-value pairs',
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Maximum number of results to return',
-                  default: 50,
-                  minimum: 1,
-                  maximum: 200,
-                },
-              },
-              required: ['query'],
               additionalProperties: false,
             },
           },
@@ -448,7 +378,7 @@ export class ClaudeCompassMCPServer {
     });
 
     // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async request => {
       const { name, arguments: args } = request.params;
 
       logger.debug('Received tool call', { name, args });
@@ -470,26 +400,8 @@ export class ClaudeCompassMCPServer {
           case 'list_dependencies':
             return await this.tools.listDependencies(args);
 
-          case 'get_api_calls':
-            return await this.tools.getApiCalls(args);
-
-          case 'get_data_contracts':
-            return await this.tools.getDataContracts(args);
-
-          case 'get_cross_stack_impact':
-            return await this.tools.getCrossStackImpact(args);
-
-          case 'get_laravel_routes':
-            return await this.tools.getLaravelRoutes(args);
-
-          case 'get_eloquent_models':
-            return await this.tools.getEloquentModels(args);
-
-          case 'get_laravel_controllers':
-            return await this.tools.getLaravelControllers(args);
-
-          case 'search_laravel_entities':
-            return await this.tools.searchLaravelEntities(args);
+          case 'impact_of':
+            return await this.tools.impactOf(args);
 
           default:
             return this.formatErrorResponse(-32601, `Unknown tool: ${name}`, request.params);
@@ -504,7 +416,7 @@ export class ClaudeCompassMCPServer {
     });
 
     // Handle resource reads
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    this.server.setRequestHandler(ReadResourceRequestSchema, async request => {
       const { uri } = request.params;
 
       logger.debug('Received read_resource request', { uri });
@@ -531,7 +443,7 @@ export class ClaudeCompassMCPServer {
 
     logger.info('MCP Server started and listening', {
       transportType: transport ? 'custom' : 'stdio',
-      sessionId: this.sessionId
+      sessionId: this.sessionId,
     });
   }
 
@@ -551,7 +463,7 @@ export class ClaudeCompassMCPServer {
 if (require.main === module) {
   const server = new ClaudeCompassMCPServer();
 
-  server.start().catch((error) => {
+  server.start().catch(error => {
     logger.error('Failed to start MCP server', { error: error.message });
     process.exit(1);
   });
