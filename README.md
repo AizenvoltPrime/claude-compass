@@ -1,44 +1,47 @@
 # Claude Compass
 
-> An AI-native development environment that solves the "context starvation" problem by giving AI assistants the same contextual understanding that senior engineers carry mentally.
+> A dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases.
 
 **🎉 Phase 5 Complete!** - Advanced JavaScript/TypeScript, PHP/Laravel, and Vue ↔ Laravel cross-stack analysis with comprehensive framework support is ready for production use.
 
 ## What is Claude Compass?
 
-Claude Compass creates a "closed loop" system between code reality and development intent. Instead of AI assistants making elegant-looking suggestions that break hidden dependencies, this system provides them with complete contextual understanding of your codebase.
+Claude Compass creates comprehensive dependency maps of your codebase. Instead of AI assistants making suggestions that break hidden dependencies, this system provides them with complete contextual understanding of code relationships and framework connections.
 
 ## The Problem
 
-AI assistants suffer from **context starvation** - they make decisions without understanding:
-- Hidden dependencies and business context
+AI assistants suffer from **context gaps** - they make suggestions without understanding:
+- Hidden dependencies and framework relationships
 - Blast radius of changes
-- Framework-specific relationships
-- Legacy system interactions
-- Cross-cutting concerns
+- Cross-stack connections (Vue ↔ Laravel)
+- Background job dependencies
+- Test coverage relationships
 
-**Result**: Code that looks good but breaks critical batch jobs, APIs, and legacy systems.
+**Result**: AI suggestions that look good but break critical batch jobs, APIs, and system integrations.
 
 ## The Solution
 
 ### Core Capabilities
 
-**🔍 Reverse-Map Reality from Code**
+**🔍 Parse and Map Code Reality**
 - Parse codebases with Tree-sitter
 - Build multiple graph types (files, symbols, framework-specific)
-- Generate dependency-aware summaries
+- Extract framework relationships (routes, jobs, cross-stack connections)
 
-**📋 Generate Forward Specifications**
-- Transform problem statements into PRDs, user stories, schemas, prototypes
-- Use as guardrails during implementation
+**📊 Dependency Analysis**
+- Map function calls, imports, and framework relationships
+- Track cross-stack dependencies (Vue ↔ Laravel)
+- Build comprehensive dependency graphs with confidence scoring
 
 **🔌 MCP Integration**
 - Expose graphs and tools via Model Context Protocol
-- Enable AI assistants to query ground truth instead of guessing
+- Enable AI assistants to query dependency information
+- Provide impact analysis and blast radius calculation
 
-**🔄 Sync & Drift Detection**
-- Monitor spec-to-code alignment
-- Detect missing endpoints, schema drift, unreferenced code
+**🔧 Framework Understanding**
+- Detect Vue components, Laravel routes, background jobs
+- Map API calls between frontend and backend
+- Track test coverage relationships
 
 ### Supported Frameworks
 
@@ -48,8 +51,8 @@ AI assistants suffer from **context starvation** - they make decisions without u
 - **Phase 3**: ✅ **Advanced JavaScript/TypeScript Analysis** (Background jobs, test frameworks, ORM, packages, transitive analysis, monorepos) - **COMPLETED**
 - **Phase 4**: ✅ **PHP/Laravel Support** (Laravel routes, Eloquent models, job queues) - **COMPLETED**
 - **Phase 5**: ✅ **Vue ↔ Laravel Integration** (Cross-stack dependency tracking, API mapping, full-stack impact analysis) - **COMPLETED**
-- **Phase 6**: **AI-Powered Analysis** (Full-stack semantic understanding) - **NEXT PRIORITY**
-- **Phase 7**: **Forward Specifications & Drift Detection** - **HIGH PRIORITY**
+- **Phase 6**: **Enhanced Impact Analysis** (Comprehensive blast radius and enhanced search) - **NEXT PRIORITY**
+- **Phase 7**: **Specification Tracking & Drift Detection** - **HIGH PRIORITY**
 - **Phase 8**: **C#/Godot Support** (Game development) - **MEDIUM PRIORITY**
 
 ## Architecture
@@ -57,10 +60,9 @@ AI assistants suffer from **context starvation** - they make decisions without u
 ### Technology Stack
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
-- **Search**: Hybrid vector embeddings + full-text search (RRF fusion)
+- **Search**: PostgreSQL full-text search with ranking
 - **Cache**: Redis for performance optimization
 - **MCP Server**: Node.js/TypeScript implementation
-- **Embeddings**: OpenAI Ada v2 or similar
 
 ### Graph Types
 - **File Graph**: Import/export relationships
@@ -106,8 +108,8 @@ npm test
 3. ✅ **Phase 3**: Advanced JS/TS Analysis - **COMPLETED** (Background jobs, test frameworks, ORM, packages, transitive analysis, monorepos)
 4. ✅ **Phase 4**: PHP/Laravel Support - **COMPLETED** (Routes, Eloquent, jobs, service providers)
 5. ✅ **Phase 5**: Vue ↔ Laravel Integration - **COMPLETED** (Cross-stack tracking, API mapping, full-stack impact analysis)
-6. **Phase 6**: AI-Powered Analysis - **NEXT PRIORITY** (Full-stack understanding)
-7. **Phase 7**: Forward Specifications & Drift Detection - **HIGH PRIORITY**
+6. **Phase 6**: Enhanced Impact Analysis - **NEXT PRIORITY** (Comprehensive blast radius and enhanced search)
+7. **Phase 7**: Specification Tracking & Drift Detection - **HIGH PRIORITY**
 8. **Phase 8**: C#/Godot Support - **MEDIUM PRIORITY** (Game development)
 
 **📋 See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for detailed roadmap and technical specifications.**

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Compass is an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of codebases. It builds dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
+Claude Compass is a dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases. It builds comprehensive dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
 
 **Current Status**: Phase 5 complete - Advanced JavaScript/TypeScript, PHP/Laravel, and Vue ↔ Laravel cross-stack analysis with comprehensive framework support ready for production use.
 
@@ -89,9 +89,9 @@ npm run analyze /path/to/project                     # Analyze absolute path
    - Transitive analyzer: Advanced dependency traversal with cycle detection and confidence scoring
 
 4. **MCP Server** (`src/mcp/`): Model Context Protocol implementation
-   - Exposes 5 enhanced tools: get_file, get_symbol, search_code, who_calls, list_dependencies
+   - Exposes 12 tools: get_file, get_symbol, search_code, who_calls, list_dependencies, plus Laravel and cross-stack tools
    - Enhanced tools support transitive analysis with indirect relationships and confidence scoring
-   - Provides 3 resources: repositories, file graph, symbol graph
+   - Provides resources: repositories, file graph, symbol graph
 
 5. **CLI** (`src/cli/`): Command-line interface using Commander.js
    - Repository analysis, search, and MCP server management
@@ -168,7 +168,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **ORM Systems**: Prisma, TypeORM, Sequelize, Mongoose, MikroORM
 **Package Managers**: npm, yarn, pnpm, bun with monorepo support (Nx, Lerna, Turborepo, Rush)
 **Graph Types**: File dependencies, symbol relationships, framework entity relationships, transitive analysis
-**AI Integration**: Enhanced MCP server with 5 tools supporting indirect analysis and 3 resources
+**MCP Integration**: Enhanced MCP server with 12 tools supporting comprehensive dependency analysis and framework relationships
 
 **Framework-Specific Features**:
 
@@ -206,9 +206,9 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 **Current Limitations**:
 
-- No vector search capabilities yet
+- Basic lexical search (PostgreSQL ilike) - full-text search planned for Phase 6
 - No runtime tracing for dynamic code analysis
-- No AI-powered semantic understanding
+- Limited to static analysis (no dynamic code execution tracing)
 
 **Completed Features** (Phases 3-5 ✅):
 
@@ -223,10 +223,10 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 **Planned Features** (Prioritized for Vue + Laravel + Godot):
 
-**Phase 6 - AI-Powered Analysis (NEXT PRIORITY):**
-- Vector search with embeddings for full-stack understanding
-- AI-generated summaries and semantic analysis
-- Forward specifications and drift detection
+**Phase 6 - Enhanced Impact Analysis (NEXT PRIORITY):**
+- Enhanced search with PostgreSQL full-text search and ranking
+- Comprehensive impact analysis tool (`impact_of`) for complete blast radius
+- Resource implementation for graph data visualization
 
 **Phase 8 - C#/Godot Support (MEDIUM PRIORITY):**
 - Game development framework support
