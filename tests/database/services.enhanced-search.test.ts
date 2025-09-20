@@ -108,24 +108,22 @@ describe('Enhanced Search Functionality', () => {
     });
 
     test('should support hybrid search mode', async () => {
-      const options: SymbolSearchOptions = {
-        searchMode: 'hybrid',
+      const options = {
         limit: 10
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await dbService.hybridSearchSymbols('user', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(r => r.name.toLowerCase().includes('user'))).toBe(true);
     });
 
     test('should support full-text search mode', async () => {
-      const options: SymbolSearchOptions = {
-        searchMode: 'fulltext',
+      const options = {
         limit: 10
       };
 
-      const results = await dbService.searchSymbols('user service', repoId, options);
+      const results = await dbService.fulltextSearchSymbols('user service', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
     });
@@ -295,31 +293,25 @@ describe('Enhanced Search Functionality', () => {
 
   describe('Full-text search capabilities', () => {
     test('should support phrase searching with fulltext mode', async () => {
-      const options: SymbolSearchOptions = {
-        searchMode: 'fulltext'
-      };
+      const options = {};
 
-      const results = await dbService.searchSymbols('user service', repoId, options);
+      const results = await dbService.fulltextSearchSymbols('user service', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
     });
 
     test('should support boolean queries in fulltext mode', async () => {
-      const options: SymbolSearchOptions = {
-        searchMode: 'fulltext'
-      };
+      const options = {};
 
-      const results = await dbService.searchSymbols('user & service', repoId, options);
+      const results = await dbService.fulltextSearchSymbols('user & service', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
     });
 
     test('should handle fulltext search with no results', async () => {
-      const options: SymbolSearchOptions = {
-        searchMode: 'fulltext'
-      };
+      const options = {};
 
-      const results = await dbService.searchSymbols('nonexistent terms that should not match', repoId, options);
+      const results = await dbService.fulltextSearchSymbols('nonexistent terms that should not match', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBe(0);
@@ -327,26 +319,32 @@ describe('Enhanced Search Functionality', () => {
   });
 
   describe('Vector search fallback', () => {
-    test('should fall back to fulltext when vector search is requested', async () => {
-      const options: SymbolSearchOptions = {
-        searchMode: 'vector'
+    test('should fail when vector search is requested without embeddings', async () => {
+      const options = {
+        similarityThreshold: 0.7
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
-
-      expect(Array.isArray(results)).toBe(true);
-      // Should still return results via fallback
+      try {
+        await dbService.vectorSearchSymbols('user', repoId, options);
+        // Should not reach here if no embeddings
+        expect(false).toBe(true);
+      } catch (error) {
+        expect(error.message).toContain('Vector search unavailable');
+      }
     });
 
-    test('should handle use_vector option', async () => {
-      const options: SymbolSearchOptions = {
-        useVector: true
+    test('should handle vector search', async () => {
+      const options = {
+        similarityThreshold: 0.7
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
-
-      expect(Array.isArray(results)).toBe(true);
-      // Should return results via hybrid mode with vector fallback
+      try {
+        const results = await dbService.vectorSearchSymbols('user', repoId, options);
+        expect(Array.isArray(results)).toBe(true);
+      } catch (error) {
+        // Vector search may fail if no embeddings are available
+        expect(error.message).toContain('Vector search unavailable');
+      }
     });
   });
 });

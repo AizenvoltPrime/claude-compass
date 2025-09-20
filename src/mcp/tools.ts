@@ -435,12 +435,10 @@ export class McpTools {
     const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
     const repoIds = validatedArgs.repo_ids || (repoId ? [repoId] : []);
 
-    // Build enhanced search options
-    const searchOptions: SymbolSearchOptions = {
-      useVector: validatedArgs.use_vector || false,
+    // Build search options
+    const searchOptions = {
       limit: validatedArgs.limit || 100,
       confidenceThreshold: 0.7,
-      searchMode: validatedArgs.use_vector ? 'hybrid' : 'fulltext',
       symbolTypes: [],
       isExported: validatedArgs.is_exported,
       framework: validatedArgs.framework,
@@ -474,11 +472,37 @@ export class McpTools {
             if (symbolType) {
               searchOptions.symbolTypes = [symbolType];
             }
-            const standardSymbols = await this.dbService.searchSymbols(
-              validatedArgs.query,
-              repoId,
-              searchOptions
-            );
+            // Choose search method based on use_vector parameter
+            let standardSymbols;
+            if (validatedArgs.use_vector === true) {
+              try {
+                standardSymbols = await this.dbService.vectorSearchSymbols(
+                  validatedArgs.query,
+                  repoId,
+                  { ...searchOptions, similarityThreshold: 0.7 }
+                );
+              } catch (error) {
+                this.logger.warn('Vector search failed, falling back to fulltext:', error);
+                standardSymbols = await this.dbService.fulltextSearchSymbols(
+                  validatedArgs.query,
+                  repoId,
+                  searchOptions
+                );
+              }
+            } else if (validatedArgs.use_vector === false) {
+              standardSymbols = await this.dbService.lexicalSearchSymbols(
+                validatedArgs.query,
+                repoId,
+                searchOptions
+              );
+            } else {
+              // Default to fulltext search
+              standardSymbols = await this.dbService.fulltextSearchSymbols(
+                validatedArgs.query,
+                repoId,
+                searchOptions
+              );
+            }
             symbols.push(...standardSymbols);
         }
       }
@@ -491,11 +515,36 @@ export class McpTools {
         }
       }
 
-      symbols = await this.dbService.searchSymbols(
-        validatedArgs.query,
-        repoId,
-        searchOptions
-      );
+      // Choose search method based on use_vector parameter
+      if (validatedArgs.use_vector === true) {
+        try {
+          symbols = await this.dbService.vectorSearchSymbols(
+            validatedArgs.query,
+            repoId,
+            { ...searchOptions, similarityThreshold: 0.7 }
+          );
+        } catch (error) {
+          this.logger.warn('Vector search failed, falling back to fulltext:', error);
+          symbols = await this.dbService.fulltextSearchSymbols(
+            validatedArgs.query,
+            repoId,
+            searchOptions
+          );
+        }
+      } else if (validatedArgs.use_vector === false) {
+        symbols = await this.dbService.lexicalSearchSymbols(
+          validatedArgs.query,
+          repoId,
+          searchOptions
+        );
+      } else {
+        // Default to fulltext search
+        symbols = await this.dbService.fulltextSearchSymbols(
+          validatedArgs.query,
+          repoId,
+          searchOptions
+        );
+      }
     }
 
     // Apply any additional filtering not handled by enhanced search

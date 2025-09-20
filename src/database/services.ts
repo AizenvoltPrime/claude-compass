@@ -33,6 +33,8 @@ import {
   ComposableSearchOptions,
   // Phase 6 imports - Enhanced Search
   SymbolSearchOptions,
+  VectorSearchOptions,
+  HybridSearchOptions,
   SearchResult,
   // Phase 3 imports - Background Jobs
   JobQueue,
@@ -78,14 +80,18 @@ import {
   CreateDataContract,
 } from './models';
 import { createComponentLogger } from '../utils/logger';
+import { getEmbeddingService, EmbeddingService } from '../services/embedding-service';
 
 const logger = createComponentLogger('database-services');
 
 export class DatabaseService {
   private db: Knex;
+  private embeddingService: EmbeddingService;
+  private embeddingCache = new Map<string, number[]>();
 
   constructor() {
     this.db = getDatabaseConnection();
+    this.embeddingService = getEmbeddingService();
   }
 
   // Getter for knex instance
@@ -387,6 +393,22 @@ export class DatabaseService {
     return symbol as Symbol;
   }
 
+  /**
+   * Create symbol with embeddings synchronously
+   */
+  async createSymbolWithEmbeddings(data: CreateSymbol): Promise<Symbol> {
+    logger.debug('Creating symbol with embeddings', { name: data.name, type: data.symbol_type, file_id: data.file_id });
+
+    const [symbol] = await this.db('symbols')
+      .insert(data)
+      .returning('*');
+
+    // Generate embeddings synchronously
+    await this.generateSymbolEmbeddings(symbol.id, symbol.name, symbol.description);
+
+    return symbol as Symbol;
+  }
+
   async createSymbols(symbols: CreateSymbol[]): Promise<Symbol[]> {
     if (symbols.length === 0) return [];
 
@@ -407,6 +429,43 @@ export class DatabaseService {
         .insert(batch)
         .returning('*');
       results.push(...(batchResults as Symbol[]));
+    }
+
+    return results;
+  }
+
+  /**
+   * Create symbols with embeddings and progress feedback
+   */
+  async createSymbolsWithEmbeddings(
+    symbols: CreateSymbol[],
+    onProgress?: (completed: number, total: number) => void
+  ): Promise<Symbol[]> {
+    if (symbols.length === 0) return [];
+
+    logger.debug('Creating symbols with embeddings', { count: symbols.length });
+
+    const BATCH_SIZE = 50;
+    const results: Symbol[] = [];
+
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE);
+
+      logger.debug(`Processing symbol batch ${i / BATCH_SIZE + 1}/${Math.ceil(symbols.length / BATCH_SIZE)}`, {
+        batchSize: batch.length
+      });
+
+      const batchResults = await this.db('symbols')
+        .insert(batch)
+        .returning('*');
+      results.push(...(batchResults as Symbol[]));
+
+      // Generate embeddings for batch synchronously with progress
+      await this.batchGenerateEmbeddings(batchResults as Symbol[]);
+
+      if (onProgress) {
+        onProgress(Math.min(i + BATCH_SIZE, symbols.length), symbols.length);
+      }
     }
 
     return results;
@@ -456,34 +515,90 @@ export class DatabaseService {
     return symbols as Symbol[];
   }
 
+  /**
+   * Search symbols with explicit search mode selection
+   */
   async searchSymbols(
     query: string,
     repoId?: number,
     options: SymbolSearchOptions = {}
   ): Promise<SymbolWithFile[]> {
     const {
-      useVector = false,
       limit = 100,
       confidenceThreshold = 0.5,
-      searchMode = 'hybrid',
       symbolTypes = [],
       isExported,
       framework,
       repoIds = []
     } = options;
 
-    // Determine effective repository filter
+    // Determine which repositories to search
     const effectiveRepoIds = repoIds.length > 0 ? repoIds : (repoId ? [repoId] : []);
 
-    if (searchMode === 'hybrid' || useVector) {
-      return this.hybridSearch(query, effectiveRepoIds, options);
-    } else if (searchMode === 'fulltext') {
-      return this.fullTextSearch(query, effectiveRepoIds, options);
-    } else if (searchMode === 'vector') {
-      return this.vectorSearch(query, effectiveRepoIds, options);
-    } else {
-      return this.lexicalSearch(query, effectiveRepoIds, options);
+    if (effectiveRepoIds.length === 0) {
+      logger.warn('No repositories specified for search');
+      return [];
     }
+
+    logger.debug('Symbol search (defaulting to fulltext)', {
+      query,
+      limit,
+      symbolTypes,
+      isExported,
+      framework,
+      repoIds: effectiveRepoIds
+    });
+
+    // Default to fulltext search for backwards compatibility
+    return this.fullTextSearch(query, effectiveRepoIds, options);
+  }
+
+  /**
+   * Lexical search (exact name matches)
+   */
+  async lexicalSearchSymbols(
+    query: string,
+    repoId?: number,
+    options: SymbolSearchOptions = {}
+  ): Promise<SymbolWithFile[]> {
+    const repoIds = options.repoIds?.length ? options.repoIds : (repoId ? [repoId] : []);
+    return this.lexicalSearch(query, repoIds, options);
+  }
+
+  /**
+   * Vector search (semantic similarity)
+   */
+  async vectorSearchSymbols(
+    query: string,
+    repoId?: number,
+    options: VectorSearchOptions = {}
+  ): Promise<SymbolWithFile[]> {
+    const repoIds = options.repoIds?.length ? options.repoIds : (repoId ? [repoId] : []);
+    return this.vectorSearch(query, repoIds, options);
+  }
+
+  /**
+   * Fulltext search (PostgreSQL FTS)
+   */
+  async fulltextSearchSymbols(
+    query: string,
+    repoId?: number,
+    options: SymbolSearchOptions = {}
+  ): Promise<SymbolWithFile[]> {
+    const repoIds = options.repoIds?.length ? options.repoIds : (repoId ? [repoId] : []);
+    return this.fullTextSearch(query, repoIds, options);
+  }
+
+  /**
+   * Hybrid search (combines all search methods)
+   */
+  async hybridSearchSymbols(
+    query: string,
+    repoId?: number,
+    options: HybridSearchOptions = {}
+  ): Promise<SymbolWithFile[]> {
+    const repoIds = options.repoIds?.length ? options.repoIds : (repoId ? [repoId] : []);
+    return this.hybridSearch(query, repoIds, options);
   }
 
   /**
@@ -603,56 +718,149 @@ export class DatabaseService {
   }
 
   /**
-   * Vector similarity search using pgvector (placeholder for future implementation)
+   * Check if vector search is available
    */
-  private async vectorSearch(
-    query: string,
-    repoIds: number[],
-    options: SymbolSearchOptions
-  ): Promise<SymbolWithFile[]> {
-    // For now, fall back to full-text search until vector embeddings are implemented
-    console.warn('Vector search not yet implemented, falling back to full-text search');
-    return this.fullTextSearch(query, repoIds, options);
+  private async isVectorSearchReady(): Promise<boolean> {
+    try {
+      const result = await this.db('symbols')
+        .whereNotNull('name_embedding')
+        .first();
+      return !!result;
+    } catch (error) {
+      return false;
+    }
   }
 
   /**
-   * Hybrid search combining multiple search strategies
+   * Vector similarity search using pgvector embeddings - FAIL FAST
    */
-  private async hybridSearch(
+  async vectorSearch(
     query: string,
     repoIds: number[],
-    options: SymbolSearchOptions
+    options: VectorSearchOptions = {}
   ): Promise<SymbolWithFile[]> {
-    const { limit = 100, confidenceThreshold = 0.5 } = options;
+    // Fail fast if vector search isn't ready
+    if (!(await this.isVectorSearchReady())) {
+      throw new Error('Vector search unavailable: No embeddings found in database. Run embedding population first.');
+    }
+
+    if (!await this.embeddingService.initialized) {
+      await this.embeddingService.initialize();
+    }
+
+    // Generate embedding for the query (with caching)
+    const queryEmbedding = await this.getCachedEmbedding(query);
+
+    if (!queryEmbedding || queryEmbedding.length !== 384) {
+      throw new Error('Failed to generate valid query embedding');
+    }
+
+    const { limit = 100, symbolTypes, isExported, similarityThreshold = 0.7 } = options;
+
+      // Build the base query
+      const baseQuery = this.db('symbols as s')
+        .select([
+          's.*',
+          'f.path as file_path',
+          'f.relative_path as file_relative_path',
+          'f.type as file_type',
+          'r.name as repo_name',
+          // Calculate cosine similarity scores
+          this.db.raw('(1 - (s.name_embedding <=> ?)) as name_similarity', [JSON.stringify(queryEmbedding)]),
+          this.db.raw('(1 - (s.description_embedding <=> ?)) as desc_similarity', [JSON.stringify(queryEmbedding)]),
+          // Use the best similarity score between name and description
+          this.db.raw('GREATEST(1 - COALESCE(s.name_embedding <=> ?, 1), 1 - COALESCE(s.description_embedding <=> ?, 1)) as vector_score',
+            [JSON.stringify(queryEmbedding), JSON.stringify(queryEmbedding)])
+        ])
+        .join('files as f', 's.file_id', 'f.id')
+        .join('repositories as r', 'f.repo_id', 'r.id')
+        .whereIn('f.repo_id', repoIds)
+        .where(function() {
+          // Only include symbols that have at least one embedding
+          this.whereNotNull('s.name_embedding')
+            .orWhereNotNull('s.description_embedding');
+        })
+        .whereRaw('GREATEST(1 - COALESCE(s.name_embedding <=> ?, 1), 1 - COALESCE(s.description_embedding <=> ?, 1)) >= ?',
+          [JSON.stringify(queryEmbedding), JSON.stringify(queryEmbedding), similarityThreshold])
+        .orderByRaw('GREATEST(1 - COALESCE(s.name_embedding <=> ?, 1), 1 - COALESCE(s.description_embedding <=> ?, 1)) DESC',
+          [JSON.stringify(queryEmbedding), JSON.stringify(queryEmbedding)])
+        .limit(limit);
+
+    // Apply additional filters
+    if (symbolTypes?.length) {
+      baseQuery.whereIn('s.symbol_type', symbolTypes);
+    }
+
+    if (isExported) {
+      baseQuery.where('s.is_exported', true);
+    }
+
+    const results = await baseQuery;
+
+    logger.debug('Vector search completed', {
+      query,
+      resultsCount: results.length,
+      similarityThreshold,
+      repoIds
+    });
+
+    return results.map((result: any) => ({
+      ...result,
+      confidence: result.vector_score,
+      match_type: 'vector' as const,
+      search_rank: result.vector_score
+    }));
+  }
+
+  /**
+   * Hybrid search combining multiple search strategies with explicit weights
+   */
+  async hybridSearch(
+    query: string,
+    repoIds: number[],
+    options: HybridSearchOptions = {}
+  ): Promise<SymbolWithFile[]> {
+    const { limit = 100, confidenceThreshold = 0.5, weights } = options;
+
+    // Use provided weights or defaults
+    const searchWeights = weights || {
+      lexical: 0.3,
+      vector: 0.4,
+      fulltext: 0.3
+    };
+
+    logger.debug('Hybrid search with explicit weights', { query, weights: searchWeights });
 
     // Run multiple search strategies in parallel
-    const [lexicalResults, fullTextResults] = await Promise.all([
+    const [lexicalResults, vectorResults, fullTextResults] = await Promise.all([
       this.lexicalSearch(query, repoIds, { ...options, limit: Math.ceil(limit * 0.7) }),
+      this.vectorSearch(query, repoIds, { ...options, limit: Math.ceil(limit * 0.7) }),
       this.fullTextSearch(query, repoIds, { ...options, limit: Math.ceil(limit * 0.7) })
     ]);
 
-    // Merge and rank results
-    return this.rankAndMergeResults(lexicalResults, [], fullTextResults, options);
+    // Merge and rank results with explicit weights
+    return this.rankAndMergeResults(lexicalResults, vectorResults, fullTextResults, searchWeights, { limit, confidenceThreshold });
   }
 
   /**
-   * Merge and rank results from different search strategies
+   * Merge and rank results from different search strategies with explicit weights
    */
   private rankAndMergeResults(
     lexicalResults: SymbolWithFile[],
     vectorResults: SymbolWithFile[],
     fullTextResults: SymbolWithFile[],
-    options: SymbolSearchOptions
+    weights: { lexical: number; vector: number; fulltext: number },
+    options: { limit?: number; confidenceThreshold?: number }
   ): SymbolWithFile[] {
     const { limit = 100, confidenceThreshold = 0.5 } = options;
     const resultMap = new Map<number, { symbol: SymbolWithFile; scores: number[]; sources: string[] }>();
 
-    // Weight factors for different search methods
-    const weights = {
-      lexical: 0.3,
-      vector: 0.4,
-      fulltext: 0.3
-    };
+    logger.debug('Merging results with explicit weights', {
+      weights,
+      lexicalCount: lexicalResults.length,
+      vectorCount: vectorResults.length,
+      fulltextCount: fullTextResults.length
+    });
 
     // Process lexical results
     lexicalResults.forEach((symbol, index) => {
@@ -2244,6 +2452,104 @@ export class DatabaseService {
       .orderBy('path');
 
     return files as File[];
+  }
+
+  /**
+   * Get cached embedding or generate new one
+   * @param text Text to embed
+   * @returns Cached or newly generated embedding
+   */
+  private async getCachedEmbedding(text: string): Promise<number[]> {
+    // Check cache first
+    if (this.embeddingCache.has(text)) {
+      logger.debug('Using cached embedding', { text: text.substring(0, 50) });
+      return this.embeddingCache.get(text)!;
+    }
+
+    // Generate new embedding
+    const embedding = await this.embeddingService.generateEmbedding(text);
+
+    // Cache with LRU management
+    this.embeddingCache.set(text, embedding);
+
+    // LRU cache management - remove oldest if over limit
+    if (this.embeddingCache.size > 1000) {
+      const firstKey = this.embeddingCache.keys().next().value;
+      this.embeddingCache.delete(firstKey);
+      logger.debug('Removed oldest embedding from cache', { removedText: firstKey?.substring(0, 50) });
+    }
+
+    logger.debug('Generated and cached new embedding', { text: text.substring(0, 50) });
+    return embedding;
+  }
+
+
+  /**
+   * Generate embeddings for a single symbol
+   * @param symbolId Symbol ID
+   * @param name Symbol name
+   * @param description Optional symbol description
+   */
+  private async generateSymbolEmbeddings(
+    symbolId: number,
+    name: string,
+    description?: string
+  ): Promise<void> {
+    try {
+      logger.debug('Generating embeddings for symbol', { symbolId, name });
+
+      const nameEmbedding = await this.embeddingService.generateEmbedding(name);
+      const descEmbedding = description
+        ? await this.embeddingService.generateEmbedding(description)
+        : null;
+
+      await this.db('symbols')
+        .where('id', symbolId)
+        .update({
+          name_embedding: JSON.stringify(nameEmbedding),
+          description_embedding: descEmbedding ? JSON.stringify(descEmbedding) : null,
+          embeddings_updated_at: new Date(),
+          embedding_model: 'all-MiniLM-L6-v2'
+        });
+
+      logger.debug('Successfully generated embeddings for symbol', { symbolId });
+    } catch (error) {
+      logger.warn(`Failed to generate embeddings for symbol ${symbolId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate embeddings for multiple symbols in batch
+   * @param symbols Array of symbols to process
+   */
+  private async batchGenerateEmbeddings(symbols: Symbol[]): Promise<void> {
+    if (symbols.length === 0) return;
+
+    try {
+      logger.debug('Generating batch embeddings', { count: symbols.length });
+
+      // Process each symbol individually for better error handling
+      for (const symbol of symbols) {
+        try {
+          await this.generateSymbolEmbeddings(
+            symbol.id,
+            symbol.name,
+            symbol.description
+          );
+        } catch (error) {
+          // Log error but continue with other symbols
+          logger.warn(`Failed to generate embedding for symbol ${symbol.id} (${symbol.name}):`, error);
+        }
+      }
+
+      logger.debug('Batch embedding generation completed', {
+        processedCount: symbols.length
+      });
+    } catch (error) {
+      logger.error('Batch embedding generation failed:', error);
+      throw error;
+    }
   }
 }
 
