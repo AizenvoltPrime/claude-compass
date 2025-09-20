@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import process from 'process';
+import path from 'path';
 
 import { Command } from 'commander';
 import { GraphBuilder } from '../graph';
@@ -65,11 +66,15 @@ program
   .option('--cross-stack', 'Enable cross-stack analysis for Vue ↔ Laravel projects', false)
   .option('--vue-laravel', 'Specifically analyze Vue.js and Laravel cross-stack relationships', false)
   .option('--confidence-threshold <threshold>', 'Cross-stack relationship confidence threshold (0.0-1.0)', '0.7')
+  .option('--force-full', 'Force full analysis instead of incremental analysis', false)
   .option('--verbose', 'Enable verbose logging')
   .action(async (repositoryPath, options) => {
     if (options.verbose) {
       logger.level = 'debug';
     }
+
+    // Resolve relative paths to absolute paths
+    const absolutePath = path.resolve(repositoryPath);
 
     const spinner = ora('Initializing analysis...').start();
 
@@ -92,6 +97,7 @@ program
         encodingFallback: options.encodingFallback,
         compassignorePath: options.compassignore,
         enableParallelParsing: options.parallelParsing === true,
+        forceFullAnalysis: options.forceFull === true,
 
         // Cross-stack analysis options
         enableCrossStack: options.crossStack === true || options.vueLaravel === true,
@@ -108,13 +114,13 @@ program
       };
 
       console.log(chalk.blue('\nStarting repository analysis...'));
-      console.log(chalk.gray(`Repository: ${repositoryPath}`));
+      console.log(chalk.gray(`Repository: ${absolutePath}`));
 
       // Run analysis (GraphBuilder will automatically detect if incremental is possible)
       spinner.start('Analyzing repository...');
 
       const startTime = Date.now();
-      const result = await graphBuilder.analyzeRepository(repositoryPath, buildOptions);
+      const result = await graphBuilder.analyzeRepository(absolutePath, buildOptions);
       const duration = Date.now() - startTime;
 
       spinner.succeed('Analysis completed');
@@ -160,6 +166,9 @@ program
 
       // Close database connection
       await databaseService.close();
+
+      // Exit cleanly
+      await cleanExit(0);
 
     } catch (error) {
       spinner.fail('Analysis failed');

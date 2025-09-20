@@ -75,14 +75,21 @@ npx tsc
 ### 4. Analyze Your First Repository
 
 ```bash
+# Analyze current directory (supports both relative and absolute paths)
+npm run analyze .
+
 # Analyze a JavaScript/TypeScript repository
 npm run analyze /path/to/your/nextjs-project
 
 # Analyze a Laravel/PHP repository
 npm run analyze /path/to/your/laravel-project
 
-# Or using the built CLI
-./dist/src/cli/index.js analyze /path/to/your/project --verbose
+# Force full analysis (clears existing data and re-analyzes)
+npm run analyze . --force-full
+
+# Or using the built CLI with options
+./dist/src/cli/index.js analyze . --verbose          # Verbose logging
+./dist/src/cli/index.js analyze . --no-test-files    # Exclude test files
 ```
 
 ### 5. Clear Previous Analysis (Optional)
@@ -92,7 +99,10 @@ npm run analyze /path/to/your/laravel-project
 ./dist/src/cli/index.js clear <repository-name> --yes
 
 # Or clear all repositories
-./dist/src/cli/index.js clear --all --yes
+./dist/src/cli/index.js clear all --yes
+
+# Note: --force-full option automatically clears existing data
+npm run analyze . --force-full    # This clears and re-analyzes automatically
 ```
 
 ### 6. Test Framework Parsing
@@ -173,16 +183,23 @@ npm run start search "User" --type class --exported-only
 ### Analysis Commands
 
 ```bash
-# Analyze repository
+# Analyze repository (supports both relative and absolute paths)
 claude-compass analyze <path> [options]
+
+# Examples:
+npm run analyze .                    # Analyze current directory
+npm run analyze /path/to/project     # Analyze absolute path
+npm run analyze . --force-full       # Force full analysis (clears existing data)
 
 # Options:
 # --no-test-files          Exclude test files
 # --include-node-modules   Include node_modules (not recommended)
-# --max-file-size <size>   Max file size in bytes (default: 1MB)
+# --max-file-size <size>   Max file size in bytes (default: 20MB)
 # --max-files <count>      Max files to process (default: 10,000)
-# --extensions <list>      File extensions (default: .js,.jsx,.ts,.tsx,.mjs,.cjs,.php)
-# --frameworks <list>      Specific frameworks to analyze (vue,nextjs,react,nodejs,laravel)
+# --extensions <list>      File extensions (default: .js,.jsx,.ts,.tsx,.mjs,.cjs,.vue,.php)
+# --force-full            Force full analysis instead of incremental (clears existing data)
+# --cross-stack           Enable cross-stack analysis for Vue ↔ Laravel projects
+# --vue-laravel           Specifically analyze Vue.js and Laravel cross-stack relationships
 # --verbose               Enable debug logging
 ```
 
@@ -394,6 +411,21 @@ All JavaScript/TypeScript and Vue ↔ Laravel cross-stack capabilities are now c
 - Enhanced impact analysis with semantic understanding
 
 ## Troubleshooting
+
+### Analysis Issues
+
+```bash
+# If analysis hangs or doesn't process files
+npm run analyze . --force-full --verbose    # Force full analysis with debug logging
+
+# If relative paths don't work (now fixed)
+npm run analyze .                           # This now works correctly
+npm run analyze $(pwd)                      # Alternative absolute path
+
+# If incremental analysis finds 0 changed files
+npm run analyze . --force-full              # Bypass incremental mode
+./dist/src/cli/index.js clear repo-name --yes && npm run analyze .  # Clear and re-analyze
+```
 
 ### Database Issues
 ```bash
