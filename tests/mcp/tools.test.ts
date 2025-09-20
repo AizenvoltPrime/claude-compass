@@ -12,6 +12,7 @@ const mockDatabaseService = {
   getDependenciesFrom: jest.fn(),
   getDependenciesTo: jest.fn(),
   searchSymbols: jest.fn(),
+  fulltextSearchSymbols: jest.fn(),
 } as unknown as DatabaseService;
 
 describe('McpTools', () => {
@@ -215,6 +216,7 @@ describe('McpTools', () => {
 
   describe('searchCode', () => {
     it('should search symbols with filters', async () => {
+      // Only return symbols that match the filters (function type and exported)
       const mockSymbols = [
         {
           id: 1,
@@ -229,22 +231,9 @@ describe('McpTools', () => {
             language: 'javascript',
           },
         },
-        {
-          id: 2,
-          name: 'TestClass',
-          symbol_type: SymbolType.CLASS,
-          start_line: 15,
-          end_line: 30,
-          is_exported: false,
-          file: {
-            id: 1,
-            path: '/test/file.js',
-            language: 'javascript',
-          },
-        },
       ];
 
-      (mockDatabaseService.searchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
+      (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
       const result = await mcpTools.searchCode({
         query: 'test',
@@ -253,7 +242,14 @@ describe('McpTools', () => {
         limit: 10,
       });
 
-      expect(mockDatabaseService.searchSymbols).toHaveBeenCalledWith('test', undefined);
+      expect(mockDatabaseService.fulltextSearchSymbols).toHaveBeenCalledWith('test', undefined, {
+        symbolTypes: ['function'],
+        isExported: true,
+        limit: 10,
+        confidenceThreshold: 0.7,
+        framework: undefined,
+        repoIds: []
+      });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.query).toBe('test');
@@ -278,7 +274,7 @@ describe('McpTools', () => {
         },
       }));
 
-      (mockDatabaseService.searchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
+      (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
       const result = await mcpTools.searchCode({
         query: 'function',

@@ -305,14 +305,24 @@ export interface ComposableSearchOptions {
 
 // Phase 6 - Enhanced search options
 export interface SymbolSearchOptions {
-  useVector?: boolean;
   limit?: number;
   confidenceThreshold?: number;
-  searchMode?: 'lexical' | 'vector' | 'fulltext' | 'hybrid';
   symbolTypes?: SymbolType[];
   isExported?: boolean;
   framework?: string;
   repoIds?: number[];
+}
+
+export interface VectorSearchOptions extends SymbolSearchOptions {
+  similarityThreshold?: number;
+}
+
+export interface HybridSearchOptions extends SymbolSearchOptions {
+  weights?: {
+    lexical: number;
+    vector: number;
+    fulltext: number;
+  };
 }
 
 export interface SearchResult<T = any> {
