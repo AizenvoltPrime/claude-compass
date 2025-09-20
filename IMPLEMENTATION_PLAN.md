@@ -165,31 +165,6 @@ CREATE TABLE orm_entities (
 );
 ```
 
-#### Specification Tracking
-
-```sql
--- Feature specifications
-CREATE TABLE features (
-    id SERIAL PRIMARY KEY,
-    repo_id INTEGER REFERENCES repositories(id),
-    name VARCHAR NOT NULL,
-    description TEXT,
-    api_contracts JSONB DEFAULT '{}',
-    status VARCHAR DEFAULT 'planning' -- planning, in_progress, implemented, deprecated
-);
-
--- Specification drift tracking
-CREATE TABLE spec_drift (
-    id SERIAL PRIMARY KEY,
-    feature_id INTEGER REFERENCES features(id),
-    drift_type VARCHAR, -- missing_endpoint, schema_change, unreferenced_code
-    description TEXT,
-    severity VARCHAR, -- low, medium, high, critical
-    detected_at TIMESTAMP DEFAULT NOW(),
-    resolved_at TIMESTAMP
-);
-```
-
 ### Graph Types
 
 #### 1. File Graph
@@ -387,30 +362,6 @@ interface MCPTools {
       frameworks_affected: string[];
       risk_level: 'low' | 'medium' | 'high' | 'critical';
     };
-  };
-
-  // External documentation search (Phase 7)
-  search_docs(
-    query: string,
-    pkg: string,
-    version?: string
-  ): {
-    results: {
-      content: string;
-      url: string;
-      score: number;
-    }[];
-  };
-
-  // Specification management (Phase 7)
-  diff_spec_vs_code(
-    feature_id: string,
-    repo_id: string
-  ): {
-    missing_endpoints: string[];
-    schema_drift: object[];
-    unreferenced_code: string[];
-    test_coverage_gaps: string[];
   };
 }
 ```
@@ -791,30 +742,6 @@ async impactOf(change: {
 - **Completeness**: Comprehensive impact analysis vs limited cross-stack only
 - **Maintainability**: Single search implementation vs multiple specialized searches
 
-#### 6D. External Integration Foundation (Weeks 7-8) 🔗 MEDIUM PRIORITY
-
-**Missing Tools** (for complete vision):
-
-```typescript
-// Implement search_docs tool
-async searchDocs(query: string, packageName: string, version?: string) {
-  const npmDocs = await this.npmDocsService.search(query, packageName);
-  const githubDocs = await this.githubDocsService.search(query, packageName);
-  return this.mergeDocumentationResults(npmDocs, githubDocs);
-}
-
-// Implement docs://{pkg}@{version} resource
-async readPackageDocs(packageName: string, version: string) {
-  return await this.packageDocsService.getDocumentation(packageName, version);
-}
-```
-
-**External Dependencies:**
-
-- Integration with npm API for package documentation
-- GitHub API for repository documentation
-- Caching layer for external documentation
-
 **Success Criteria for Phase 6:**
 
 **Tool Consolidation Success:**
@@ -842,44 +769,9 @@ async readPackageDocs(packageName: string, version: string) {
 
 - ✅ Clean, focused API that's easier to understand and use
 - ✅ Better performance through consolidation vs maintaining 12 separate tools
-- ✅ Foundation ready for Phase 7 external integrations
 - ✅ Proven targeted tools pattern vs overwhelming data dumps
 
-### Phase 7: Specification Tracking & Drift Detection (HIGH PRIORITY) - NOT IMPLEMENTED
-
-**Goal**: Requirements → implementation workflow and sync maintenance for full-stack features
-
-**Status**: ❌ **NOT STARTED** - Confirmed no implementation exists in codebase
-
-**Foundation Available**:
-- ✅ Cross-stack error handler with schema drift detection foundation
-- ✅ API call tracking and data contracts tables provide specification foundation
-- ✅ Framework parsers already extract API definitions
-- ✅ Cross-stack confidence scoring algorithms can be leveraged
-
-**New Implementation Needed** (4-6 weeks):
-
-1. **Database Schema Extensions**: specifications, spec_drift, documentation_links tables
-2. **Documentation Parser Integration**: OpenAPI, JSDoc, PHPDoc parsers
-3. **New MCP Tools**: `search_docs`, `diff_spec_vs_code`, `get_specification`
-4. **Drift Detection System**: Schema comparison algorithms with confidence scoring
-
-**Deliverables:**
-
-- Specification tracking for Vue + Laravel features
-- API contract validation (OpenAPI + TypeScript types)
-- Spec vs. code comparison algorithms (Vue components vs Laravel endpoints)
-- Drift detection and reporting across frontend/backend
-- Integration with existing cross-stack analysis
-
-**Success Criteria:**
-
-- OpenAPI/JSDoc/PHPDoc parsing functional
-- Specification drift detection with confidence scoring
-- MCP tools provide comprehensive documentation search
-- Integration with existing cross-stack analysis
-
-### Phase 8: C#/Godot Game Development Support (MEDIUM PRIORITY) - NOT IMPLEMENTED
+### Phase 7: C#/Godot Game Development Support (MEDIUM PRIORITY) - NOT IMPLEMENTED
 
 **Goal**: Add Godot/C# game engine support
 
@@ -1774,9 +1666,8 @@ npm run build
 1. **`search_code`** - ✅ **Enhanced with hybrid vector+lexical search** with PostgreSQL full-text search and ranking
 2. **`impact_of`** - ✅ **Comprehensive blast radius tool** fully implemented replacing `get_cross_stack_impact`
 
-**Phase 7 Future Additions:**
-3. **`search_docs`** - External documentation search (planned)
-4. **`diff_spec_vs_code`** - Specification drift detection (planned)
+**Future Additions:**
+3. Additional tools as requirements emerge
 
 ### Completed Phases (Verified)
 
@@ -1835,20 +1726,14 @@ npm run build
 - Advanced result prioritization and filtering
 - Cross-language symbol search
 
-**Specification Management (Phase 7 - Not Started)**:
+**Future Enhancements**:
 
-- Specification tracking and drift detection
-- API contract validation
-- Integration with documentation systems
-
-**External Integration**:
-
-- Package documentation search and integration
+- Additional framework support as needed
 - Enhanced resource visualization
 
 ## Updated Implementation Roadmap (Based on Current Codebase State)
 
-### Phase 9-New: Production Hardening & Performance (MEDIUM PRIORITY)
+### Phase 8: Production Hardening & Performance (MEDIUM PRIORITY)
 
 **Goal**: Enhance production readiness and performance optimization
 
@@ -1873,21 +1758,18 @@ npm run build
 ## Implementation Dependencies and Sequence
 
 ### Critical Path Analysis
-1. **Phase 6B** → **Phase 7** (vector search enables better specification matching)
-2. **Phase 7** → **Phase 9** (specification tracking before production hardening)
-3. **Phase 8** (independent, can run parallel with Phase 7)
+1. **Phase 6B** → **Phase 7** (vector search foundation for game development)
+2. **Phase 7** → **Phase 8** (C# support before production hardening)
 
 ### Resource Requirements
 - **Phase 6B**: 1 developer, 1-2 weeks
-- **Phase 7**: 2 developers, 4-6 weeks
-- **Phase 8**: 2 developers, 6-8 weeks (can overlap with Phase 7)
-- **Phase 9**: 1-2 developers, 3-4 weeks
+- **Phase 7**: 2 developers, 6-8 weeks
+- **Phase 8**: 1-2 developers, 3-4 weeks
 
 ### Risk Assessment
 - **Low Risk**: Phase 6B (infrastructure complete)
-- **Medium Risk**: Phase 7 (new concepts, existing foundation)
-- **High Risk**: Phase 8 (new language, complex domain)
-- **Low Risk**: Phase 9 (enhancement of existing features)
+- **High Risk**: Phase 7 (new language, complex domain)
+- **Low Risk**: Phase 8 (enhancement of existing features)
 
 ## Success Metrics
 
@@ -1898,28 +1780,27 @@ npm run build
 - Memory usage: <2GB for 100k symbol repositories
 
 ### Phase 7 Success Metrics
-- Documentation parsing accuracy: >95% for standard formats
-- Drift detection precision: >80% true positives
-- API contract validation coverage: >90% of tracked APIs
-- False positive rate: <10% for drift detection
-
-### Phase 8 Success Metrics
 - C# parsing coverage: >95% of language constructs
 - Godot scene relationship accuracy: >90%
 - Game development workflow support: Complete scene-to-script mapping
 - Performance: Analysis time <10min for medium game projects
+
+### Phase 8 Success Metrics
+- Performance improvement: >20% faster analysis times
+- Memory optimization: <2GB for large repositories
+- Enterprise features: Multi-tenant support functional
+- Monitoring: Complete system health tracking
 
 ## Updated Priority Order
 
 ### Immediate Priority (Next 1-2 weeks)
 1. **Phase 6B**: Vector embedding population - infrastructure ready, minimal effort, high value
 
-### High Priority (Next 1-2 months)
-2. **Phase 7**: Specification tracking & drift detection - leverages existing foundation
+### High Priority (Next 2-3 months)
+2. **Phase 7**: C#/Godot game development support
 
-### Medium Priority (Next 2-3 months)
-3. **Phase 8**: C#/Godot support (can run parallel with Phase 7)
-4. **Phase 9**: Production hardening & performance
+### Medium Priority (Next 3-4 months)
+3. **Phase 8**: Production hardening & performance
 
 ## Critical Finding
 
