@@ -68,6 +68,11 @@ import {
   PackageDependencyType,
   PackageManagerType,
   WorkspaceType,
+  // Phase 5 imports - Cross-Stack Tracking
+  ApiCall,
+  DataContract,
+  CreateApiCall,
+  CreateDataContract,
 } from './models';
 import { createComponentLogger } from '../utils/logger';
 
@@ -1461,6 +1466,465 @@ export class DatabaseService {
       .where({ repo_id: repoId, project_path: projectPath })
       .first();
     return workspaceProject as WorkspaceProject || null;
+  }
+
+  // ===== Phase 5 Service Methods - Cross-Stack Tracking =====
+
+  /**
+   * Get all cross-stack dependencies for a repository
+   */
+  async getCrossStackDependencies(repoId: number): Promise<{apiCalls: ApiCall[], dataContracts: DataContract[]}> {
+    logger.debug('Getting cross-stack dependencies', { repoId });
+
+    // Get API calls
+    const apiCalls = await this.db('api_calls')
+      .where({ repo_id: repoId })
+      .orderBy('created_at', 'desc');
+
+    // Get data contracts
+    const dataContracts = await this.db('data_contracts')
+      .where({ repo_id: repoId })
+      .orderBy('created_at', 'desc');
+
+    logger.debug('Retrieved cross-stack dependencies', {
+      repoId,
+      apiCallsCount: apiCalls.length,
+      dataContractsCount: dataContracts.length
+    });
+
+    return {
+      apiCalls: apiCalls as ApiCall[],
+      dataContracts: dataContracts as DataContract[]
+    };
+  }
+
+  /**
+   * Get a framework entity by ID (routes, components, etc.)
+   */
+  async getFrameworkEntityById(id: number): Promise<Route | Component | Composable | null> {
+    logger.debug('Getting framework entity by ID', { id });
+
+    // Try routes first
+    const route = await this.db('routes')
+      .where({ id })
+      .first();
+
+    if (route) {
+      return route as Route;
+    }
+
+    // Try components
+    const component = await this.db('components')
+      .where({ id })
+      .first();
+
+    if (component) {
+      return component as Component;
+    }
+
+    // Try composables
+    const composable = await this.db('composables')
+      .where({ id })
+      .first();
+
+    if (composable) {
+      return composable as Composable;
+    }
+
+    return null;
+  }
+
+  /**
+   * Create API call records in batch
+   */
+  async createApiCalls(data: CreateApiCall[]): Promise<ApiCall[]> {
+    if (data.length === 0) return [];
+
+    logger.debug('Creating API calls in batch', { count: data.length });
+
+    const BATCH_SIZE = 100;
+    const results: ApiCall[] = [];
+
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+
+      const batchResults = await this.db('api_calls')
+        .insert(batch)
+        .returning('*');
+
+      results.push(...(batchResults as ApiCall[]));
+    }
+
+    logger.debug('API calls created successfully', { count: results.length });
+    return results;
+  }
+
+  /**
+   * Create data contract records in batch
+   */
+  async createDataContracts(data: CreateDataContract[]): Promise<DataContract[]> {
+    if (data.length === 0) return [];
+
+    logger.debug('Creating data contracts in batch', { count: data.length });
+
+    const BATCH_SIZE = 100;
+    const results: DataContract[] = [];
+
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+
+      const batchResults = await this.db('data_contracts')
+        .insert(batch)
+        .returning('*');
+
+      results.push(...(batchResults as DataContract[]));
+    }
+
+    logger.debug('Data contracts created successfully', { count: results.length });
+    return results;
+  }
+
+  /**
+   * Get API calls by component ID
+   */
+  async getApiCallsByComponent(componentId: number): Promise<ApiCall[]> {
+    logger.debug('Getting API calls by component', { componentId });
+
+    const apiCalls = await this.db('api_calls')
+      .where({ frontend_symbol_id: componentId })
+      .orderBy('created_at', 'desc');
+
+    return apiCalls as ApiCall[];
+  }
+
+  /**
+   * Get data contracts by schema name
+   */
+  async getDataContractsBySchema(schemaName: string): Promise<DataContract[]> {
+    logger.debug('Getting data contracts by schema name', { schemaName });
+
+    const dataContracts = await this.db('data_contracts')
+      .where({ name: schemaName })
+      .orderBy('created_at', 'desc');
+
+    return dataContracts as DataContract[];
+  }
+
+  /**
+   * Get frameworks used in a repository
+   */
+  async getRepositoryFrameworks(repoId: number): Promise<string[]> {
+    logger.debug('Getting repository frameworks', { repoId });
+
+    const metadata = await this.db('framework_metadata')
+      .where({ repo_id: repoId })
+      .select('framework_type')
+      .distinct();
+
+    return metadata.map(m => m.framework_type);
+  }
+
+  /**
+   * Stream cross-stack data for large datasets
+   */
+  async streamCrossStackData(repoId: number): Promise<AsyncIterable<{type: 'apiCall' | 'dataContract', data: any}>> {
+    logger.debug('Streaming cross-stack data', { repoId });
+
+    const stream = async function* (db: any) {
+      // Stream API calls
+      const apiCalls = await db('api_calls')
+        .where({ repo_id: repoId })
+        .orderBy('created_at', 'desc');
+
+      for (const apiCall of apiCalls) {
+        yield { type: 'apiCall' as const, data: apiCall };
+      }
+
+      // Stream data contracts
+      const dataContracts = await db('data_contracts')
+        .where({ repo_id: repoId })
+        .orderBy('created_at', 'desc');
+
+      for (const dataContract of dataContracts) {
+        yield { type: 'dataContract' as const, data: dataContract };
+      }
+    };
+
+    return stream(this.db);
+  }
+
+  // Caching methods for performance optimization
+  private cacheStore: Map<string, any> = new Map();
+
+  /**
+   * Get cached pattern match result
+   */
+  async getCachedPatternMatch(key: string): Promise<any | null> {
+    logger.debug('Getting cached pattern match', { key });
+    return this.cacheStore.get(`pattern:${key}`) || null;
+  }
+
+  /**
+   * Cache pattern match result
+   */
+  async cachePatternMatch(key: string, value: any): Promise<void> {
+    logger.debug('Caching pattern match', { key });
+    this.cacheStore.set(`pattern:${key}`, value);
+  }
+
+  /**
+   * Get cached schema compatibility result
+   */
+  async getCachedSchemaCompatibility(key: string): Promise<any | null> {
+    logger.debug('Getting cached schema compatibility', { key });
+    return this.cacheStore.get(`schema:${key}`) || null;
+  }
+
+  /**
+   * Cache schema compatibility result
+   */
+  async cacheSchemaCompatibility(key: string, value: any): Promise<void> {
+    logger.debug('Caching schema compatibility', { key });
+    this.cacheStore.set(`schema:${key}`, value);
+  }
+
+  /**
+   * Perform cross-stack health check for a repository
+   */
+  async performCrossStackHealthCheck(repoId: number): Promise<{
+    status: 'pass' | 'fail';
+    healthy: boolean;
+    issues: string[];
+    recommendations: string[];
+    checks: Array<{
+      name: string;
+      status: 'pass' | 'fail';
+      message: string;
+    }>;
+  }> {
+    logger.debug('Performing cross-stack health check', { repoId });
+
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    const checks: Array<{ name: string; status: 'pass' | 'fail'; message: string; }> = [];
+
+    try {
+      const crossStackData = await this.getCrossStackDependencies(repoId);
+
+      // Check for orphaned API calls
+      const orphanedApiCalls = crossStackData.apiCalls.filter(call =>
+        !call.frontend_symbol_id || !call.backend_route_id
+      );
+
+      if (orphanedApiCalls.length > 0) {
+        issues.push(`Found ${orphanedApiCalls.length} orphaned API calls with missing references`);
+        recommendations.push('Review and clean up API calls with missing frontend or backend references');
+        checks.push({
+          name: 'API Call References',
+          status: 'fail',
+          message: `${orphanedApiCalls.length} orphaned API calls found`
+        });
+      } else {
+        checks.push({
+          name: 'API Call References',
+          status: 'pass',
+          message: 'All API calls have valid references'
+        });
+      }
+
+      // Check for drift in data contracts
+      const driftedContracts = crossStackData.dataContracts.filter(contract =>
+        contract.drift_detected
+      );
+
+      if (driftedContracts.length > 0) {
+        issues.push(`Found ${driftedContracts.length} data contracts with detected schema drift`);
+        recommendations.push('Review and update data contracts to resolve schema drift');
+        checks.push({
+          name: 'Schema Drift Detection',
+          status: 'fail',
+          message: `${driftedContracts.length} contracts with schema drift`
+        });
+      } else {
+        checks.push({
+          name: 'Schema Drift Detection',
+          status: 'pass',
+          message: 'No schema drift detected in data contracts'
+        });
+      }
+
+      // Check for low confidence relationships
+      const lowConfidenceApiCalls = crossStackData.apiCalls.filter(call =>
+        call.confidence < 0.7
+      );
+
+      if (lowConfidenceApiCalls.length > 0) {
+        recommendations.push(`Consider reviewing ${lowConfidenceApiCalls.length} API calls with low confidence scores`);
+        checks.push({
+          name: 'Confidence Scores',
+          status: 'pass', // This is a warning, not a failure
+          message: `${lowConfidenceApiCalls.length} API calls have low confidence scores`
+        });
+      } else {
+        checks.push({
+          name: 'Confidence Scores',
+          status: 'pass',
+          message: 'All API calls have acceptable confidence scores'
+        });
+      }
+
+      const healthy = issues.length === 0;
+
+      return {
+        status: healthy ? 'pass' : 'fail',
+        healthy,
+        issues,
+        recommendations,
+        checks
+      };
+    } catch (error) {
+      logger.error('Cross-stack health check failed', { repoId, error });
+      return {
+        status: 'fail',
+        healthy: false,
+        issues: ['Health check failed due to database error'],
+        recommendations: ['Check database connectivity and table structure'],
+        checks: [{
+          name: 'Database Connectivity',
+          status: 'fail',
+          message: 'Failed to connect to database or execute queries'
+        }]
+      };
+    }
+  }
+
+  /**
+   * Get cross-stack analysis health status
+   */
+  async getCrossStackHealth(repoId: number): Promise<{
+    status: 'healthy' | 'warning' | 'error';
+    lastChecked: Date;
+    summary: {
+      totalApiCalls: number;
+      totalDataContracts: number;
+      averageConfidence: number;
+      driftDetected: number;
+    };
+  }> {
+    logger.debug('Getting cross-stack health status', { repoId });
+
+    try {
+      const crossStackData = await this.getCrossStackDependencies(repoId);
+
+      const totalApiCalls = crossStackData.apiCalls.length;
+      const totalDataContracts = crossStackData.dataContracts.length;
+
+      const averageConfidence = totalApiCalls > 0
+        ? crossStackData.apiCalls.reduce((sum, call) => sum + call.confidence, 0) / totalApiCalls
+        : 1.0;
+
+      const driftDetected = crossStackData.dataContracts.filter(contract =>
+        contract.drift_detected
+      ).length;
+
+      let status: 'healthy' | 'warning' | 'error' = 'healthy';
+
+      if (driftDetected > 0 || averageConfidence < 0.5) {
+        status = 'error';
+      } else if (averageConfidence < 0.7) {
+        status = 'warning';
+      }
+
+      return {
+        status,
+        lastChecked: new Date(),
+        summary: {
+          totalApiCalls,
+          totalDataContracts,
+          averageConfidence,
+          driftDetected
+        }
+      };
+    } catch (error) {
+      logger.error('Failed to get cross-stack health status', { repoId, error });
+      return {
+        status: 'error',
+        lastChecked: new Date(),
+        summary: {
+          totalApiCalls: 0,
+          totalDataContracts: 0,
+          averageConfidence: 0,
+          driftDetected: 0
+        }
+      };
+    }
+  }
+
+  // Method name aliases and framework entity queries
+
+  /**
+   * Get framework entities by type (includes routes, components, composables, ORM entities)
+   * This is a more general method than getORMEntitiesByType
+   */
+  async getFrameworkEntitiesByType(repoId: number, entityType: string): Promise<(Route | Component | Composable | ORMEntity)[]> {
+    logger.debug('Getting framework entities by type', { repoId, entityType });
+
+    const results: (Route | Component | Composable | ORMEntity)[] = [];
+
+    // Check routes
+    if (entityType === 'route' || entityType === 'all') {
+      const routes = await this.getRoutesByRepository(repoId);
+      results.push(...routes);
+    }
+
+    // Check components
+    if (entityType === 'component' || entityType === 'all') {
+      const components = await this.getComponentsByRepository(repoId);
+      results.push(...components);
+    }
+
+    // Check composables
+    if (entityType === 'composable' || entityType === 'all') {
+      const composables = await this.getComposablesByRepository(repoId);
+      results.push(...composables);
+    }
+
+    // Check ORM entities
+    if (entityType === 'orm_entity' || entityType === 'all') {
+      const ormEntities = await this.getORMEntitiesByRepository(repoId);
+      results.push(...ormEntities);
+    }
+
+    return results;
+  }
+
+  /**
+   * Get symbols by type for a repository
+   */
+  async getSymbolsByType(repoId: number, symbolType: string): Promise<Symbol[]> {
+    logger.debug('Getting symbols by type', { repoId, symbolType });
+
+    const symbols = await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .where('symbols.symbol_type', symbolType)
+      .select('symbols.*')
+      .orderBy('symbols.name');
+
+    return symbols as Symbol[];
+  }
+
+  /**
+   * Get files by language for a repository
+   */
+  async getFilesByLanguage(repoId: number, language: string): Promise<File[]> {
+    logger.debug('Getting files by language', { repoId, language });
+
+    const files = await this.db('files')
+      .where({ repo_id: repoId, language })
+      .orderBy('path');
+
+    return files as File[];
   }
 }
 

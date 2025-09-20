@@ -27,4 +27,7 @@ module.exports = {
   clearMocks: true,
   restoreMocks: true,
   verbose: true,
+  maxWorkers: 1,
+  workerIdleMemoryLimit: '512MB',
+  maxConcurrency: 1,
 };

@@ -10,6 +10,9 @@ export interface TransitiveAnalysisOptions {
   includeTypes?: DependencyType[];
   excludeTypes?: DependencyType[];
   confidenceThreshold?: number;
+  // NEW: Cross-stack options
+  includeCrossStack?: boolean;
+  crossStackConfidenceThreshold?: number;
 }
 
 export interface TransitiveResult {
@@ -26,6 +29,29 @@ export interface TransitiveAnalysisResult {
   totalPaths: number;
   cyclesDetected: number;
   executionTimeMs: number;
+}
+
+export interface CrossStackOptions {
+  maxDepth?: number;
+  includeTransitive?: boolean;
+  confidenceThreshold?: number;
+}
+
+export interface CrossStackImpactResult {
+  symbolId: number;
+  frontendImpact: TransitiveResult[];
+  backendImpact: TransitiveResult[];
+  crossStackRelationships: CrossStackRelationship[];
+  totalImpactedSymbols: number;
+  executionTimeMs: number;
+}
+
+export interface CrossStackRelationship {
+  fromSymbol: { id: number; name: string; type: string; language: string };
+  toSymbol: { id: number; name: string; type: string; language: string };
+  relationshipType: DependencyType;
+  confidence: number;
+  path: number[];
 }
 
 /**
@@ -55,13 +81,38 @@ export class TransitiveAnalyzer {
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
     const confidenceThreshold = options.confidenceThreshold || this.DEFAULT_CONFIDENCE_THRESHOLD;
 
+    // NEW: Cross-stack specific handling
+    const includeCrossStack = options.includeCrossStack || false;
+    const crossStackThreshold = options.crossStackConfidenceThreshold || 0.7;
+
     logger.debug('Starting transitive caller analysis', {
       symbolId,
       maxDepth,
       confidenceThreshold,
       includeTypes: options.includeTypes,
-      excludeTypes: options.excludeTypes
+      excludeTypes: options.excludeTypes,
+      includeCrossStack,
+      crossStackThreshold
     });
+
+    if (includeCrossStack) {
+      return this.traverseCallersWithCrossStack(symbolId, options, crossStackThreshold);
+    } else {
+      // Use existing traverseCallers implementation
+      return this.traverseCallersOriginal(symbolId, options);
+    }
+  }
+
+  /**
+   * Original caller traversal method without cross-stack support
+   */
+  private async traverseCallersOriginal(
+    symbolId: number,
+    options: TransitiveAnalysisOptions
+  ): Promise<TransitiveAnalysisResult> {
+    const startTime = Date.now();
+    const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
+    const confidenceThreshold = options.confidenceThreshold || this.DEFAULT_CONFIDENCE_THRESHOLD;
 
     const visited = new Set<number>();
     const cycles = new Set<string>();
@@ -100,6 +151,194 @@ export class TransitiveAnalyzer {
       cyclesDetected: cycles.size,
       executionTimeMs: executionTime
     };
+  }
+
+  /**
+   * Cross-stack transitive caller analysis with cross-language traversal
+   */
+  private async traverseCallersWithCrossStack(
+    symbolId: number,
+    options: TransitiveAnalysisOptions,
+    crossStackThreshold: number
+  ): Promise<TransitiveAnalysisResult> {
+    const startTime = Date.now();
+    const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
+    const confidenceThreshold = options.confidenceThreshold || this.DEFAULT_CONFIDENCE_THRESHOLD;
+
+    const visited = new Set<number>();
+    const cycles = new Set<string>();
+    const results: TransitiveResult[] = [];
+    let maxDepthReached = 0;
+
+    // Include cross-stack dependency types in the traversal
+    const enhancedOptions: TransitiveAnalysisOptions = {
+      ...options,
+      includeTypes: options.includeTypes ? [
+        ...options.includeTypes,
+        DependencyType.API_CALL,
+        DependencyType.SHARES_SCHEMA,
+        DependencyType.FRONTEND_BACKEND
+      ] : undefined
+    };
+
+    await this.traverseCallersWithCrossStackSupport(
+      symbolId,
+      [],
+      0,
+      maxDepth,
+      1.0, // Start with full confidence
+      visited,
+      cycles,
+      results,
+      enhancedOptions,
+      confidenceThreshold,
+      crossStackThreshold
+    );
+
+    maxDepthReached = Math.max(...results.map(r => r.depth), 0);
+
+    const executionTime = Date.now() - startTime;
+
+    logger.debug('Completed cross-stack transitive caller analysis', {
+      symbolId,
+      totalResults: results.length,
+      maxDepthReached,
+      cyclesDetected: cycles.size,
+      executionTimeMs: executionTime,
+      crossStackThreshold
+    });
+
+    return {
+      results,
+      maxDepthReached,
+      totalPaths: results.length,
+      cyclesDetected: cycles.size,
+      executionTimeMs: executionTime
+    };
+  }
+
+  /**
+   * Cross-stack aware traversal method with confidence propagation across language boundaries
+   */
+  private async traverseCallersWithCrossStackSupport(
+    symbolId: number,
+    currentPath: number[],
+    currentDepth: number,
+    maxDepth: number,
+    currentConfidence: number,
+    visited: Set<number>,
+    cycles: Set<string>,
+    results: TransitiveResult[],
+    options: TransitiveAnalysisOptions,
+    confidenceThreshold: number,
+    crossStackThreshold: number
+  ): Promise<void> {
+    // Stop if we've reached max depth
+    if (currentDepth >= maxDepth) {
+      return;
+    }
+
+    // Stop if confidence has dropped too low
+    if (currentConfidence < confidenceThreshold) {
+      return;
+    }
+
+    // Cycle detection
+    if (visited.has(symbolId)) {
+      const cycleKey = [...currentPath, symbolId].sort().join('-');
+      cycles.add(cycleKey);
+      logger.debug('Cycle detected in cross-stack caller traversal', { symbolId, path: currentPath });
+      return;
+    }
+
+    visited.add(symbolId);
+
+    try {
+      // Get both regular and cross-stack callers
+      const regularCallers = await this.getDirectCallers(symbolId, options);
+      const crossStackCallers = await this.getCrossStackCallers(symbolId, crossStackThreshold);
+
+      // Process regular callers
+      for (const caller of regularCallers) {
+        if (!caller.from_symbol) continue;
+
+        const fromSymbolId = caller.from_symbol.id;
+        const newPath = [...currentPath, symbolId];
+        const newConfidence = currentConfidence * (caller.confidence || 1.0);
+
+        // Add this result
+        results.push({
+          symbolId: fromSymbolId,
+          path: newPath,
+          depth: currentDepth + 1,
+          totalConfidence: newConfidence,
+          dependencies: [caller]
+        });
+
+        // Recurse to find callers of this caller
+        const newVisited = new Set(visited);
+        await this.traverseCallersWithCrossStackSupport(
+          fromSymbolId,
+          newPath,
+          currentDepth + 1,
+          maxDepth,
+          newConfidence,
+          newVisited,
+          cycles,
+          results,
+          options,
+          confidenceThreshold,
+          crossStackThreshold
+        );
+      }
+
+      // Process cross-stack callers with confidence adjustment
+      for (const caller of crossStackCallers) {
+        if (!caller.from_symbol) continue;
+
+        const fromSymbolId = caller.from_symbol.id;
+        const newPath = [...currentPath, symbolId];
+
+        // Apply cross-stack confidence adjustment
+        const crossStackAdjustedConfidence = this.adjustCrossStackConfidence(
+          caller.confidence || 1.0,
+          caller.dependency_type
+        );
+        const newConfidence = currentConfidence * crossStackAdjustedConfidence;
+
+        // Only continue if cross-stack confidence meets threshold
+        if (newConfidence >= crossStackThreshold) {
+          // Add this result
+          results.push({
+            symbolId: fromSymbolId,
+            path: newPath,
+            depth: currentDepth + 1,
+            totalConfidence: newConfidence,
+            dependencies: [caller]
+          });
+
+          // Recurse to find callers of this cross-stack caller
+          const newVisited = new Set(visited);
+          await this.traverseCallersWithCrossStackSupport(
+            fromSymbolId,
+            newPath,
+            currentDepth + 1,
+            maxDepth,
+            newConfidence,
+            newVisited,
+            cycles,
+            results,
+            options,
+            confidenceThreshold,
+            crossStackThreshold
+          );
+        }
+      }
+    } catch (error) {
+      logger.error('Error traversing cross-stack callers', { symbolId, error: error.message });
+    } finally {
+      visited.delete(symbolId);
+    }
   }
 
   /**
@@ -311,6 +550,224 @@ export class TransitiveAnalyzer {
       logger.error('Error traversing dependencies', { symbolId, error: error.message });
     } finally {
       visited.delete(symbolId);
+    }
+  }
+
+  /**
+   * Get cross-stack transitive impact analysis for a symbol
+   */
+  async getCrossStackTransitiveImpact(
+    symbolId: number,
+    options: CrossStackOptions = {}
+  ): Promise<CrossStackImpactResult> {
+    const startTime = Date.now();
+    const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
+    const confidenceThreshold = options.confidenceThreshold || 0.7;
+
+    logger.debug('Starting cross-stack impact analysis', {
+      symbolId,
+      maxDepth,
+      confidenceThreshold,
+      includeTransitive: options.includeTransitive
+    });
+
+    // Get frontend impact (if this is a backend symbol)
+    const frontendOptions: TransitiveAnalysisOptions = {
+      maxDepth,
+      confidenceThreshold,
+      includeCrossStack: true,
+      crossStackConfidenceThreshold: confidenceThreshold,
+      includeTypes: [DependencyType.API_CALL, DependencyType.SHARES_SCHEMA, DependencyType.FRONTEND_BACKEND]
+    };
+
+    const frontendImpactResult = options.includeTransitive
+      ? await this.getTransitiveCallers(symbolId, frontendOptions)
+      : { results: [], maxDepthReached: 0, totalPaths: 0, cyclesDetected: 0, executionTimeMs: 0 };
+
+    // Get backend impact (if this is a frontend symbol)
+    const backendOptions: TransitiveAnalysisOptions = {
+      maxDepth,
+      confidenceThreshold,
+      includeCrossStack: true,
+      crossStackConfidenceThreshold: confidenceThreshold,
+      includeTypes: [DependencyType.API_CALL, DependencyType.SHARES_SCHEMA, DependencyType.FRONTEND_BACKEND]
+    };
+
+    const backendImpactResult = options.includeTransitive
+      ? await this.getTransitiveDependencies(symbolId, backendOptions)
+      : { results: [], maxDepthReached: 0, totalPaths: 0, cyclesDetected: 0, executionTimeMs: 0 };
+
+    // Get direct cross-stack relationships
+    const crossStackRelationships = await this.getCrossStackRelationships(symbolId, confidenceThreshold);
+
+    const executionTime = Date.now() - startTime;
+
+    logger.debug('Completed cross-stack impact analysis', {
+      symbolId,
+      frontendImpact: frontendImpactResult.results.length,
+      backendImpact: backendImpactResult.results.length,
+      crossStackRelationships: crossStackRelationships.length,
+      executionTimeMs: executionTime
+    });
+
+    return {
+      symbolId,
+      frontendImpact: frontendImpactResult.results,
+      backendImpact: backendImpactResult.results,
+      crossStackRelationships,
+      totalImpactedSymbols: frontendImpactResult.results.length + backendImpactResult.results.length,
+      executionTimeMs: executionTime
+    };
+  }
+
+  /**
+   * Get cross-stack callers (symbols from different language stacks that call this symbol)
+   */
+  private async getCrossStackCallers(
+    symbolId: number,
+    confidenceThreshold: number
+  ): Promise<DependencyWithSymbols[]> {
+    const query = this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
+      .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
+      .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
+      .where('dependencies.to_symbol_id', symbolId)
+      .whereIn('dependencies.dependency_type', [
+        DependencyType.API_CALL,
+        DependencyType.SHARES_SCHEMA,
+        DependencyType.FRONTEND_BACKEND
+      ])
+      .where('dependencies.confidence', '>=', confidenceThreshold)
+      .select(
+        'dependencies.*',
+        'from_symbols.id as from_symbol_id',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path',
+        'from_files.language as from_language',
+        'to_symbols.id as to_symbol_id',
+        'to_symbols.name as to_symbol_name',
+        'to_symbols.symbol_type as to_symbol_type',
+        'to_files.path as to_file_path',
+        'to_files.language as to_language'
+      )
+      .orderBy('dependencies.confidence', 'desc');
+
+    const results = await query;
+
+    return results.map(row => ({
+      id: row.id,
+      from_symbol_id: row.from_symbol_id,
+      to_symbol_id: row.to_symbol_id,
+      dependency_type: row.dependency_type,
+      line_number: row.line_number,
+      confidence: row.confidence,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      from_symbol: row.from_symbol_id ? {
+        id: row.from_symbol_id,
+        name: row.from_symbol_name,
+        symbol_type: row.from_symbol_type,
+        file: row.from_file_path ? {
+          path: row.from_file_path,
+          language: row.from_language
+        } : undefined
+      } : undefined,
+      to_symbol: row.to_symbol_id ? {
+        id: row.to_symbol_id,
+        name: row.to_symbol_name,
+        symbol_type: row.to_symbol_type,
+        file: row.to_file_path ? {
+          path: row.to_file_path,
+          language: row.to_language
+        } : undefined
+      } : undefined
+    })) as DependencyWithSymbols[];
+  }
+
+  /**
+   * Get cross-stack relationships for a symbol
+   */
+  private async getCrossStackRelationships(
+    symbolId: number,
+    confidenceThreshold: number
+  ): Promise<CrossStackRelationship[]> {
+    // Get relationships where this symbol is either source or target
+    const query = this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
+      .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
+      .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
+      .where(function() {
+        this.where('dependencies.from_symbol_id', symbolId)
+          .orWhere('dependencies.to_symbol_id', symbolId);
+      })
+      .whereIn('dependencies.dependency_type', [
+        DependencyType.API_CALL,
+        DependencyType.SHARES_SCHEMA,
+        DependencyType.FRONTEND_BACKEND
+      ])
+      .where('dependencies.confidence', '>=', confidenceThreshold)
+      .select(
+        'dependencies.*',
+        'from_symbols.id as from_symbol_id',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path',
+        'from_files.language as from_language',
+        'to_symbols.id as to_symbol_id',
+        'to_symbols.name as to_symbol_name',
+        'to_symbols.symbol_type as to_symbol_type',
+        'to_files.path as to_file_path',
+        'to_files.language as to_language'
+      );
+
+    const results = await query;
+
+    return results.map(row => ({
+      fromSymbol: {
+        id: row.from_symbol_id,
+        name: row.from_symbol_name,
+        type: row.from_symbol_type,
+        language: row.from_language || 'unknown'
+      },
+      toSymbol: {
+        id: row.to_symbol_id,
+        name: row.to_symbol_name,
+        type: row.to_symbol_type,
+        language: row.to_language || 'unknown'
+      },
+      relationshipType: row.dependency_type,
+      confidence: row.confidence,
+      path: [] // Will be populated by traversal algorithms
+    }));
+  }
+
+  /**
+   * Adjust confidence score for cross-stack relationships
+   */
+  private adjustCrossStackConfidence(
+    originalConfidence: number,
+    dependencyType: DependencyType
+  ): number {
+    // Apply different confidence adjustments based on relationship type
+    switch (dependencyType) {
+      case DependencyType.API_CALL:
+        // API calls are generally high confidence if detected correctly
+        return originalConfidence * 0.95;
+
+      case DependencyType.SHARES_SCHEMA:
+        // Schema sharing has medium confidence due to potential naming similarities
+        return originalConfidence * 0.85;
+
+      case DependencyType.FRONTEND_BACKEND:
+        // Generic cross-stack relationships have lower confidence
+        return originalConfidence * 0.75;
+
+      default:
+        // Default cross-stack adjustment
+        return originalConfidence * 0.8;
     }
   }
 

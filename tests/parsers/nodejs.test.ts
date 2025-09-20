@@ -4,11 +4,17 @@ import JavaScript from 'tree-sitter-javascript';
 
 describe('NodeJSParser', () => {
   let parser: NodeJSParser;
+  let tsParser: Parser;
 
   beforeEach(() => {
-    const tsParser = new Parser();
+    tsParser = new Parser();
     tsParser.setLanguage(JavaScript);
     parser = new NodeJSParser(tsParser);
+  });
+
+  afterEach(() => {
+    tsParser = null as any;
+    parser = null as any;
   });
 
   describe('Express.js Routes', () => {
@@ -117,7 +123,6 @@ app.use((error, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(\`Server running on port \${PORT}\`);
 });
 
 module.exports = app;
@@ -207,7 +212,6 @@ fastify.post('/users', {
 const start = async () => {
   try {
     await fastify.listen({ port: 3000, host: '0.0.0.0' });
-    console.log('Server listening on port 3000');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -274,7 +278,6 @@ const requestLogger = async (req, res, next) => {
 
   res.on('finish', () => {
     const duration = Date.now() - start;
-    console.log(\`\${req.method} \${req.url} - \${res.statusCode} (\${duration}ms)\`);
   });
 
   next();

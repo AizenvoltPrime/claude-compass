@@ -32,14 +32,12 @@ describe('Query Optimization and Transitive Analysis', () => {
             }
 
             const testSymbol: SymbolWithFile = symbols[0];
-            console.log(`Testing transitive analysis with symbol: ${testSymbol.name} (ID: ${testSymbol.id})`);
 
             // Test transitive dependencies
             const startTime: number = Date.now();
             const result = await transitiveAnalyzer.getTransitiveDependencies(testSymbol.id, { maxDepth: 5 });
             const endTime: number = Date.now();
 
-            console.log(`Found ${result.results.length} transitive dependencies in ${endTime - startTime}ms`);
 
             expect(result).toBeDefined();
             expect(result.results).toBeDefined();
@@ -62,7 +60,6 @@ describe('Query Optimization and Transitive Analysis', () => {
             const result = await transitiveAnalyzer.getTransitiveCallers(testSymbol.id, { maxDepth: 5 });
             const endTime: number = Date.now();
 
-            console.log(`Found ${result.results.length} transitive callers in ${endTime - startTime}ms`);
 
             expect(result).toBeDefined();
             expect(result.results).toBeDefined();
@@ -93,7 +90,6 @@ describe('Query Optimization and Transitive Analysis', () => {
             const firstQueryTime: number = endTime1 - startTime1;
             const secondQueryTime: number = endTime2 - startTime2;
 
-            console.log(`First query: ${firstQueryTime}ms, Second query: ${secondQueryTime}ms`);
 
             // Results should be identical
             expect(result1.results.length).toBe(result2.results.length);

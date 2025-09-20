@@ -6,11 +6,17 @@ import type { LaravelRoute, LaravelController, EloquentModel, LaravelMiddleware,
 
 describe('LaravelParser', () => {
   let parser: LaravelParser;
+  let treeParser: Parser;
 
   beforeEach(() => {
-    const treeParser = new Parser();
+    treeParser = new Parser();
     treeParser.setLanguage(PHP);
     parser = new LaravelParser(treeParser);
+  });
+
+  afterEach(() => {
+    treeParser = null as any;
+    parser = null as any;
   });
 
   describe('Route Extraction', () => {

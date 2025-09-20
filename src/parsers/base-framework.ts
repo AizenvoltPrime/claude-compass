@@ -36,6 +36,7 @@ export interface FrameworkParseOptions extends ParseOptions {
  * Framework-specific file analysis result
  */
 export interface ParseFileResult extends ParseResult {
+  filePath: string; // Phase 5 addition for cross-stack tracking
   frameworkEntities?: FrameworkEntity[];
   metadata?: {
     framework?: string;
@@ -75,7 +76,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
    * Parse a file with framework-aware context
    */
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-    logger.debug(`Parsing file with ${this.frameworkType} framework context`, { filePath });
 
     try {
       // Check if file needs chunked parsing due to size constraints
@@ -91,6 +91,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       // Skip framework analysis if requested or not applicable
       if (options.skipFrameworkAnalysis || !this.isFrameworkApplicable(filePath, content)) {
         return {
+          filePath,
           ...baseResult,
           frameworkEntities: [],
           metadata: {
@@ -109,6 +110,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       logger.error(`Framework parsing failed for ${filePath}`, { error, framework: this.frameworkType });
 
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -162,12 +164,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       pattern.fileExtensions.includes(ext)
     );
 
-    logger.debug(`Extension check result for ${this.frameworkType}`, {
-      filePath,
-      extension: ext,
-      hasApplicableExtension,
-      patterns: this.patterns.map(p => ({ name: p.name, extensions: p.fileExtensions }))
-    });
 
     if (!hasApplicableExtension) {
       return false;
@@ -189,12 +185,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       }
     });
 
-    logger.debug(`Final applicability result for ${this.frameworkType}`, {
-      filePath,
-      hasApplicableExtension,
-      hasApplicableContent,
-      result: hasApplicableContent
-    });
 
     return hasApplicableContent;
   }
@@ -208,6 +198,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     filePath: string
   ): ParseFileResult {
     return {
+      filePath,
       symbols: baseResult.symbols,
       dependencies: baseResult.dependencies,
       imports: baseResult.imports,

@@ -178,7 +178,7 @@ export class ClaudeCompassMCPServer {
                 },
                 dependency_type: {
                   type: 'string',
-                  enum: ['calls', 'imports', 'inherits', 'implements', 'references', 'exports'],
+                  enum: ['calls', 'imports', 'inherits', 'implements', 'references', 'exports', 'api_call', 'shares_schema', 'frontend_backend'],
                   description: 'Type of dependency relationship to find',
                   default: 'calls',
                 },
@@ -186,6 +186,18 @@ export class ClaudeCompassMCPServer {
                   type: 'boolean',
                   description: 'Include indirect callers (transitive dependencies)',
                   default: false,
+                },
+                include_cross_stack: {
+                  type: 'boolean',
+                  description: 'Include cross-stack callers (Vue ↔ Laravel)',
+                  default: false,
+                },
+                cross_stack_confidence_threshold: {
+                  type: 'number',
+                  description: 'Confidence threshold for cross-stack relationships (0.0-1.0)',
+                  default: 0.7,
+                  minimum: 0,
+                  maximum: 1,
                 },
               },
               required: ['symbol_id'],
@@ -203,13 +215,90 @@ export class ClaudeCompassMCPServer {
                 },
                 dependency_type: {
                   type: 'string',
-                  enum: ['calls', 'imports', 'inherits', 'implements', 'references', 'exports'],
+                  enum: ['calls', 'imports', 'inherits', 'implements', 'references', 'exports', 'api_call', 'shares_schema', 'frontend_backend'],
                   description: 'Type of dependency relationship to list',
                 },
                 include_indirect: {
                   type: 'boolean',
                   description: 'Include indirect dependencies (transitive)',
                   default: false,
+                },
+                include_cross_stack: {
+                  type: 'boolean',
+                  description: 'Include cross-stack dependencies (Vue ↔ Laravel)',
+                  default: false,
+                },
+              },
+              required: ['symbol_id'],
+            },
+          },
+          {
+            name: 'get_api_calls',
+            description: 'Find API calls from Vue components to Laravel endpoints',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                component_id: {
+                  type: 'number',
+                  description: 'The ID of the Vue component symbol to find API calls for',
+                },
+                include_response_schemas: {
+                  type: 'boolean',
+                  description: 'Whether to include full response schema information',
+                  default: false,
+                },
+                repository_id: {
+                  type: 'number',
+                  description: 'Limit search to specific repository',
+                },
+              },
+              required: ['component_id'],
+            },
+          },
+          {
+            name: 'get_data_contracts',
+            description: 'List shared data structures between TypeScript and PHP',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                schema_name: {
+                  type: 'string',
+                  description: 'The name of the data schema/interface to analyze',
+                },
+                repository_id: {
+                  type: 'number',
+                  description: 'Limit search to specific repository',
+                },
+                include_drift_analysis: {
+                  type: 'boolean',
+                  description: 'Whether to include schema drift analysis between frontend and backend',
+                  default: false,
+                },
+              },
+              required: ['schema_name'],
+            },
+          },
+          {
+            name: 'get_cross_stack_impact',
+            description: 'Calculate blast radius across Vue ↔ Laravel boundaries',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                symbol_id: {
+                  type: 'number',
+                  description: 'The ID of the symbol to analyze cross-stack impact for',
+                },
+                include_transitive: {
+                  type: 'boolean',
+                  description: 'Include transitive cross-stack impact analysis',
+                  default: false,
+                },
+                max_depth: {
+                  type: 'number',
+                  description: 'Maximum depth for transitive analysis',
+                  default: 10,
+                  minimum: 1,
+                  maximum: 20,
                 },
               },
               required: ['symbol_id'],
@@ -269,6 +358,15 @@ export class ClaudeCompassMCPServer {
 
           case 'list_dependencies':
             return await this.tools.listDependencies(args);
+
+          case 'get_api_calls':
+            return await this.tools.getApiCalls(args);
+
+          case 'get_data_contracts':
+            return await this.tools.getDataContracts(args);
+
+          case 'get_cross_stack_impact':
+            return await this.tools.getCrossStackImpact(args);
 
           default:
             return this.formatErrorResponse(-32601, `Unknown tool: ${name}`, request.params);

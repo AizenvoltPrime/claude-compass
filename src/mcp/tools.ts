@@ -1,5 +1,5 @@
 import { DatabaseService } from '../database/services';
-import { DependencyType, DependencyWithSymbols, SymbolWithFile } from '../database/models';
+import { DependencyType, DependencyWithSymbols, SymbolWithFile, ApiCall, DataContract } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { transitiveAnalyzer, TransitiveAnalysisOptions } from '../graph/transitive-analyzer';
 
@@ -159,6 +159,107 @@ function validateSearchLaravelEntitiesArgs(args: any): SearchLaravelEntitiesArgs
   return args as SearchLaravelEntitiesArgs;
 }
 
+// Cross-stack tool validation functions
+function validateGetApiCallsArgs(args: any): GetApiCallsArgs {
+  if (args.component_id === undefined || args.component_id === null) {
+    throw new Error('component_id is required');
+  }
+  if (typeof args.component_id !== 'number') {
+    throw new Error('component_id must be a number');
+  }
+  if (args.component_id < 0) {
+    throw new Error('component_id must be a positive number');
+  }
+  if (args.include_response_schemas !== undefined && typeof args.include_response_schemas !== 'boolean') {
+    throw new Error('include_response_schemas must be a boolean');
+  }
+  if (args.repository_id !== undefined && typeof args.repository_id !== 'number') {
+    throw new Error('repository_id must be a number');
+  }
+  return args as GetApiCallsArgs;
+}
+
+function validateGetDataContractsArgs(args: any): GetDataContractsArgs {
+  if (args.schema_name === undefined || args.schema_name === null) {
+    throw new Error('schema_name is required');
+  }
+  if (typeof args.schema_name !== 'string') {
+    throw new Error('schema_name must be a string');
+  }
+  if (args.schema_name === '' || args.schema_name.trim() === '') {
+    throw new Error('schema_name cannot be empty');
+  }
+  if (args.repository_id !== undefined && typeof args.repository_id !== 'number') {
+    throw new Error('repository_id must be a number');
+  }
+  if (args.include_drift_analysis !== undefined && typeof args.include_drift_analysis !== 'boolean') {
+    throw new Error('include_drift_analysis must be a boolean');
+  }
+  return args as GetDataContractsArgs;
+}
+
+function validateGetCrossStackImpactArgs(args: any): GetCrossStackImpactArgs {
+  if (args.symbol_id === undefined || args.symbol_id === null) {
+    throw new Error('symbol_id is required');
+  }
+  if (typeof args.symbol_id !== 'number') {
+    throw new Error('symbol_id must be a number');
+  }
+  if (args.symbol_id <= 0) {
+    throw new Error('symbol_id must be a positive number');
+  }
+  if (args.include_transitive !== undefined && typeof args.include_transitive !== 'boolean') {
+    throw new Error('include_transitive must be a boolean');
+  }
+  if (args.max_depth !== undefined) {
+    const maxDepth = Number(args.max_depth);
+    if (isNaN(maxDepth) || maxDepth < 1 || maxDepth > 20) {
+      throw new Error('max_depth must be a number between 1 and 20');
+    }
+    args.max_depth = maxDepth;
+  }
+  return args as GetCrossStackImpactArgs;
+}
+
+function validateWhoCallsArgsWithCrossStack(args: any): WhoCallsArgsWithCrossStack {
+  if (!args.symbol_id || typeof args.symbol_id !== 'number') {
+    throw new Error('symbol_id is required and must be a number');
+  }
+  if (args.dependency_type !== undefined && typeof args.dependency_type !== 'string') {
+    throw new Error('dependency_type must be a string');
+  }
+  if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
+    throw new Error('include_indirect must be a boolean');
+  }
+  if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
+    throw new Error('include_cross_stack must be a boolean');
+  }
+  if (args.cross_stack_confidence_threshold !== undefined) {
+    const threshold = Number(args.cross_stack_confidence_threshold);
+    if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+      throw new Error('cross_stack_confidence_threshold must be a number between 0 and 1');
+    }
+    args.cross_stack_confidence_threshold = threshold;
+  }
+  return args as WhoCallsArgsWithCrossStack;
+}
+
+function validateListDependenciesArgsWithCrossStack(args: any): ListDependenciesArgsWithCrossStack {
+  if (!args.symbol_id || typeof args.symbol_id !== 'number') {
+    throw new Error('symbol_id is required and must be a number');
+  }
+  if (args.dependency_type !== undefined && typeof args.dependency_type !== 'string') {
+    throw new Error('dependency_type must be a string');
+  }
+  if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
+    throw new Error('include_indirect must be a boolean');
+  }
+  if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
+    throw new Error('include_cross_stack must be a boolean');
+  }
+  return args as ListDependenciesArgsWithCrossStack;
+}
+
 export interface GetFileArgs {
   file_id?: number;
   file_path?: string;
@@ -222,6 +323,34 @@ export interface SearchLaravelEntitiesArgs {
   limit?: number;
 }
 
+// Cross-stack tool argument interfaces
+export interface GetApiCallsArgs {
+  component_id: number;
+  include_response_schemas?: boolean;
+  repository_id?: number;
+}
+
+export interface GetDataContractsArgs {
+  schema_name: string;
+  repository_id?: number;
+  include_drift_analysis?: boolean;
+}
+
+export interface GetCrossStackImpactArgs {
+  symbol_id: number;
+  include_transitive?: boolean;
+  max_depth?: number;
+}
+
+export interface WhoCallsArgsWithCrossStack extends WhoCallsArgs {
+  include_cross_stack?: boolean;
+  cross_stack_confidence_threshold?: number;
+}
+
+export interface ListDependenciesArgsWithCrossStack extends ListDependenciesArgs {
+  include_cross_stack?: boolean;
+}
+
 export class McpTools {
   private dbService: DatabaseService;
   private logger: any;
@@ -235,7 +364,6 @@ export class McpTools {
 
   async getFile(args: any) {
     const validatedArgs = validateGetFileArgs(args);
-    this.logger.debug('Getting file', validatedArgs);
 
     let file;
 
@@ -292,7 +420,6 @@ export class McpTools {
 
   async getSymbol(args: any) {
     const validatedArgs = validateGetSymbolArgs(args);
-    this.logger.debug('Getting symbol', validatedArgs);
 
     const symbol = await this.dbService.getSymbolWithFile(validatedArgs.symbol_id);
     if (!symbol) {
@@ -363,7 +490,6 @@ export class McpTools {
 
   async searchCode(args: any) {
     const validatedArgs = validateSearchCodeArgs(args);
-    this.logger.debug('Searching code', validatedArgs);
 
     const symbols = await this.dbService.searchSymbols(validatedArgs.query, validatedArgs.repo_id);
 
@@ -416,7 +542,11 @@ export class McpTools {
   }
 
   async whoCalls(args: any) {
-    const validatedArgs = validateWhoCallsArgs(args);
+    // Check if cross-stack parameters are provided to use enhanced validation
+    const validatedArgs = (args.include_cross_stack !== undefined || args.cross_stack_confidence_threshold !== undefined)
+      ? validateWhoCallsArgsWithCrossStack(args)
+      : validateWhoCallsArgs(args);
+
     this.logger.debug('Finding who calls symbol', validatedArgs);
 
     const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
@@ -481,6 +611,25 @@ export class McpTools {
       }
     }
 
+    // Enhanced formatting includes cross-stack relationship indicators
+    const enhancedCallers = callers.map(caller => ({
+      id: caller.id,
+      dependency_type: caller.dependency_type,
+      line_number: caller.line_number,
+      confidence: caller.confidence,
+      from_symbol: caller.from_symbol ? {
+        id: caller.from_symbol.id,
+        name: caller.from_symbol.name,
+        type: caller.from_symbol.symbol_type,
+        file_path: caller.from_symbol.file?.path,
+      } : null,
+      // Add cross-stack indicators if cross-stack analysis is enabled
+      ...(('include_cross_stack' in validatedArgs) ? {
+        is_cross_stack: this.isCrossStackRelationship(caller),
+        cross_stack_confidence: caller.confidence
+      } : {})
+    }));
+
     return {
       content: [
         {
@@ -491,23 +640,17 @@ export class McpTools {
               name: symbol.name,
               type: symbol.symbol_type,
             },
-            callers: callers.map(caller => ({
-              id: caller.id,
-              dependency_type: caller.dependency_type,
-              line_number: caller.line_number,
-              confidence: caller.confidence,
-              from_symbol: caller.from_symbol ? {
-                id: caller.from_symbol.id,
-                name: caller.from_symbol.name,
-                type: caller.from_symbol.symbol_type,
-                file_path: caller.from_symbol.file?.path,
-              } : null,
-            })),
+            callers: enhancedCallers,
             total_callers: callers.length,
             filters: {
               dependency_type: validatedArgs.dependency_type,
               include_indirect: validatedArgs.include_indirect,
+              ...('include_cross_stack' in validatedArgs ? {
+                include_cross_stack: (validatedArgs as WhoCallsArgsWithCrossStack).include_cross_stack,
+                cross_stack_confidence_threshold: (validatedArgs as WhoCallsArgsWithCrossStack).cross_stack_confidence_threshold
+              } : {})
             },
+            cross_stack_enabled: 'include_cross_stack' in validatedArgs
           }, null, 2),
         },
       ],
@@ -515,7 +658,11 @@ export class McpTools {
   }
 
   async listDependencies(args: any) {
-    const validatedArgs = validateListDependenciesArgs(args);
+    // Check if cross-stack parameters are provided to use enhanced validation
+    const validatedArgs = (args.include_cross_stack !== undefined)
+      ? validateListDependenciesArgsWithCrossStack(args)
+      : validateListDependenciesArgs(args);
+
     this.logger.debug('Listing dependencies for symbol', validatedArgs);
 
     const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
@@ -608,6 +755,25 @@ export class McpTools {
       }
     }
 
+    // Enhanced formatting includes cross-stack dependency types
+    const enhancedDependencies = dependencies.map(dep => ({
+      id: dep.id,
+      dependency_type: dep.dependency_type,
+      line_number: dep.line_number,
+      confidence: dep.confidence,
+      to_symbol: dep.to_symbol ? {
+        id: dep.to_symbol.id,
+        name: dep.to_symbol.name,
+        type: dep.to_symbol.symbol_type,
+        file_path: dep.to_symbol.file?.path,
+      } : null,
+      // Add cross-stack indicators if cross-stack analysis is enabled
+      ...(('include_cross_stack' in validatedArgs) ? {
+        is_cross_stack: this.isCrossStackRelationship(dep),
+        cross_stack_confidence: dep.confidence
+      } : {})
+    }));
+
     return {
       content: [
         {
@@ -618,27 +784,358 @@ export class McpTools {
               name: symbol.name,
               type: symbol.symbol_type,
             },
-            dependencies: dependencies.map(dep => ({
-              id: dep.id,
-              dependency_type: dep.dependency_type,
-              line_number: dep.line_number,
-              confidence: dep.confidence,
-              to_symbol: dep.to_symbol ? {
-                id: dep.to_symbol.id,
-                name: dep.to_symbol.name,
-                type: dep.to_symbol.symbol_type,
-                file_path: dep.to_symbol.file?.path,
-              } : null,
-            })),
+            dependencies: enhancedDependencies,
             total_dependencies: dependencies.length,
             filters: {
               dependency_type: validatedArgs.dependency_type,
               include_indirect: validatedArgs.include_indirect,
+              ...('include_cross_stack' in validatedArgs ? {
+                include_cross_stack: (validatedArgs as ListDependenciesArgsWithCrossStack).include_cross_stack
+              } : {})
             },
+            cross_stack_enabled: 'include_cross_stack' in validatedArgs
           }, null, 2),
         },
       ],
     };
+  }
+
+  // Cross-stack MCP tools
+  async getApiCalls(args: any) {
+    const validatedArgs = validateGetApiCallsArgs(args);
+    this.logger.debug('Getting API calls for component', validatedArgs);
+
+    try {
+      const apiCalls = await this.dbService.getApiCallsByComponent(validatedArgs.component_id);
+
+      // Enrich with schemas if requested
+      const enrichedCalls = validatedArgs.include_response_schemas
+        ? await this.enrichWithSchemas(apiCalls)
+        : apiCalls;
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            component_id: validatedArgs.component_id,
+            api_calls: enrichedCalls.map(call => ({
+              id: call.id,
+              method: call.method,
+              url_pattern: call.url_pattern,
+              request_schema: call.request_schema,
+              response_schema: call.response_schema,
+              confidence: call.confidence,
+              backend_route_id: call.backend_route_id,
+              created_at: call.created_at,
+            })),
+            total_calls: enrichedCalls.length,
+            filters: {
+              component_id: validatedArgs.component_id,
+              include_response_schemas: validatedArgs.include_response_schemas,
+              repository_id: validatedArgs.repository_id,
+            },
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      this.logger.error('Failed to get API calls', { error: (error as Error).message });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            component_id: validatedArgs.component_id,
+            api_calls: [],
+            total_calls: 0,
+            error: (error as Error).message,
+            filters: {
+              component_id: validatedArgs.component_id,
+              include_response_schemas: validatedArgs.include_response_schemas,
+              repository_id: validatedArgs.repository_id,
+            },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  async getDataContracts(args: any) {
+    const validatedArgs = validateGetDataContractsArgs(args);
+    this.logger.debug('Getting data contracts for schema', validatedArgs);
+
+    try {
+      // Note: Database method currently expects symbolId, but we have schema_name
+      // This is a temporary workaround until the database method is properly implemented
+      let contracts: DataContract[] = [];
+      let errorMessage: string | undefined;
+
+      try {
+        // Get contracts by schema name directly
+        contracts = await this.dbService.getDataContractsBySchema(validatedArgs.schema_name);
+        if (contracts.length === 0) {
+          errorMessage = `No data contracts found for schema name '${validatedArgs.schema_name}'`;
+        }
+      } catch (error) {
+        this.logger.warn('Failed to find data contracts by schema name, returning empty result', {
+          schema_name: validatedArgs.schema_name,
+          error: (error as Error).message
+        });
+        contracts = [];
+        errorMessage = `Failed to search for schema: ${(error as Error).message}`;
+      }
+
+      // Analyze schema drift if requested
+      const analysis = validatedArgs.include_drift_analysis
+        ? await this.analyzeSchemaDrift(contracts)
+        : null;
+
+      const response: any = {
+        schema_name: validatedArgs.schema_name,
+        data_contracts: contracts.map(contract => ({
+          id: contract.id,
+          name: contract.name,
+          frontend_type_id: contract.frontend_type_id,
+          backend_type_id: contract.backend_type_id,
+          schema_definition: contract.schema_definition,
+          drift_detected: contract.drift_detected,
+          last_verified: contract.last_verified,
+        })),
+        total_contracts: contracts.length,
+        drift_analysis: analysis,
+        filters: {
+          schema_name: validatedArgs.schema_name,
+          repository_id: validatedArgs.repository_id,
+          include_drift_analysis: validatedArgs.include_drift_analysis,
+        },
+      };
+
+      if (errorMessage) {
+        response.error = errorMessage;
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(response, null, 2),
+        }],
+      };
+    } catch (error) {
+      this.logger.error('Failed to get data contracts', { error: (error as Error).message });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            schema_name: validatedArgs.schema_name,
+            data_contracts: [],
+            total_contracts: 0,
+            error: (error as Error).message,
+            filters: {
+              schema_name: validatedArgs.schema_name,
+              repository_id: validatedArgs.repository_id,
+              include_drift_analysis: validatedArgs.include_drift_analysis,
+            },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  async getCrossStackImpact(args: any) {
+    const validatedArgs = validateGetCrossStackImpactArgs(args);
+    this.logger.debug('Getting cross-stack impact analysis', validatedArgs);
+
+    try {
+      let impact;
+
+      if (validatedArgs.include_transitive !== false) {
+        // Use transitive analysis for cross-stack impact
+        const options = {
+          maxDepth: validatedArgs.max_depth || 10,
+          includeTransitive: true,
+          confidenceThreshold: 0.7,
+        };
+
+        try {
+          impact = await this.getCrossStackTransitiveImpact(validatedArgs.symbol_id, options);
+        } catch (error) {
+          this.logger.warn('Cross-stack transitive analysis not available, falling back to direct impact', {
+            error: (error as Error).message,
+          });
+          // Return error response for transitive analysis failures
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                symbol_id: validatedArgs.symbol_id,
+                cross_stack_impact: await this.getDirectCrossStackImpact(validatedArgs.symbol_id),
+                analysis_depth: 'direct',
+                error: `Cross-stack transitive analysis failed: ${(error as Error).message}`,
+                filters: {
+                  symbol_id: validatedArgs.symbol_id,
+                  include_transitive: validatedArgs.include_transitive,
+                  max_depth: validatedArgs.max_depth,
+                },
+              }, null, 2),
+            }],
+          };
+        }
+      } else {
+        impact = await this.getDirectCrossStackImpact(validatedArgs.symbol_id);
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            symbol_id: validatedArgs.symbol_id,
+            cross_stack_impact: impact,
+            analysis_depth: validatedArgs.include_transitive !== false ? 'transitive' : 'direct',
+            filters: {
+              symbol_id: validatedArgs.symbol_id,
+              include_transitive: validatedArgs.include_transitive,
+              max_depth: validatedArgs.max_depth,
+            },
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      this.logger.error('Failed to get cross-stack impact', { error: (error as Error).message });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            symbol_id: validatedArgs.symbol_id,
+            cross_stack_impact: null,
+            analysis_depth: validatedArgs.include_transitive !== false ? 'transitive' : 'direct',
+            error: (error as Error).message,
+            filters: {
+              symbol_id: validatedArgs.symbol_id,
+              include_transitive: validatedArgs.include_transitive,
+              max_depth: validatedArgs.max_depth,
+            },
+          }, null, 2),
+        }],
+      };
+    }
+  }
+
+  // Helper methods for cross-stack tools
+  private async enrichWithSchemas(apiCalls: ApiCall[]): Promise<ApiCall[]> {
+    // Placeholder implementation - would enrich API calls with full schema information
+    this.logger.debug('Enriching API calls with schemas', { count: apiCalls.length });
+    return apiCalls; // For now, return as-is
+  }
+
+  private async analyzeSchemaDrift(contracts: DataContract[]): Promise<any> {
+    // Placeholder implementation - would analyze schema drift between frontend and backend
+    this.logger.debug('Analyzing schema drift', { count: contracts.length });
+    return {
+      total_contracts: contracts.length,
+      drift_detected_count: contracts.filter(c => c.drift_detected).length,
+      last_analysis: new Date().toISOString(),
+      drift_summary: 'Schema drift analysis not yet implemented',
+    };
+  }
+
+  private async getCrossStackTransitiveImpact(symbolId: number, options: any): Promise<any> {
+    this.logger.debug('Getting cross-stack transitive impact with enhanced analyzer', { symbolId, options });
+
+    try {
+      // Import the transitive analyzer to use the new cross-stack capabilities
+      const { transitiveAnalyzer } = await import('../graph/transitive-analyzer');
+
+      // Use the new getCrossStackTransitiveImpact method
+      const crossStackOptions = {
+        maxDepth: options.maxDepth || 10,
+        includeTransitive: true,
+        confidenceThreshold: options.crossStackConfidenceThreshold || 0.7
+      };
+
+      const result = await transitiveAnalyzer.getCrossStackTransitiveImpact(symbolId, crossStackOptions);
+
+      this.logger.debug('Cross-stack transitive impact analysis completed', {
+        symbolId,
+        frontendImpact: result.frontendImpact.length,
+        backendImpact: result.backendImpact.length,
+        crossStackRelationships: result.crossStackRelationships.length,
+        totalImpacted: result.totalImpactedSymbols
+      });
+
+      return result;
+    } catch (error) {
+      this.logger.error('Failed to get cross-stack transitive impact', { error: (error as Error).message });
+      throw new Error(`Cross-stack transitive analysis failed: ${(error as Error).message}`);
+    }
+  }
+
+  private async getDirectCrossStackImpact(symbolId: number): Promise<any> {
+    // Placeholder implementation - would get direct cross-stack relationships
+    this.logger.debug('Getting direct cross-stack impact', { symbolId });
+
+    // Get dependencies with cross-stack types
+    const dependencies = await this.dbService.getDependenciesFrom(symbolId);
+    const crossStackDeps = dependencies.filter(dep =>
+      dep.dependency_type === DependencyType.API_CALL ||
+      dep.dependency_type === DependencyType.SHARES_SCHEMA ||
+      dep.dependency_type === DependencyType.FRONTEND_BACKEND
+    );
+
+    // Get callers with cross-stack types
+    const callers = await this.dbService.getDependenciesTo(symbolId);
+    const crossStackCallers = callers.filter(caller =>
+      caller.dependency_type === DependencyType.API_CALL ||
+      caller.dependency_type === DependencyType.SHARES_SCHEMA ||
+      caller.dependency_type === DependencyType.FRONTEND_BACKEND
+    );
+
+    return {
+      directDependencies: crossStackDeps.map(dep => ({
+        id: dep.id,
+        type: dep.dependency_type,
+        confidence: dep.confidence,
+        to_symbol: dep.to_symbol ? {
+          id: dep.to_symbol.id,
+          name: dep.to_symbol.name,
+          type: dep.to_symbol.symbol_type,
+          file_path: dep.to_symbol.file?.path,
+        } : null,
+      })),
+      directCallers: crossStackCallers.map(caller => ({
+        id: caller.id,
+        type: caller.dependency_type,
+        confidence: caller.confidence,
+        from_symbol: caller.from_symbol ? {
+          id: caller.from_symbol.id,
+          name: caller.from_symbol.name,
+          type: caller.from_symbol.symbol_type,
+          file_path: caller.from_symbol.file?.path,
+        } : null,
+      })),
+      crossStackRelationships: [
+        ...crossStackDeps.map(dep => ({
+          fromSymbolId: dep.from_symbol_id,
+          toSymbolId: dep.to_symbol_id,
+          relationshipType: dep.dependency_type,
+          confidence: dep.confidence
+        })),
+        ...crossStackCallers.map(caller => ({
+          fromSymbolId: caller.from_symbol_id,
+          toSymbolId: caller.to_symbol_id,
+          relationshipType: caller.dependency_type,
+          confidence: caller.confidence
+        }))
+      ],
+      total_cross_stack_dependencies: crossStackDeps.length,
+      total_cross_stack_callers: crossStackCallers.length,
+    };
+  }
+
+  private isCrossStackRelationship(result: any): boolean {
+    // Helper method to determine if a relationship is cross-stack
+    if (!result.dependency_type) return false;
+
+    return result.dependency_type === DependencyType.API_CALL ||
+           result.dependency_type === DependencyType.SHARES_SCHEMA ||
+           result.dependency_type === DependencyType.FRONTEND_BACKEND;
   }
 
   // Laravel-specific MCP tools

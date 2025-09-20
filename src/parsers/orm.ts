@@ -185,11 +185,11 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-    logger.debug('Parsing ORM file', { filePath });
 
     // Handle empty content early to avoid parse errors
     if (!content || content.trim().length === 0) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -329,7 +329,6 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private async parsePrismaSchema(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-    logger.debug('Parsing Prisma schema', { filePath });
 
     // Parse Prisma models
     const modelRegex = /model\s+(\w+)\s*{([^}]+)}/g;
@@ -462,7 +461,6 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private async parseTypeORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-    logger.debug('Parsing TypeORM entity', { filePath });
 
     // Find entity class
     const entityMatch = content.match(/@Entity\s*(?:\([^)]*\))?\s*(?:export\s+)?class\s+(\w+)/);
@@ -540,7 +538,6 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private async parseSequelizeModel(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-    logger.debug('Parsing Sequelize model', { filePath });
 
     // Find model definition
     const modelDefineMatch = content.match(/(\w+)\s*=\s*sequelize\.define\s*\(\s*['"`](\w+)['"`]/);
@@ -628,7 +625,6 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private async parseMongooseSchema(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-    logger.debug('Parsing Mongoose schema', { filePath });
 
     // Find schema definition
     const schemaMatch = content.match(/(\w+)Schema\s*=\s*new\s+Schema\s*\(/);
@@ -707,7 +703,6 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private async parseObjectionModel(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-    logger.debug('Parsing Objection.js model', { filePath });
 
     const modelMatch = content.match(/class\s+(\w+)\s+extends\s+Model/);
     if (!modelMatch) return;
@@ -813,7 +808,6 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private async parseMikroORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-    logger.debug('Parsing MikroORM entity', { filePath });
 
     const entityMatch = content.match(/@Entity\s*(?:\([^)]*\))?\s*(?:export\s+)?class\s+(\w+)/);
     if (!entityMatch) return;

@@ -84,11 +84,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   }
 
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-    this.logger.debug('Parsing background job file', { filePath });
 
     // Check if this file contains job-related code
     if (!this.containsJobPatterns(content)) {
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -115,6 +115,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       const frameworkEntities = this.analyzeFrameworkEntitiesFromResult(baseResult, content, filePath);
 
       const result: ParseFileResult = {
+        filePath,
         ...baseResult,
         frameworkEntities,
         metadata: {
@@ -146,6 +147,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       const frameworkEntities = this.createJobFrameworkEntities(filePath, jobSystems);
 
       return {
+        filePath,
         ...result,
         frameworkEntities,
         metadata: {
@@ -164,6 +166,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       });
 
       return {
+        filePath,
         ...result,
         frameworkEntities: [],
         metadata: {

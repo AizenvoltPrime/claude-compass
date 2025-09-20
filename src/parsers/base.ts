@@ -44,12 +44,26 @@ export interface ParsedExport {
   line_number: number;
 }
 
+// Framework entity types for Phase 5 cross-stack tracking
+export enum FrameworkEntityType {
+  VUE_COMPONENT = 'vue_component',
+  REACT_COMPONENT = 'react_component',
+  LARAVEL_ROUTE = 'laravel_route',
+  LARAVEL_MODEL = 'laravel_model',
+  EXPRESS_ROUTE = 'express_route',
+  NEXTJS_ROUTE = 'nextjs_route',
+  VUE_COMPOSABLE = 'vue_composable',
+  REACT_HOOK = 'react_hook',
+  PINIA_STORE = 'pinia_store'
+}
+
 // Framework-specific entity interfaces
 export interface FrameworkEntity {
   type: string;
   name: string;
   filePath: string;
   metadata?: Record<string, any>;
+  properties?: Record<string, any>; // Phase 5 addition for cross-stack properties
 }
 
 export interface VueComponent extends FrameworkEntity {

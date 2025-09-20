@@ -91,6 +91,7 @@ describe('MultiParser', () => {
       });
 
       mockVueParser.parseFile.mockResolvedValue({
+        filePath: '/src/App.vue',
         symbols: [{
           name: 'MyComponent',
           symbol_type: SymbolType.FUNCTION,
@@ -180,6 +181,7 @@ const title = ref('Hello')
       });
 
       mockReactParser.parseFile.mockResolvedValue({
+        filePath: '/src/Button.tsx',
         symbols: [],
         dependencies: [],
         imports: [],
@@ -291,6 +293,7 @@ export default function Button() {
       });
 
       mockReactParser.parseFile.mockResolvedValue({
+        filePath: '/src/Component.jsx',
         symbols: [],
         dependencies: [],
         imports: [],
@@ -356,6 +359,7 @@ export default function Button() {
         });
 
       mockVueParser.parseFile.mockResolvedValue({
+        filePath: '/src/App.vue',
         symbols: [],
         dependencies: [],
         imports: [],

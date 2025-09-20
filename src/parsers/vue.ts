@@ -21,8 +21,48 @@ import {
 import { DependencyType, SymbolType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
+import {
+  normalizeUrlPattern,
+  calculateUrlSimilarity,
+  parseUrlConstruction,
+  UrlPattern,
+  RouteParameter,
+} from './utils/url-patterns';
 
 const logger = createComponentLogger('vue-parser');
+
+/**
+ * API call information extracted from Vue components
+ */
+export interface VueApiCall extends FrameworkEntity {
+  type: 'api_call';
+  url: string;
+  normalizedUrl: string;
+  method: string;
+  requestType?: string;
+  responseType?: string;
+  confidence: number;
+  location: {
+    line: number;
+    column: number;
+  };
+  framework: 'vue';
+}
+
+/**
+ * TypeScript interface information for API types
+ */
+export interface VueTypeInterface extends FrameworkEntity {
+  type: 'type_interface';
+  properties: Array<{
+    name: string;
+    type: string;
+    optional: boolean;
+  }>;
+  usage: 'request' | 'response' | 'generic';
+  confidence: number;
+  framework: 'vue';
+}
 
 /**
  * Vue.js-specific parser for Single File Components, composables, and Vue Router
@@ -69,7 +109,6 @@ export class VueParser extends BaseFrameworkParser {
    * Override parseFile to handle Vue SFCs properly
    */
   async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-    logger.debug(`Parsing Vue file`, { filePath });
 
     try {
       // For Vue SFCs, handle chunked parsing at script level if needed
@@ -84,6 +123,7 @@ export class VueParser extends BaseFrameworkParser {
       logger.error(`Vue parsing failed for ${filePath}`, { error });
 
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
@@ -185,6 +225,7 @@ export class VueParser extends BaseFrameworkParser {
     const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
 
     return {
+      filePath,
       symbols,
       dependencies,
       imports,
@@ -257,6 +298,7 @@ export class VueParser extends BaseFrameworkParser {
     const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
 
     return {
+      filePath,
       symbols,
       dependencies,
       imports,
@@ -268,6 +310,448 @@ export class VueParser extends BaseFrameworkParser {
         isFrameworkSpecific: (frameworkResult.entities?.length || 0) > 0,
         fileType: 'vue-sfc',
       },
+    };
+  }
+
+  /**
+   * Extract API calls from Vue component script content
+   */
+  private extractApiCalls(scriptContent: string, filePath: string): VueApiCall[] {
+    const apiCalls: VueApiCall[] = [];
+
+    try {
+      const isTypeScript = filePath.includes('.ts') || scriptContent.includes('interface ') || scriptContent.includes('type ');
+      const tree = this.parseScriptContent(scriptContent, isTypeScript);
+
+      if (!tree?.rootNode) {
+        return apiCalls;
+      }
+
+      const traverse = (node: Parser.SyntaxNode) => {
+        // Detect various API call patterns
+        if (node.type === 'call_expression') {
+          const apiCall = this.parseApiCallExpression(node, scriptContent, filePath);
+          if (apiCall) {
+            apiCalls.push(apiCall);
+          }
+        }
+
+        // Traverse child nodes
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            traverse(child);
+          }
+        }
+      };
+
+      traverse(tree.rootNode);
+    } catch (error) {
+      logger.warn(`Failed to extract API calls from ${filePath}`, { error });
+    }
+
+    return apiCalls;
+  }
+
+  /**
+   * Parse individual API call expression
+   */
+  private parseApiCallExpression(node: Parser.SyntaxNode, scriptContent: string, filePath: string): VueApiCall | null {
+    const functionNode = node.child(0);
+    if (!functionNode) return null;
+
+    const functionName = functionNode.text;
+    const argsNode = node.child(1); // arguments node
+
+    // Detect different API calling patterns
+    let method = 'GET';
+    let url = '';
+    let requestType: string | undefined;
+    let responseType: string | undefined;
+    let confidence = 0.5;
+
+    // Pattern 1: fetch('/api/users')
+    if (functionName === 'fetch' || functionName === '$fetch') {
+      const result = this.parseFetchCall(argsNode, scriptContent);
+      if (result) {
+        url = result.url;
+        method = result.method;
+        confidence = result.confidence;
+        requestType = result.requestType;
+        responseType = result.responseType;
+      }
+    }
+    // Pattern 2: axios.get('/api/users') or axios('/api/users', {method: 'POST'})
+    else if (functionName.includes('axios')) {
+      const result = this.parseAxiosCall(functionNode, argsNode, scriptContent);
+      if (result) {
+        url = result.url;
+        method = result.method;
+        confidence = result.confidence;
+        requestType = result.requestType;
+        responseType = result.responseType;
+      }
+    }
+    // Pattern 3: useFetch('/api/users') (Nuxt composable)
+    else if (functionName === 'useFetch' || functionName === 'useLazyFetch') {
+      const result = this.parseUseFetchCall(argsNode, scriptContent);
+      if (result) {
+        url = result.url;
+        method = result.method;
+        confidence = result.confidence;
+        requestType = result.requestType;
+        responseType = result.responseType;
+      }
+    }
+
+    if (!url) return null;
+
+    // Normalize URL pattern
+    const urlPattern = normalizeUrlPattern(url);
+
+    return {
+      type: 'api_call',
+      name: `${method.toUpperCase()}_${url.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      filePath,
+      url,
+      normalizedUrl: urlPattern.normalized,
+      method: method.toUpperCase(),
+      requestType,
+      responseType,
+      confidence: Math.min(confidence * urlPattern.confidence, 1.0),
+      location: {
+        line: node.startPosition.row + 1,
+        column: node.startPosition.column,
+      },
+      framework: 'vue',
+      metadata: {
+        urlPattern,
+        originalCall: functionName,
+      },
+    };
+  }
+
+  /**
+   * Parse fetch() or $fetch() call arguments
+   */
+  private parseFetchCall(argsNode: Parser.SyntaxNode | null, scriptContent: string): {
+    url: string;
+    method: string;
+    confidence: number;
+    requestType?: string;
+    responseType?: string;
+  } | null {
+    if (!argsNode || argsNode.childCount < 2) return null;
+
+    let url = '';
+    let method = 'GET';
+    let confidence = 0.8;
+    let requestType: string | undefined;
+    let responseType: string | undefined;
+
+    // First argument is URL
+    const urlArg = argsNode.child(1);
+    if (urlArg) {
+      url = this.extractStringValue(urlArg, scriptContent);
+      if (url.includes('${') || url.includes('" + ') || url.includes("' + ")) {
+        confidence *= 0.9; // Slight penalty for dynamic URLs
+      }
+    }
+
+    // Second argument might be options object
+    if (argsNode.childCount > 3) {
+      const optionsArg = argsNode.child(3);
+      if (optionsArg && optionsArg.type === 'object_expression') {
+        const methodProp = this.findObjectProperty(optionsArg, 'method');
+        if (methodProp) {
+          method = this.extractStringValue(methodProp, scriptContent).toUpperCase();
+        }
+
+        // Look for body type in TypeScript
+        const bodyProp = this.findObjectProperty(optionsArg, 'body');
+        if (bodyProp) {
+          requestType = this.inferTypeFromExpression(bodyProp, scriptContent);
+        }
+      }
+    }
+
+    return url ? { url, method, confidence, requestType, responseType } : null;
+  }
+
+  /**
+   * Parse axios call arguments
+   */
+  private parseAxiosCall(functionNode: Parser.SyntaxNode, argsNode: Parser.SyntaxNode | null, scriptContent: string): {
+    url: string;
+    method: string;
+    confidence: number;
+    requestType?: string;
+    responseType?: string;
+  } | null {
+    const fullCall = functionNode.text;
+    let method = 'GET';
+    let url = '';
+    let confidence = 0.9;
+
+    // Extract method from function name (axios.get, axios.post, etc.)
+    if (fullCall) {
+      const methodMatch = fullCall.match(/axios\.(\w+)/);
+      if (methodMatch) {
+        method = methodMatch[1].toUpperCase();
+      }
+    }
+
+    // Extract URL from first argument
+    if (argsNode && argsNode.childCount > 1) {
+      const urlArg = argsNode.child(1);
+      if (urlArg) {
+        url = this.extractStringValue(urlArg, scriptContent);
+      }
+    }
+
+    return url ? { url, method, confidence } : null;
+  }
+
+  /**
+   * Parse useFetch() call arguments (Nuxt.js)
+   */
+  private parseUseFetchCall(argsNode: Parser.SyntaxNode | null, scriptContent: string): {
+    url: string;
+    method: string;
+    confidence: number;
+    requestType?: string;
+    responseType?: string;
+  } | null {
+    if (!argsNode || argsNode.childCount < 2) return null;
+
+    const urlArg = argsNode.child(1);
+    if (!urlArg) return null;
+
+    let url = '';
+    let method = 'GET';
+    let confidence = 0.9;
+    let responseType: string | undefined;
+
+    // Handle different useFetch patterns
+    if (urlArg.type === 'arrow_function' || urlArg.type === 'function_expression') {
+      // useFetch(() => `/api/users/${id}`)
+      url = this.extractUrlFromFunction(urlArg, scriptContent);
+      confidence *= 0.8; // Dynamic URLs have lower confidence
+    } else {
+      // useFetch('/api/users')
+      url = this.extractStringValue(urlArg, scriptContent);
+    }
+
+    // Try to extract response type from TypeScript generics
+    // useFetch<UserResponse>('/api/users')
+    const parentCall = urlArg.parent?.parent;
+    if (parentCall && parentCall.type === 'call_expression') {
+      responseType = this.extractGenericType(parentCall, scriptContent);
+    }
+
+    return url ? { url, method, confidence, responseType } : null;
+  }
+
+  /**
+   * Extract TypeScript interfaces used in API calls
+   */
+  private parseTypeScriptInterfaces(scriptContent: string, filePath: string): VueTypeInterface[] {
+    const interfaces: VueTypeInterface[] = [];
+
+    try {
+      const tree = this.parseScriptContent(scriptContent, true);
+      if (!tree?.rootNode) return interfaces;
+
+      const traverse = (node: Parser.SyntaxNode) => {
+        if (node.type === 'interface_declaration') {
+          const interfaceEntity = this.parseInterfaceDeclaration(node, scriptContent, filePath);
+          if (interfaceEntity) {
+            interfaces.push(interfaceEntity);
+          }
+        }
+
+        // Also look for type aliases
+        if (node.type === 'type_alias_declaration') {
+          const typeEntity = this.parseTypeAliasDeclaration(node, scriptContent, filePath);
+          if (typeEntity) {
+            interfaces.push(typeEntity);
+          }
+        }
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            traverse(child);
+          }
+        }
+      };
+
+      traverse(tree.rootNode);
+    } catch (error) {
+      logger.warn(`Failed to extract TypeScript interfaces from ${filePath}`, { error });
+    }
+
+    return interfaces;
+  }
+
+  /**
+   * Parse interface declaration node
+   */
+  private parseInterfaceDeclaration(node: Parser.SyntaxNode, scriptContent: string, filePath: string): VueTypeInterface | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    const interfaceName = nameNode.text;
+    const properties: VueTypeInterface['properties'] = [];
+
+    // Extract interface body
+    const bodyNode = node.childForFieldName('body');
+    if (bodyNode && bodyNode.type === 'object_type') {
+      for (let i = 0; i < bodyNode.childCount; i++) {
+        const child = bodyNode.child(i);
+        if (child && child.type === 'property_signature') {
+          const prop = this.parsePropertySignature(child, scriptContent);
+          if (prop) {
+            properties.push(prop);
+          }
+        }
+      }
+    }
+
+    // Determine usage based on naming conventions
+    let usage: VueTypeInterface['usage'] = 'generic';
+    const lowerName = interfaceName.toLowerCase();
+    if (lowerName.includes('request') || lowerName.includes('input') || lowerName.includes('create') || lowerName.includes('update')) {
+      usage = 'request';
+    } else if (lowerName.includes('response') || lowerName.includes('result') || lowerName.includes('data')) {
+      usage = 'response';
+    }
+
+    return {
+      type: 'type_interface',
+      name: interfaceName,
+      filePath,
+      properties,
+      usage,
+      confidence: 0.9,
+      framework: 'vue',
+      metadata: {
+        isInterface: true,
+        location: {
+          line: node.startPosition.row + 1,
+          column: node.startPosition.column,
+        },
+      },
+    };
+  }
+
+  /**
+   * Parse type alias declaration node
+   */
+  private parseTypeAliasDeclaration(node: Parser.SyntaxNode, scriptContent: string, filePath: string): VueTypeInterface | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    const typeName = nameNode.text;
+
+    // For type aliases, we'll extract what we can but with lower confidence
+    return {
+      type: 'type_interface',
+      name: typeName,
+      filePath,
+      properties: [], // Type aliases are harder to analyze structurally
+      usage: 'generic',
+      confidence: 0.7,
+      framework: 'vue',
+      metadata: {
+        isInterface: false,
+        isTypeAlias: true,
+        location: {
+          line: node.startPosition.row + 1,
+          column: node.startPosition.column,
+        },
+      },
+    };
+  }
+
+  /**
+   * Helper methods for parsing API calls and types
+   */
+  private extractStringValue(node: Parser.SyntaxNode, content: string): string {
+    if (node.type === 'string' || node.type === 'template_string') {
+      const text = node.text;
+      // Remove quotes and handle template literals
+      if (text.startsWith('`') && text.endsWith('`')) {
+        return text.slice(1, -1);
+      }
+      if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+        return text.slice(1, -1);
+      }
+      return text;
+    }
+    return node.text;
+  }
+
+  private findObjectProperty(objectNode: Parser.SyntaxNode, propertyName: string): Parser.SyntaxNode | null {
+    for (let i = 0; i < objectNode.childCount; i++) {
+      const child = objectNode.child(i);
+      if (child && child.type === 'pair') {
+        const keyNode = child.child(0);
+        if (keyNode && keyNode.text.includes(propertyName)) {
+          return child.child(2); // Return value node
+        }
+      }
+    }
+    return null;
+  }
+
+  private inferTypeFromExpression(node: Parser.SyntaxNode, content: string): string | undefined {
+    // Basic type inference from expressions
+    if (node.type === 'object_expression') {
+      return 'object';
+    }
+    if (node.type === 'array_expression') {
+      return 'array';
+    }
+    if (node.type === 'string' || node.type === 'template_string') {
+      return 'string';
+    }
+    return undefined;
+  }
+
+  private extractUrlFromFunction(functionNode: Parser.SyntaxNode, content: string): string {
+    // Extract URL from arrow function or function expression
+    // This is a simplified extraction - could be enhanced
+    const body = functionNode.childForFieldName('body');
+    if (body) {
+      return this.extractStringValue(body, content);
+    }
+    return '';
+  }
+
+  private extractGenericType(callNode: Parser.SyntaxNode, content: string): string | undefined {
+    // Look for TypeScript generics in call expression
+    const typeArgs = callNode.childForFieldName('type_arguments');
+    if (typeArgs && typeArgs.childCount > 0) {
+      const firstType = typeArgs.child(1); // Skip opening bracket
+      if (firstType) {
+        return firstType.text;
+      }
+    }
+    return undefined;
+  }
+
+  private parsePropertySignature(node: Parser.SyntaxNode, content: string): VueTypeInterface['properties'][0] | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    const typeNode = node.childForFieldName('type');
+    const isOptional = node.text.includes('?');
+
+    return {
+      name: nameNode.text,
+      type: typeNode ? typeNode.text : 'any',
+      optional: isOptional,
     };
   }
 
@@ -284,9 +768,12 @@ export class VueParser extends BaseFrameworkParser {
     try {
       if (filePath.endsWith('.vue')) {
         // Parse Vue Single File Component
+        logger.debug('Attempting to parse Vue SFC', { filePath });
         const component = await this.parseVueSFCEntity(content, filePath, options);
         if (component) {
           entities.push(component);
+        } else {
+          logger.warn('No Vue component entity created for SFC', { filePath });
         }
       } else if (this.isPiniaStore(filePath, content)) {
         // Parse Pinia stores (check before composables since stores are more specific)
@@ -307,6 +794,23 @@ export class VueParser extends BaseFrameworkParser {
           entities.push(component);
         }
       }
+
+      // Extract API calls and TypeScript interfaces from script content
+      const sections = this.extractSFCSections(content);
+      const scriptContent = sections.scriptSetup || sections.script;
+
+      if (scriptContent) {
+        // Extract API calls
+        const apiCalls = this.extractApiCalls(scriptContent, filePath);
+        entities.push(...apiCalls);
+
+        // Extract TypeScript interfaces (only for TypeScript files or scripts)
+        const isTypeScript = sections.scriptLang === 'ts' || filePath.includes('.ts') || scriptContent.includes('interface ') || scriptContent.includes('type ');
+        if (isTypeScript) {
+          const typeInterfaces = this.parseTypeScriptInterfaces(scriptContent, filePath);
+          entities.push(...typeInterfaces);
+        }
+      }
     } catch (error) {
       logger.error(`Framework entity detection failed for ${filePath}`, { error });
     }
@@ -324,8 +828,19 @@ export class VueParser extends BaseFrameworkParser {
     filePath: string,
     options: FrameworkParseOptions
   ): Promise<FrameworkEntity | null> {
+    logger.debug('parseVueSFCEntity called', { filePath });
     const sections = this.extractSFCSections(content);
     const componentName = this.extractComponentName(filePath);
+    logger.debug('Extracted SFC sections and component name', {
+      filePath,
+      componentName,
+      hasScript: !!(sections.script || sections.scriptSetup),
+      hasTemplate: !!sections.template,
+      hasStyle: !!sections.style,
+      scriptLang: sections.scriptLang,
+      scriptLength: (sections.script || sections.scriptSetup)?.length || 0,
+      templateLength: sections.template?.length || 0
+    });
 
     // Parse script content if available
     let scriptTree = null;
@@ -349,24 +864,41 @@ export class VueParser extends BaseFrameworkParser {
         }
       } catch (error) {
         logger.warn(`Failed to parse script section for ${filePath}`, { error });
+        // Continue with component creation even if script parsing fails
+        scriptTree = null;
       }
     }
 
-    // Extract enhanced metadata
-    const builtInComponents = sections.template ? this.extractBuiltInComponents(sections.template) : [];
-    const directives = sections.template ? this.extractDirectives(sections.template) : [];
-    const scopedSlots = sections.template ? this.extractScopedSlots(sections.template) : [];
-    const templateRefs = sections.template ? this.extractTemplateRefs(sections.template) : [];
-    const dynamicComponents = sections.template ? this.extractDynamicComponents(sections.template) : [];
-    const eventHandlers = sections.template ? this.extractEventHandlers(sections.template) : [];
+    // Extract enhanced metadata (with error handling)
+    let builtInComponents = [];
+    let directives = [];
+    let scopedSlots = [];
+    let templateRefs = [];
+    let dynamicComponents = [];
+    let eventHandlers = [];
+    let props = [];
+    let emits = [];
+    let lifecycle = [];
 
-    // Extract basic component properties
-    const props = scriptTree ? this.extractProps(scriptTree, content) : [];
-    const emits = scriptTree ? this.extractEmits(scriptTree, content) : [];
-    const lifecycle = scriptTree ? this.extractLifecycleHooks(scriptTree, content) : [];
+    try {
+      builtInComponents = sections.template ? this.extractBuiltInComponents(sections.template) : [];
+      directives = sections.template ? this.extractDirectives(sections.template) : [];
+      scopedSlots = sections.template ? this.extractScopedSlots(sections.template) : [];
+      templateRefs = sections.template ? this.extractTemplateRefs(sections.template) : [];
+      dynamicComponents = sections.template ? this.extractDynamicComponents(sections.template) : [];
+      eventHandlers = sections.template ? this.extractEventHandlers(sections.template) : [];
 
-    // Extract advanced Composition API patterns
-    const advancedComposition = scriptTree ? this.extractAdvancedCompositionAPI(scriptTree) : {
+      // Extract basic component properties
+      props = scriptTree ? this.extractProps(scriptTree, content) : [];
+      emits = scriptTree ? this.extractEmits(scriptTree, content) : [];
+      lifecycle = scriptTree ? this.extractLifecycleHooks(scriptTree, content) : [];
+    } catch (error) {
+      logger.warn(`Failed to extract Vue component metadata for ${filePath}`, { error });
+      // Continue with empty arrays - better to have a basic component than no component
+    }
+
+    // Extract advanced Composition API patterns (with error handling)
+    let advancedComposition = {
       provide: [],
       inject: [],
       defineExpose: [],
@@ -374,23 +906,26 @@ export class VueParser extends BaseFrameworkParser {
       watchEffect: [],
       computed: []
     };
-
-    // Extract VueUse composables
-    const vueUseComposables = scriptTree ? this.extractVueUseComposables(scriptTree) : [];
-
-    // Extract Vite patterns
-    const vitePatterns = this.extractVitePatterns(content);
-
-    // Extract styling features
-    const stylingFeatures = this.extractStylingFeatures(content);
-
-    // Extract TypeScript features
-    const typescriptFeatures = scriptTree ? this.extractTypeScriptFeatures(content, scriptTree) : {
+    let vueUseComposables = [];
+    let vitePatterns = { globImports: [], envVariables: [], hotReload: false };
+    let stylingFeatures = {};
+    let typescriptFeatures = {
       interfaces: [],
       types: [],
       generics: [],
       imports: []
     };
+
+    try {
+      advancedComposition = scriptTree ? this.extractAdvancedCompositionAPI(scriptTree) : advancedComposition;
+      vueUseComposables = scriptTree ? this.extractVueUseComposables(scriptTree) : [];
+      vitePatterns = this.extractVitePatterns(content);
+      stylingFeatures = this.extractStylingFeatures(content);
+      typescriptFeatures = scriptTree ? this.extractTypeScriptFeatures(content, scriptTree) : typescriptFeatures;
+    } catch (error) {
+      logger.warn(`Failed to extract advanced Vue component features for ${filePath}`, { error });
+      // Continue with default values
+    }
 
     const component: FrameworkEntity = {
       type: 'component',
@@ -481,6 +1016,14 @@ export class VueParser extends BaseFrameworkParser {
         })()
       }
     };
+
+    logger.debug('parseVueSFCEntity completed', {
+      filePath,
+      componentName: component?.name,
+      componentType: component?.type,
+      hasMetadata: !!component?.metadata,
+      isComponentNull: !component
+    });
 
     return component;
   }
@@ -1475,7 +2018,7 @@ export class VueParser extends BaseFrameworkParser {
       }
 
       // Extract type-only imports
-      if (node.type === 'import_statement') {
+      if (node.type === 'import_statement' && node.text) {
         const hasTypeKeyword = node.text.includes('import type');
         const sourceMatch = node.text.match(/from\s+['"`]([^'"`]+)['"`]/);
         const source = sourceMatch ? sourceMatch[1] : '';

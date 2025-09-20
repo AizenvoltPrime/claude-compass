@@ -4,6 +4,7 @@ import { FrameworkDetector, FrameworkDetectionResult } from './framework-detecto
 import { ParserFactory } from './base';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
+import { CrossStackParser, CrossStackRelationship } from './cross-stack';
 
 const logger = createComponentLogger('multi-parser');
 
@@ -124,7 +125,6 @@ export class MultiParser {
             });
             continue;
           }
-          logger.debug(`Parsing with ${parserName}`, { filePath });
 
           let result: ParseFileResult;
 
@@ -133,6 +133,7 @@ export class MultiParser {
           } else if (parser instanceof BaseParser) {
             const baseResult = await parser.parseFile(filePath, content, options);
             result = {
+              filePath,
               ...baseResult,
               frameworkEntities: [],
               metadata: {
@@ -191,7 +192,7 @@ export class MultiParser {
       }
 
       // Merge results from all parsers
-      const mergedResult = this.mergeParseResults(primaryResult, parseResults, primaryParser);
+      const mergedResult = await this.mergeParseResults(primaryResult, parseResults, primaryParser);
 
       // Add any collected errors from failed parsers
       if (collectedErrors.length > 0) {
@@ -392,11 +393,11 @@ export class MultiParser {
   /**
    * Merge results from multiple parsers
    */
-  private mergeParseResults(
+  private async mergeParseResults(
     primaryResult: ParseFileResult,
     allResults: Array<{ parser: string; result: ParseFileResult }>,
     primaryParser: string
-  ): ParseFileResult {
+  ): Promise<ParseFileResult> {
     const mergedResult = { ...primaryResult };
 
     // Collect all symbols, dependencies, imports, exports from all parsers
@@ -450,7 +451,28 @@ export class MultiParser {
       }
     }
 
+    // NEW: Cross-stack relationship detection
+    const crossStackRelationships = await this.detectCrossStackRelationships(allResults);
+    if (crossStackRelationships.length > 0) {
+      logger.debug(`Detected ${crossStackRelationships.length} cross-stack relationships`);
+
+      // Add cross-stack dependencies to the merged dependencies array
+      for (const relationship of crossStackRelationships) {
+        if (!allDependencies.some(d => this.dependenciesEqual(d, relationship.dependency))) {
+          allDependencies.push(relationship.dependency);
+        }
+      }
+
+      // Add cross-stack metadata to frameworkEntities
+      for (const relationship of crossStackRelationships) {
+        if (!allFrameworkEntities.some(e => this.frameworkEntitiesEqual(e, relationship.metadata))) {
+          allFrameworkEntities.push(relationship.metadata);
+        }
+      }
+    }
+
     return {
+      filePath: primaryResult.filePath,
       symbols: allSymbols,
       dependencies: allDependencies,
       imports: allImports,
@@ -458,9 +480,53 @@ export class MultiParser {
       errors: this.deduplicateErrors(allErrors), // Final deduplication of all collected errors
       frameworkEntities: allFrameworkEntities,
       metadata: {
-        ...primaryResult.metadata
+        ...primaryResult.metadata,
+        ...(crossStackRelationships.length > 0 && { crossStackRelationships: crossStackRelationships.length })
       }
     };
+  }
+
+  /**
+   * Detect cross-stack relationships between Vue and Laravel parse results
+   */
+  private async detectCrossStackRelationships(
+    allResults: Array<{ parser: string; result: ParseFileResult }>
+  ): Promise<CrossStackRelationship[]> {
+    try {
+      // Filter results by framework type
+      const vueResults = allResults
+        .filter(r => r.parser === 'vue' ||
+                (r.result.metadata?.framework === 'vue'))
+        .map(r => r.result);
+
+      const laravelResults = allResults
+        .filter(r => r.parser === 'laravel' ||
+                (r.result.metadata?.framework === 'laravel'))
+        .map(r => r.result);
+
+      // Only proceed if we have both Vue and Laravel results
+      if (vueResults.length === 0 || laravelResults.length === 0) {
+        return [];
+      }
+
+      logger.debug('Attempting cross-stack relationship detection', {
+        vueResults: vueResults.length,
+        laravelResults: laravelResults.length
+      });
+
+      // Use CrossStackParser to detect relationships
+      const crossStackParser = new CrossStackParser(0.7); // 70% confidence threshold
+      const relationships = await crossStackParser.detectApiCallRelationships(vueResults, laravelResults);
+
+      if (relationships.length > 0) {
+        logger.info(`Successfully detected ${relationships.length} cross-stack relationships`);
+      }
+
+      return relationships;
+    } catch (error) {
+      logger.error('Cross-stack relationship detection failed', { error });
+      return [];
+    }
   }
 
   /**
@@ -468,6 +534,7 @@ export class MultiParser {
    */
   private createEmptyResult(filePath: string, parsers: string[]): MultiParseResult {
     return {
+      filePath,
       symbols: [],
       dependencies: [],
       imports: [],

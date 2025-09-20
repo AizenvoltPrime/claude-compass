@@ -148,7 +148,6 @@ describe('BackgroundJobParser', () => {
           });
 
           worker.on('message', (result) => {
-            console.log('Worker result:', result);
           });
 
           worker.on('error', (error) => {
@@ -203,7 +202,6 @@ describe('BackgroundJobParser', () => {
         });
 
         reportQueue.on('succeeded', (job, result) => {
-          console.log(\`Report generated: \${result.reportId}\`);
         });
 
         reportQueue.on('failed', (job, err) => {
@@ -261,7 +259,6 @@ describe('BackgroundJobParser', () => {
 
         // Run every day at 2 AM
         cron.schedule('0 2 * * *', async () => {
-          console.log('Running daily backup...');
           await performDailyBackup();
         });
 

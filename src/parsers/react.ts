@@ -89,6 +89,7 @@ export class ReactParser extends BaseFrameworkParser {
 
       if (!tree || !tree.rootNode) {
         return {
+          filePath,
           symbols: [],
           dependencies: [],
           imports: [],
@@ -114,6 +115,7 @@ export class ReactParser extends BaseFrameworkParser {
       }
 
       return {
+        filePath,
         symbols,
         dependencies,
         imports,
@@ -129,6 +131,7 @@ export class ReactParser extends BaseFrameworkParser {
       logger.error(`React fallback parsing also failed for ${filePath}`, { error: (error as Error).message });
 
       return {
+        filePath,
         symbols: [],
         dependencies: [],
         imports: [],
