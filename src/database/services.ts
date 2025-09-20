@@ -31,6 +31,9 @@ import {
   RouteSearchOptions,
   ComponentSearchOptions,
   ComposableSearchOptions,
+  // Phase 6 imports - Enhanced Search
+  SymbolSearchOptions,
+  SearchResult,
   // Phase 3 imports - Background Jobs
   JobQueue,
   JobDefinition,
@@ -83,6 +86,11 @@ export class DatabaseService {
 
   constructor() {
     this.db = getDatabaseConnection();
+  }
+
+  // Getter for knex instance
+  get knex(): Knex {
+    return this.db;
   }
 
   // Repository operations
@@ -448,20 +456,263 @@ export class DatabaseService {
     return symbols as Symbol[];
   }
 
-  async searchSymbols(query: string, repoId?: number): Promise<SymbolWithFile[]> {
+  async searchSymbols(
+    query: string,
+    repoId?: number,
+    options: SymbolSearchOptions = {}
+  ): Promise<SymbolWithFile[]> {
+    const {
+      useVector = false,
+      limit = 100,
+      confidenceThreshold = 0.5,
+      searchMode = 'hybrid',
+      symbolTypes = [],
+      isExported,
+      framework,
+      repoIds = []
+    } = options;
+
+    // Determine effective repository filter
+    const effectiveRepoIds = repoIds.length > 0 ? repoIds : (repoId ? [repoId] : []);
+
+    if (searchMode === 'hybrid' || useVector) {
+      return this.hybridSearch(query, effectiveRepoIds, options);
+    } else if (searchMode === 'fulltext') {
+      return this.fullTextSearch(query, effectiveRepoIds, options);
+    } else if (searchMode === 'vector') {
+      return this.vectorSearch(query, effectiveRepoIds, options);
+    } else {
+      return this.lexicalSearch(query, effectiveRepoIds, options);
+    }
+  }
+
+  /**
+   * Enhanced lexical search with fuzzy matching and better ranking
+   */
+  private async lexicalSearch(
+    query: string,
+    repoIds: number[],
+    options: SymbolSearchOptions
+  ): Promise<SymbolWithFile[]> {
+    const { limit = 100, symbolTypes = [], isExported, framework } = options;
+
     let queryBuilder = this.db('symbols')
       .leftJoin('files', 'symbols.file_id', 'files.id')
-      .select('symbols.*', 'files.path as file_path', 'files.language as file_language')
-      .where('symbols.name', 'ilike', `%${query}%`);
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language'
+      );
 
-    if (repoId) {
-      queryBuilder = queryBuilder.where('files.repo_id', repoId);
+    // Basic lexical matching with multiple strategies
+    const fuzzyQuery = query.replace(/[%_]/g, '\\$&');
+    queryBuilder = queryBuilder.where(function() {
+      this.where('symbols.name', 'ilike', `%${fuzzyQuery}%`)
+          .orWhere('symbols.signature', 'ilike', `%${fuzzyQuery}%`)
+          .orWhere('symbols.description', 'ilike', `%${fuzzyQuery}%`);
+    });
+
+    // Apply filters
+    if (repoIds.length > 0) {
+      queryBuilder = queryBuilder.whereIn('files.repo_id', repoIds);
+    }
+
+    if (symbolTypes.length > 0) {
+      queryBuilder = queryBuilder.whereIn('symbols.symbol_type', symbolTypes);
+    }
+
+    if (isExported !== undefined) {
+      queryBuilder = queryBuilder.where('symbols.is_exported', isExported);
+    }
+
+    if (framework) {
+      queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
+    }
+
+    // Enhanced ordering with relevance
+    const results = await queryBuilder
+      .orderByRaw(`
+        CASE
+          WHEN symbols.name ILIKE ? THEN 1
+          WHEN symbols.name ILIKE ? THEN 2
+          WHEN symbols.signature ILIKE ? THEN 3
+          ELSE 4
+        END
+      `, [`${fuzzyQuery}`, `%${fuzzyQuery}%`, `%${fuzzyQuery}%`])
+      .orderBy('symbols.name')
+      .limit(limit);
+
+    return this.formatSymbolResults(results);
+  }
+
+  /**
+   * Full-text search using PostgreSQL tsvector
+   */
+  private async fullTextSearch(
+    query: string,
+    repoIds: number[],
+    options: SymbolSearchOptions
+  ): Promise<SymbolWithFile[]> {
+    const { limit = 100, symbolTypes = [], isExported, framework } = options;
+
+    // Sanitize query for ts_query
+    const sanitizedQuery = query
+      .replace(/[^\w\s]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(word => word.length > 0)
+      .join(' & ');
+
+    if (!sanitizedQuery) {
+      return this.lexicalSearch(query, repoIds, options);
+    }
+
+    let queryBuilder = this.db('symbols')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language',
+        this.db.raw('ts_rank_cd(symbols.search_vector, to_tsquery(?)) as rank', [sanitizedQuery])
+      )
+      .where(this.db.raw('symbols.search_vector @@ to_tsquery(?)', [sanitizedQuery]));
+
+    // Apply filters
+    if (repoIds.length > 0) {
+      queryBuilder = queryBuilder.whereIn('files.repo_id', repoIds);
+    }
+
+    if (symbolTypes.length > 0) {
+      queryBuilder = queryBuilder.whereIn('symbols.symbol_type', symbolTypes);
+    }
+
+    if (isExported !== undefined) {
+      queryBuilder = queryBuilder.where('symbols.is_exported', isExported);
+    }
+
+    if (framework) {
+      queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
     }
 
     const results = await queryBuilder
+      .orderBy('rank', 'desc')
       .orderBy('symbols.name')
-      .limit(100);
+      .limit(limit);
 
+    return this.formatSymbolResults(results);
+  }
+
+  /**
+   * Vector similarity search using pgvector (placeholder for future implementation)
+   */
+  private async vectorSearch(
+    query: string,
+    repoIds: number[],
+    options: SymbolSearchOptions
+  ): Promise<SymbolWithFile[]> {
+    // For now, fall back to full-text search until vector embeddings are implemented
+    console.warn('Vector search not yet implemented, falling back to full-text search');
+    return this.fullTextSearch(query, repoIds, options);
+  }
+
+  /**
+   * Hybrid search combining multiple search strategies
+   */
+  private async hybridSearch(
+    query: string,
+    repoIds: number[],
+    options: SymbolSearchOptions
+  ): Promise<SymbolWithFile[]> {
+    const { limit = 100, confidenceThreshold = 0.5 } = options;
+
+    // Run multiple search strategies in parallel
+    const [lexicalResults, fullTextResults] = await Promise.all([
+      this.lexicalSearch(query, repoIds, { ...options, limit: Math.ceil(limit * 0.7) }),
+      this.fullTextSearch(query, repoIds, { ...options, limit: Math.ceil(limit * 0.7) })
+    ]);
+
+    // Merge and rank results
+    return this.rankAndMergeResults(lexicalResults, [], fullTextResults, options);
+  }
+
+  /**
+   * Merge and rank results from different search strategies
+   */
+  private rankAndMergeResults(
+    lexicalResults: SymbolWithFile[],
+    vectorResults: SymbolWithFile[],
+    fullTextResults: SymbolWithFile[],
+    options: SymbolSearchOptions
+  ): SymbolWithFile[] {
+    const { limit = 100, confidenceThreshold = 0.5 } = options;
+    const resultMap = new Map<number, { symbol: SymbolWithFile; scores: number[]; sources: string[] }>();
+
+    // Weight factors for different search methods
+    const weights = {
+      lexical: 0.3,
+      vector: 0.4,
+      fulltext: 0.3
+    };
+
+    // Process lexical results
+    lexicalResults.forEach((symbol, index) => {
+      const score = Math.max(0.1, 1 - (index / lexicalResults.length));
+      if (!resultMap.has(symbol.id)) {
+        resultMap.set(symbol.id, { symbol, scores: [0, 0, 0], sources: [] });
+      }
+      const entry = resultMap.get(symbol.id)!;
+      entry.scores[0] = score;
+      entry.sources.push('lexical');
+    });
+
+    // Process vector results (placeholder)
+    vectorResults.forEach((symbol, index) => {
+      const score = Math.max(0.1, 1 - (index / vectorResults.length));
+      if (!resultMap.has(symbol.id)) {
+        resultMap.set(symbol.id, { symbol, scores: [0, 0, 0], sources: [] });
+      }
+      const entry = resultMap.get(symbol.id)!;
+      entry.scores[1] = score;
+      entry.sources.push('vector');
+    });
+
+    // Process full-text results
+    fullTextResults.forEach((symbol, index) => {
+      const score = Math.max(0.1, 1 - (index / fullTextResults.length));
+      if (!resultMap.has(symbol.id)) {
+        resultMap.set(symbol.id, { symbol, scores: [0, 0, 0], sources: [] });
+      }
+      const entry = resultMap.get(symbol.id)!;
+      entry.scores[2] = score;
+      entry.sources.push('fulltext');
+    });
+
+    // Calculate final scores and filter by confidence
+    const rankedResults = Array.from(resultMap.values())
+      .map(entry => {
+        const finalScore =
+          entry.scores[0] * weights.lexical +
+          entry.scores[1] * weights.vector +
+          entry.scores[2] * weights.fulltext;
+
+        return {
+          symbol: entry.symbol,
+          score: finalScore,
+          confidence: Math.min(1, entry.sources.length / 2), // More sources = higher confidence
+          sources: entry.sources
+        };
+      })
+      .filter(result => result.confidence >= confidenceThreshold)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    return rankedResults.map(result => result.symbol);
+  }
+
+  /**
+   * Format symbol results to consistent SymbolWithFile format
+   */
+  private formatSymbolResults(results: any[]): SymbolWithFile[] {
     return results.map(result => ({
       ...result,
       file: {

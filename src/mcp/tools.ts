@@ -3,8 +3,8 @@ import {
   DependencyType,
   DependencyWithSymbols,
   SymbolWithFile,
-  ApiCall,
-  DataContract,
+  SymbolSearchOptions,
+  SymbolType,
 } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { transitiveAnalyzer, TransitiveAnalysisOptions } from '../graph/transitive-analyzer';
@@ -61,6 +61,39 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
     }
     args.limit = limit;
   }
+
+  // Phase 6A enhanced validation
+  if (args.entity_types !== undefined) {
+    if (!Array.isArray(args.entity_types)) {
+      throw new Error('entity_types must be an array');
+    }
+    const validEntityTypes = ['route', 'model', 'controller', 'component', 'job', 'function', 'class', 'interface'];
+    for (const entityType of args.entity_types) {
+      if (typeof entityType !== 'string' || !validEntityTypes.includes(entityType)) {
+        throw new Error(`entity_types must contain valid types: ${validEntityTypes.join(', ')}`);
+      }
+    }
+  }
+
+  if (args.framework !== undefined && typeof args.framework !== 'string') {
+    throw new Error('framework must be a string');
+  }
+
+  if (args.use_vector !== undefined && typeof args.use_vector !== 'boolean') {
+    throw new Error('use_vector must be a boolean');
+  }
+
+  if (args.repo_ids !== undefined) {
+    if (!Array.isArray(args.repo_ids)) {
+      throw new Error('repo_ids must be an array');
+    }
+    for (const repoId of args.repo_ids) {
+      if (typeof repoId !== 'number') {
+        throw new Error('repo_ids must contain only numbers');
+      }
+    }
+  }
+
   return args as SearchCodeArgs;
 }
 
@@ -90,127 +123,7 @@ function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   return args as ListDependenciesArgs;
 }
 
-// Laravel-specific tool validation functions
-function validateGetLaravelRoutesArgs(args: any): GetLaravelRoutesArgs {
-  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
-    throw new Error('repo_id must be a number');
-  }
-  if (args.path !== undefined && typeof args.path !== 'string') {
-    throw new Error('path must be a string');
-  }
-  if (args.method !== undefined && typeof args.method !== 'string') {
-    throw new Error('method must be a string');
-  }
-  if (args.middleware !== undefined && typeof args.middleware !== 'string') {
-    throw new Error('middleware must be a string');
-  }
-  if (args.controller !== undefined && typeof args.controller !== 'string') {
-    throw new Error('controller must be a string');
-  }
-  return args as GetLaravelRoutesArgs;
-}
-
-function validateGetEloquentModelsArgs(args: any): GetEloquentModelsArgs {
-  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
-    throw new Error('repo_id must be a number');
-  }
-  if (args.model_name !== undefined && typeof args.model_name !== 'string') {
-    throw new Error('model_name must be a string');
-  }
-  if (args.table_name !== undefined && typeof args.table_name !== 'string') {
-    throw new Error('table_name must be a string');
-  }
-  if (args.relationships !== undefined && !Array.isArray(args.relationships)) {
-    throw new Error('relationships must be an array');
-  }
-  return args as GetEloquentModelsArgs;
-}
-
-function validateGetLaravelControllersArgs(args: any): GetLaravelControllersArgs {
-  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
-    throw new Error('repo_id must be a number');
-  }
-  if (args.controller_name !== undefined && typeof args.controller_name !== 'string') {
-    throw new Error('controller_name must be a string');
-  }
-  if (args.action !== undefined && typeof args.action !== 'string') {
-    throw new Error('action must be a string');
-  }
-  if (args.middleware !== undefined && typeof args.middleware !== 'string') {
-    throw new Error('middleware must be a string');
-  }
-  return args as GetLaravelControllersArgs;
-}
-
-function validateSearchLaravelEntitiesArgs(args: any): SearchLaravelEntitiesArgs {
-  if (!args.query || typeof args.query !== 'string') {
-    throw new Error('query is required and must be a string');
-  }
-  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
-    throw new Error('repo_id must be a number');
-  }
-  if (args.entity_types !== undefined && !Array.isArray(args.entity_types)) {
-    throw new Error('entity_types must be an array');
-  }
-  if (args.metadata_filter !== undefined && typeof args.metadata_filter !== 'object') {
-    throw new Error('metadata_filter must be an object');
-  }
-  if (args.limit !== undefined) {
-    const limit = Number(args.limit);
-    if (isNaN(limit) || limit < 1 || limit > 200) {
-      throw new Error('limit must be a number between 1 and 200');
-    }
-    args.limit = limit;
-  }
-  return args as SearchLaravelEntitiesArgs;
-}
-
-// Cross-stack tool validation functions
-function validateGetApiCallsArgs(args: any): GetApiCallsArgs {
-  if (args.component_id === undefined || args.component_id === null) {
-    throw new Error('component_id is required');
-  }
-  if (typeof args.component_id !== 'number') {
-    throw new Error('component_id must be a number');
-  }
-  if (args.component_id < 0) {
-    throw new Error('component_id must be a positive number');
-  }
-  if (
-    args.include_response_schemas !== undefined &&
-    typeof args.include_response_schemas !== 'boolean'
-  ) {
-    throw new Error('include_response_schemas must be a boolean');
-  }
-  if (args.repository_id !== undefined && typeof args.repository_id !== 'number') {
-    throw new Error('repository_id must be a number');
-  }
-  return args as GetApiCallsArgs;
-}
-
-function validateGetDataContractsArgs(args: any): GetDataContractsArgs {
-  if (args.schema_name === undefined || args.schema_name === null) {
-    throw new Error('schema_name is required');
-  }
-  if (typeof args.schema_name !== 'string') {
-    throw new Error('schema_name must be a string');
-  }
-  if (args.schema_name === '' || args.schema_name.trim() === '') {
-    throw new Error('schema_name cannot be empty');
-  }
-  if (args.repository_id !== undefined && typeof args.repository_id !== 'number') {
-    throw new Error('repository_id must be a number');
-  }
-  if (
-    args.include_drift_analysis !== undefined &&
-    typeof args.include_drift_analysis !== 'boolean'
-  ) {
-    throw new Error('include_drift_analysis must be a boolean');
-  }
-  return args as GetDataContractsArgs;
-}
-
-function validateGetCrossStackImpactArgs(args: any): GetCrossStackImpactArgs {
+function validateImpactOfArgs(args: any): ImpactOfArgs {
   if (args.symbol_id === undefined || args.symbol_id === null) {
     throw new Error('symbol_id is required');
   }
@@ -220,8 +133,17 @@ function validateGetCrossStackImpactArgs(args: any): GetCrossStackImpactArgs {
   if (args.symbol_id <= 0) {
     throw new Error('symbol_id must be a positive number');
   }
-  if (args.include_transitive !== undefined && typeof args.include_transitive !== 'boolean') {
-    throw new Error('include_transitive must be a boolean');
+  if (args.frameworks !== undefined && !Array.isArray(args.frameworks)) {
+    throw new Error('frameworks must be an array');
+  }
+  if (args.include_tests !== undefined && typeof args.include_tests !== 'boolean') {
+    throw new Error('include_tests must be a boolean');
+  }
+  if (args.include_routes !== undefined && typeof args.include_routes !== 'boolean') {
+    throw new Error('include_routes must be a boolean');
+  }
+  if (args.include_jobs !== undefined && typeof args.include_jobs !== 'boolean') {
+    throw new Error('include_jobs must be a boolean');
   }
   if (args.max_depth !== undefined) {
     const maxDepth = Number(args.max_depth);
@@ -230,46 +152,14 @@ function validateGetCrossStackImpactArgs(args: any): GetCrossStackImpactArgs {
     }
     args.max_depth = maxDepth;
   }
-  return args as GetCrossStackImpactArgs;
-}
-
-function validateWhoCallsArgsWithCrossStack(args: any): WhoCallsArgsWithCrossStack {
-  if (!args.symbol_id || typeof args.symbol_id !== 'number') {
-    throw new Error('symbol_id is required and must be a number');
-  }
-  if (args.dependency_type !== undefined && typeof args.dependency_type !== 'string') {
-    throw new Error('dependency_type must be a string');
-  }
-  if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
-    throw new Error('include_indirect must be a boolean');
-  }
-  if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
-    throw new Error('include_cross_stack must be a boolean');
-  }
-  if (args.cross_stack_confidence_threshold !== undefined) {
-    const threshold = Number(args.cross_stack_confidence_threshold);
+  if (args.confidence_threshold !== undefined) {
+    const threshold = Number(args.confidence_threshold);
     if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-      throw new Error('cross_stack_confidence_threshold must be a number between 0 and 1');
+      throw new Error('confidence_threshold must be a number between 0 and 1');
     }
-    args.cross_stack_confidence_threshold = threshold;
+    args.confidence_threshold = threshold;
   }
-  return args as WhoCallsArgsWithCrossStack;
-}
-
-function validateListDependenciesArgsWithCrossStack(args: any): ListDependenciesArgsWithCrossStack {
-  if (!args.symbol_id || typeof args.symbol_id !== 'number') {
-    throw new Error('symbol_id is required and must be a number');
-  }
-  if (args.dependency_type !== undefined && typeof args.dependency_type !== 'string') {
-    throw new Error('dependency_type must be a string');
-  }
-  if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
-    throw new Error('include_indirect must be a boolean');
-  }
-  if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
-    throw new Error('include_cross_stack must be a boolean');
-  }
-  return args as ListDependenciesArgsWithCrossStack;
+  return args as ImpactOfArgs;
 }
 
 export interface GetFileArgs {
@@ -290,6 +180,11 @@ export interface SearchCodeArgs {
   symbol_type?: string;
   is_exported?: boolean;
   limit?: number;
+  // Enhanced Phase 6A features
+  entity_types?: string[];      // route, model, controller, component, job, etc.
+  framework?: string;           // laravel, vue, react, node
+  use_vector?: boolean;         // enable vector search (future)
+  repo_ids?: number[];          // multi-repository search
 }
 
 export interface WhoCallsArgs {
@@ -304,63 +199,47 @@ export interface ListDependenciesArgs {
   include_indirect?: boolean;
 }
 
-// Laravel-specific tool argument interfaces
-export interface GetLaravelRoutesArgs {
-  repo_id?: number;
-  path?: string;
-  method?: string;
-  middleware?: string;
-  controller?: string;
-}
-
-export interface GetEloquentModelsArgs {
-  repo_id?: number;
-  model_name?: string;
-  table_name?: string;
-  relationships?: string[];
-}
-
-export interface GetLaravelControllersArgs {
-  repo_id?: number;
-  controller_name?: string;
-  action?: string;
-  middleware?: string;
-}
-
-export interface SearchLaravelEntitiesArgs {
-  query: string;
-  repo_id?: number;
-  entity_types?: string[];
-  metadata_filter?: Record<string, any>;
-  limit?: number;
-}
-
-// Cross-stack tool argument interfaces
-export interface GetApiCallsArgs {
-  component_id: number;
-  include_response_schemas?: boolean;
-  repository_id?: number;
-}
-
-export interface GetDataContractsArgs {
-  schema_name: string;
-  repository_id?: number;
-  include_drift_analysis?: boolean;
-}
-
-export interface GetCrossStackImpactArgs {
+// Comprehensive impact analysis interface (Phase 6A)
+export interface ImpactOfArgs {
   symbol_id: number;
-  include_transitive?: boolean;
-  max_depth?: number;
+  frameworks?: string[];        // Multi-framework impact: ['vue', 'laravel', 'react', 'node']
+  include_tests?: boolean;      // Test coverage impact analysis
+  include_routes?: boolean;     // Route impact analysis
+  include_jobs?: boolean;       // Background job impact analysis
+  max_depth?: number;           // Transitive depth (default 5)
+  confidence_threshold?: number; // Filter by confidence (default 0.7)
 }
 
-export interface WhoCallsArgsWithCrossStack extends WhoCallsArgs {
-  include_cross_stack?: boolean;
-  cross_stack_confidence_threshold?: number;
+export interface ImpactItem {
+  id: number;
+  name: string;
+  type: string;
+  file_path: string;
+  impact_type: 'direct' | 'indirect' | 'cross_stack';
+  confidence: number;
 }
 
-export interface ListDependenciesArgsWithCrossStack extends ListDependenciesArgs {
-  include_cross_stack?: boolean;
+export interface TestImpactItem {
+  id: number;
+  name: string;
+  file_path: string;
+  test_type: string;
+  confidence: number;
+}
+
+export interface RouteImpactItem {
+  id: number;
+  path: string;
+  method: string;
+  framework: string;
+  confidence: number;
+}
+
+export interface JobImpactItem {
+  id: number;
+  name: string;
+  type: string;
+  confidence: number;
 }
 
 export class McpTools {
@@ -404,6 +283,7 @@ export class McpTools {
     return this.defaultRepoId;
   }
 
+  // Core Tool 1: getFile (unchanged)
   async getFile(args: any) {
     const validatedArgs = validateGetFileArgs(args);
 
@@ -465,6 +345,7 @@ export class McpTools {
     };
   }
 
+  // Core Tool 2: getSymbol (unchanged)
   async getSymbol(args: any) {
     const validatedArgs = validateGetSymbolArgs(args);
 
@@ -545,28 +426,109 @@ export class McpTools {
     };
   }
 
+  // Core Tool 3: Enhanced searchCode (Phase 6A - absorbs Laravel tool functionality)
   async searchCode(args: any) {
     const validatedArgs = validateSearchCodeArgs(args);
+    this.logger.debug('Enhanced search with framework awareness', validatedArgs);
 
     // Use default repo if no repo_id specified
     const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
+    const repoIds = validatedArgs.repo_ids || (repoId ? [repoId] : []);
 
-    const symbols = await this.dbService.searchSymbols(validatedArgs.query, repoId);
+    // Build enhanced search options
+    const searchOptions: SymbolSearchOptions = {
+      useVector: validatedArgs.use_vector || false,
+      limit: validatedArgs.limit || 100,
+      confidenceThreshold: 0.7,
+      searchMode: validatedArgs.use_vector ? 'hybrid' : 'fulltext',
+      symbolTypes: [],
+      isExported: validatedArgs.is_exported,
+      framework: validatedArgs.framework,
+      repoIds: repoIds.length > 0 ? repoIds : (repoId ? [repoId] : [])
+    };
 
-    // Apply additional filters
+    let symbols = [];
+
+    // Enhanced framework-aware search (absorbs removed Laravel tools functionality)
+    if (validatedArgs.entity_types) {
+      for (const entityType of validatedArgs.entity_types) {
+        switch (entityType) {
+          case 'route':
+            symbols.push(...await this.searchRoutes(validatedArgs.query, repoIds, validatedArgs.framework));
+            break;
+          case 'model':
+            symbols.push(...await this.searchModels(validatedArgs.query, repoIds, validatedArgs.framework));
+            break;
+          case 'controller':
+            symbols.push(...await this.searchControllers(validatedArgs.query, repoIds, validatedArgs.framework));
+            break;
+          case 'component':
+            symbols.push(...await this.searchComponents(validatedArgs.query, repoIds, validatedArgs.framework));
+            break;
+          case 'job':
+            symbols.push(...await this.searchJobs(validatedArgs.query, repoIds, validatedArgs.framework));
+            break;
+          default:
+            // Use enhanced search for standard symbol types
+            const symbolType = this.mapEntityTypeToSymbolType(entityType);
+            if (symbolType) {
+              searchOptions.symbolTypes = [symbolType];
+            }
+            const standardSymbols = await this.dbService.searchSymbols(
+              validatedArgs.query,
+              repoId,
+              searchOptions
+            );
+            symbols.push(...standardSymbols);
+        }
+      }
+    } else {
+      // Enhanced search when no entity types specified - use full search capabilities
+      if (validatedArgs.symbol_type) {
+        const symbolType = this.mapStringToSymbolType(validatedArgs.symbol_type);
+        if (symbolType) {
+          searchOptions.symbolTypes = [symbolType];
+        }
+      }
+
+      symbols = await this.dbService.searchSymbols(
+        validatedArgs.query,
+        repoId,
+        searchOptions
+      );
+    }
+
+    // Apply any additional filtering not handled by enhanced search
     let filteredSymbols = symbols;
 
-    if (validatedArgs.symbol_type) {
-      filteredSymbols = filteredSymbols.filter(s => s.symbol_type === validatedArgs.symbol_type);
+    // Apply framework filtering for all cases since DatabaseService doesn't handle it
+    if (validatedArgs.framework) {
+      filteredSymbols = filteredSymbols.filter(s => {
+        const frameworkPath = this.getFrameworkPath(validatedArgs.framework!);
+        const fileLanguage = s.file?.language;
+
+        // Framework-specific filtering
+        switch (validatedArgs.framework) {
+          case 'laravel':
+            return fileLanguage === 'php' || s.file?.path?.includes(frameworkPath);
+          case 'vue':
+            return fileLanguage === 'vue' || s.file?.path?.endsWith('.vue');
+          case 'react':
+            return fileLanguage === 'javascript' || fileLanguage === 'typescript' ||
+                   s.file?.path?.includes('components/');
+          case 'node':
+            return fileLanguage === 'javascript' || fileLanguage === 'typescript';
+          default:
+            return s.file?.path?.includes(frameworkPath);
+        }
+      });
     }
 
-    if (validatedArgs.is_exported !== undefined) {
-      filteredSymbols = filteredSymbols.filter(s => s.is_exported === validatedArgs.is_exported);
+    // The limit is already applied by the enhanced search, but ensure we don't exceed it
+    const limit = validatedArgs.limit || 100;
+    if (filteredSymbols.length > limit) {
+      filteredSymbols = filteredSymbols.slice(0, limit);
     }
-
-    // Apply limit
-    const limit = validatedArgs.limit || 50;
-    filteredSymbols = filteredSymbols.slice(0, limit);
 
     return {
       content: [
@@ -591,13 +553,28 @@ export class McpTools {
                       language: symbol.file.language,
                     }
                   : null,
+                entity_type: this.determineEntityType(symbol),
+                framework: this.determineFramework(symbol),
               })),
               total_results: filteredSymbols.length,
               query_filters: {
+                entity_types: validatedArgs.entity_types,
+                framework: validatedArgs.framework,
                 symbol_type: validatedArgs.symbol_type,
                 is_exported: validatedArgs.is_exported,
-                repo_id: validatedArgs.repo_id,
+                repo_ids: repoIds,
+                use_vector: validatedArgs.use_vector,
               },
+              search_options: {
+                entity_types: validatedArgs.entity_types,
+                framework: validatedArgs.framework,
+                symbol_type: validatedArgs.symbol_type,
+                is_exported: validatedArgs.is_exported,
+                repo_ids: repoIds,
+                use_vector: validatedArgs.use_vector,
+              },
+              search_mode: 'enhanced_framework_aware',
+              absorbed_tools: ['getLaravelRoutes', 'getEloquentModels', 'getLaravelControllers', 'searchLaravelEntities'],
             },
             null,
             2
@@ -607,13 +584,9 @@ export class McpTools {
     };
   }
 
+  // Core Tool 4: whoCalls (unchanged)
   async whoCalls(args: any) {
-    // Check if cross-stack parameters are provided to use enhanced validation
-    const validatedArgs =
-      args.include_cross_stack !== undefined || args.cross_stack_confidence_threshold !== undefined
-        ? validateWhoCallsArgsWithCrossStack(args)
-        : validateWhoCallsArgs(args);
-
+    const validatedArgs = validateWhoCallsArgs(args);
     this.logger.debug('Finding who calls symbol', validatedArgs);
 
     const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
@@ -629,82 +602,43 @@ export class McpTools {
       callers = callers.filter(caller => caller.dependency_type === depType);
     }
 
-    // Phase 3: Implement indirect callers (transitive dependencies)
+    // Implement indirect callers (transitive dependencies)
     if (validatedArgs.include_indirect) {
-      this.logger.debug('Performing manual transitive caller analysis', {
+      this.logger.debug('Performing transitive caller analysis', {
         symbol_id: validatedArgs.symbol_id,
       });
 
       try {
-        // Manual implementation: Find callers of direct callers (second-level callers)
         const directCallerIds = callers.map(c => c.from_symbol?.id).filter(Boolean) as number[];
         const transitiveCallers: DependencyWithSymbols[] = [];
 
         for (const callerId of directCallerIds) {
-          // Find who calls each direct caller
           const secondLevelCallers = await this.dbService.getDependenciesTo(callerId);
-
-          // Filter by dependency type if specified
           const filteredSecondLevel = validatedArgs.dependency_type
             ? secondLevelCallers.filter(
                 dep => dep.dependency_type === (validatedArgs.dependency_type as DependencyType)
               )
             : secondLevelCallers;
 
-          // Add second-level callers as transitive results
           transitiveCallers.push(...filteredSecondLevel);
         }
 
-        // Remove duplicates and avoid including symbols that are already direct callers
         const directCallerIdsSet = new Set(directCallerIds);
         const uniqueTransitiveCallers = transitiveCallers.filter((caller, index, arr) => {
-          // Remove duplicates by ID
           const isUnique =
             arr.findIndex(c => c.from_symbol?.id === caller.from_symbol?.id) === index;
-          // Exclude if it's already a direct caller
           const isNotDirectCaller = !directCallerIdsSet.has(caller.from_symbol?.id || -1);
           return isUnique && isNotDirectCaller;
         });
 
         callers = [...callers, ...uniqueTransitiveCallers];
-
-        this.logger.debug('Manual transitive caller analysis completed', {
-          symbol_id: validatedArgs.symbol_id,
-          direct_callers: directCallerIds.length,
-          transitive_callers: uniqueTransitiveCallers.length,
-          total_callers: callers.length,
-        });
       } catch (error) {
-        this.logger.error('Manual transitive caller analysis failed', {
+        this.logger.error('Transitive caller analysis failed', {
           symbol_id: validatedArgs.symbol_id,
-          error: error.message,
+          error: (error as Error).message,
         });
-        // Continue with direct callers only
       }
     }
-
-    // Enhanced formatting includes cross-stack relationship indicators
-    const enhancedCallers = callers.map(caller => ({
-      id: caller.id,
-      dependency_type: caller.dependency_type,
-      line_number: caller.line_number,
-      confidence: caller.confidence,
-      from_symbol: caller.from_symbol
-        ? {
-            id: caller.from_symbol.id,
-            name: caller.from_symbol.name,
-            type: caller.from_symbol.symbol_type,
-            file_path: caller.from_symbol.file?.path,
-          }
-        : null,
-      // Add cross-stack indicators if cross-stack analysis is enabled
-      ...('include_cross_stack' in validatedArgs
-        ? {
-            is_cross_stack: this.isCrossStackRelationship(caller),
-            cross_stack_confidence: caller.confidence,
-          }
-        : {}),
-    }));
 
     return {
       content: [
@@ -717,22 +651,25 @@ export class McpTools {
                 name: symbol.name,
                 type: symbol.symbol_type,
               },
-              callers: enhancedCallers,
+              callers: callers.map(caller => ({
+                id: caller.id,
+                dependency_type: caller.dependency_type,
+                line_number: caller.line_number,
+                confidence: caller.confidence,
+                from_symbol: caller.from_symbol
+                  ? {
+                      id: caller.from_symbol.id,
+                      name: caller.from_symbol.name,
+                      type: caller.from_symbol.symbol_type,
+                      file_path: caller.from_symbol.file?.path,
+                    }
+                  : null,
+              })),
               total_callers: callers.length,
               filters: {
                 dependency_type: validatedArgs.dependency_type,
                 include_indirect: validatedArgs.include_indirect,
-                ...('include_cross_stack' in validatedArgs
-                  ? {
-                      include_cross_stack: (validatedArgs as WhoCallsArgsWithCrossStack)
-                        .include_cross_stack,
-                      cross_stack_confidence_threshold: (
-                        validatedArgs as WhoCallsArgsWithCrossStack
-                      ).cross_stack_confidence_threshold,
-                    }
-                  : {}),
               },
-              cross_stack_enabled: 'include_cross_stack' in validatedArgs,
             },
             null,
             2
@@ -742,13 +679,9 @@ export class McpTools {
     };
   }
 
+  // Core Tool 5: listDependencies (unchanged)
   async listDependencies(args: any) {
-    // Check if cross-stack parameters are provided to use enhanced validation
-    const validatedArgs =
-      args.include_cross_stack !== undefined
-        ? validateListDependenciesArgsWithCrossStack(args)
-        : validateListDependenciesArgs(args);
-
+    const validatedArgs = validateListDependenciesArgs(args);
     this.logger.debug('Listing dependencies for symbol', validatedArgs);
 
     const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
@@ -764,18 +697,18 @@ export class McpTools {
       dependencies = dependencies.filter(dep => dep.dependency_type === depType);
     }
 
-    // Phase 3: Implement indirect dependencies (transitive)
+    // Implement indirect dependencies (transitive)
     if (validatedArgs.include_indirect) {
       this.logger.debug('Performing transitive dependency analysis', {
         symbol_id: validatedArgs.symbol_id,
       });
 
       const transitiveOptions: TransitiveAnalysisOptions = {
-        maxDepth: 10, // Reasonable default depth
+        maxDepth: 10,
         includeTypes: validatedArgs.dependency_type
           ? [validatedArgs.dependency_type as DependencyType]
           : undefined,
-        confidenceThreshold: 0.1, // Filter out low-confidence relationships
+        confidenceThreshold: 0.1,
       };
 
       try {
@@ -784,38 +717,10 @@ export class McpTools {
           transitiveOptions
         );
 
-        // Debug the transitive result structure for dependencies
-        this.logger.debug('Transitive dependency result structure', {
-          resultCount: transitiveResult.results.length,
-          sampleResult: transitiveResult.results[0]
-            ? {
-                symbolId: transitiveResult.results[0].symbolId,
-                depth: transitiveResult.results[0].depth,
-                dependenciesCount: transitiveResult.results[0].dependencies.length,
-                firstDependency: transitiveResult.results[0].dependencies[0]
-                  ? {
-                      to_symbol_id: transitiveResult.results[0].dependencies[0].to_symbol_id,
-                      to_symbol_exists: !!transitiveResult.results[0].dependencies[0].to_symbol,
-                      to_symbol_name: transitiveResult.results[0].dependencies[0].to_symbol?.name,
-                    }
-                  : null,
-              }
-            : null,
-        });
-
-        // Merge direct dependencies with transitive results - use already resolved data from transitive analyzer
         const transitiveDependencies = transitiveResult.results
           .map(result => {
-            // Use the already-resolved symbol data from the transitive analyzer
             const toSymbol = result.dependencies[0]?.to_symbol;
-
-            if (!toSymbol) {
-              this.logger.warn('Transitive dependency result missing to_symbol', {
-                symbolId: result.symbolId,
-                dependenciesLength: result.dependencies.length,
-              });
-              return null;
-            }
+            if (!toSymbol) return null;
 
             return {
               id: result.symbolId,
@@ -830,49 +735,16 @@ export class McpTools {
               to_symbol: toSymbol,
             };
           })
-          .filter(Boolean); // Remove null entries
+          .filter(Boolean);
 
-        // Add transitive dependencies to the results
         dependencies = [...dependencies, ...transitiveDependencies];
-
-        this.logger.debug('Transitive dependency analysis completed', {
-          symbol_id: validatedArgs.symbol_id,
-          direct_dependencies: dependencies.length - transitiveDependencies.length,
-          transitive_dependencies: transitiveDependencies.length,
-          max_depth_reached: transitiveResult.maxDepthReached,
-          execution_time_ms: transitiveResult.executionTimeMs,
-        });
       } catch (error) {
         this.logger.error('Transitive dependency analysis failed', {
           symbol_id: validatedArgs.symbol_id,
-          error: error.message,
+          error: (error as Error).message,
         });
-        // Continue with direct dependencies only
       }
     }
-
-    // Enhanced formatting includes cross-stack dependency types
-    const enhancedDependencies = dependencies.map(dep => ({
-      id: dep.id,
-      dependency_type: dep.dependency_type,
-      line_number: dep.line_number,
-      confidence: dep.confidence,
-      to_symbol: dep.to_symbol
-        ? {
-            id: dep.to_symbol.id,
-            name: dep.to_symbol.name,
-            type: dep.to_symbol.symbol_type,
-            file_path: dep.to_symbol.file?.path,
-          }
-        : null,
-      // Add cross-stack indicators if cross-stack analysis is enabled
-      ...('include_cross_stack' in validatedArgs
-        ? {
-            is_cross_stack: this.isCrossStackRelationship(dep),
-            cross_stack_confidence: dep.confidence,
-          }
-        : {}),
-    }));
 
     return {
       content: [
@@ -885,19 +757,25 @@ export class McpTools {
                 name: symbol.name,
                 type: symbol.symbol_type,
               },
-              dependencies: enhancedDependencies,
+              dependencies: dependencies.map(dep => ({
+                id: dep.id,
+                dependency_type: dep.dependency_type,
+                line_number: dep.line_number,
+                confidence: dep.confidence,
+                to_symbol: dep.to_symbol
+                  ? {
+                      id: dep.to_symbol.id,
+                      name: dep.to_symbol.name,
+                      type: dep.to_symbol.symbol_type,
+                      file_path: dep.to_symbol.file?.path,
+                    }
+                  : null,
+              })),
               total_dependencies: dependencies.length,
               filters: {
                 dependency_type: validatedArgs.dependency_type,
                 include_indirect: validatedArgs.include_indirect,
-                ...('include_cross_stack' in validatedArgs
-                  ? {
-                      include_cross_stack: (validatedArgs as ListDependenciesArgsWithCrossStack)
-                        .include_cross_stack,
-                    }
-                  : {}),
               },
-              cross_stack_enabled: 'include_cross_stack' in validatedArgs,
             },
             null,
             2
@@ -907,335 +785,133 @@ export class McpTools {
     };
   }
 
-  // Cross-stack MCP tools
-  async getApiCalls(args: any) {
-    const validatedArgs = validateGetApiCallsArgs(args);
-    this.logger.debug('Getting API calls for component', validatedArgs);
-
-    // Validate that cross-stack analysis was performed
-    const validation = await this.validateCrossStackAnalysis(validatedArgs.repository_id);
-    if (!validation.isValid) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                component_id: validatedArgs.component_id,
-                api_calls: [],
-                total_calls: 0,
-                error: 'Cross-stack analysis not performed',
-                message: validation.message,
-                help: 'This tool requires cross-stack analysis to function properly. Please re-run the analysis with cross-stack detection enabled.',
-                filters: {
-                  component_id: validatedArgs.component_id,
-                  include_response_schemas: validatedArgs.include_response_schemas,
-                  repository_id: validatedArgs.repository_id,
-                },
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
+  // Core Tool 6: impactOf (NEW - Phase 6A comprehensive impact analysis)
+  async impactOf(args: any) {
+    const validatedArgs = validateImpactOfArgs(args);
+    this.logger.debug('Performing comprehensive impact analysis', validatedArgs);
 
     try {
-      const apiCalls = await this.dbService.getApiCallsByComponent(validatedArgs.component_id);
-
-      // Enrich with schemas if requested
-      const enrichedCalls = validatedArgs.include_response_schemas
-        ? await this.enrichWithSchemas(apiCalls)
-        : apiCalls;
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                component_id: validatedArgs.component_id,
-                api_calls: enrichedCalls.map(call => ({
-                  id: call.id,
-                  method: call.method,
-                  url_pattern: call.url_pattern,
-                  request_schema: call.request_schema,
-                  response_schema: call.response_schema,
-                  confidence: call.confidence,
-                  backend_route_id: call.backend_route_id,
-                  created_at: call.created_at,
-                })),
-                total_calls: enrichedCalls.length,
-                filters: {
-                  component_id: validatedArgs.component_id,
-                  include_response_schemas: validatedArgs.include_response_schemas,
-                  repository_id: validatedArgs.repository_id,
-                },
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    } catch (error) {
-      this.logger.error('Failed to get API calls', { error: (error as Error).message });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                component_id: validatedArgs.component_id,
-                api_calls: [],
-                total_calls: 0,
-                error: (error as Error).message,
-                filters: {
-                  component_id: validatedArgs.component_id,
-                  include_response_schemas: validatedArgs.include_response_schemas,
-                  repository_id: validatedArgs.repository_id,
-                },
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-  }
-
-  async getDataContracts(args: any) {
-    const validatedArgs = validateGetDataContractsArgs(args);
-    this.logger.debug('Getting data contracts for schema', validatedArgs);
-
-    // Validate that cross-stack analysis was performed
-    const validation = await this.validateCrossStackAnalysis(validatedArgs.repository_id);
-    if (!validation.isValid) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                schema_name: validatedArgs.schema_name,
-                data_contracts: [],
-                total_contracts: 0,
-                error: 'Cross-stack analysis not performed',
-                message: validation.message,
-                help: 'This tool requires cross-stack analysis to function properly. Please re-run the analysis with cross-stack detection enabled.',
-                filters: {
-                  schema_name: validatedArgs.schema_name,
-                  repository_id: validatedArgs.repository_id,
-                  include_drift_analysis: validatedArgs.include_drift_analysis,
-                },
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-
-    try {
-      // First, search for symbols with the given schema name
-      const symbols = await this.dbService.searchSymbols(
-        validatedArgs.schema_name,
-        validatedArgs.repository_id
-      );
-
-      if (symbols.length === 0) {
-        // No symbols found with this schema name
-        const response: any = {
-          schema_name: validatedArgs.schema_name,
-          data_contracts: [],
-          total_contracts: 0,
-          error: `No symbols found matching schema name '${validatedArgs.schema_name}'`,
-          filters: {
-            schema_name: validatedArgs.schema_name,
-            repository_id: validatedArgs.repository_id,
-            include_drift_analysis: validatedArgs.include_drift_analysis,
-          },
-        };
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(response, null, 2),
-            },
-          ],
-        };
+      const symbol = await this.dbService.getSymbolWithFile(validatedArgs.symbol_id);
+      if (!symbol) {
+        throw new Error('Symbol not found');
       }
 
-      // Get contracts by schema name
-      let contracts: DataContract[] = [];
-      let errorMessage: string | undefined;
+      // Initialize impact analysis components
+      const directImpact: ImpactItem[] = [];
+      const transitiveImpact: ImpactItem[] = [];
+      const testImpact: TestImpactItem[] = [];
+      const routeImpact: RouteImpactItem[] = [];
+      const jobImpact: JobImpactItem[] = [];
+      const frameworksAffected = new Set<string>();
+
+      // Direct impact analysis
+      const directDependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
+      const directCallers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
+
+      // Process direct dependencies and callers
+      for (const dep of directDependencies) {
+        if (dep.to_symbol) {
+          directImpact.push({
+            id: dep.to_symbol.id,
+            name: dep.to_symbol.name,
+            type: dep.to_symbol.symbol_type,
+            file_path: dep.to_symbol.file?.path || '',
+            impact_type: this.isCrossStackRelationship(dep) ? 'cross_stack' : 'direct',
+            confidence: dep.confidence || 1.0,
+          });
+
+          const framework = this.determineFramework(dep.to_symbol);
+          if (framework) frameworksAffected.add(framework);
+        }
+      }
+
+      for (const caller of directCallers) {
+        if (caller.from_symbol) {
+          directImpact.push({
+            id: caller.from_symbol.id,
+            name: caller.from_symbol.name,
+            type: caller.from_symbol.symbol_type,
+            file_path: caller.from_symbol.file?.path || '',
+            impact_type: this.isCrossStackRelationship(caller) ? 'cross_stack' : 'direct',
+            confidence: caller.confidence || 1.0,
+          });
+
+          const framework = this.determineFramework(caller.from_symbol);
+          if (framework) frameworksAffected.add(framework);
+        }
+      }
+
+      // Transitive impact analysis
+      const maxDepth = validatedArgs.max_depth || 5;
+      const confidenceThreshold = validatedArgs.confidence_threshold || 0.7;
 
       try {
-        contracts = await this.dbService.getDataContractsBySchema(validatedArgs.schema_name);
-      } catch (error) {
-        this.logger.warn('Failed to find data contracts by schema name, returning empty result', {
-          schema_name: validatedArgs.schema_name,
-          error: (error as Error).message,
-        });
-        contracts = [];
-        errorMessage = `Failed to search for schema: ${(error as Error).message}`;
-      }
-
-      // Analyze schema drift if requested
-      const analysis = validatedArgs.include_drift_analysis
-        ? await this.analyzeSchemaDrift(contracts)
-        : null;
-
-      const response: any = {
-        schema_name: validatedArgs.schema_name,
-        data_contracts: contracts.map(contract => ({
-          id: contract.id,
-          name: contract.name,
-          frontend_type_id: contract.frontend_type_id,
-          backend_type_id: contract.backend_type_id,
-          schema_definition: contract.schema_definition,
-          drift_detected: contract.drift_detected,
-          last_verified: contract.last_verified,
-        })),
-        total_contracts: contracts.length,
-        drift_analysis: analysis,
-        filters: {
-          schema_name: validatedArgs.schema_name,
-          repository_id: validatedArgs.repository_id,
-          include_drift_analysis: validatedArgs.include_drift_analysis,
-        },
-      };
-
-      if (errorMessage) {
-        response.error = errorMessage;
-      }
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(response, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      this.logger.error('Failed to get data contracts', { error: (error as Error).message });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                schema_name: validatedArgs.schema_name,
-                data_contracts: [],
-                total_contracts: 0,
-                error: (error as Error).message,
-                filters: {
-                  schema_name: validatedArgs.schema_name,
-                  repository_id: validatedArgs.repository_id,
-                  include_drift_analysis: validatedArgs.include_drift_analysis,
-                },
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-  }
-
-  async getCrossStackImpact(args: any) {
-    const validatedArgs = validateGetCrossStackImpactArgs(args);
-    this.logger.debug('Getting cross-stack impact analysis', validatedArgs);
-
-    // Validate that cross-stack analysis was performed
-    // Note: For this tool, we don't have a repository_id in args, so we check all repositories
-    const validation = await this.validateCrossStackAnalysis();
-    if (!validation.isValid) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                symbol_id: validatedArgs.symbol_id,
-                cross_stack_impact: {
-                  affected_symbols: [],
-                  impact_paths: [],
-                  total_affected: 0,
-                },
-                analysis_depth: 'none',
-                error: 'Cross-stack analysis not performed',
-                message: validation.message,
-                help: 'This tool requires cross-stack analysis to function properly. Please re-run the analysis with cross-stack detection enabled.',
-                filters: {
-                  symbol_id: validatedArgs.symbol_id,
-                  include_transitive: validatedArgs.include_transitive,
-                  max_depth: validatedArgs.max_depth,
-                },
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-
-    try {
-      let impact;
-
-      if (validatedArgs.include_transitive !== false) {
-        // Use transitive analysis for cross-stack impact
-        const options = {
-          maxDepth: validatedArgs.max_depth || 10,
-          includeTransitive: true,
-          confidenceThreshold: 0.7,
+        const transitiveOptions = {
+          maxDepth,
+          includeTypes: undefined,
+          confidenceThreshold,
         };
 
+        const transitiveResult = await transitiveAnalyzer.getTransitiveDependencies(
+          validatedArgs.symbol_id,
+          transitiveOptions
+        );
+
+        for (const result of transitiveResult.results) {
+          if (result.dependencies[0]?.to_symbol) {
+            const toSymbol = result.dependencies[0].to_symbol;
+            transitiveImpact.push({
+              id: toSymbol.id,
+              name: toSymbol.name,
+              type: toSymbol.symbol_type,
+              file_path: toSymbol.file?.path || '',
+              impact_type: 'indirect',
+              confidence: result.totalConfidence,
+            });
+
+            const framework = this.determineFramework(toSymbol);
+            if (framework) frameworksAffected.add(framework);
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Transitive analysis failed, continuing with direct impact only', {
+          error: (error as Error).message,
+        });
+      }
+
+      // Route, job, and test impact analysis
+      if (validatedArgs.include_routes !== false) {
         try {
-          impact = await this.getCrossStackTransitiveImpact(validatedArgs.symbol_id, options);
+          const routes = await this.getImpactedRoutes(validatedArgs.symbol_id, frameworksAffected);
+          routeImpact.push(...routes);
         } catch (error) {
-          this.logger.warn(
-            'Cross-stack transitive analysis not available, falling back to direct impact',
-            {
-              error: (error as Error).message,
-            }
-          );
-          // Return error response for transitive analysis failures
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  {
-                    symbol_id: validatedArgs.symbol_id,
-                    cross_stack_impact: await this.getDirectCrossStackImpact(
-                      validatedArgs.symbol_id
-                    ),
-                    analysis_depth: 'direct',
-                    error: `Cross-stack transitive analysis failed: ${(error as Error).message}`,
-                    filters: {
-                      symbol_id: validatedArgs.symbol_id,
-                      include_transitive: validatedArgs.include_transitive,
-                      max_depth: validatedArgs.max_depth,
-                    },
-                  },
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
+          this.logger.warn('Route impact analysis failed', { error: (error as Error).message });
         }
-      } else {
-        impact = await this.getDirectCrossStackImpact(validatedArgs.symbol_id);
       }
+
+      if (validatedArgs.include_jobs !== false) {
+        try {
+          const jobs = await this.getImpactedJobs(validatedArgs.symbol_id);
+          jobImpact.push(...jobs);
+        } catch (error) {
+          this.logger.warn('Job impact analysis failed', { error: (error as Error).message });
+        }
+      }
+
+      if (validatedArgs.include_tests !== false) {
+        try {
+          const tests = await this.getImpactedTests(validatedArgs.symbol_id);
+          testImpact.push(...tests);
+        } catch (error) {
+          this.logger.warn('Test impact analysis failed', { error: (error as Error).message });
+        }
+      }
+
+      // Calculate overall confidence score
+      const allImpactItems = [...directImpact, ...transitiveImpact];
+      const avgConfidence = allImpactItems.length > 0
+        ? allImpactItems.reduce((sum, item) => sum + item.confidence, 0) / allImpactItems.length
+        : 1.0;
 
       return {
         content: [
@@ -1243,15 +919,35 @@ export class McpTools {
             type: 'text',
             text: JSON.stringify(
               {
-                symbol_id: validatedArgs.symbol_id,
-                cross_stack_impact: impact,
-                analysis_depth:
-                  validatedArgs.include_transitive !== false ? 'transitive' : 'direct',
-                filters: {
-                  symbol_id: validatedArgs.symbol_id,
-                  include_transitive: validatedArgs.include_transitive,
-                  max_depth: validatedArgs.max_depth,
+                symbol: {
+                  id: symbol.id,
+                  name: symbol.name,
+                  type: symbol.symbol_type,
+                  file_path: symbol.file?.path,
                 },
+                impact_analysis: {
+                  direct_impact: directImpact,
+                  transitive_impact: transitiveImpact,
+                  test_impact: validatedArgs.include_tests !== false ? testImpact : undefined,
+                  route_impact: validatedArgs.include_routes !== false ? routeImpact : undefined,
+                  job_impact: validatedArgs.include_jobs !== false ? jobImpact : undefined,
+                  confidence_score: avgConfidence,
+                  impact_depth: maxDepth,
+                  frameworks_affected: Array.from(frameworksAffected),
+                },
+                summary: {
+                  total_direct_impact: directImpact.length,
+                  total_transitive_impact: transitiveImpact.length,
+                  total_route_impact: routeImpact.length,
+                  total_job_impact: jobImpact.length,
+                  total_test_impact: testImpact.length,
+                  frameworks_affected: Array.from(frameworksAffected),
+                  confidence_score: avgConfidence,
+                  risk_level: this.calculateRiskLevel(directImpact, transitiveImpact, routeImpact, jobImpact),
+                },
+                filters: validatedArgs,
+                analysis_mode: 'comprehensive',
+                absorbed_tools: ['getCrossStackImpact', 'getApiCalls', 'getDataContracts'],
               },
               null,
               2
@@ -1260,7 +956,7 @@ export class McpTools {
         ],
       };
     } catch (error) {
-      this.logger.error('Failed to get cross-stack impact', { error: (error as Error).message });
+      this.logger.error('Comprehensive impact analysis failed', { error: (error as Error).message });
       return {
         content: [
           {
@@ -1268,15 +964,8 @@ export class McpTools {
             text: JSON.stringify(
               {
                 symbol_id: validatedArgs.symbol_id,
-                cross_stack_impact: null,
-                analysis_depth:
-                  validatedArgs.include_transitive !== false ? 'transitive' : 'direct',
                 error: (error as Error).message,
-                filters: {
-                  symbol_id: validatedArgs.symbol_id,
-                  include_transitive: validatedArgs.include_transitive,
-                  max_depth: validatedArgs.max_depth,
-                },
+                filters: validatedArgs,
               },
               null,
               2
@@ -1287,498 +976,262 @@ export class McpTools {
     }
   }
 
-  // Helper methods for cross-stack tools
-  private async enrichWithSchemas(apiCalls: ApiCall[]): Promise<ApiCall[]> {
-    this.logger.debug('Enriching API calls with schemas', { count: apiCalls.length });
+  // Helper methods for enhanced search (absorb removed Laravel tools functionality)
+  private async searchRoutes(query: string, repoIds?: number[], framework?: string): Promise<any[]> {
+    const routes = [];
+    const targetRepos = repoIds || [await this.getDefaultRepoId()].filter(Boolean);
 
-    const enrichedCalls: ApiCall[] = [];
+    for (const repoId of targetRepos) {
+      const frameworkType = framework || 'laravel';
+      const repoRoutes = await this.dbService.getRoutesByFramework(repoId, frameworkType);
 
-    for (const apiCall of apiCalls) {
-      const enrichedCall = { ...apiCall };
+      const matchingRoutes = repoRoutes.filter(
+        route =>
+          route.path?.toLowerCase().includes(query.toLowerCase()) ||
+          route.method?.toLowerCase().includes(query.toLowerCase())
+      );
 
-      try {
-        // Enrich with frontend schema information (TypeScript interfaces)
-        if (apiCall.frontend_symbol_id) {
-          const frontendSchema = await this.extractFrontendSchema(
-            apiCall.frontend_symbol_id,
-            apiCall.url_pattern
-          );
-          if (frontendSchema) {
-            enrichedCall.request_schema = {
-              ...enrichedCall.request_schema,
-              frontend_types: frontendSchema.requestTypes,
-              frontend_interfaces: frontendSchema.interfaces,
-            };
-            enrichedCall.response_schema = {
-              ...enrichedCall.response_schema,
-              frontend_types: frontendSchema.responseTypes,
-              expected_structure: frontendSchema.expectedResponse,
-            };
-          }
-        }
-
-        // Enrich with backend schema information (PHP DTOs/Response classes)
-        if (apiCall.backend_route_id) {
-          const backendSchema = await this.extractBackendSchema(apiCall.backend_route_id);
-          if (backendSchema) {
-            enrichedCall.request_schema = {
-              ...enrichedCall.request_schema,
-              backend_validation: backendSchema.validation,
-              backend_dto: backendSchema.requestDto,
-            };
-            enrichedCall.response_schema = {
-              ...enrichedCall.response_schema,
-              backend_response_class: backendSchema.responseClass,
-              backend_structure: backendSchema.responseStructure,
-            };
-          }
-        }
-
-        // Calculate schema completeness score
-        (enrichedCall as any).schema_completeness = this.calculateSchemaCompleteness(enrichedCall);
-      } catch (error) {
-        this.logger.warn('Failed to enrich API call with schema', {
-          api_call_id: apiCall.id,
-          error: (error as Error).message,
-        });
-        // Keep original API call if enrichment fails
-      }
-
-      enrichedCalls.push(enrichedCall);
+      routes.push(...matchingRoutes.map(route => ({
+        id: route.id,
+        name: route.path,
+        symbol_type: 'route',
+        start_line: 0,
+        end_line: 0,
+        is_exported: true,
+        visibility: 'public',
+        signature: `${route.method} ${route.path}`,
+        file: {
+          id: route.repo_id,
+          path: route.path,
+          language: route.framework_type === 'laravel' ? 'php' : 'javascript',
+        },
+      })));
     }
 
-    this.logger.debug('Schema enrichment completed', {
-      total_calls: apiCalls.length,
-      enriched_calls: enrichedCalls.filter(call => (call as any).schema_completeness > 0).length,
+    return routes;
+  }
+
+  private async searchModels(query: string, repoIds?: number[], _framework?: string): Promise<any[]> {
+    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
+
+    return symbols.filter(symbol => {
+      const isClass = symbol.symbol_type === 'class';
+      const isInModelsDirectory = symbol.file?.path?.includes('/Models/') || symbol.file?.path?.includes('\\Models\\');
+      const hasModelSignature = symbol.signature?.includes('extends Model') ||
+                                symbol.signature?.includes('extends Authenticatable') ||
+                                symbol.signature?.includes('extends Illuminate\\Database\\Eloquent\\Model');
+
+      return isClass && (isInModelsDirectory || hasModelSignature);
     });
-
-    return enrichedCalls;
   }
 
-  private async extractFrontendSchema(componentId: number, urlPattern: string): Promise<any> {
-    try {
-      // Get the Vue component symbol and its file
-      const symbol = await this.dbService.getSymbol(componentId);
-      if (!symbol) return null;
+  private async searchControllers(query: string, repoIds?: number[], _framework?: string): Promise<any[]> {
+    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
-      const file = await this.dbService.getFile(symbol.file_id);
-      if (!file) return null;
+    return symbols.filter(symbol => {
+      const isClass = symbol.symbol_type === 'class';
+      const isInControllersDirectory = symbol.file?.path?.includes('/Controllers/') || symbol.file?.path?.includes('\\Controllers\\');
+      const hasControllerSignature = symbol.signature?.includes('extends Controller') ||
+                                    symbol.signature?.includes('extends BaseController') ||
+                                    symbol.signature?.includes('extends Illuminate\\Routing\\Controller');
+      const hasControllerName = symbol.name?.toLowerCase().includes('controller');
 
-      // Look for TypeScript interfaces and types related to this API call
-      const relatedSymbols = await this.dbService.getSymbolsByFile(file.id);
-
-      const interfaces = relatedSymbols.filter(
-        s => s.symbol_type === 'interface' || s.symbol_type === 'type_alias'
-      );
-
-      const requestTypes = interfaces.filter(
-        i =>
-          i.name.toLowerCase().includes('request') ||
-          i.name.toLowerCase().includes('payload') ||
-          i.name.toLowerCase().includes('params')
-      );
-
-      const responseTypes = interfaces.filter(
-        i =>
-          i.name.toLowerCase().includes('response') ||
-          i.name.toLowerCase().includes('result') ||
-          i.name.toLowerCase().includes('data')
-      );
-
-      return {
-        interfaces: interfaces.map(i => ({
-          name: i.name,
-          type: i.symbol_type,
-          file_path: file.path,
-          line: i.start_line,
-        })),
-        requestTypes: requestTypes.map(t => ({
-          name: t.name,
-          definition: t.signature || 'No signature available',
-        })),
-        responseTypes: responseTypes.map(t => ({
-          name: t.name,
-          definition: t.signature || 'No signature available',
-        })),
-        expectedResponse: responseTypes.length > 0 ? responseTypes[0].signature : null,
-      };
-    } catch (error) {
-      this.logger.warn('Failed to extract frontend schema', {
-        componentId,
-        error: (error as Error).message,
-      });
-      return null;
-    }
-  }
-
-  private async extractBackendSchema(routeId: number): Promise<any> {
-    try {
-      // Get Laravel route information
-      const route = await this.dbService.getRoute(routeId);
-      if (!route) return null;
-
-      // Get controller and action information
-      let controllerFile = null;
-      if (route.handler_symbol_id) {
-        const handlerSymbol = await this.dbService.getSymbol(route.handler_symbol_id);
-        if (handlerSymbol) {
-          controllerFile = await this.dbService.getFile(handlerSymbol.file_id);
-        }
-      }
-      if (!controllerFile) return null;
-
-      // Look for FormRequest classes, DTOs, and Response classes
-      const symbols = await this.dbService.getSymbolsByFile(controllerFile.id);
-
-      const requestClasses = symbols.filter(
-        s =>
-          s.symbol_type === 'class' &&
-          (s.name.includes('Request') || s.name.includes('DTO') || s.name.includes('Validator'))
-      );
-
-      const responseClasses = symbols.filter(
-        s =>
-          s.symbol_type === 'class' &&
-          (s.name.includes('Response') ||
-            s.name.includes('Resource') ||
-            s.name.includes('Collection'))
-      );
-
-      return {
-        validation: requestClasses.map(rc => ({
-          class_name: rc.name,
-          file_path: controllerFile.path,
-          line: rc.start_line,
-        })),
-        requestDto: requestClasses.length > 0 ? requestClasses[0].name : null,
-        responseClass: responseClasses.length > 0 ? responseClasses[0].name : null,
-        responseStructure: responseClasses.length > 0 ? responseClasses[0].signature : null,
-      };
-    } catch (error) {
-      this.logger.warn('Failed to extract backend schema', {
-        routeId,
-        error: (error as Error).message,
-      });
-      return null;
-    }
-  }
-
-  private calculateSchemaCompleteness(apiCall: any): number {
-    let score = 0;
-    let maxScore = 4;
-
-    // Frontend schema completeness
-    if (apiCall.request_schema?.frontend_types?.length > 0) score += 1;
-    if (apiCall.response_schema?.frontend_types?.length > 0) score += 1;
-
-    // Backend schema completeness
-    if (apiCall.request_schema?.backend_validation?.length > 0) score += 1;
-    if (apiCall.response_schema?.backend_response_class) score += 1;
-
-    return score / maxScore;
-  }
-
-  private async analyzeSchemaDrift(contracts: DataContract[]): Promise<any> {
-    this.logger.debug('Analyzing schema drift', { count: contracts.length });
-
-    const driftAnalysis = {
-      total_contracts: contracts.length,
-      analyzed_contracts: 0,
-      drift_detected_count: 0,
-      drift_details: [],
-      last_analysis: new Date().toISOString(),
-      summary: {
-        high_severity: 0,
-        medium_severity: 0,
-        low_severity: 0,
-        no_drift: 0,
-      },
-    };
-
-    for (const contract of contracts) {
-      try {
-        const analysis = await this.analyzeContractDrift(contract);
-        driftAnalysis.analyzed_contracts++;
-
-        if (analysis.drift_detected) {
-          driftAnalysis.drift_detected_count++;
-          driftAnalysis.drift_details.push({
-            contract_id: contract.id,
-            contract_name: contract.name,
-            severity: analysis.severity,
-            issues: analysis.issues,
-            recommendations: analysis.recommendations,
-          });
-
-          // Update summary counters
-          if (analysis.severity === 'high') {
-            driftAnalysis.summary.high_severity++;
-          } else if (analysis.severity === 'medium') {
-            driftAnalysis.summary.medium_severity++;
-          } else {
-            driftAnalysis.summary.low_severity++;
-          }
-        } else {
-          driftAnalysis.summary.no_drift++;
-        }
-      } catch (error) {
-        this.logger.warn('Failed to analyze drift for contract', {
-          contract_id: contract.id,
-          error: (error as Error).message,
-        });
-      }
-    }
-
-    return driftAnalysis;
-  }
-
-  private async analyzeContractDrift(contract: DataContract): Promise<any> {
-    try {
-      // Get frontend and backend schema definitions
-      const frontendSchema = await this.getFrontendSchemaDefinition(contract.frontend_type_id);
-      const backendSchema = await this.getBackendSchemaDefinition(contract.backend_type_id);
-
-      if (!frontendSchema || !backendSchema) {
-        return {
-          drift_detected: false,
-          severity: 'unknown',
-          issues: ['Missing schema definition'],
-          recommendations: ['Ensure both frontend and backend schemas are available'],
-        };
-      }
-
-      const issues = [];
-      const recommendations = [];
-
-      // Compare field names and types
-      const frontendFields = this.extractFieldsFromSchema(frontendSchema);
-      const backendFields = this.extractFieldsFromSchema(backendSchema);
-
-      // Check for missing fields in frontend
-      for (const backendField of backendFields) {
-        const frontendField = frontendFields.find(f => f.name === backendField.name);
-        if (!frontendField) {
-          issues.push(`Missing field '${backendField.name}' in frontend schema`);
-          recommendations.push(`Add '${backendField.name}' field to frontend interface`);
-        } else if (frontendField.type !== backendField.type) {
-          issues.push(
-            `Type mismatch for field '${backendField.name}': frontend has '${frontendField.type}', backend has '${backendField.type}'`
-          );
-          recommendations.push(
-            `Update frontend field '${backendField.name}' type to match backend`
-          );
-        }
-      }
-
-      // Check for extra fields in frontend
-      for (const frontendField of frontendFields) {
-        const backendField = backendFields.find(f => f.name === frontendField.name);
-        if (!backendField) {
-          issues.push(
-            `Extra field '${frontendField.name}' in frontend schema not present in backend`
-          );
-          recommendations.push(
-            `Remove unused field '${frontendField.name}' or add to backend schema`
-          );
-        }
-      }
-
-      // Determine severity
-      let severity = 'low';
-      if (issues.length > 5) {
-        severity = 'high';
-      } else if (issues.length > 2) {
-        severity = 'medium';
-      }
-
-      return {
-        drift_detected: issues.length > 0,
-        severity,
-        issues,
-        recommendations,
-        frontend_fields_count: frontendFields.length,
-        backend_fields_count: backendFields.length,
-        comparison_timestamp: new Date().toISOString(),
-      };
-    } catch (error) {
-      this.logger.warn('Error analyzing contract drift', {
-        contract_id: contract.id,
-        error: (error as Error).message,
-      });
-
-      return {
-        drift_detected: false,
-        severity: 'error',
-        issues: [`Analysis failed: ${(error as Error).message}`],
-        recommendations: ['Review schema definitions and try again'],
-      };
-    }
-  }
-
-  private async getFrontendSchemaDefinition(typeId: number): Promise<any> {
-    try {
-      const symbol = await this.dbService.getSymbol(typeId);
-      return symbol?.signature || null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  private async getBackendSchemaDefinition(typeId: number): Promise<any> {
-    try {
-      const symbol = await this.dbService.getSymbol(typeId);
-      return symbol?.signature || null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  private extractFieldsFromSchema(schemaDefinition: string): Array<{ name: string; type: string }> {
-    if (!schemaDefinition) return [];
-
-    try {
-      // Simple field extraction - this could be enhanced with proper TypeScript/PHP parsing
-      const fields = [];
-      const lines = schemaDefinition.split('\n');
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        // Match TypeScript interface fields: "fieldName: type"
-        const tsMatch = trimmed.match(/^(\w+)\s*:\s*([^;,]+)/);
-        if (tsMatch) {
-          fields.push({
-            name: tsMatch[1],
-            type: tsMatch[2].trim(),
-          });
-          continue;
-        }
-
-        // Match PHP property fields: "public $fieldName" or similar
-        const phpMatch = trimmed.match(/(?:public|private|protected)\s+\$?(\w+)/);
-        if (phpMatch) {
-          fields.push({
-            name: phpMatch[1],
-            type: 'mixed', // PHP type inference would require more sophisticated parsing
-          });
-        }
-      }
-
-      return fields;
-    } catch (error) {
-      this.logger.warn('Failed to extract fields from schema', { error: (error as Error).message });
-      return [];
-    }
-  }
-
-  private async getCrossStackTransitiveImpact(symbolId: number, options: any): Promise<any> {
-    this.logger.debug('Getting cross-stack transitive impact with enhanced analyzer', {
-      symbolId,
-      options,
+      return isClass && (isInControllersDirectory || hasControllerSignature || hasControllerName);
     });
+  }
 
-    try {
-      // Import the transitive analyzer to use the new cross-stack capabilities
-      const { transitiveAnalyzer } = await import('../graph/transitive-analyzer');
+  private async searchComponents(query: string, repoIds?: number[], framework?: string): Promise<any[]> {
+    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
-      // Use the new getCrossStackTransitiveImpact method
-      const crossStackOptions = {
-        maxDepth: options.maxDepth || 10,
-        includeTransitive: true,
-        confidenceThreshold: options.crossStackConfidenceThreshold || 0.7,
-      };
+    return symbols.filter(symbol => {
+      if (framework === 'vue') {
+        return symbol.file?.path?.endsWith('.vue') || symbol.symbol_type === 'component';
+      } else if (framework === 'react') {
+        return symbol.symbol_type === 'function' && symbol.name.match(/^[A-Z]/);
+      }
+      return symbol.symbol_type === 'component';
+    });
+  }
 
-      const result = await transitiveAnalyzer.getCrossStackTransitiveImpact(
-        symbolId,
-        crossStackOptions
-      );
+  private async searchJobs(query: string, repoIds?: number[], _framework?: string): Promise<any[]> {
+    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
-      this.logger.debug('Cross-stack transitive impact analysis completed', {
-        symbolId,
-        frontendImpact: result.frontendImpact.length,
-        backendImpact: result.backendImpact.length,
-        crossStackRelationships: result.crossStackRelationships.length,
-        totalImpacted: result.totalImpactedSymbols,
-      });
+    return symbols.filter(symbol => {
+      return symbol.symbol_type === 'class' &&
+             (symbol.name?.toLowerCase().includes('job') ||
+              symbol.file?.path?.includes('jobs/') ||
+              symbol.file?.path?.includes('Jobs/'));
+    });
+  }
 
-      return result;
-    } catch (error) {
-      this.logger.error('Failed to get cross-stack transitive impact', {
-        error: (error as Error).message,
-      });
-      throw new Error(`Cross-stack transitive analysis failed: ${(error as Error).message}`);
+  private getFrameworkPath(framework: string): string {
+    switch (framework) {
+      case 'laravel': return 'app/';
+      case 'vue': return '.vue';
+      case 'react': return 'components/';
+      case 'node': return 'server/';
+      default: return '';
     }
   }
 
-  private async getDirectCrossStackImpact(symbolId: number): Promise<any> {
-    // Placeholder implementation - would get direct cross-stack relationships
-    this.logger.debug('Getting direct cross-stack impact', { symbolId });
+  private determineEntityType(symbol: any): string {
+    if (symbol.file?.path?.endsWith('.vue')) return 'component';
+    if (symbol.symbol_type === 'function' && symbol.name?.match(/^[A-Z]/)) return 'component';
+    if (symbol.symbol_type === 'class' && symbol.name?.includes('Job')) return 'job';
+    return symbol.symbol_type || 'unknown';
+  }
 
-    // Get dependencies with cross-stack types
-    const dependencies = await this.dbService.getDependenciesFrom(symbolId);
-    const crossStackDeps = dependencies.filter(
-      dep =>
-        dep.dependency_type === DependencyType.API_CALL ||
-        dep.dependency_type === DependencyType.SHARES_SCHEMA ||
-        dep.dependency_type === DependencyType.FRONTEND_BACKEND
-    );
+  private determineFramework(symbol: any): string {
+    if (symbol.file?.path?.includes('app/') || symbol.file?.path?.endsWith('.php')) return 'laravel';
+    if (symbol.file?.path?.endsWith('.vue')) return 'vue';
+    if (symbol.file?.path?.includes('components/') && symbol.file?.path?.endsWith('.tsx')) return 'react';
+    if (symbol.file?.path?.includes('server/') || symbol.file?.path?.includes('api/')) return 'node';
+    return 'unknown';
+  }
 
-    // Get callers with cross-stack types
-    const callers = await this.dbService.getDependenciesTo(symbolId);
-    const crossStackCallers = callers.filter(
-      caller =>
-        caller.dependency_type === DependencyType.API_CALL ||
-        caller.dependency_type === DependencyType.SHARES_SCHEMA ||
-        caller.dependency_type === DependencyType.FRONTEND_BACKEND
-    );
+  // Helper methods for enhanced search
+  private mapEntityTypeToSymbolType(entityType: string): SymbolType | null {
+    switch (entityType) {
+      case 'function':
+        return SymbolType.FUNCTION;
+      case 'class':
+        return SymbolType.CLASS;
+      case 'interface':
+        return SymbolType.INTERFACE;
+      case 'component':
+        return SymbolType.COMPONENT;
+      default:
+        return null;
+    }
+  }
 
-    return {
-      directDependencies: crossStackDeps.map(dep => ({
-        id: dep.id,
-        type: dep.dependency_type,
-        confidence: dep.confidence,
-        to_symbol: dep.to_symbol
-          ? {
-              id: dep.to_symbol.id,
-              name: dep.to_symbol.name,
-              type: dep.to_symbol.symbol_type,
-              file_path: dep.to_symbol.file?.path,
+  private mapStringToSymbolType(symbolType: string): SymbolType | null {
+    const upperCaseType = symbolType.toUpperCase() as keyof typeof SymbolType;
+    return SymbolType[upperCaseType] || null;
+  }
+
+  // Helper methods for impact analysis
+  private async getImpactedRoutes(symbolId: number, frameworks: Set<string>): Promise<RouteImpactItem[]> {
+    const routes: RouteImpactItem[] = [];
+
+    try {
+      const repositories = await this.dbService.getAllRepositories();
+
+      for (const repo of repositories) {
+        for (const framework of frameworks) {
+          if (framework === 'laravel' || framework === 'node') {
+            const frameworkRoutes = await this.dbService.getRoutesByFramework(repo.id, framework);
+
+            for (const route of frameworkRoutes) {
+              if (route.handler_symbol_id) {
+                const isRelated = await this.isSymbolRelated(symbolId, route.handler_symbol_id);
+                if (isRelated) {
+                  routes.push({
+                    id: route.id,
+                    path: route.path || '',
+                    method: route.method || 'GET',
+                    framework: route.framework_type || framework,
+                    confidence: 0.8,
+                  });
+                }
+              }
             }
-          : null,
-      })),
-      directCallers: crossStackCallers.map(caller => ({
-        id: caller.id,
-        type: caller.dependency_type,
-        confidence: caller.confidence,
-        from_symbol: caller.from_symbol
-          ? {
-              id: caller.from_symbol.id,
-              name: caller.from_symbol.name,
-              type: caller.from_symbol.symbol_type,
-              file_path: caller.from_symbol.file?.path,
-            }
-          : null,
-      })),
-      crossStackRelationships: [
-        ...crossStackDeps.map(dep => ({
-          fromSymbolId: dep.from_symbol_id,
-          toSymbolId: dep.to_symbol_id,
-          relationshipType: dep.dependency_type,
-          confidence: dep.confidence,
-        })),
-        ...crossStackCallers.map(caller => ({
-          fromSymbolId: caller.from_symbol_id,
-          toSymbolId: caller.to_symbol_id,
-          relationshipType: caller.dependency_type,
-          confidence: caller.confidence,
-        })),
-      ],
-      total_cross_stack_dependencies: crossStackDeps.length,
-      total_cross_stack_callers: crossStackCallers.length,
-    };
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Failed to analyze route impact', { error: (error as Error).message });
+    }
+
+    return routes;
+  }
+
+  private async getImpactedJobs(symbolId: number): Promise<JobImpactItem[]> {
+    const jobs: JobImpactItem[] = [];
+
+    try {
+      const jobSymbols = await this.dbService.searchSymbols('job', undefined);
+      const filteredJobs = jobSymbols.filter(symbol =>
+        symbol.symbol_type === 'class' &&
+        (symbol.name?.toLowerCase().includes('job') ||
+         symbol.file?.path?.includes('jobs/') ||
+         symbol.file?.path?.includes('Jobs/'))
+      );
+
+      for (const jobSymbol of filteredJobs) {
+        const isRelated = await this.isSymbolRelated(symbolId, jobSymbol.id);
+        if (isRelated) {
+          jobs.push({
+            id: jobSymbol.id,
+            name: jobSymbol.name,
+            type: 'background_job',
+            confidence: 0.7,
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Failed to analyze job impact', { error: (error as Error).message });
+    }
+
+    return jobs;
+  }
+
+  private async getImpactedTests(symbolId: number): Promise<TestImpactItem[]> {
+    const tests: TestImpactItem[] = [];
+
+    try {
+      const testSymbols = await this.dbService.searchSymbols('test', undefined);
+      const filteredTests = testSymbols.filter(symbol =>
+        symbol.file?.is_test ||
+        symbol.file?.path?.includes('test') ||
+        symbol.file?.path?.includes('Test') ||
+        symbol.file?.path?.includes('spec') ||
+        symbol.file?.path?.includes('.test.') ||
+        symbol.file?.path?.includes('.spec.')
+      );
+
+      for (const testSymbol of filteredTests) {
+        const isRelated = await this.isSymbolRelated(symbolId, testSymbol.id);
+        if (isRelated) {
+          tests.push({
+            id: testSymbol.id,
+            name: testSymbol.name,
+            file_path: testSymbol.file?.path || '',
+            test_type: this.determineTestType(testSymbol.file?.path || ''),
+            confidence: 0.6,
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Failed to analyze test impact', { error: (error as Error).message });
+    }
+
+    return tests;
+  }
+
+  private async isSymbolRelated(symbolId: number, targetSymbolId: number): Promise<boolean> {
+    if (symbolId === targetSymbolId) return true;
+
+    try {
+      const dependencies = await this.dbService.getDependenciesFrom(targetSymbolId);
+      const callers = await this.dbService.getDependenciesTo(targetSymbolId);
+
+      return dependencies.some(dep => dep.to_symbol_id === symbolId) ||
+             callers.some(caller => caller.from_symbol_id === symbolId);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private determineTestType(filePath: string): string {
+    if (filePath.includes('.test.') || filePath.includes('test/')) return 'unit';
+    if (filePath.includes('.spec.') || filePath.includes('spec/')) return 'spec';
+    if (filePath.includes('e2e') || filePath.includes('integration')) return 'integration';
+    if (filePath.includes('cypress') || filePath.includes('playwright')) return 'e2e';
+    return 'unknown';
   }
 
   private isCrossStackRelationship(result: any): boolean {
-    // Helper method to determine if a relationship is cross-stack
     if (!result.dependency_type) return false;
 
     return (
@@ -1788,456 +1241,13 @@ export class McpTools {
     );
   }
 
-  private async validateCrossStackAnalysis(
-    repositoryId?: number
-  ): Promise<{ isValid: boolean; message?: string }> {
-    // Check if cross-stack analysis was performed by looking for cross-stack data
-    try {
-      let hasApiCalls = false;
-      let hasDataContracts = false;
+  private calculateRiskLevel(directImpact: ImpactItem[], transitiveImpact: ImpactItem[], routeImpact: RouteImpactItem[], jobImpact: JobImpactItem[]): string {
+    const totalImpact = directImpact.length + transitiveImpact.length + routeImpact.length + jobImpact.length;
 
-      if (repositoryId) {
-        // Check specific repository
-        const crossStackData = await this.dbService.getCrossStackDependencies(repositoryId);
-        hasApiCalls = crossStackData.apiCalls.length > 0;
-        hasDataContracts = crossStackData.dataContracts.length > 0;
-      } else {
-        // Check all repositories
-        const repositories = await this.dbService.getAllRepositories();
-        for (const repo of repositories) {
-          const crossStackData = await this.dbService.getCrossStackDependencies(repo.id);
-
-          if (crossStackData.apiCalls.length > 0) hasApiCalls = true;
-          if (crossStackData.dataContracts.length > 0) hasDataContracts = true;
-
-          if (hasApiCalls && hasDataContracts) break;
-        }
-      }
-
-      if (!hasApiCalls && !hasDataContracts) {
-        return {
-          isValid: false,
-          message:
-            `Cross-stack analysis has not been performed${repositoryId ? ` for repository ${repositoryId}` : ''}. ` +
-            'To enable cross-stack features, re-run the analysis with cross-stack detection enabled. ' +
-            'Example: ./dist/src/cli/index.js analyze /path/to/project --verbose --extensions .vue,.ts,.js,.php',
-        };
-      }
-
-      return { isValid: true };
-    } catch (error) {
-      this.logger.warn('Failed to validate cross-stack analysis', {
-        error: (error as Error).message,
-      });
-      return {
-        isValid: false,
-        message:
-          'Could not verify cross-stack analysis status. Please ensure the analysis was run with cross-stack detection enabled.',
-      };
-    }
+    if (totalImpact > 20) return 'critical';
+    if (totalImpact > 10) return 'high';
+    if (totalImpact > 5) return 'medium';
+    return 'low';
   }
 
-  // Laravel-specific MCP tools
-  async getLaravelRoutes(args: any) {
-    const validatedArgs = validateGetLaravelRoutesArgs(args);
-    this.logger.debug('Getting Laravel routes', validatedArgs);
-
-    // Get all Laravel routes from the repository
-    let routes = [];
-    const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
-
-    if (repoId) {
-      routes = await this.dbService.getRoutesByFramework(repoId, 'laravel');
-    } else {
-      // If no repo_id specified and no default, get routes from all repositories
-      const repositories = await this.dbService.getAllRepositories();
-      for (const repo of repositories) {
-        const repoRoutes = await this.dbService.getRoutesByFramework(repo.id, 'laravel');
-        routes.push(...repoRoutes);
-      }
-    }
-
-    // Apply filters
-    let filteredRoutes = routes;
-
-    if (validatedArgs.path) {
-      filteredRoutes = filteredRoutes.filter(
-        route =>
-          route.path?.includes(validatedArgs.path!) || route.name?.includes(validatedArgs.path!)
-      );
-    }
-
-    if (validatedArgs.method) {
-      filteredRoutes = filteredRoutes.filter(
-        route => route.method?.toLowerCase() === validatedArgs.method!.toLowerCase()
-      );
-    }
-
-    if (validatedArgs.middleware) {
-      filteredRoutes = filteredRoutes.filter(route =>
-        route.middleware?.some(m => m.includes(validatedArgs.middleware!))
-      );
-    }
-
-    if (validatedArgs.controller) {
-      filteredRoutes = filteredRoutes.filter(route =>
-        route.controller?.includes(validatedArgs.controller!)
-      );
-    }
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              routes: filteredRoutes.map(route => ({
-                id: route.id,
-                path: route.path,
-                method: route.method,
-                name: route.name,
-                controller: route.controller,
-                action: route.action,
-                middleware: route.middleware || [],
-                framework_type: route.framework_type,
-                dynamic_segments: route.dynamic_segments || [],
-                file_id: route.file_id,
-              })),
-              total_routes: filteredRoutes.length,
-              filters: {
-                repo_id: validatedArgs.repo_id,
-                path: validatedArgs.path,
-                method: validatedArgs.method,
-                middleware: validatedArgs.middleware,
-                controller: validatedArgs.controller,
-              },
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  async getEloquentModels(args: any) {
-    const validatedArgs = validateGetEloquentModelsArgs(args);
-    this.logger.debug('Getting Eloquent models', validatedArgs);
-
-    // Get Laravel framework metadata (contains models)
-    let frameworkMetadata = [];
-    const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
-
-    if (repoId) {
-      const metadata = await this.dbService.getFrameworkMetadata(repoId, 'laravel');
-      if (metadata) {
-        frameworkMetadata = [metadata];
-      }
-    } else {
-      // Get from all repositories
-      const repositories = await this.dbService.getAllRepositories();
-      for (const repo of repositories) {
-        const metadata = await this.dbService.getFrameworkMetadata(repo.id, 'laravel');
-        if (metadata) {
-          frameworkMetadata.push(metadata);
-        }
-      }
-    }
-
-    // Extract models from framework metadata
-    let models = [];
-    for (const metadata of frameworkMetadata) {
-      if (metadata.metadata && metadata.metadata.models) {
-        models.push(...metadata.metadata.models);
-      }
-    }
-
-    // Apply filters
-    let filteredModels = models;
-
-    if (validatedArgs.model_name) {
-      filteredModels = filteredModels.filter(model =>
-        model.name?.toLowerCase().includes(validatedArgs.model_name!.toLowerCase())
-      );
-    }
-
-    if (validatedArgs.table_name) {
-      filteredModels = filteredModels.filter(model =>
-        model.tableName?.toLowerCase().includes(validatedArgs.table_name!.toLowerCase())
-      );
-    }
-
-    if (validatedArgs.relationships && validatedArgs.relationships.length > 0) {
-      filteredModels = filteredModels.filter(model =>
-        model.relationships?.some(rel =>
-          validatedArgs.relationships!.some(filterRel => rel.type.includes(filterRel))
-        )
-      );
-    }
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              models: filteredModels.map(model => ({
-                name: model.name,
-                type: model.type,
-                tableName: model.tableName,
-                fillable: model.fillable || [],
-                relationships: model.relationships || [],
-                file_path: model.file_path,
-                start_line: model.start_line,
-                end_line: model.end_line,
-              })),
-              total_models: filteredModels.length,
-              filters: {
-                repo_id: validatedArgs.repo_id,
-                model_name: validatedArgs.model_name,
-                table_name: validatedArgs.table_name,
-                relationships: validatedArgs.relationships,
-              },
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  async getLaravelControllers(args: any) {
-    const validatedArgs = validateGetLaravelControllersArgs(args);
-    this.logger.debug('Getting Laravel controllers', validatedArgs);
-
-    // Get Laravel framework metadata (contains controllers)
-    let frameworkMetadata = [];
-    const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
-
-    if (repoId) {
-      const metadata = await this.dbService.getFrameworkMetadata(repoId, 'laravel');
-      if (metadata) {
-        frameworkMetadata = [metadata];
-      }
-    } else {
-      // Get from all repositories
-      const repositories = await this.dbService.getAllRepositories();
-      for (const repo of repositories) {
-        const metadata = await this.dbService.getFrameworkMetadata(repo.id, 'laravel');
-        if (metadata) {
-          frameworkMetadata.push(metadata);
-        }
-      }
-    }
-
-    // Extract controllers from framework metadata
-    let controllers = [];
-    for (const metadata of frameworkMetadata) {
-      if (metadata.metadata && metadata.metadata.controllers) {
-        controllers.push(...metadata.metadata.controllers);
-      }
-    }
-
-    // Apply filters
-    let filteredControllers = controllers;
-
-    if (validatedArgs.controller_name) {
-      filteredControllers = filteredControllers.filter(controller =>
-        controller.name?.toLowerCase().includes(validatedArgs.controller_name!.toLowerCase())
-      );
-    }
-
-    if (validatedArgs.action) {
-      filteredControllers = filteredControllers.filter(controller =>
-        controller.actions?.some(action => action.includes(validatedArgs.action!))
-      );
-    }
-
-    if (validatedArgs.middleware) {
-      filteredControllers = filteredControllers.filter(controller =>
-        controller.middleware?.some(m => m.includes(validatedArgs.middleware!))
-      );
-    }
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              controllers: filteredControllers.map(controller => ({
-                name: controller.name,
-                type: controller.type,
-                actions: controller.actions || [],
-                middleware: controller.middleware || [],
-                resourceController: controller.resourceController || false,
-                file_path: controller.file_path,
-                start_line: controller.start_line,
-                end_line: controller.end_line,
-              })),
-              total_controllers: filteredControllers.length,
-              filters: {
-                repo_id: validatedArgs.repo_id,
-                controller_name: validatedArgs.controller_name,
-                action: validatedArgs.action,
-                middleware: validatedArgs.middleware,
-              },
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  async searchLaravelEntities(args: any) {
-    const validatedArgs = validateSearchLaravelEntitiesArgs(args);
-    this.logger.debug('Searching Laravel entities', validatedArgs);
-
-    const results = [];
-
-    // Define entity types to search
-    const entityTypes = validatedArgs.entity_types || [
-      'route',
-      'model',
-      'controller',
-      'middleware',
-      'job',
-      'service_provider',
-      'command',
-    ];
-
-    // Search routes if included
-    if (entityTypes.includes('route')) {
-      let routes = [];
-      const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
-
-      if (repoId) {
-        routes = await this.dbService.getRoutesByFramework(repoId, 'laravel');
-      } else {
-        const repositories = await this.dbService.getAllRepositories();
-        for (const repo of repositories) {
-          const repoRoutes = await this.dbService.getRoutesByFramework(repo.id, 'laravel');
-          routes.push(...repoRoutes);
-        }
-      }
-
-      const matchingRoutes = routes.filter(
-        route =>
-          route.path?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
-          route.name?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
-          route.controller?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
-          route.action?.toLowerCase().includes(validatedArgs.query.toLowerCase())
-      );
-
-      results.push(
-        ...matchingRoutes.map(route => ({
-          entity_type: 'route',
-          entity_id: route.id,
-          name: route.name || route.path,
-          type: 'route',
-          path: route.path,
-          method: route.method,
-          controller: route.controller,
-          action: route.action,
-          middleware: route.middleware,
-          file_id: route.file_id,
-        }))
-      );
-    }
-
-    // Search framework metadata entities (models, controllers, etc.)
-    if (
-      entityTypes.some(type =>
-        ['model', 'controller', 'middleware', 'job', 'service_provider', 'command'].includes(type)
-      )
-    ) {
-      let frameworkMetadata = [];
-      const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
-
-      if (repoId) {
-        const metadata = await this.dbService.getFrameworkMetadata(repoId, 'laravel');
-        if (metadata) {
-          frameworkMetadata = [metadata];
-        }
-      } else {
-        const repositories = await this.dbService.getAllRepositories();
-        for (const repo of repositories) {
-          const metadata = await this.dbService.getFrameworkMetadata(repo.id, 'laravel');
-          if (metadata) {
-            frameworkMetadata.push(metadata);
-          }
-        }
-      }
-
-      for (const metadata of frameworkMetadata) {
-        if (metadata.metadata) {
-          // Search each entity type
-          for (const entityType of entityTypes) {
-            const entities =
-              metadata.metadata[entityType + 's'] || metadata.metadata[entityType] || [];
-
-            const matchingEntities = entities.filter(
-              entity =>
-                entity.name?.toLowerCase().includes(validatedArgs.query.toLowerCase()) ||
-                (entity.type &&
-                  entity.type.toLowerCase().includes(validatedArgs.query.toLowerCase()))
-            );
-
-            results.push(
-              ...matchingEntities.map(entity => ({
-                entity_type: entityType,
-                entity_id: entity.id || entity.name,
-                name: entity.name,
-                type: entity.type || entityType,
-                ...entity,
-              }))
-            );
-          }
-        }
-      }
-    }
-
-    // Apply metadata filter if provided
-    let filteredResults = results;
-    if (validatedArgs.metadata_filter) {
-      filteredResults = results.filter(result => {
-        for (const [key, value] of Object.entries(validatedArgs.metadata_filter!)) {
-          if (result[key] !== value) {
-            return false;
-          }
-        }
-        return true;
-      });
-    }
-
-    // Apply limit
-    const limit = validatedArgs.limit || 50;
-    filteredResults = filteredResults.slice(0, limit);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              query: validatedArgs.query,
-              results: filteredResults,
-              total_results: filteredResults.length,
-              filters: {
-                repo_id: validatedArgs.repo_id,
-                entity_types: validatedArgs.entity_types,
-                metadata_filter: validatedArgs.metadata_filter,
-                limit: validatedArgs.limit,
-              },
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
 }

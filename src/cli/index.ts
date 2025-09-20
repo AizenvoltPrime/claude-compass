@@ -572,10 +572,10 @@ program
       const { McpTools } = await import('../mcp/tools');
       const mcpTools = new McpTools(databaseService);
 
-      const result = await mcpTools.getCrossStackImpact({
+      const result = await mcpTools.impactOf({
         symbol_id: parseInt(symbolId),
-        include_transitive: options.includeTransitive,
-        max_depth: parseInt(options.maxDepth)
+        max_depth: parseInt(options.maxDepth),
+        confidence_threshold: 0.7
       });
 
       spinner.succeed('Cross-stack impact analysis completed');

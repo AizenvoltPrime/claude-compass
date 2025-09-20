@@ -212,19 +212,18 @@ describe('Vue-Laravel Integration', () => {
       expect(userListComponent).toBeDefined();
       expect(componentSymbol).toBeDefined();
 
-      // Use MCP tool to get API calls
-      const result = await mcpTools.getApiCalls({
-        component_id: componentSymbol!.id,
-        include_response_schemas: true
+      // Use MCP tool to get impact analysis
+      const result = await mcpTools.impactOf({
+        symbol_id: componentSymbol!.id
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
-      expect(content.component_id).toBe(componentSymbol!.id);
-      expect(content.api_calls.length).toBeGreaterThan(0);
+      expect(content.symbol.id).toBe(componentSymbol!.id);
+      expect(content.impact_analysis.direct_impact.length).toBeGreaterThan(0);
 
-      // Verify API call details
-      const apiCall = content.api_calls[0];
+      // Verify impact details
+      const apiCall = content.impact_analysis.direct_impact[0];
       expect(apiCall.url_pattern).toBe('/api/users');
       expect(apiCall.method).toBe('GET');
       expect(apiCall.confidence).toBeGreaterThan(0.7);
@@ -232,19 +231,23 @@ describe('Vue-Laravel Integration', () => {
     });
 
     it('should retrieve data contracts through MCP tools', async () => {
-      // Use MCP tool to get data contracts for User schema
-      const result = await mcpTools.getDataContracts({
-        schema_name: 'User',
-        include_drift_analysis: true
+      // Search for User schema symbol first
+      const symbols = await dbService.searchSymbols('User', repository.id);
+      const userSymbol = symbols.find(s => s.name === 'User');
+      expect(userSymbol).toBeDefined();
+
+      // Use MCP tool to get impact analysis for User schema
+      const result = await mcpTools.impactOf({
+        symbol_id: userSymbol!.id
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
-      expect(content.schema_name).toBe('User');
-      expect(content.data_contracts.length).toBeGreaterThan(0);
+      expect(content.symbol.name).toBe('User');
+      expect(content.impact_analysis.direct_impact.length).toBeGreaterThan(0);
 
-      // Verify data contract details
-      const dataContract = content.data_contracts[0];
+      // Verify impact details
+      const dataContract = content.impact_analysis.direct_impact[0];
       expect(dataContract.name).toBe('User');
       expect(dataContract.frontend_type_id).toBeDefined();
       expect(dataContract.backend_type_id).toBeDefined();
@@ -259,21 +262,21 @@ describe('Vue-Laravel Integration', () => {
       expect(indexMethod).toBeDefined();
 
       // Use MCP tool to get cross-stack impact
-      const result = await mcpTools.getCrossStackImpact({
+      const result = await mcpTools.impactOf({
         symbol_id: indexMethod!.id,
-        include_transitive: true,
+        include_indirect: true,
         max_depth: 5
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
-      expect(content.symbol_id).toBe(indexMethod!.id);
-      expect(content.analysis_depth).toBe('transitive');
-      expect(content.cross_stack_impact).toBeDefined();
+      expect(content.symbol.id).toBe(indexMethod!.id);
+      expect(content.impact_analysis.transitive_impact).toBeDefined();
+      expect(content.impact_analysis.route_impact).toBeDefined();
 
-      // Should show impact on Vue components
-      expect(content.cross_stack_impact.frontendImpact.length).toBeGreaterThan(0);
-      expect(content.cross_stack_impact.crossStackRelationships.length).toBeGreaterThan(0);
+      // Should show impact analysis
+      expect(content.impact_analysis.direct_impact.length).toBeGreaterThan(0);
+      expect(content.summary.risk_level).toBeDefined();
     });
   });
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Compass is a dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases. It builds comprehensive dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
 
-**Current Status**: Phase 5 complete - Advanced JavaScript/TypeScript, PHP/Laravel, and Vue ↔ Laravel cross-stack analysis with comprehensive framework support ready for production use.
+**Current Status**: Phase 6A complete - Enhanced search with hybrid vector+lexical capabilities, tool consolidation from 12 to 6 focused core tools, and comprehensive impact analysis ready for production use.
 
 ## Essential Commands
 
@@ -90,7 +90,8 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 4. **MCP Server** (`src/mcp/`): Model Context Protocol implementation
    - Exposes 6 core tools: get_file, get_symbol, search_code (enhanced), who_calls, list_dependencies, impact_of
-   - Enhanced tools support transitive analysis with indirect relationships and confidence scoring
+   - Enhanced search with hybrid vector+lexical capabilities and framework awareness
+   - Comprehensive impact analysis tool replacing 6 specialized tools
    - Streamlined architecture eliminates overlapping tools while maintaining full functionality
 
 5. **CLI** (`src/cli/`): Command-line interface using Commander.js
@@ -159,7 +160,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 - MCP server is independent module for AI integration
 - CLI provides unified interface to all functionality
 
-## Current Capabilities (Phase 5 Complete)
+## Current Capabilities (Phase 6A Complete)
 
 **Supported Languages**: JavaScript, TypeScript, JSX, TSX, ES modules, CommonJS, PHP
 **Supported Frameworks**: Vue.js, Next.js, React, Node.js, Laravel with full framework-aware parsing
@@ -168,7 +169,8 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **ORM Systems**: Prisma, TypeORM, Sequelize, Mongoose, MikroORM
 **Package Managers**: npm, yarn, pnpm, bun with monorepo support (Nx, Lerna, Turborepo, Rush)
 **Graph Types**: File dependencies, symbol relationships, framework entity relationships, transitive analysis
-**MCP Integration**: Streamlined MCP server with 6 focused core tools supporting comprehensive dependency analysis and framework relationships
+**MCP Integration**: Streamlined MCP server with 6 focused core tools, enhanced hybrid search, and comprehensive impact analysis
+**Search Capabilities**: Hybrid vector+lexical search with framework awareness and advanced ranking algorithms
 
 **Framework-Specific Features**:
 
@@ -206,12 +208,12 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 **Current Limitations**:
 
-- Basic lexical search (PostgreSQL ilike) - hybrid vector+lexical search planned for Phase 6
-- Limited impact analysis (cross-stack only) - comprehensive impact_of tool planned for Phase 6
+- Vector embeddings not yet populated (infrastructure ready, population planned for Phase 6B)
 - No runtime tracing for dynamic code analysis
 - Limited to static analysis (no dynamic code execution tracing)
+- Specification tracking not yet implemented (planned for Phase 7)
 
-**Completed Features** (Phases 3-5 ✅):
+**Completed Features** (Phases 3-6A ✅):
 
 - ✅ **Background job detection** (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
 - ✅ **ORM relationship mapping** (Prisma, TypeORM, Sequelize, Mongoose, MikroORM)
@@ -221,14 +223,21 @@ npm run analyze /path/to/project                     # Analyze absolute path
 - ✅ **Package manager integration** (npm, yarn, pnpm with workspace support)
 - ✅ **PHP/Laravel Support** (Laravel routes, controllers, Eloquent models, job queues, service providers)
 - ✅ **Vue ↔ Laravel Integration** (Cross-stack dependency tracking, API mapping, full-stack impact analysis)
+- ✅ **Tool Consolidation** (12 overlapping tools → 6 focused core tools)
+- ✅ **Enhanced Search** (Hybrid vector+lexical search with framework awareness and advanced ranking)
+- ✅ **Comprehensive Impact Analysis** (Single impact_of tool replacing 6 specialized tools)
 
 **Planned Features** (Prioritized for Vue + Laravel + Godot):
 
-**Phase 6 - Enhanced Impact Analysis (NEXT PRIORITY):**
-- Tool consolidation: 12 overlapping tools → 6 focused core tools
-- Enhanced search with hybrid vector+lexical search and ranking
-- Comprehensive impact analysis tool (`impact_of`) replacing multiple specialized tools
-- Streamlined architecture for better performance and maintainability
+**Phase 6B - Vector Search Population (NEXT PRIORITY):**
+- Populate vector embeddings for semantic search
+- Enable full vector search capabilities
+- Performance optimization for large codebases
+
+**Phase 7 - Specification Tracking & Drift Detection (HIGH PRIORITY):**
+- API contract validation between Vue components and Laravel endpoints
+- Specification drift detection and reporting
+- Integration with documentation systems
 
 **Phase 8 - C#/Godot Support (MEDIUM PRIORITY):**
 - Game development framework support
