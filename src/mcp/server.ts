@@ -304,6 +304,129 @@ export class ClaudeCompassMCPServer {
               required: ['symbol_id'],
             },
           },
+          {
+            name: 'get_laravel_routes',
+            description: 'Get Laravel routes with filtering options',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                repo_id: {
+                  type: 'number',
+                  description: 'Limit search to specific repository',
+                },
+                path: {
+                  type: 'string',
+                  description: 'Filter routes by path pattern',
+                },
+                method: {
+                  type: 'string',
+                  description: 'Filter routes by HTTP method (GET, POST, PUT, DELETE, etc.)',
+                },
+                middleware: {
+                  type: 'string',
+                  description: 'Filter routes by middleware name',
+                },
+                controller: {
+                  type: 'string',
+                  description: 'Filter routes by controller name',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          {
+            name: 'get_eloquent_models',
+            description: 'Get Laravel Eloquent models with relationships',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                repo_id: {
+                  type: 'number',
+                  description: 'Limit search to specific repository',
+                },
+                model_name: {
+                  type: 'string',
+                  description: 'Filter models by name pattern',
+                },
+                table_name: {
+                  type: 'string',
+                  description: 'Filter models by table name',
+                },
+                relationships: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                  },
+                  description: 'Filter models by relationship types (hasMany, belongsTo, etc.)',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          {
+            name: 'get_laravel_controllers',
+            description: 'Get Laravel controllers with actions and middleware',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                repo_id: {
+                  type: 'number',
+                  description: 'Limit search to specific repository',
+                },
+                controller_name: {
+                  type: 'string',
+                  description: 'Filter controllers by name pattern',
+                },
+                action: {
+                  type: 'string',
+                  description: 'Filter controllers by action name',
+                },
+                middleware: {
+                  type: 'string',
+                  description: 'Filter controllers by middleware name',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          {
+            name: 'search_laravel_entities',
+            description: 'Search across all Laravel entities (routes, models, controllers, etc.)',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'Search query to match against entity names and properties',
+                },
+                repo_id: {
+                  type: 'number',
+                  description: 'Limit search to specific repository',
+                },
+                entity_types: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: ['route', 'model', 'controller', 'middleware', 'job', 'service_provider', 'command'],
+                  },
+                  description: 'Filter by specific Laravel entity types',
+                },
+                metadata_filter: {
+                  type: 'object',
+                  description: 'Additional metadata filters as key-value pairs',
+                },
+                limit: {
+                  type: 'number',
+                  description: 'Maximum number of results to return',
+                  default: 50,
+                  minimum: 1,
+                  maximum: 200,
+                },
+              },
+              required: ['query'],
+              additionalProperties: false,
+            },
+          },
         ],
       };
     });
@@ -318,18 +441,6 @@ export class ClaudeCompassMCPServer {
             uri: 'repo://repositories',
             name: 'Repositories',
             description: 'List of all analyzed repositories',
-            mimeType: 'application/json',
-          },
-          {
-            uri: 'graph://files',
-            name: 'File Graph',
-            description: 'File dependency graph showing import/export relationships',
-            mimeType: 'application/json',
-          },
-          {
-            uri: 'graph://symbols',
-            name: 'Symbol Graph',
-            description: 'Symbol dependency graph showing function calls and references',
             mimeType: 'application/json',
           },
         ],
@@ -367,6 +478,18 @@ export class ClaudeCompassMCPServer {
 
           case 'get_cross_stack_impact':
             return await this.tools.getCrossStackImpact(args);
+
+          case 'get_laravel_routes':
+            return await this.tools.getLaravelRoutes(args);
+
+          case 'get_eloquent_models':
+            return await this.tools.getEloquentModels(args);
+
+          case 'get_laravel_controllers':
+            return await this.tools.getLaravelControllers(args);
+
+          case 'search_laravel_entities':
+            return await this.tools.searchLaravelEntities(args);
 
           default:
             return this.formatErrorResponse(-32601, `Unknown tool: ${name}`, request.params);

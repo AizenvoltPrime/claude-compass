@@ -41,72 +41,58 @@ export class McpResources {
     }
   }
 
-  private async handleGraphResource(resource: string) {
-    switch (resource) {
-      case 'files':
-        return await this.getFileGraph();
-
-      case 'symbols':
-        return await this.getSymbolGraph();
-
-      default:
-        throw new Error(`Unknown graph resource: ${resource}`);
-    }
+  private async handleGraphResource(resource: string): Promise<never> {
+    throw new Error(`Graph resources are no longer exposed via MCP. Use specific tools instead (search_code, who_calls, etc.)`);
   }
 
   private async getRepositoriesList() {
-    // This would need a method to get all repositories
-    // For now, return a placeholder
-    return {
-      contents: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            repositories: [
-              {
-                message: 'Repository listing not yet fully implemented',
-                note: 'This feature requires additional database methods to be completed',
-              },
-            ],
-          }, null, 2),
-        },
-      ],
-    };
+    try {
+      // Get all repositories from the database
+      const repositories = await this.dbService.getAllRepositories();
+
+      this.logger.debug('Retrieved repositories', { count: repositories.length });
+
+      return {
+        contents: [
+          {
+            type: 'text',
+            uri: 'repo://repositories',
+            text: JSON.stringify({
+              repositories: repositories.map(repo => ({
+                id: repo.id,
+                name: repo.name,
+                path: repo.path,
+                language_primary: repo.language_primary,
+                framework_stack: repo.framework_stack,
+                last_indexed: repo.last_indexed,
+                git_hash: repo.git_hash,
+                created_at: repo.created_at,
+                updated_at: repo.updated_at,
+              })),
+              total_count: repositories.length,
+              generated_at: new Date().toISOString(),
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      this.logger.error('Failed to get repositories list', { error: (error as Error).message });
+
+      return {
+        contents: [
+          {
+            type: 'text',
+            uri: 'repo://repositories',
+            text: JSON.stringify({
+              error: 'Failed to retrieve repositories',
+              message: (error as Error).message,
+              repositories: [],
+              total_count: 0,
+            }, null, 2),
+          },
+        ],
+      };
+    }
   }
 
-  private async getFileGraph() {
-    // This would need methods to build and return the file graph
-    // For now, return a placeholder
-    return {
-      contents: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            file_graph: {
-              message: 'File graph not yet fully implemented',
-              note: 'This feature requires integration with the FileGraphBuilder to return graph data',
-            },
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async getSymbolGraph() {
-    // This would need methods to build and return the symbol graph
-    // For now, return a placeholder
-    return {
-      contents: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            symbol_graph: {
-              message: 'Symbol graph not yet fully implemented',
-              note: 'This feature requires integration with the SymbolGraphBuilder to return graph data',
-            },
-          }, null, 2),
-        },
-      ],
-    };
-  }
 }
