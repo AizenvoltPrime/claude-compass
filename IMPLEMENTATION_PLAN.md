@@ -1,51 +1,54 @@
-# Claude Compass: AI-Native Development Environment
+# Claude Compass: Dependency Analysis Development Environment
 
 ## Overview
 
-This project implements a "closed loop" system that gives AI assistants the same contextual understanding that senior engineers carry mentally. Based on insights from production experience where AI suggestions looked elegant but broke hidden dependencies, this system creates a bridge between code reality and development intent.
+This project implements a dependency analysis system that gives AI assistants complete contextual understanding of codebases. Based on insights from production experience where code changes looked elegant but broke hidden dependencies, this system creates comprehensive maps of code relationships and framework connections.
 
 ## Problem Statement
 
-**The core problem**: Claude Code isn't dumb, it's context-starved.
+**The core problem**: AI assistants lack complete codebase context.
 
-Picture this: You're thrown into a sprawling codebase with years of accumulated business logic and interconnected systems. Claude Code analyzes the files you show it and suggests clean, elegant code. You trust it. Then testing reveals the changes have unknowingly:
+Picture this: You're working in a sprawling codebase with years of accumulated business logic and interconnected systems. You make what seems like a simple change to a utility function. Then testing reveals the changes have unknowingly:
 
 - Broken a critical batch job processing user data overnight
 - Crashed the API that relied on a specific response format
 - Interfered with a legacy import system handling 30% of enterprise customers
 
-The code wasn't wrong in isolation. Claude Code just had no idea about the hidden dependencies and business context that make any real system tick.
+The code wasn't wrong in isolation. The AI assistant just had no idea about the hidden dependencies and framework relationships that make any real system tick.
 
 AI assistants suffer from "context starvation" - they make decisions without understanding:
 
-- Hidden dependencies and business context
+- Hidden dependencies and framework relationships
 - Blast radius of changes
-- Framework-specific relationships
-- Legacy system interactions
-- Cross-cutting concerns
+- Cross-stack connections (Vue ↔ Laravel)
+- Background job dependencies
+- Test coverage relationships
 
-**Result**: Elegant-looking code that breaks critical systems in production.
+**Result**: AI suggestions that look good but break critical systems in production.
 
 ## Solution Architecture
 
 ### Core Components
 
-1. **Reverse-Map Reality from Code**
+1. **Parse and Map Code Reality**
    - Parse codebases with Tree-sitter
    - Build multiple graph types (files, symbols, framework-specific)
-   - Generate dependency-aware summaries
+   - Extract framework relationships (routes, jobs, cross-stack connections)
 
-2. **Generate Forward Specifications**
-   - Transform problem statements into PRDs, user stories, schemas, prototypes
-   - Use as guardrails during implementation
+2. **Dependency Analysis**
+   - Map function calls, imports, and framework relationships
+   - Track cross-stack dependencies (Vue ↔ Laravel)
+   - Build comprehensive dependency graphs
 
 3. **MCP Integration**
    - Expose graphs and tools via Model Context Protocol
-   - Enable AI assistants to query ground truth instead of guessing
+   - Enable AI assistants to query dependency information
+   - Provide impact analysis and blast radius calculation
 
-4. **Sync & Drift Detection**
-   - Monitor spec-to-code alignment
-   - Detect missing endpoints, schema drift, unreferenced code
+4. **Framework Understanding**
+   - Detect Vue components, Laravel routes, background jobs
+   - Map API calls between frontend and backend
+   - Track test coverage relationships
 
 ## Technical Architecture
 
@@ -55,9 +58,8 @@ AI assistants suffer from "context starvation" - they make decisions without und
 
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
-- **Search**: Hybrid vector embeddings + full-text search
+- **Search**: PostgreSQL full-text search with ranking
 - **MCP Server**: Node.js/TypeScript implementation
-- **Vector Embeddings**: OpenAI Ada v2 or similar
 
 **Supported Languages & Frameworks (Sequential Implementation):**
 
@@ -163,38 +165,20 @@ CREATE TABLE orm_entities (
 );
 ```
 
-#### Analysis & Specifications
+#### Specification Tracking
 
 ```sql
--- AI-generated summaries
-CREATE TABLE summaries (
-    id SERIAL PRIMARY KEY,
-    target_type VARCHAR, -- file, symbol, feature
-    target_id INTEGER,
-    purpose TEXT,
-    inputs TEXT,
-    outputs TEXT,
-    side_effects TEXT,
-    invariants TEXT,
-    error_paths TEXT,
-    test_coverage TEXT,
-    embedding VECTOR(1536) -- for semantic search
-);
-
--- Forward specifications
+-- Feature specifications
 CREATE TABLE features (
     id SERIAL PRIMARY KEY,
     repo_id INTEGER REFERENCES repositories(id),
     name VARCHAR NOT NULL,
     description TEXT,
-    prd_doc TEXT,
-    user_stories JSONB DEFAULT '[]',
     api_contracts JSONB DEFAULT '{}',
-    db_schema JSONB DEFAULT '{}',
     status VARCHAR DEFAULT 'planning' -- planning, in_progress, implemented, deprecated
 );
 
--- Drift tracking
+-- Specification drift tracking
 CREATE TABLE spec_drift (
     id SERIAL PRIMARY KEY,
     feature_id INTEGER REFERENCES features(id),
@@ -295,15 +279,6 @@ interface MCPResources {
     handler: string;
   }[];
 
-  // AI-generated documentation
-  'kb://summaries': {
-    target: string;
-    purpose: string;
-    inputs: string;
-    outputs: string;
-    side_effects: string;
-  }[];
-
   // External library documentation
   'docs://{pkg}@{version}': {
     content: string;
@@ -382,16 +357,6 @@ interface MCPTools {
     schema_drift: object[];
     unreferenced_code: string[];
     test_coverage_gaps: string[];
-  };
-
-  generate_reverse_prd(
-    feature_id: string,
-    repo_id: string
-  ): {
-    prd: string;
-    user_stories: string[];
-    api_contract: object;
-    db_schema: object;
   };
 }
 ```
@@ -596,56 +561,57 @@ interface MCPTools {
 - ✅ **CLI Integration**: Cross-stack analysis commands and reporting
 - ✅ **Performance Optimizations**: Streaming mode and cartesian product safeguards for large projects
 
-### Phase 6: AI-Powered Analysis (Months 6-7) - HIGH PRIORITY ⚡ IMMEDIATE
+### Phase 6: Enhanced Impact Analysis (Months 6-7) - HIGH PRIORITY ⚡ IMMEDIATE
 
-**Goal**: Bridge the final gap to achieve the complete AI-native development vision by implementing AI-powered semantic understanding and comprehensive impact analysis.
+**Goal**: Complete the comprehensive impact analysis system using existing dependency graphs and framework relationships.
 
-**Current Status**: Foundation complete, ready for AI enhancement
+**Current Status**: Foundation complete, ready for enhanced impact tools
 
 **Verified Implementation Gaps** (from investigation analysis):
 
-1. **Vector Search**: `search_code` tool limited to PostgreSQL ilike - missing embeddings
+1. **Search Enhancement**: `search_code` tool limited to PostgreSQL ilike - add full-text search capabilities
 2. **Impact Analysis**: `get_cross_stack_impact` excellent for Vue ↔ Laravel, missing broader `impact_of` tool
 3. **Resources**: Graph data exists in database but resources are placeholders
-4. **AI Features**: No semantic understanding, summaries, or AI-enhanced analysis
+4. **Documentation Integration**: Missing external package documentation search
 
 **Detailed Phase 6 Implementation Plan:**
 
-#### 6A. Vector Embeddings & Hybrid Search (Weeks 1-2) 🎯 CRITICAL
+#### 6A. Enhanced Search Capabilities (Weeks 1-2) 🎯 CRITICAL
 
 **Technical Implementation:**
+
 ```typescript
 // Current: Basic lexical search
 async searchCode(query: string) {
   return await this.dbService.searchSymbols(query); // PostgreSQL ilike only
 }
 
-// Target: Hybrid vector + lexical search
+// Target: Enhanced full-text search
 async searchCode(query: string, options: SearchOptions) {
-  const embedding = await this.embeddingService.generateEmbedding(query);
-  const vectorResults = await this.dbService.vectorSimilaritySearch(embedding);
-  const lexicalResults = await this.dbService.searchSymbols(query);
-  return this.mergeAndRankResults(vectorResults, lexicalResults);
+  const fullTextResults = await this.dbService.fullTextSearch(query);
+  const exactResults = await this.dbService.searchSymbols(query);
+  return this.mergeAndRankResults(fullTextResults, exactResults);
 }
 ```
 
 **Database Changes Required:**
-- Add `embedding vector(1536)` column to symbols table
-- Configure pgvector extension (already available)
-- Create vector similarity indexes
-- Add OpenAI SDK dependency
+
+- Add full-text search indexes to symbols and files tables
+- Implement PostgreSQL full-text search with ranking
+- Add search result ranking algorithms
 
 **Files to Modify:**
+
 - `src/mcp/tools.ts` - Enhance search_code tool
-- `src/database/services.ts` - Add vector search methods
-- `src/vector/` - New directory for embedding services
-- Database migration for vector columns
+- `src/database/services.ts` - Add full-text search methods
+- Database migration for search indexes
 
 #### 6B. Complete Impact Analysis (Weeks 3-4) 🎯 HIGH PRIORITY
 
 **Current Gap**: `get_cross_stack_impact` is excellent for Vue ↔ Laravel but we need a broader `impact_of` tool for comprehensive blast radius analysis across routes, jobs, tests.
 
 **Implementation:**
+
 ```typescript
 // Current: Cross-stack specific
 async getCrossStackImpact(symbolId: number) {
@@ -668,13 +634,14 @@ async impactOf(change: ChangeDescription) {
       jobs: jobImpact,
       crossStack: crossStackImpact
     },
-    confidenceScore: this.calculateAIConfidence(change),
+    confidenceScore: this.calculateConfidence(change),
     riskLevel: this.assessRiskLevel(change)
   };
 }
 ```
 
 **Data Sources Available** (verified in investigation):
+
 - Complete dependency graphs in database
 - Test-to-code linkage tables from Phase 3
 - Route and job entity tables from Phases 2-4
@@ -685,38 +652,40 @@ async impactOf(change: ChangeDescription) {
 **Current Status**: Resources are placeholders but database has rich graph data
 
 **Implementation:**
+
 ```typescript
 // Current: Placeholder
 async readResource(uri: string) {
   return { contents: [{ type: 'text', text: 'Not implemented' }] };
 }
 
-// Target: Rich graph visualization
+// Target: Rich graph data export
 async readResource(uri: string) {
   switch(uri) {
     case 'graph://symbols':
-      return await this.generateSymbolGraphVisualization(repoId);
+      return await this.generateSymbolGraphData(repoId);
     case 'graph://routes':
-      return await this.generateRouteGraphVisualization(repoId);
+      return await this.generateRouteGraphData(repoId);
     case 'graph://jobs':
-      return await this.generateJobGraphVisualization(repoId);
-    case 'kb://summaries':
-      return await this.generateAISummaries(entityType, entityId);
+      return await this.generateJobGraphData(repoId);
+    case 'graph://dependencies':
+      return await this.generateDependencyGraphData(repoId);
   }
 }
 ```
 
 **Missing Resources to Implement:**
-- `graph://files` - File dependency visualization
-- `graph://symbols` - Symbol dependency visualization
+
+- `graph://files` - File dependency data
+- `graph://symbols` - Symbol dependency data
 - `graph://routes` - Framework route graphs
 - `graph://di` - Dependency injection graphs
 - `graph://jobs` - Background job graphs
-- `kb://summaries` - AI-generated summaries
 
 #### 6D. External Integration Foundation (Weeks 7-8) 🔗 MEDIUM PRIORITY
 
 **Missing Tools** (for complete vision):
+
 ```typescript
 // Implement search_docs tool
 async searchDocs(query: string, packageName: string, version?: string) {
@@ -732,40 +701,45 @@ async readPackageDocs(packageName: string, version: string) {
 ```
 
 **External Dependencies:**
+
 - Integration with npm API for package documentation
 - GitHub API for repository documentation
 - Caching layer for external documentation
 
 **Success Criteria for Phase 6:**
 
-**Vector Search Success:**
-- ✅ Hybrid search returns 90%+ relevant results vs 60% lexical-only
-- ✅ Semantic queries like "authentication middleware" find relevant Laravel code
-- ✅ Cross-language search finds TypeScript interfaces related to PHP DTOs
+**Enhanced Search Success:**
+
+- ✅ Full-text search returns significantly more relevant results than basic ilike
+- ✅ Search ranking algorithms prioritize by relevance and usage frequency
+- ✅ Cross-language search finds related code across TypeScript and PHP
 
 **Impact Analysis Success:**
+
 - ✅ `impact_of` tool identifies comprehensive blast radius across framework entities
 - ✅ Confidence scoring accurately predicts change impact risk
 - ✅ Test impact analysis shows which tests need updates for changes
 
 **Resource Success:**
-- ✅ Graph resources provide actionable visualization data
-- ✅ `kb://summaries` generates accurate AI summaries for symbols and files
+
+- ✅ Graph resources provide actionable data for dependency exploration
 - ✅ Framework-specific graphs (routes, jobs, DI) expose rich relationship data
+- ✅ Resources enable effective code navigation and understanding
 
 **Integration Success:**
+
 - ✅ External documentation search provides relevant package help
 - ✅ Foundation established for specification management (Phase 7)
-- ✅ AI features integrate seamlessly with existing MCP architecture
+- ✅ Enhanced features integrate seamlessly with existing MCP architecture
 
-### Phase 7: Forward Specifications & Drift Detection (Months 7-8) - HIGH PRIORITY
+### Phase 7: Specification Tracking & Drift Detection (Months 7-8) - HIGH PRIORITY
 
 **Goal**: Requirements → implementation workflow and sync maintenance for full-stack features
 
 **Deliverables:**
 
-- Problem statement → PRD generation for Vue + Laravel features
-- API contract generation from requirements (OpenAPI + TypeScript types)
+- Specification tracking for Vue + Laravel features
+- API contract validation (OpenAPI + TypeScript types)
 - Spec vs. code comparison algorithms (Vue components vs Laravel endpoints)
 - Drift detection and reporting across frontend/backend
 - Git hook integration for automatic re-indexing
@@ -773,7 +747,7 @@ async readPackageDocs(packageName: string, version: string) {
 
 **Success Criteria:**
 
-- Can generate detailed specifications for full-stack features
+- Can track specifications for full-stack features
 - Detects when Vue components diverge from Laravel API contracts
 - Provides actionable recommendations for frontend/backend alignment
 - Reduces manual effort to keep API documentation current
@@ -1051,45 +1025,26 @@ interface LaravelParser {
 
 ## Search Implementation
 
-### Hybrid Search Strategy
+### PostgreSQL Full-Text Search Strategy
 
-**Storage/Search**: Postgres + pgvector for embeddings; Full-Text Search (FTS) for keywords; simple Reciprocal Rank Fusion (RRF) to blend scores.
+**Storage/Search**: PostgreSQL with full-text search indexes and ranking algorithms.
 
-**Key principle**: Store per-symbol summaries in the DB; don't bury them in markdown wikis.
+**Key principle**: Index symbol names, signatures, and file paths for fast lexical search with relevance ranking.
 
 ```sql
--- Combine vector similarity with lexical matching using RRF
-WITH vector_search AS (
-  SELECT
-    id, target_id, target_type,
-    1 - (embedding <=> query_embedding) as vector_score,
-    ROW_NUMBER() OVER (ORDER BY embedding <=> query_embedding) as vector_rank
-  FROM summaries
-  WHERE embedding <=> query_embedding < 0.3
-  ORDER BY embedding <=> query_embedding
-  LIMIT 100
-),
-lexical_search AS (
-  SELECT
-    id, target_id, target_type,
-    ts_rank(to_tsvector('english', purpose || ' ' || inputs || ' ' || outputs),
-            plainto_tsquery('english', $1)) as lexical_score,
-    ROW_NUMBER() OVER (ORDER BY ts_rank(...) DESC) as lexical_rank
-  FROM summaries
-  WHERE to_tsvector('english', purpose || ' ' || inputs || ' ' || outputs)
-        @@ plainto_tsquery('english', $1)
-  LIMIT 100
-)
+-- Full-text search with ranking
 SELECT
-  s.id, s.target_id, s.target_type,
-  -- Simple RRF: 1/(k + rank) where k=60
-  (1.0 / (60 + COALESCE(v.vector_rank, 100))) +
-  (1.0 / (60 + COALESCE(l.lexical_rank, 100))) as rrf_score
-FROM summaries s
-LEFT JOIN vector_search v ON s.id = v.id
-LEFT JOIN lexical_search l ON s.id = l.id
-WHERE v.id IS NOT NULL OR l.id IS NOT NULL
-ORDER BY rrf_score DESC;
+  s.id, s.name, s.signature, f.path,
+  ts_rank(
+    to_tsvector('english', s.name || ' ' || COALESCE(s.signature, '') || ' ' || f.path),
+    plainto_tsquery('english', $1)
+  ) as relevance_score
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE to_tsvector('english', s.name || ' ' || COALESCE(s.signature, '') || ' ' || f.path)
+      @@ plainto_tsquery('english', $1)
+ORDER BY relevance_score DESC, s.name
+LIMIT 50;
 ```
 
 ## Impact Analysis Algorithm
@@ -1149,52 +1104,43 @@ interface ImpactAnalysis {
 }
 ```
 
-## Specification Generation
+## Specification Management
 
-### PRD Generation Template
+### API Contract Validation
 
 ```typescript
-interface PRDGenerator {
-  generatePRD(problemStatement: string): ProductRequirementDocument {
-    const analysis = this.analyzeProblemStatement(problemStatement);
+interface SpecificationValidator {
+  validateAPIContract(
+    featureId: string,
+    actualEndpoints: Route[],
+    specEndpoints: APISpec[]
+  ): ValidationResult {
+    const missing = this.findMissingEndpoints(specEndpoints, actualEndpoints);
+    const extra = this.findExtraEndpoints(actualEndpoints, specEndpoints);
+    const schemaDrift = this.detectSchemaDrift(specEndpoints, actualEndpoints);
 
     return {
-      title: analysis.feature_name,
-      overview: analysis.business_value,
-      userStories: this.generateUserStories(analysis),
-      acceptanceCriteria: this.generateAcceptanceCriteria(analysis),
-      apiContract: this.generateAPIContract(analysis),
-      databaseSchema: this.generateDatabaseSchema(analysis),
-      testPlan: this.generateTestPlan(analysis),
-      risks: this.identifyRisks(analysis),
-      timeline: this.estimateTimeline(analysis)
+      missing_endpoints: missing,
+      extra_endpoints: extra,
+      schema_drift: schemaDrift,
+      is_valid: missing.length === 0 && schemaDrift.length === 0
     };
   }
 
-  private generateUserStories(analysis: ProblemAnalysis): UserStory[] {
-    return analysis.user_personas.map(persona => ({
-      persona: persona.role,
-      want: persona.goal,
-      so_that: persona.benefit,
-      acceptance_criteria: this.generateAcceptanceCriteria(persona)
-    }));
+  private findMissingEndpoints(spec: APISpec[], actual: Route[]): string[] {
+    return spec
+      .filter(specRoute => !actual.find(actualRoute =>
+        actualRoute.path === specRoute.path &&
+        actualRoute.method === specRoute.method
+      ))
+      .map(route => `${route.method} ${route.path}`);
   }
 
-  private generateAPIContract(analysis: ProblemAnalysis): OpenAPISpec {
-    return {
-      openapi: '3.0.0',
-      paths: analysis.endpoints.reduce((paths, endpoint) => {
-        paths[endpoint.path] = {
-          [endpoint.method.toLowerCase()]: {
-            summary: endpoint.description,
-            parameters: endpoint.parameters,
-            requestBody: endpoint.request_schema,
-            responses: endpoint.response_schemas
-          }
-        };
-        return paths;
-      }, {} as any)
-    };
+  private detectSchemaDrift(spec: APISpec[], actual: Route[]): SchemaDrift[] {
+    // Compare request/response schemas between spec and implementation
+    return actual
+      .map(route => this.compareSchemas(route, spec))
+      .filter(drift => drift !== null);
   }
 }
 ```
@@ -1319,7 +1265,7 @@ describe('MCP Server', () => {
 ### Optimization Strategies
 
 - **Incremental Parsing**: Only re-process changed files
-- **Caching**: Cache expensive operations (embeddings, summaries)
+- **Caching**: Cache expensive operations (search results, dependency graphs)
 - **Indexing**: Optimize database queries with proper indexes
 - **Batch Processing**: Group similar operations
 - **Streaming**: Stream large results instead of loading in memory
@@ -1389,7 +1335,6 @@ services:
     build: .
     environment:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/claude_compass
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - postgres
       - redis
@@ -1517,8 +1462,8 @@ Without structure (graphs, edges, summaries) and proper distribution (MCP), prom
   - _Mitigation_: Automated testing, community contributions
 - **Performance**: Large repositories causing slowdowns
   - _Mitigation_: Incremental processing, caching strategies
-- **Accuracy**: AI-generated summaries being incorrect
-  - _Mitigation_: Human review workflows, confidence scoring
+- **Accuracy**: Static analysis missing dynamic relationships
+  - _Mitigation_: Framework-aware parsing, confidence scoring
 
 ### Business Risks
 
@@ -1570,12 +1515,11 @@ Without structure (graphs, edges, summaries) and proper distribution (MCP), prom
 - **Performance Analysis**: Identify performance bottlenecks
 - **Security Analysis**: Detect security vulnerabilities
 
-### AI Improvements (Year 2-3)
+### Advanced Analysis (Year 2-3)
 
-- **Custom Models**: Fine-tuned embeddings for code domains
-- **Code Generation**: Generate implementations from specs
-- **Automated Refactoring**: Suggest and implement improvements
-- **Intelligent Testing**: Generate test cases from specifications
+- **Enhanced Pattern Detection**: Improved framework pattern recognition
+- **Smart Refactoring**: Suggest dependency-aware improvements
+- **Advanced Testing**: Enhanced test coverage analysis and suggestions
 
 ### Integration Ecosystem (Year 3+)
 
@@ -1591,7 +1535,6 @@ Without structure (graphs, edges, summaries) and proper distribution (MCP), prom
 - Node.js 18+
 - PostgreSQL 15+ with pgvector extension
 - Git repositories to analyze
-- OpenAI API key (for embeddings)
 
 ### Quick Start (Recommended Approach)
 
@@ -1621,7 +1564,7 @@ npm run mcp-server
 # Add MCP server configuration to your Claude Code settings
 ```
 
-**Key principle**: Get search_code, who_calls, and impact_of working first. Store per-symbol summaries in the DB from day one.
+**Key principle**: Get search_code, who_calls, and impact_of working first. Focus on dependency graphs and framework relationships.
 
 ### Development Environment
 
@@ -1644,33 +1587,28 @@ npm run build
 
 ## Implementation Status Summary (VERIFIED - September 2025)
 
-**Current Status**: Phase 5 completed successfully with **12 production-ready MCP tools** including industry-leading Vue ↔ Laravel cross-stack integration. Based on comprehensive investigation and flow analysis, Claude Compass has achieved an excellent foundation that is **one phase away** from fulfilling the complete AI-native development vision.
+**Current Status**: Phase 5 completed successfully with **12 production-ready MCP tools** including industry-leading Vue ↔ Laravel cross-stack integration. Based on comprehensive investigation and flow analysis, Claude Compass has achieved an excellent foundation that is **one phase away** from fulfilling the complete dependency analysis vision.
 
 ### Verified Current Implementation (Phase 5 Complete)
 
 #### ✅ MCP Tools Status - 12 Tools Implemented
 
 **Core Tools (Reddit post compatible):**
+
 1. **`get_file`** ✅ - Fully implemented with repository and symbol inclusion
 2. **`get_symbol`** ✅ - Fully implemented with dependencies and callers
-3. **`search_code`** ⚠️ - **Lexical search only** (missing vector embeddings)
+3. **`search_code`** ⚠️ - **Basic lexical search only** (missing full-text search with ranking)
 4. **`who_calls`** ✅ - Advanced implementation with transitive analysis
 5. **`list_dependencies`** ✅ - Advanced implementation with transitive analysis
 
-**Laravel-Specific Tools:**
-6. **`get_laravel_routes`** ✅ - Comprehensive Laravel route analysis
-7. **`get_eloquent_models`** ✅ - Eloquent model relationship mapping
-8. **`get_laravel_controllers`** ✅ - Laravel controller and action analysis
-9. **`search_laravel_entities`** ✅ - Laravel entity search across types
+**Laravel-Specific Tools:** 6. **`get_laravel_routes`** ✅ - Comprehensive Laravel route analysis 7. **`get_eloquent_models`** ✅ - Eloquent model relationship mapping 8. **`get_laravel_controllers`** ✅ - Laravel controller and action analysis 9. **`search_laravel_entities`** ✅ - Laravel entity search across types
 
-**Cross-Stack Tools (Phase 5 - Beyond Reddit post):**
-10. **`get_api_calls`** ✅ - Vue ↔ Laravel API call mapping
-11. **`get_data_contracts`** ✅ - Data contract analysis with drift detection
-12. **`get_cross_stack_impact`** ✅ - Cross-stack impact analysis with transitive support
+**Cross-Stack Tools (Phase 5 - Beyond Reddit post):** 10. **`get_api_calls`** ✅ - Vue ↔ Laravel API call mapping 11. **`get_data_contracts`** ✅ - Data contract analysis with drift detection 12. **`get_cross_stack_impact`** ✅ - Cross-stack impact analysis with transitive support
 
 #### ⚠️ MCP Resources Status - Mostly Placeholders
 
 **Current Resources:**
+
 1. **`repo://repositories`** ⚠️ - Basic implementation only
 2. **`graph://files`** ❌ - Placeholder implementation
 3. **`graph://symbols`** ❌ - Placeholder implementation
@@ -1678,10 +1616,10 @@ npm run build
 #### ❌ Missing Tools (for Complete Vision)
 
 **High Priority Missing:**
+
 1. **`impact_of`** - True blast radius analysis tool (vs current `get_cross_stack_impact`)
 2. **`search_docs`** - External documentation search
 3. **`diff_spec_vs_code`** - Specification drift detection
-4. **`generate_reverse_prd`** - Reverse engineering PRD generation
 
 ### Completed Phases (Verified)
 
@@ -1695,77 +1633,84 @@ npm run build
 - **Performance**: Chunked parsing for large files, transitive analysis with cycle detection
 
 **Key Architectural Achievements:**
+
 - **Ground Truth**: Static analysis provides accurate dependency relationships
 - **Framework Awareness**: Captures real Vue Router, Laravel routes, React hooks, etc.
 - **Cross-Stack Integration**: Maps Vue components to Laravel endpoints with confidence scoring
 - **Modular Design**: Clean separation enables easy Phase 6 enhancement
 
-### Gap Analysis: Current vs Complete AI-Native Vision
+### Gap Analysis: Current vs Complete Dependency Analysis Vision
 
 #### ✅ Achieved Core Goals
 
 **"Ground Truth" Context**: ✅ **Excellent**
+
 - Framework-aware parsing captures hidden dependencies
 - Cross-stack analysis reveals Vue ↔ Laravel relationships
 - Transitive analysis provides comprehensive dependency understanding
 - Confidence scoring for relationship strength
 
 **Core MCP Tools**: ✅ **Strong**
+
 - get_file, get_symbol, who_calls, list_dependencies are robust
 - Cross-stack tools exceed typical development tool capabilities
 - Advanced features like transitive analysis with cycle detection
 
 #### ⚠️ Partially Achieved
 
-**Search Functionality**: ⚠️ **Limited by missing vector search**
-- ✅ Lexical search working via PostgreSQL ilike
-- ❌ Missing vector embeddings and hybrid search
-- ❌ No semantic understanding of developer intent
+**Search Functionality**: ⚠️ **Limited by basic lexical search**
+
+- ✅ Basic lexical search working via PostgreSQL ilike
+- ❌ Missing full-text search with ranking algorithms
+- ❌ No advanced search result prioritization
 
 **Impact Analysis**: ⚠️ **Cross-stack excellent, broader blast radius missing**
+
 - ✅ Sophisticated Vue ↔ Laravel impact analysis
 - ❌ Missing comprehensive blast radius for routes, jobs, tests
-- ❌ No AI-powered confidence scoring for impact predictions
+- ❌ No comprehensive confidence scoring for impact predictions
 
 #### ❌ Major Gaps
 
-**AI-Powered Features (Phase 6 - Not Started)**:
-- Vector embeddings for code and documentation
-- AI-generated summaries for symbols/files/features
-- Hybrid vector + lexical search
-- Semantic impact analysis with AI insights
+**Enhanced Search Features (Phase 6 - Not Started)**:
 
-**Forward Specifications (Phase 7 - Not Started)**:
+- Full-text search with ranking algorithms
+- Advanced result prioritization and filtering
+- Cross-language symbol search
+
+**Specification Management (Phase 7 - Not Started)**:
+
 - Specification tracking and drift detection
-- PRD generation and reverse engineering
-- Integration with design documents
+- API contract validation
+- Integration with documentation systems
 
 **External Integration**:
+
 - Package documentation search and integration
-- Knowledge base with AI-generated summaries
+- Enhanced resource visualization
 
 ### Next Steps - Phase 6 Implementation Plan
 
-**🎯 Phase 6: AI-Powered Analysis** - IMMEDIATE PRIORITY
+**🎯 Phase 6: Enhanced Impact Analysis** - IMMEDIATE PRIORITY
 
-**Primary Goal**: Bridge the gap from "excellent foundation" to "revolutionary development tool" by implementing the missing AI-powered features that complete the Reddit post vision.
+**Primary Goal**: Bridge the gap from "excellent foundation" to "comprehensive development tool" by implementing the missing enhanced search and impact analysis features.
 
 **Specific Deliverables**:
 
-1. **Vector Embeddings Implementation** (Weeks 1-2)
-   - Add OpenAI embeddings for code symbols
-   - Implement hybrid vector + lexical search
-   - Enhance `search_code` tool with semantic understanding
+1. **Enhanced Search Implementation** (Weeks 1-2)
+   - Add PostgreSQL full-text search with ranking
+   - Implement advanced search result prioritization
+   - Enhance `search_code` tool with improved relevance
 
 2. **Complete Impact Analysis** (Weeks 3-4)
    - Implement true `impact_of` tool with comprehensive blast radius
-   - Add AI-powered confidence scoring
+   - Add enhanced confidence scoring algorithms
    - Include routes, jobs, tests in impact analysis
 
 3. **Resource Implementation** (Weeks 5-6)
    - Complete `graph://files` and `graph://symbols` resources
    - Add framework-specific resources (`graph://routes`, `graph://di`, `graph://jobs`)
-   - Implement `kb://summaries` with AI-generated summaries
+   - Implement comprehensive graph data visualization
 
 4. **External Integration Foundation** (Weeks 7-8)
    - Implement `search_docs` tool for package documentation
@@ -1773,9 +1718,10 @@ npm run build
    - Foundation for specification management
 
 **Success Criteria**:
-- Hybrid search provides significantly more relevant results than lexical-only
+
+- Enhanced search provides significantly more relevant results than basic lexical search
 - `impact_of` tool provides comprehensive blast radius with confidence scoring
 - Graph resources enable effective code exploration and visualization
-- Search understands semantic similarity across TypeScript and PHP code
+- Search effectively finds related code across TypeScript and PHP
 
-This comprehensive plan provides the foundation for building Claude Compass - an AI-native development environment that solves the context starvation problem by creating a closed loop between code reality and development intent.
+This comprehensive plan provides the foundation for building Claude Compass - a dependency analysis development environment that solves the context gap problem by creating comprehensive maps between code reality and AI assistant understanding.
