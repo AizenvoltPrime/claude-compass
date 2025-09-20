@@ -137,11 +137,16 @@ export class DatabaseService {
       .where({ name })
       .first();
 
-    if (repository && repository.framework_stack && typeof repository.framework_stack === 'string') {
+    if (!repository) {
+      return null;
+    }
+
+    // Parse framework_stack JSON if it's a string
+    if (repository.framework_stack && typeof repository.framework_stack === 'string') {
       repository.framework_stack = JSON.parse(repository.framework_stack);
     }
 
-    return repository as Repository || null;
+    return repository as Repository;
   }
 
   async getAllRepositories(): Promise<Repository[]> {
