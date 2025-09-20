@@ -28,7 +28,6 @@ export interface Config {
   logging: LoggingConfig;
   mcpServer: McpServerConfig;
   nodeEnv: string;
-  openaiApiKey?: string;
 }
 
 function getEnvVar(key: string, defaultValue?: string): string {
@@ -67,5 +66,4 @@ export const config: Config = {
     host: getEnvVar('MCP_SERVER_HOST', 'localhost'),
   },
   nodeEnv: getEnvVar('NODE_ENV', 'development'),
-  openaiApiKey: process.env.OPENAI_API_KEY,
 };
