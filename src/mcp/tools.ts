@@ -1065,7 +1065,11 @@ export class McpTools {
 
     return symbols.filter(symbol => {
       const isClass = symbol.symbol_type === 'class';
-      const isInModelsDirectory = symbol.file?.path?.includes('/Models/') || symbol.file?.path?.includes('\\Models\\');
+      const path = symbol.file?.path || '';
+      // More flexible path matching that works with various directory structures
+      const isInModelsDirectory = path.includes('/Models/') || path.includes('\\Models\\') ||
+                                 path.includes('/models/') || path.includes('\\models\\') ||
+                                 /[\/\\][Mm]odels[\/\\]/.test(path);
       const hasModelSignature = symbol.signature?.includes('extends Model') ||
                                 symbol.signature?.includes('extends Authenticatable') ||
                                 symbol.signature?.includes('extends Illuminate\\Database\\Eloquent\\Model');
@@ -1079,7 +1083,11 @@ export class McpTools {
 
     return symbols.filter(symbol => {
       const isClass = symbol.symbol_type === 'class';
-      const isInControllersDirectory = symbol.file?.path?.includes('/Controllers/') || symbol.file?.path?.includes('\\Controllers\\');
+      const path = symbol.file?.path || '';
+      // More flexible path matching that works with various directory structures
+      const isInControllersDirectory = path.includes('/Controllers/') || path.includes('\\Controllers\\') ||
+                                       path.includes('/controllers/') || path.includes('\\controllers\\') ||
+                                       /[\/\\][Cc]ontrollers[\/\\]/.test(path);
       const hasControllerSignature = symbol.signature?.includes('extends Controller') ||
                                     symbol.signature?.includes('extends BaseController') ||
                                     symbol.signature?.includes('extends Illuminate\\Routing\\Controller');
@@ -1106,10 +1114,14 @@ export class McpTools {
     const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
+      const path = symbol.file?.path || '';
+      // More flexible path matching that works with various directory structures
+      const isInJobsDirectory = path.includes('/jobs/') || path.includes('\\jobs\\') ||
+                               path.includes('/Jobs/') || path.includes('\\Jobs\\') ||
+                               /[\/\\][Jj]obs[\/\\]/.test(path);
+
       return symbol.symbol_type === 'class' &&
-             (symbol.name?.toLowerCase().includes('job') ||
-              symbol.file?.path?.includes('jobs/') ||
-              symbol.file?.path?.includes('Jobs/'));
+             (symbol.name?.toLowerCase().includes('job') || isInJobsDirectory);
     });
   }
 
