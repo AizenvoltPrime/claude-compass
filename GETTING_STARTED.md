@@ -5,11 +5,14 @@ Welcome to Claude Compass - an AI-native development environment that solves the
 Claude Compass provides:
 - ✅ JavaScript/TypeScript parsing with Tree-sitter
 - ✅ PHP parsing with Tree-sitter and advanced chunked parsing
-- ✅ Framework-aware parsing for Vue.js, Next.js, React, Node.js, and Laravel
+- ✅ C# parsing with Tree-sitter for game development
+- ✅ Framework-aware parsing for Vue.js, Next.js, React, Node.js, Laravel, and Godot
 - ✅ Laravel route and controller detection (web.php, api.php, controllers)
 - ✅ Laravel Eloquent model relationship mapping
 - ✅ Laravel job queue and scheduler detection
 - ✅ Laravel service provider and dependency injection analysis
+- ✅ Godot scene file parsing (.tscn) with node hierarchy and script analysis
+- ✅ C# script parsing with Godot-specific patterns and autoload detection
 - ✅ Background job parsing (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
 - ✅ Test framework parsing (Jest, Vitest, Cypress, Playwright)
 - ✅ ORM relationship parsing (Prisma, TypeORM, Sequelize, Mongoose)
@@ -85,6 +88,9 @@ npm run analyze /path/to/your/nextjs-project
 
 # Analyze a Laravel/PHP repository
 npm run analyze /path/to/your/laravel-project
+
+# Analyze a Godot/C# game project
+npm run analyze /path/to/your/godot-project
 
 # Force full analysis (clears existing data and re-analyzes)
 npm run analyze . --force-full
@@ -198,7 +204,7 @@ npm run analyze . --force-full       # Force full analysis (clears existing data
 # --include-node-modules   Include node_modules (not recommended)
 # --max-file-size <size>   Max file size in bytes (default: 20MB)
 # --max-files <count>      Max files to process (default: 10,000)
-# --extensions <list>      File extensions (default: .js,.jsx,.ts,.tsx,.mjs,.cjs,.vue,.php)
+# --extensions <list>      File extensions (default: .js,.jsx,.ts,.tsx,.mjs,.cjs,.vue,.php,.cs,.tscn)
 # --force-full            Force full analysis instead of incremental (clears existing data)
 # --cross-stack           Enable cross-stack analysis for Vue ↔ Laravel projects
 # --vue-laravel           Specifically analyze Vue.js and Laravel cross-stack relationships
@@ -225,9 +231,9 @@ claude-compass search <query> [options]
 
 # Options:
 # --repo-id <id>      Limit to specific repository
-# --type <type>       Filter by symbol type (function, class, route, component, hook)
+# --type <type>       Filter by symbol type (function, class, route, component, hook, scene, script)
 # --exported-only     Show only exported symbols
-# --framework <name>  Filter by framework (vue, nextjs, react, nodejs, laravel)
+# --framework <name>  Filter by framework (vue, nextjs, react, nodejs, laravel, godot)
 # --limit <count>     Max results (default: 20)
 ```
 
@@ -364,8 +370,9 @@ NODE_ENV=development
 
 Claude Compass includes:
 
-- ✅ **Framework-specific parsing**: Vue.js, Next.js, React, Node.js, and Laravel components, routes, and hooks
+- ✅ **Framework-specific parsing**: Vue.js, Next.js, React, Node.js, Laravel, and Godot components, routes, scenes, and hooks
 - ✅ **PHP/Laravel support**: Laravel routes, controllers, Eloquent models, job queues, service providers, middleware
+- ✅ **C#/Godot support**: Godot scene parsing (.tscn), C# script analysis, node hierarchy, autoload detection, signal extraction
 - ✅ **Background job detection**: Bull, BullMQ, Agenda, Bee, Kue, Worker Threads with configuration analysis
 - ✅ **Test-to-code linkage**: Jest, Vitest, Cypress, Playwright with coverage analysis and confidence scoring
 - ✅ **ORM relationship mapping**: Prisma, TypeORM, Sequelize, Mongoose entity relationships and CRUD operations
@@ -385,12 +392,13 @@ Claude Compass includes:
 
 ## What's Working
 
-- 🔍 **Symbol Extraction**: Functions, classes, interfaces, variables, methods, components, hooks, jobs, tests, entities (JS/TS/PHP)
+- 🔍 **Symbol Extraction**: Functions, classes, interfaces, variables, methods, components, hooks, jobs, tests, entities, scenes, scripts (JS/TS/PHP/C#)
 - 📦 **Import Analysis**: ES6, CommonJS, dynamic imports with path resolution
-- 🎯 **Framework Detection**: Evidence-based detection for Vue, Next.js, React, Node.js, Laravel
+- 🎯 **Framework Detection**: Evidence-based detection for Vue, Next.js, React, Node.js, Laravel, Godot
 - 🧩 **Component Analysis**: Props extraction, JSX dependencies, HOC detection
 - 🚀 **Route Mapping**: Express/Fastify/Laravel routes with middleware, auth, validation patterns
 - 🏛️ **Laravel Support**: Route detection (web.php, api.php), Eloquent models, job queues, service providers
+- 🎮 **Godot Support**: Scene file parsing (.tscn), C# script analysis, node hierarchy, autoload detection
 - 🎣 **Hook/Composable Parsing**: Custom hooks, Vue composables, state management
 - 📊 **Graph Building**: File, symbol, framework entity, and transitive relationships
 - ⚡ **Background Jobs**: Queue detection, job processing, worker thread analysis
@@ -419,10 +427,9 @@ Future development priorities:
 - **Documentation Integration**: Integrate with documentation systems
 - **Contract Testing**: Automated validation of API contracts
 
-### C#/Godot Support
-- **Game Development**: Support for C# and Godot game engine
-- **Scene Analysis**: Parse Godot scenes and script relationships
-- **Game-specific Tools**: Specialized tools for game development workflows
+### Additional Language Support
+- **Python/Django Support**: Planned support for Python and Django framework
+- **Additional Framework Integration**: Expand to other popular frameworks as needed
 
 ## Troubleshooting
 
