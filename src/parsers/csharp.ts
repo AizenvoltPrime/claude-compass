@@ -772,21 +772,92 @@ export class CSharpParser extends ChunkedParser {
   private extractInheritanceDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
+    // Find the parent class/interface declaration to get the correct 'from_symbol'
+    const parentDeclaration = this.findParentDeclaration(node);
+    if (!parentDeclaration) {
+      return dependencies;
+    }
+
+    const parentNameNode = parentDeclaration.childForFieldName('name');
+    if (!parentNameNode) {
+      return dependencies;
+    }
+
+    const fromSymbol = this.getNodeText(parentNameNode, content);
+    const isInterface = parentDeclaration.type === 'interface_declaration';
+
+    // Extract base classes and interfaces from the base_list
+    const baseNames: string[] = [];
     for (const child of node.children) {
       if (child.type === 'identifier' || child.type === 'qualified_name') {
         const baseName = this.getNodeText(child, content);
-
-        dependencies.push({
-          from_symbol: 'derived',
-          to_symbol: baseName,
-          dependency_type: DependencyType.INHERITS,
-          line_number: child.startPosition.row + 1,
-          confidence: 0.9
-        });
+        if (baseName && baseName.trim()) {
+          baseNames.push(baseName.trim());
+        }
       }
     }
 
+    // Process inheritance relationships
+    for (let i = 0; i < baseNames.length; i++) {
+      const baseName = baseNames[i];
+      let dependencyType: DependencyType;
+
+      if (isInterface) {
+        // Interfaces can only extend other interfaces
+        dependencyType = DependencyType.INHERITS;
+      } else {
+        // For classes: first item is typically base class, rest are interfaces
+        // However, if the first item starts with 'I' and is PascalCase, it's likely an interface
+        if (i === 0 && !this.isLikelyInterface(baseName)) {
+          dependencyType = DependencyType.INHERITS;
+        } else {
+          dependencyType = DependencyType.IMPLEMENTS;
+        }
+      }
+
+      dependencies.push({
+        from_symbol: fromSymbol,
+        to_symbol: baseName,
+        dependency_type: dependencyType,
+        line_number: node.startPosition.row + 1,
+        confidence: 0.9
+      });
+    }
+
     return dependencies;
+  }
+
+  /**
+   * Find the parent class/interface/struct declaration that contains the given base_list node
+   */
+  private findParentDeclaration(baseListNode: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    let parent = baseListNode.parent;
+
+    while (parent) {
+      if (parent.type === 'class_declaration' ||
+          parent.type === 'interface_declaration' ||
+          parent.type === 'struct_declaration') {
+        return parent;
+      }
+      parent = parent.parent;
+    }
+
+    return null;
+  }
+
+  /**
+   * Determine if a name is likely an interface based on C# naming conventions
+   * Interfaces typically start with 'I' followed by a capital letter
+   */
+  private isLikelyInterface(name: string): boolean {
+    if (!name || name.length < 2) {
+      return false;
+    }
+
+    // Check if it starts with 'I' followed by a capital letter (PascalCase interface convention)
+    return name.charAt(0) === 'I' &&
+           name.charAt(1) >= 'A' &&
+           name.charAt(1) <= 'Z';
   }
 
   private extractConstraintDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
@@ -815,7 +886,10 @@ export class CSharpParser extends ChunkedParser {
   // Import/Export extraction helper methods
 
   private extractUsingDirective(node: Parser.SyntaxNode, content: string): ParsedImport | null {
-    const nameNode = node.childForFieldName('name');
+    // Look for identifier or qualified_name child nodes
+    const nameNode = node.children.find(child =>
+      child.type === 'identifier' || child.type === 'qualified_name'
+    );
     if (!nameNode) return null;
 
     const namespaceName = this.getNodeText(nameNode, content);
@@ -1009,9 +1083,18 @@ export class CSharpParser extends ChunkedParser {
       'const', 'new', 'extern', 'unsafe', 'volatile'
     ]);
 
-    // Look for actual modifier node types in the declaration
+    // Look for modifier nodes and extract their types
     for (const child of node.children) {
-      if (csharpModifierTypes.has(child.type)) {
+      if (child.type === 'modifier') {
+        // Look at the first child of the modifier node for the actual modifier type
+        if (child.childCount > 0) {
+          const modifierType = child.child(0)?.type;
+          if (modifierType && csharpModifierTypes.has(modifierType)) {
+            modifiers.push(modifierType);
+          }
+        }
+      } else if (csharpModifierTypes.has(child.type)) {
+        // Direct modifier nodes (fallback)
         modifiers.push(child.type);
       }
     }
@@ -1026,9 +1109,16 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node, content);
 
-    // Build signature with proper spacing
+    // Extract generic type parameters
+    const typeParametersNode = node.children.find(child => child.type === 'type_parameter_list');
+    let typeParameters = '';
+    if (typeParametersNode) {
+      typeParameters = this.getNodeText(typeParametersNode, content);
+    }
+
+    // Build signature with proper spacing and generic parameters
     const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    return `${modifierString}class ${name}`;
+    return `${modifierString}class ${name}${typeParameters}`;
   }
 
   private extractInterfaceSignature(node: Parser.SyntaxNode, content: string): string {
@@ -1038,9 +1128,16 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node, content);
 
-    // Build signature with proper spacing
+    // Extract generic type parameters
+    const typeParametersNode = node.children.find(child => child.type === 'type_parameter_list');
+    let typeParameters = '';
+    if (typeParametersNode) {
+      typeParameters = this.getNodeText(typeParametersNode, content);
+    }
+
+    // Build signature with proper spacing and generic parameters
     const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    return `${modifierString}interface ${name}`;
+    return `${modifierString}interface ${name}${typeParameters}`;
   }
 
   private extractMethodSignature(node: Parser.SyntaxNode, content: string): string {
@@ -1050,20 +1147,37 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node, content);
 
-    // Extract return type
-    const returnTypeNode = node.childForFieldName('type');
-    const returnType = returnTypeNode ? this.getNodeText(returnTypeNode, content) : 'void';
+    // Extract return type - look for any type child node
+    let returnType = 'void';
+    const typeNode = node.children.find(child =>
+      child.type === 'predefined_type' ||
+      child.type === 'identifier' ||
+      child.type === 'qualified_name' ||
+      child.type === 'generic_name' ||
+      child.type === 'array_type' ||
+      child.type === 'nullable_type'
+    );
+    if (typeNode) {
+      returnType = this.getNodeText(typeNode, content);
+    }
 
     // Extract parameters
-    const parametersNode = node.childForFieldName('parameters');
+    const parametersNode = node.children.find(child => child.type === 'parameter_list');
     let parameters = '()';
     if (parametersNode) {
       parameters = this.getNodeText(parametersNode, content);
     }
 
-    // Build signature with proper spacing
+    // Extract generic type parameters
+    const typeParametersNode = node.children.find(child => child.type === 'type_parameter_list');
+    let typeParameters = '';
+    if (typeParametersNode) {
+      typeParameters = this.getNodeText(typeParametersNode, content);
+    }
+
+    // Build signature with proper spacing, including async keyword if present
     const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    return `${modifierString}${returnType} ${name}${parameters}`;
+    return `${modifierString}${returnType} ${name}${typeParameters}${parameters}`;
   }
 
   private extractPropertySignature(node: Parser.SyntaxNode, content: string): string {
