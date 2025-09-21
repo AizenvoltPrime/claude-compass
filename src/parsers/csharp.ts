@@ -210,6 +210,10 @@ export class CSharpParser extends ChunkedParser {
       const imports = this.extractImports(tree.rootNode, content);
       const exports = this.extractExports(tree.rootNode, content);
 
+      // Validate method call detection completeness
+      const methodCallValidationErrors = this.validateMethodCallDetection(content, dependencies, filePath);
+      validationErrors.push(...methodCallValidationErrors);
+
       logger.info('C# parsing completed for large file', {
         filePath,
         symbolsFound: symbols.length,
@@ -282,6 +286,10 @@ export class CSharpParser extends ChunkedParser {
       const dependencies = this.extractDependencies(tree.rootNode, content);
       const imports = this.extractImports(tree.rootNode, content);
       const exports = this.extractExports(tree.rootNode, content);
+
+      // Validate method call detection completeness
+      const methodCallValidationErrors = this.validateMethodCallDetection(content, dependencies, filePath);
+      validationErrors.push(...methodCallValidationErrors);
 
       // Log parsing statistics for C# files
       logger.debug('C# parsing completed', {
@@ -423,23 +431,87 @@ export class CSharpParser extends ChunkedParser {
 
     // Extract method calls
     const callNodes = this.findNodesOfType(rootNode, 'invocation_expression');
+    logger.debug('C# dependency extraction: method calls', {
+      invocationExpressionCount: callNodes.length
+    });
+
     for (const node of callNodes) {
       const dependency = this.extractCallDependency(node, content);
-      if (dependency) dependencies.push(dependency);
+      if (dependency) {
+        dependencies.push(dependency);
+        logger.debug('C# method call detected', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          line: dependency.line_number,
+          confidence: dependency.confidence,
+          type: dependency.dependency_type
+        });
+      } else {
+        logger.debug('C# method call extraction failed', {
+          line: node.startPosition.row + 1,
+          nodeType: node.type,
+          nodeText: this.getNodeText(node, content).substring(0, 100)
+        });
+      }
+    }
+
+    // Extract conditional access expressions (null-conditional operator ?.)
+    const conditionalAccessNodes = this.findNodesOfType(rootNode, 'conditional_access_expression');
+    logger.debug('C# dependency extraction: conditional access expressions', {
+      conditionalAccessCount: conditionalAccessNodes.length
+    });
+
+    for (const node of conditionalAccessNodes) {
+      const extractedDependencies = this.extractConditionalAccessDependencies(node, content);
+      if (extractedDependencies.length > 0) {
+        dependencies.push(...extractedDependencies);
+        logger.debug('C# conditional access dependencies detected', {
+          count: extractedDependencies.length,
+          line: node.startPosition.row + 1,
+          nodeText: this.getNodeText(node, content).substring(0, 100),
+          dependencies: extractedDependencies.map(d => `${d.from_symbol} -> ${d.to_symbol}`)
+        });
+      } else {
+        logger.debug('C# conditional access extraction failed', {
+          line: node.startPosition.row + 1,
+          nodeText: this.getNodeText(node, content).substring(0, 100)
+        });
+      }
     }
 
     // Extract member access expressions
     const memberAccessNodes = this.findNodesOfType(rootNode, 'member_access_expression');
+    logger.debug('C# dependency extraction: member access expressions', {
+      memberAccessCount: memberAccessNodes.length
+    });
+
+    let memberAccessDependencies = 0;
     for (const node of memberAccessNodes) {
       const dependency = this.extractMemberAccessDependency(node, content);
-      if (dependency) dependencies.push(dependency);
+      if (dependency) {
+        dependencies.push(dependency);
+        memberAccessDependencies++;
+        logger.debug('C# member access detected', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          line: dependency.line_number
+        });
+      }
     }
 
     // Extract inheritance relationships
     const baseListNodes = this.findNodesOfType(rootNode, 'base_list');
+    logger.debug('C# dependency extraction: inheritance relationships', {
+      baseListCount: baseListNodes.length
+    });
+
     for (const node of baseListNodes) {
       const inheritanceDeps = this.extractInheritanceDependencies(node, content);
       dependencies.push(...inheritanceDeps);
+      logger.debug('C# inheritance relationships detected', {
+        count: inheritanceDeps.length,
+        line: node.startPosition.row + 1
+      });
     }
 
     // Extract generic type constraints
@@ -449,7 +521,24 @@ export class CSharpParser extends ChunkedParser {
       dependencies.push(...constraintDeps);
     }
 
-    return dependencies;
+    // Deduplicate dependencies to eliminate overlapping extractions
+    const dedupedDependencies = this.deduplicateDependencies(dependencies);
+
+    logger.info('C# dependency extraction completed', {
+      totalDependencies: dependencies.length,
+      deduplicatedDependencies: dedupedDependencies.length,
+      duplicatesRemoved: dependencies.length - dedupedDependencies.length,
+      invocationExpressions: callNodes.length,
+      conditionalAccessExpressions: conditionalAccessNodes.length,
+      memberAccessExpressions: memberAccessNodes.length,
+      memberAccessDependencies,
+      inheritanceRelationships: baseListNodes.length,
+      methodCalls: dedupedDependencies.filter(d => d.dependency_type === 'calls').length,
+      references: dedupedDependencies.filter(d => d.dependency_type === 'references').length,
+      inheritance: dedupedDependencies.filter(d => d.dependency_type === 'inherits' || d.dependency_type === 'implements').length
+    });
+
+    return dedupedDependencies;
   }
 
   protected extractImports(rootNode: Parser.SyntaxNode, content: string): ParsedImport[] {
@@ -725,31 +814,130 @@ export class CSharpParser extends ChunkedParser {
   // Dependency extraction helper methods
 
   private extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
-    const expressionNode = node.childForFieldName('expression');
-    if (!expressionNode) return null;
+    const functionNode = node.childForFieldName('function');
+    if (!functionNode) {
+      logger.debug('C# method call extraction failed: no function node', {
+        line: node.startPosition.row + 1,
+        nodeType: node.type
+      });
+      return null;
+    }
 
-    // Extract method name, handling different expression types
+    // Extract method name and calling context, handling different expression types
     let methodName = '';
-    if (expressionNode.type === 'member_access_expression') {
-      // For member access like obj.Method(), get just the method name
-      const nameNode = expressionNode.childForFieldName('name');
-      methodName = nameNode ? this.getNodeText(nameNode, content) : this.getNodeText(expressionNode, content);
-    } else if (expressionNode.type === 'identifier') {
+    let callingObject = '';
+
+    if (functionNode.type === 'member_access_expression') {
+      // For member access like obj.Method() or this.Method()
+      const nameNode = functionNode.childForFieldName('name');
+      const objectNode = functionNode.childForFieldName('expression');
+
+      methodName = nameNode ? this.getNodeText(nameNode, content) : '';
+      callingObject = objectNode ? this.getNodeText(objectNode, content) : '';
+
+      // If no method name extracted, use the full expression
+      if (!methodName) {
+        methodName = this.getNodeText(functionNode, content);
+      }
+    } else if (functionNode.type === 'identifier') {
       // For simple method calls like Method()
-      methodName = this.getNodeText(expressionNode, content);
+      methodName = this.getNodeText(functionNode, content);
+    } else if (functionNode.type === 'generic_name') {
+      // For generic method calls like Method<T>()
+      const nameNode = functionNode.childForFieldName('name');
+      methodName = nameNode ? this.getNodeText(nameNode, content) : this.getNodeText(functionNode, content);
+    } else if (functionNode.type === 'qualified_name') {
+      // For qualified calls like Namespace.Class.Method()
+      const nameNode = functionNode.childForFieldName('name');
+      methodName = nameNode ? this.getNodeText(nameNode, content) : this.getNodeText(functionNode, content);
+    } else if (functionNode.type === 'conditional_access_expression') {
+      // For conditional access calls like obj?.Method() - extract the final method in the chain
+      // Look for member_binding_expression nodes which contain the method names in chained calls
+      const memberBindingNodes = this.findNodesOfType(functionNode, 'member_binding_expression');
+
+      if (memberBindingNodes.length > 0) {
+        // Get the last member_binding_expression for the final method in the chain
+        const finalMemberBinding = memberBindingNodes[memberBindingNodes.length - 1];
+        const identifierNode = finalMemberBinding.children.find(child => child.type === 'identifier');
+        methodName = identifierNode ? this.getNodeText(identifierNode, content) : '';
+
+        logger.debug('C# conditional access method extracted from member binding', {
+          methodName,
+          memberBindingCount: memberBindingNodes.length,
+          finalBindingText: this.getNodeText(finalMemberBinding, content)
+        });
+      }
+
+      if (!methodName) {
+        // Fallback: try to extract from the full text
+        methodName = this.getNodeText(functionNode, content);
+      }
+    } else if (functionNode.type === 'element_access_expression') {
+      // For indexer method calls like array[index].Method()
+      methodName = this.getNodeText(functionNode, content);
+    } else if (functionNode.type === 'invocation_expression') {
+      // For nested invocation expressions like Method1().Method2()
+      const innerFunction = functionNode.childForFieldName('function');
+      methodName = innerFunction ? this.getNodeText(innerFunction, content) : this.getNodeText(functionNode, content);
     } else {
-      // For complex expressions, use the full text
-      methodName = this.getNodeText(expressionNode, content);
+      // For complex expressions, use the full text but try to extract meaningful names
+      const fullText = this.getNodeText(functionNode, content);
+
+      // Try to extract method name from complex expressions
+      const methodCallMatch = fullText.match(/(\w+)\s*\(/);
+      if (methodCallMatch) {
+        methodName = methodCallMatch[1];
+      } else {
+        methodName = fullText;
+      }
+    }
+
+    // Clean up method name (remove whitespace, handle edge cases)
+    methodName = methodName.trim();
+    if (!methodName) {
+      // Fallback to full expression text if no method name could be extracted
+      methodName = this.getNodeText(functionNode, content).trim();
+    }
+
+    // Skip if we couldn't extract a meaningful method name
+    if (!methodName || methodName.length === 0) {
+      logger.debug('C# method call extraction failed: no method name', {
+        line: node.startPosition.row + 1,
+        functionType: functionNode.type,
+        functionText: this.getNodeText(functionNode, content).substring(0, 50)
+      });
+      return null;
     }
 
     const callerName = this.findContainingFunction(node, content);
+
+    // Additional debug logging
+    logger.debug('C# method call extraction details', {
+      methodName,
+      callerName,
+      functionType: functionNode.type,
+      line: node.startPosition.row + 1
+    });
+
+    // Determine confidence based on extraction quality
+    let confidence = 0.9;
+    if (callingObject) {
+      // Higher confidence when we have calling object context
+      confidence = 0.95;
+    } else if (functionNode.type === 'identifier' || functionNode.type === 'member_access_expression') {
+      // High confidence for simple patterns
+      confidence = 0.9;
+    } else if (methodName.includes('(') || methodName.includes('.')) {
+      // Lower confidence for complex expressions that might not be clean method names
+      confidence = 0.7;
+    }
 
     return {
       from_symbol: callerName,
       to_symbol: methodName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
-      confidence: 0.9 // Higher confidence with improved extraction
+      confidence
     };
   }
 
@@ -767,6 +955,168 @@ export class CSharpParser extends ChunkedParser {
       line_number: node.startPosition.row + 1,
       confidence: 0.7
     };
+  }
+
+  /**
+   * Extract dependencies from conditional access expressions (null-conditional operator ?.)
+   * Handles patterns like: obj?.Method(), obj?.Property?.Method(), chained calls, etc.
+   * Returns array to support chained method calls that generate multiple dependencies.
+   */
+  private extractConditionalAccessDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+    const maxChainDepth = 10; // Prevent infinite recursion
+
+    logger.debug('C# conditional access extraction starting', {
+      line: node.startPosition.row + 1,
+      nodeText: this.getNodeText(node, content).substring(0, 100)
+    });
+
+    // Extract all invocation expressions within the conditional access chain
+    const invocationNodes = this.findNodesOfType(node, 'invocation_expression');
+
+    logger.debug('C# conditional access invocation nodes found', {
+      count: invocationNodes.length
+    });
+
+    // Process each invocation expression to capture chained method calls
+    for (const invocationNode of invocationNodes) {
+      const dependency = this.extractCallDependency(invocationNode, content);
+      if (dependency) {
+        // Mark as higher confidence since we specifically detected the conditional access pattern
+        dependency.confidence = Math.min(0.95, dependency.confidence + 0.1);
+        dependencies.push(dependency);
+
+        logger.debug('C# conditional access call extracted', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          line: dependency.line_number,
+          confidence: dependency.confidence
+        });
+      }
+    }
+
+    // If we found invocation expressions, we're done - they capture the method calls
+    if (dependencies.length > 0) {
+      logger.debug('C# conditional access dependencies extracted from invocations', {
+        count: dependencies.length
+      });
+      return dependencies;
+    }
+
+    // If no invocation found, check for member access within conditional access
+    const memberAccessNodes = this.findNodesOfType(node, 'member_access_expression');
+    logger.debug('C# conditional access member access nodes found', {
+      count: memberAccessNodes.length
+    });
+
+    for (const memberAccessNode of memberAccessNodes) {
+      const nameNode = memberAccessNode.childForFieldName('name');
+      if (!nameNode) continue;
+
+      const memberName = this.getNodeText(nameNode, content);
+      const callerName = this.findContainingFunction(node, content);
+
+      // Check if this is a method call (has parentheses) or just property access
+      const nodeText = this.getNodeText(node, content);
+      const isMethodCall = nodeText.includes('(') && nodeText.includes(')');
+
+      const dependency: ParsedDependency = {
+        from_symbol: callerName,
+        to_symbol: memberName,
+        dependency_type: isMethodCall ? DependencyType.CALLS : DependencyType.REFERENCES,
+        line_number: node.startPosition.row + 1,
+        confidence: 0.85 // High confidence for conditional access
+      };
+
+      dependencies.push(dependency);
+
+      logger.debug('C# conditional access member dependency extracted', {
+        from: dependency.from_symbol,
+        to: dependency.to_symbol,
+        type: dependency.dependency_type,
+        line: dependency.line_number
+      });
+    }
+
+    // If we found member access, we're done
+    if (dependencies.length > 0) {
+      logger.debug('C# conditional access dependencies extracted from member access', {
+        count: dependencies.length
+      });
+      return dependencies;
+    }
+
+    // Fallback: extract using regex pattern matching for complex expressions
+    const expressionText = this.getNodeText(node, content);
+    if (expressionText.includes('?.')) {
+      const callerName = this.findContainingFunction(node, content);
+      const chainedCalls = this.extractChainedCallsFromText(expressionText, callerName, node.startPosition.row + 1);
+      dependencies.push(...chainedCalls);
+
+      if (chainedCalls.length > 0) {
+        logger.debug('C# conditional access dependencies extracted from regex fallback', {
+          count: chainedCalls.length,
+          expression: expressionText.substring(0, 100)
+        });
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Extract chained method calls from complex conditional access expressions using regex patterns
+   */
+  private extractChainedCallsFromText(expressionText: string, callerName: string, lineNumber: number): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    // Pattern to match method calls in conditional access chains: obj?.Method1()?.Method2()
+    const methodCallPattern = /\?\s*\.?\s*(\w+)\s*\(/g;
+    let match;
+
+    while ((match = methodCallPattern.exec(expressionText)) !== null) {
+      const methodName = match[1];
+      const dependency: ParsedDependency = {
+        from_symbol: callerName,
+        to_symbol: methodName,
+        dependency_type: DependencyType.CALLS,
+        line_number: lineNumber,
+        confidence: 0.75 // Lower confidence for regex-based extraction
+      };
+
+      dependencies.push(dependency);
+
+      logger.debug('C# chained conditional access call extracted via regex', {
+        from: dependency.from_symbol,
+        to: dependency.to_symbol,
+        pattern: match[0]
+      });
+    }
+
+    // If no method calls found, try property access pattern: obj?.Property
+    if (dependencies.length === 0) {
+      const propertyPattern = /\?\s*\.?\s*(\w+)(?!\s*\()/g;
+      while ((match = propertyPattern.exec(expressionText)) !== null) {
+        const propertyName = match[1];
+        const dependency: ParsedDependency = {
+          from_symbol: callerName,
+          to_symbol: propertyName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: lineNumber,
+          confidence: 0.70 // Lower confidence for property access via regex
+        };
+
+        dependencies.push(dependency);
+
+        logger.debug('C# conditional access property extracted via regex', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          pattern: match[0]
+        });
+      }
+    }
+
+    return dependencies;
   }
 
   private extractInheritanceDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
@@ -1002,6 +1352,64 @@ export class CSharpParser extends ChunkedParser {
   }
 
   /**
+   * Validate method call detection by comparing AST results with text-based analysis
+   * This helps identify potential gaps in Tree-sitter parsing
+   */
+  private validateMethodCallDetection(content: string, dependencies: ParsedDependency[], filePath: string): ParseError[] {
+    const validationErrors: ParseError[] = [];
+
+    // Use regex to find potential method calls that might have been missed
+    const methodCallRegex = /(\w+)\s*\?\?\s*\.(\w+)\s*\(|(\w+)\s*\?\s*\.(\w+)\s*\(|(\w+)\.(\w+)\s*\(/g;
+    const textBasedCalls = new Set<string>();
+    let match;
+
+    while ((match = methodCallRegex.exec(content)) !== null) {
+      const methodName = match[2] || match[4] || match[6]; // Extract method name from different patterns
+      if (methodName) {
+        textBasedCalls.add(methodName.toLowerCase());
+      }
+    }
+
+    // Check what we detected through AST
+    const astDetectedCalls = new Set<string>();
+    for (const dep of dependencies) {
+      if (dep.dependency_type === 'calls') {
+        astDetectedCalls.add(dep.to_symbol.toLowerCase());
+      }
+    }
+
+    // Find potentially missed method calls
+    for (const textCall of textBasedCalls) {
+      if (!astDetectedCalls.has(textCall)) {
+        logger.warn('C# method call potentially missed by AST parsing', {
+          methodName: textCall,
+          filePath,
+          textBasedCalls: textBasedCalls.size,
+          astDetectedCalls: astDetectedCalls.size
+        });
+
+        validationErrors.push({
+          message: `Potential method call '${textCall}' detected in text but not in AST - verify parsing completeness`,
+          line: 1,
+          column: 1,
+          severity: 'warning'
+        });
+      }
+    }
+
+    // Log validation summary
+    logger.debug('C# method call validation completed', {
+      filePath,
+      textBasedCallsFound: textBasedCalls.size,
+      astDetectedCalls: astDetectedCalls.size,
+      potentiallyMissedCalls: Array.from(textBasedCalls).filter(call => !astDetectedCalls.has(call)),
+      validationErrors: validationErrors.length
+    });
+
+    return validationErrors;
+  }
+
+  /**
    * Find all ERROR nodes in the syntax tree
    */
   private findErrorNodes(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
@@ -1022,54 +1430,273 @@ export class CSharpParser extends ChunkedParser {
 
   /**
    * Find the containing function for a call expression node by traversing up the AST
+   * Two-phase approach: 1) Collect full context, 2) Find method and build qualified name
    */
   private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {
-    let parent = callNode.parent;
-    let className = '';
+    logger.debug('C# findContainingFunction starting', {
+      startNodeType: callNode.type,
+      startNodeText: this.getNodeText(callNode, content).substring(0, 50)
+    });
 
-    // Walk up the AST to find containing function, method, or constructor
+    // Phase 1: Collect complete context by traversing up the AST
+    const context = this.collectASTContext(callNode, content);
+
+    logger.debug('C# findContainingFunction collected context', {
+      className: context.className,
+      namespaceName: context.namespaceName,
+      interfaceName: context.interfaceName,
+      structName: context.structName
+    });
+
+    // Phase 2: Find the specific method/constructor/property with complete context
+    let parent = callNode.parent;
     while (parent) {
-      if (parent.type === 'method_declaration' ||
-          parent.type === 'constructor_declaration') {
+      logger.debug('C# findContainingFunction searching for method', {
+        nodeType: parent.type
+      });
+
+      // Method declarations
+      if (parent.type === 'method_declaration') {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
           const methodName = this.getNodeText(nameNode, content);
-          // Include class context if available
-          return className ? `${className}.${methodName}` : methodName;
+          const containerName = context.className || context.interfaceName || context.structName;
+          const qualifiedName = this.buildQualifiedName(context.namespaceName, containerName, methodName);
+
+          logger.debug('C# findContainingFunction found method with full context', {
+            methodName,
+            containerName,
+            namespaceName: context.namespaceName,
+            qualifiedName
+          });
+
+          return qualifiedName;
         }
       }
 
+      // Constructor declarations
+      if (parent.type === 'constructor_declaration') {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          const constructorName = this.getNodeText(nameNode, content);
+          const containerName = context.className || context.structName;
+          return this.buildQualifiedName(context.namespaceName, containerName, `.ctor(${constructorName})`);
+        }
+      }
+
+      // Property declarations (including auto-properties)
       if (parent.type === 'property_declaration') {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
           const propertyName = this.getNodeText(nameNode, content);
-          // Properties often have getter/setter, so specify it's from property
-          return className ? `${className}.${propertyName}` : propertyName;
+
+          // Check if we're inside an accessor (get/set)
+          let accessorType = '';
+          let accessorParent = callNode.parent;
+          while (accessorParent && accessorParent !== parent) {
+            if (accessorParent.type === 'accessor_declaration') {
+              const keyword = accessorParent.children.find(child =>
+                child.type === 'get' || child.type === 'set' || child.type === 'init'
+              );
+              if (keyword) {
+                accessorType = `.${keyword.type}`;
+              }
+              break;
+            }
+            accessorParent = accessorParent.parent;
+          }
+
+          const containerName = context.className || context.interfaceName || context.structName;
+          return this.buildQualifiedName(context.namespaceName, containerName, `${propertyName}${accessorType}`);
         }
       }
 
-      // Keep track of class context for better naming
+      // Event declarations
+      if (parent.type === 'event_declaration') {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          const eventName = this.getNodeText(nameNode, content);
+          const containerName = context.className || context.interfaceName || context.structName;
+          return this.buildQualifiedName(context.namespaceName, containerName, `${eventName}.event`);
+        }
+      }
+
+      // Indexer declarations
+      if (parent.type === 'indexer_declaration') {
+        const containerName = context.className || context.interfaceName || context.structName;
+        return this.buildQualifiedName(context.namespaceName, containerName, 'this[]');
+      }
+
+      // Operator declarations
+      if (parent.type === 'operator_declaration') {
+        const operatorKeyword = parent.children.find(child => child.type === 'operator_token');
+        const operatorName = operatorKeyword ? this.getNodeText(operatorKeyword, content) : 'operator';
+        const containerName = context.className || context.interfaceName || context.structName;
+        return this.buildQualifiedName(context.namespaceName, containerName, `operator_${operatorName}`);
+      }
+
+      // Local function declarations (C# 7.0+)
+      if (parent.type === 'local_function_statement') {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          const localFunctionName = this.getNodeText(nameNode, content);
+          // Continue traversing to find the containing method
+          const containingMethod = this.findContainingFunction(parent, content);
+          return `${containingMethod}.${localFunctionName}`;
+        }
+      }
+
+      // Lambda expressions and anonymous methods
+      if (parent.type === 'lambda_expression' || parent.type === 'anonymous_method_expression') {
+        // Continue traversing to find the containing method
+        const containingMethod = this.findContainingFunction(parent, content);
+        return `${containingMethod}.<lambda>`;
+      }
+
+      parent = parent.parent;
+    }
+
+    // Return best available context if no specific method found
+    const containerName = context.className || context.interfaceName || context.structName;
+    if (containerName) {
+      return this.buildQualifiedName(context.namespaceName, containerName, '<unknown>');
+    }
+
+    return context.namespaceName ? `${context.namespaceName}.<global>` : '<global>';
+  }
+
+  /**
+   * Phase 1: Collect complete AST context by traversing up to the root
+   */
+  private collectASTContext(startNode: Parser.SyntaxNode, content: string): {
+    className: string;
+    namespaceName: string;
+    interfaceName: string;
+    structName: string;
+  } {
+    let parent = startNode.parent;
+    let className = '';
+    let namespaceName = '';
+    let interfaceName = '';
+    let structName = '';
+
+    // Traverse up the entire AST to collect all context
+    while (parent) {
+      // Keep track of class context
       if (parent.type === 'class_declaration' && !className) {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
           className = this.getNodeText(nameNode, content);
+          logger.debug('C# collectASTContext found class', {
+            className
+          });
+        }
+      }
+
+      // Keep track of interface context
+      if (parent.type === 'interface_declaration' && !interfaceName) {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          interfaceName = this.getNodeText(nameNode, content);
+        }
+      }
+
+      // Keep track of struct context
+      if (parent.type === 'struct_declaration' && !structName) {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          structName = this.getNodeText(nameNode, content);
         }
       }
 
       // Check for namespace context
-      if (parent.type === 'namespace_declaration') {
+      if (parent.type === 'namespace_declaration' && !namespaceName) {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
-          const namespaceName = this.getNodeText(nameNode, content);
-          return className ? `${namespaceName}.${className}.<unknown>` : `${namespaceName}.<unknown>`;
+          namespaceName = this.getNodeText(nameNode, content);
+        }
+      }
+
+      // File-scoped namespace (C# 10+)
+      if (parent.type === 'file_scoped_namespace_declaration' && !namespaceName) {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          namespaceName = this.getNodeText(nameNode, content);
         }
       }
 
       parent = parent.parent;
     }
 
-    // Return class context if no method found but class is available
-    return className ? `${className}.<unknown>` : '<global>';
+    return {
+      className,
+      namespaceName,
+      interfaceName,
+      structName
+    };
+  }
+
+  /**
+   * Build a qualified name from namespace, class, and member components
+   */
+  private buildQualifiedName(namespaceName: string, className: string, memberName: string): string {
+    const parts: string[] = [];
+
+    if (namespaceName) {
+      parts.push(namespaceName);
+    }
+
+    if (className) {
+      parts.push(className);
+    }
+
+    if (memberName) {
+      parts.push(memberName);
+    }
+
+    return parts.join('.');
+  }
+
+  /**
+   * Deduplicate dependencies based on from_symbol, to_symbol, dependency_type, and line_number.
+   * When duplicates are found, prefer the one with higher confidence.
+   */
+  private deduplicateDependencies(dependencies: ParsedDependency[]): ParsedDependency[] {
+    const uniqueMap = new Map<string, ParsedDependency>();
+
+    for (const dependency of dependencies) {
+      // Create a unique key for the dependency
+      const key = `${dependency.from_symbol}|${dependency.to_symbol}|${dependency.dependency_type}|${dependency.line_number}`;
+
+      const existing = uniqueMap.get(key);
+      if (!existing) {
+        // First occurrence, add it
+        uniqueMap.set(key, dependency);
+      } else {
+        // Duplicate found, keep the one with higher confidence
+        if (dependency.confidence > existing.confidence) {
+          uniqueMap.set(key, dependency);
+
+          logger.debug('C# dependency deduplication: replaced with higher confidence', {
+            key,
+            oldConfidence: existing.confidence,
+            newConfidence: dependency.confidence,
+            from: dependency.from_symbol,
+            to: dependency.to_symbol
+          });
+        } else {
+          logger.debug('C# dependency deduplication: ignored lower confidence duplicate', {
+            key,
+            existingConfidence: existing.confidence,
+            duplicateConfidence: dependency.confidence,
+            from: dependency.from_symbol,
+            to: dependency.to_symbol
+          });
+        }
+      }
+    }
+
+    return Array.from(uniqueMap.values());
   }
 
   private extractModifiers(node: Parser.SyntaxNode, content: string): string[] {
