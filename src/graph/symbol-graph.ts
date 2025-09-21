@@ -23,6 +23,13 @@ export interface SymbolEdge {
   type: DependencyType;
   lineNumber: number;
   confidence: number;
+  // Parameter context fields for C# method calls
+  parameter_context?: string;
+  call_instance_id?: string;
+  parameter_types?: string[];
+  // Additional context fields
+  calling_object?: string;
+  qualified_context?: string;
 }
 
 export interface SymbolGraphData {
@@ -103,7 +110,13 @@ export class SymbolGraphBuilder {
         to_symbol_id: edge.to,
         dependency_type: edge.type,
         line_number: edge.lineNumber,
-        confidence: edge.confidence
+        confidence: edge.confidence,
+        // Include parameter context fields from SymbolEdge
+        parameter_context: edge.parameter_context,
+        call_instance_id: edge.call_instance_id,
+        parameter_types: edge.parameter_types,
+        calling_object: edge.calling_object,
+        qualified_context: edge.qualified_context
       }));
   }
 
@@ -387,7 +400,13 @@ export class SymbolGraphBuilder {
             to: resolution.toSymbol.id,
             type: resolution.originalDependency.dependency_type,
             lineNumber: resolution.originalDependency.line_number,
-            confidence: resolution.confidence
+            confidence: resolution.confidence,
+            // Preserve parameter context fields
+            parameter_context: resolution.originalDependency.parameter_context,
+            call_instance_id: resolution.originalDependency.call_instance_id,
+            parameter_types: resolution.originalDependency.parameter_types,
+            calling_object: resolution.originalDependency.calling_object,
+            qualified_context: resolution.originalDependency.qualified_context
           });
 
           // Mark this dependency as resolved
@@ -420,7 +439,13 @@ export class SymbolGraphBuilder {
                   to: targetSymbol.id,
                   type: dep.dependency_type,
                   lineNumber: dep.line_number,
-                  confidence: (dep.confidence || 0.5) * 0.8 // Reduced confidence for fallback resolution
+                  confidence: (dep.confidence || 0.5) * 0.8, // Reduced confidence for fallback resolution
+                  // Preserve parameter context fields from fallback resolution
+                  parameter_context: dep.parameter_context,
+                  call_instance_id: dep.call_instance_id,
+                  parameter_types: dep.parameter_types,
+                  calling_object: dep.calling_object,
+                  qualified_context: dep.qualified_context
                 });
               }
             } else {
@@ -475,7 +500,13 @@ export class SymbolGraphBuilder {
               to: targetSymbol.id,
               type: dep.dependency_type,
               lineNumber: dep.line_number,
-              confidence: dep.confidence || 0.5
+              confidence: dep.confidence || 0.5,
+              // Preserve parameter context fields from legacy resolution
+              parameter_context: dep.parameter_context,
+              call_instance_id: dep.call_instance_id,
+              parameter_types: dep.parameter_types,
+              calling_object: dep.calling_object,
+              qualified_context: dep.qualified_context
             });
           }
         }

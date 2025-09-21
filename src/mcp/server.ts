@@ -134,6 +134,11 @@ export class ClaudeCompassMCPServer {
                   description: 'Whether to include symbols that call this symbol',
                   default: false,
                 },
+                group_results: {
+                  type: 'boolean',
+                  description: 'Whether to group dependency results by call site',
+                  default: false,
+                },
               },
               required: ['symbol_id'],
             },
@@ -266,6 +271,11 @@ export class ClaudeCompassMCPServer {
                   description: 'Include human-readable call chains',
                   default: false,
                 },
+                group_results: {
+                  type: 'boolean',
+                  description: 'Whether to group dependency results by call site',
+                  default: false,
+                },
               },
               required: ['symbol_id'],
             },
@@ -308,6 +318,11 @@ export class ClaudeCompassMCPServer {
                 show_call_chains: {
                   type: 'boolean',
                   description: 'Include human-readable call chains',
+                  default: false,
+                },
+                group_results: {
+                  type: 'boolean',
+                  description: 'Whether to group dependency results by call site',
                   default: false,
                 },
               },

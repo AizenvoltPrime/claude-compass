@@ -11,6 +11,7 @@ const mockDatabaseService = {
   getSymbolsByFile: jest.fn(),
   getDependenciesFrom: jest.fn(),
   getDependenciesTo: jest.fn(),
+  getDependenciesToWithContext: jest.fn(),
   searchSymbols: jest.fn(),
   fulltextSearchSymbols: jest.fn(),
 } as unknown as DatabaseService;
@@ -243,7 +244,7 @@ describe('McpTools', () => {
       });
 
       expect(mockDatabaseService.fulltextSearchSymbols).toHaveBeenCalledWith('test', undefined, {
-        symbolTypes: ['function'],
+        symbolTypes: ['function', 'method'],
         isExported: true,
         limit: 10,
         confidenceThreshold: 0.7,
@@ -312,12 +313,12 @@ describe('McpTools', () => {
       ];
 
       (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
-      (mockDatabaseService.getDependenciesTo as jest.Mock).mockResolvedValue(mockCallers);
+      (mockDatabaseService.getDependenciesToWithContext as jest.Mock).mockResolvedValue(mockCallers);
 
       const result = await mcpTools.whoCalls({ symbol_id: 1 });
 
       expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
-      expect(mockDatabaseService.getDependenciesTo).toHaveBeenCalledWith(1);
+      expect(mockDatabaseService.getDependenciesToWithContext).toHaveBeenCalledWith(1);
 
       const data = JSON.parse(result.content[0].text);
       expect(data.symbol.name).toBe('targetFunction');
