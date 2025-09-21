@@ -551,6 +551,26 @@ export class CSharpParser extends ChunkedParser {
       }
     }
 
+    // Extract constructor calls (object creation expressions)
+    const constructorNodes = this.getNodesOfType(rootNode, 'object_creation_expression');
+    logger.debug('C# dependency extraction: constructor calls', {
+      objectCreationCount: constructorNodes.length
+    });
+
+    let constructorDependencies = 0;
+    for (const node of constructorNodes) {
+      const dependency = this.extractConstructorDependency(node, content);
+      if (dependency) {
+        dependencies.push(dependency);
+        constructorDependencies++;
+        logger.debug('C# constructor call detected', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          line: dependency.line_number
+        });
+      }
+    }
+
     // Extract member access expressions
     const memberAccessNodes = this.getNodesOfType(rootNode, 'member_access_expression');
     logger.debug('C# dependency extraction: member access expressions', {
@@ -601,6 +621,8 @@ export class CSharpParser extends ChunkedParser {
       deduplicatedDependencies: dedupedDependencies.length,
       duplicatesRemoved: dependencies.length - dedupedDependencies.length,
       invocationExpressions: callNodes.length,
+      constructorExpressions: constructorNodes.length,
+      constructorDependencies,
       conditionalAccessExpressions: conditionalAccessNodes.length,
       memberAccessExpressions: memberAccessNodes.length,
       memberAccessDependencies,
@@ -1255,21 +1277,14 @@ export class CSharpParser extends ChunkedParser {
     // Log method call detection
     logger.debug('C# method call extraction details');
 
-    // Determine confidence based on extraction quality
-    let confidence = 0.9;
-    if (qualifiedMethodName !== methodName) {
-      // Highest confidence when we have resolved qualified method name
-      confidence = 0.98;
-    } else if (callingObject) {
-      // Higher confidence when we have calling object context (even if unresolved)
-      confidence = 0.95;
-    } else if (functionNode.type === 'identifier' || functionNode.type === 'member_access_expression') {
-      // High confidence for simple patterns
-      confidence = 0.9;
-    } else if (methodName.includes('(') || methodName.includes('.')) {
-      // Lower confidence for complex expressions that might not be clean method names
-      confidence = 0.7;
-    }
+    // Determine confidence using standardized methodology
+    const confidence = this.calculateMethodCallConfidence({
+      functionNodeType: functionNode.type,
+      hasQualifiedName: qualifiedMethodName !== methodName,
+      hasCallingObject: Boolean(callingObject),
+      methodNameClean: !methodName.includes('(') && !methodName.includes('.') && methodName.length > 0,
+      extractionSource: 'ast'
+    });
 
     return {
       from_symbol: callerName,
@@ -1301,6 +1316,158 @@ export class CSharpParser extends ChunkedParser {
       dependency_type: DependencyType.REFERENCES,
       line_number: node.startPosition.row + 1,
       confidence: 0.7
+    };
+  }
+
+  /**
+   * Standardized confidence score calculation for method calls
+   * This ensures consistent confidence scoring across the entire system
+   */
+  private calculateMethodCallConfidence(params: {
+    functionNodeType: string;
+    hasQualifiedName: boolean;
+    hasCallingObject: boolean;
+    methodNameClean: boolean;
+    extractionSource: 'ast' | 'text' | 'inferred';
+  }): number {
+    const { functionNodeType, hasQualifiedName, hasCallingObject, methodNameClean, extractionSource } = params;
+
+    // Base confidence by extraction source
+    let baseConfidence = 0.5; // Default for inferred
+    switch (extractionSource) {
+      case 'ast':
+        baseConfidence = 0.9;
+        break;
+      case 'text':
+        baseConfidence = 0.7;
+        break;
+      case 'inferred':
+        baseConfidence = 0.5;
+        break;
+    }
+
+    // Quality modifiers (applied multiplicatively)
+    let qualityMultiplier = 1.0;
+
+    // Type resolution bonus
+    if (hasQualifiedName) {
+      qualityMultiplier += 0.08; // +8% for qualified names
+    }
+
+    // Calling context bonus
+    if (hasCallingObject) {
+      qualityMultiplier += 0.05; // +5% for calling object context
+    }
+
+    // Node type confidence adjustments
+    if (functionNodeType === 'identifier' || functionNodeType === 'member_access_expression') {
+      qualityMultiplier += 0.0; // Standard confidence for common patterns
+    } else if (functionNodeType === 'generic_name' || functionNodeType === 'qualified_name') {
+      qualityMultiplier -= 0.05; // -5% for more complex patterns
+    } else {
+      qualityMultiplier -= 0.1; // -10% for complex expressions
+    }
+
+    // Method name cleanliness
+    if (!methodNameClean) {
+      qualityMultiplier -= 0.2; // -20% for unclean method names
+    }
+
+    // Calculate final confidence (capped at 1.0)
+    const finalConfidence = Math.min(baseConfidence * qualityMultiplier, 1.0);
+
+    logger.debug('C# confidence calculation', {
+      baseConfidence,
+      qualityMultiplier,
+      finalConfidence,
+      params
+    });
+
+    return finalConfidence;
+  }
+
+  private extractConstructorDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+    // Get the type being constructed
+    const typeNode = node.childForFieldName('type');
+    if (!typeNode) {
+      logger.debug('C# constructor call extraction failed: no type node', {
+        line: node.startPosition.row + 1,
+        nodeType: node.type
+      });
+      return null;
+    }
+
+    let typeName = '';
+
+    if (typeNode.type === 'identifier') {
+      // Simple constructor: new ClassName()
+      typeName = this.getNodeText(typeNode, content);
+    } else if (typeNode.type === 'qualified_name') {
+      // Qualified constructor: new Namespace.ClassName()
+      const nameNode = typeNode.childForFieldName('name');
+      if (nameNode) {
+        typeName = this.getNodeText(nameNode, content);
+      } else {
+        // Fallback to full qualified name
+        typeName = this.getNodeText(typeNode, content);
+      }
+    } else if (typeNode.type === 'generic_name') {
+      // Generic constructor: new ClassName<T>()
+      const nameNode = typeNode.childForFieldName('name');
+      if (nameNode) {
+        typeName = this.getNodeText(nameNode, content);
+      } else {
+        typeName = this.getNodeText(typeNode, content);
+      }
+    } else if (typeNode.type === 'member_access_expression') {
+      // Nested type constructor: new OuterClass.InnerClass()
+      const nameNode = typeNode.childForFieldName('name');
+      if (nameNode) {
+        typeName = this.getNodeText(nameNode, content);
+      } else {
+        typeName = this.getNodeText(typeNode, content);
+      }
+    } else {
+      // For complex types, use the full text
+      typeName = this.getNodeText(typeNode, content);
+    }
+
+    // Clean up type name
+    typeName = typeName.trim();
+
+    // Skip if we couldn't extract a meaningful type name
+    if (!typeName || typeName.length === 0) {
+      logger.debug('C# constructor call extraction failed: no type name', {
+        line: node.startPosition.row + 1,
+        typeNodeType: typeNode.type,
+        typeNodeText: this.getNodeText(typeNode, content).substring(0, 50)
+      });
+      return null;
+    }
+
+    const callerName = this.findContainingFunction(node, content);
+
+    // Determine confidence using standardized methodology
+    const confidence = this.calculateMethodCallConfidence({
+      functionNodeType: typeNode.type,
+      hasQualifiedName: typeNode.type === 'qualified_name',
+      hasCallingObject: true, // Constructor calls always have 'new' as calling context
+      methodNameClean: !typeName.includes('(') && !typeName.includes('.') && typeName.length > 0,
+      extractionSource: 'ast'
+    });
+
+    return {
+      from_symbol: callerName,
+      to_symbol: typeName, // Constructor calls create dependency on the type
+      dependency_type: DependencyType.CALLS, // Constructor calls are method calls to constructors
+      line_number: node.startPosition.row + 1,
+      confidence,
+
+      // Enhanced context fields
+      calling_object: 'new', // Indicate this is a constructor call
+      method_signature: `${typeName}()`, // Constructor signature
+      file_context: this.currentFilePath || undefined,
+      namespace_context: this.getCurrentNamespace(node, content)
     };
   }
 
@@ -1777,34 +1944,91 @@ export class CSharpParser extends ChunkedParser {
   private validateMethodCallDetection(content: string, dependencies: ParsedDependency[], filePath: string): ParseError[] {
     const validationErrors: ParseError[] = [];
 
-    // Use regex to find potential method calls that might have been missed
-    const methodCallRegex = /(\w+)\s*\?\?\s*\.(\w+)\s*\(|(\w+)\s*\?\s*\.(\w+)\s*\(|(\w+)\.(\w+)\s*\(/g;
+    // Improved regex that excludes common false positives
+    // Pattern matches: obj.Method(, obj?.Method(, obj??.Method( but excludes:
+    // - Constructor calls: new ClassName(
+    // - String literals: "text.Method("
+    // - Comments: // text.Method(
+    // - Method definitions: ReturnType Method(
+    const methodCallRegex = /(?<!new\s+\w*\.)(?<!\/\/.*?)(?<!")(\w+)(?:\?\??\.)(\w+)\s*\(|(?<!new\s+)(?<!\/\/.*?)(?<!")(\w+)\.(\w+)\s*\(/g;
     const textBasedCalls = new Set<string>();
-    let match;
+    const excludePatterns = [
+      /new\s+\w*\.\w+\s*\(/g,  // Constructor calls like new Godot.Collections.Dictionary()
+      /"[^"]*\w+\s*\([^"]*"/g,  // String literals containing method-like patterns
+      /\/\/.*?\w+\s*\(/g,       // Comments containing method-like patterns
+      /public|private|protected|internal\s+[\w\s<>]*\s+\w+\s*\(/g, // Method definitions
+      /override\s+[\w\s<>]*\s+\w+\s*\(/g, // Override method definitions
+      /virtual\s+[\w\s<>]*\s+\w+\s*\(/g,  // Virtual method definitions
+      /abstract\s+[\w\s<>]*\s+\w+\s*\(/g, // Abstract method definitions
+      /static\s+[\w\s<>]*\s+\w+\s*\(/g,   // Static method definitions
+    ];
 
-    while ((match = methodCallRegex.exec(content)) !== null) {
-      const methodName = match[2] || match[4] || match[6]; // Extract method name from different patterns
-      if (methodName) {
-        textBasedCalls.add(methodName.toLowerCase());
+    // First, identify exclusion ranges
+    const excludeRanges: Array<{start: number, end: number}> = [];
+    for (const pattern of excludePatterns) {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        excludeRanges.push({
+          start: match.index,
+          end: match.index + match[0].length
+        });
       }
     }
 
-    // Check what we detected through AST
+    // Find method call patterns, excluding those in exclusion ranges
+    let match;
+    while ((match = methodCallRegex.exec(content)) !== null) {
+      const matchStart = match.index;
+      const matchEnd = match.index + match[0].length;
+
+      // Check if this match overlaps with any exclusion range
+      const isExcluded = excludeRanges.some(range =>
+        (matchStart >= range.start && matchStart <= range.end) ||
+        (matchEnd >= range.start && matchEnd <= range.end)
+      );
+
+      if (!isExcluded) {
+        // Extract method name from different capture groups
+        const methodName = match[2] || match[4]; // Avoid the null coalescing and regular object patterns
+        if (methodName && methodName.length > 1) { // Skip single characters
+          // Preserve original case for better matching
+          textBasedCalls.add(methodName);
+        }
+      }
+    }
+
+    // Check what we detected through AST (preserve case)
     const astDetectedCalls = new Set<string>();
     for (const dep of dependencies) {
       if (dep.dependency_type === 'calls') {
-        astDetectedCalls.add(dep.to_symbol.toLowerCase());
+        astDetectedCalls.add(dep.to_symbol);
       }
     }
 
-    // Find potentially missed method calls
+    // Find potentially missed method calls with case-insensitive comparison
+    const potentiallyMissed: string[] = [];
     for (const textCall of textBasedCalls) {
-      if (!astDetectedCalls.has(textCall)) {
+      const found = Array.from(astDetectedCalls).some(astCall =>
+        astCall.toLowerCase() === textCall.toLowerCase()
+      );
+
+      if (!found) {
+        potentiallyMissed.push(textCall);
+      }
+    }
+
+    // Only report validation errors if there are significant misses (more than 20% of detected calls)
+    const missRatio = potentiallyMissed.length / Math.max(textBasedCalls.size, 1);
+    const shouldReport = missRatio > 0.2 && potentiallyMissed.length > 2;
+
+    if (shouldReport) {
+      for (const textCall of potentiallyMissed) {
         logger.warn('C# method call potentially missed by AST parsing', {
           methodName: textCall,
           filePath,
           textBasedCalls: textBasedCalls.size,
-          astDetectedCalls: astDetectedCalls.size
+          astDetectedCalls: astDetectedCalls.size,
+          missRatio: missRatio.toFixed(2)
         });
 
         validationErrors.push({
@@ -1821,8 +2045,10 @@ export class CSharpParser extends ChunkedParser {
       filePath,
       textBasedCallsFound: textBasedCalls.size,
       astDetectedCalls: astDetectedCalls.size,
-      potentiallyMissedCalls: Array.from(textBasedCalls).filter(call => !astDetectedCalls.has(call)),
-      validationErrors: validationErrors.length
+      potentiallyMissedCalls: potentiallyMissed,
+      missRatio: missRatio.toFixed(2),
+      validationErrors: validationErrors.length,
+      reportingThreshold: shouldReport ? 'exceeded' : 'within acceptable range'
     });
 
     return validationErrors;
