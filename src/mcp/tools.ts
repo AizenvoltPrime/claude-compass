@@ -94,6 +94,18 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
     }
   }
 
+  if (args.include_qualified !== undefined && typeof args.include_qualified !== 'boolean') {
+    throw new Error('include_qualified must be a boolean');
+  }
+
+  if (args.class_context !== undefined && typeof args.class_context !== 'string') {
+    throw new Error('class_context must be a string');
+  }
+
+  if (args.namespace_context !== undefined && typeof args.namespace_context !== 'string') {
+    throw new Error('namespace_context must be a string');
+  }
+
   return args as SearchCodeArgs;
 }
 
@@ -180,11 +192,13 @@ export interface SearchCodeArgs {
   symbol_type?: string;
   is_exported?: boolean;
   limit?: number;
-  // Enhanced Phase 6A features
   entity_types?: string[];      // route, model, controller, component, job, etc.
   framework?: string;           // laravel, vue, react, node
   use_vector?: boolean;         // enable vector search (future)
   repo_ids?: number[];          // multi-repository search
+  include_qualified?: boolean;  // search in qualified context
+  class_context?: string;       // filter by class context
+  namespace_context?: string;   // filter by namespace context
 }
 
 export interface WhoCallsArgs {
@@ -583,6 +597,59 @@ export class McpTools {
       }
     }
 
+    if (validatedArgs.include_qualified === true || validatedArgs.class_context || validatedArgs.namespace_context) {
+      this.logger.debug('Performing enhanced search with qualified context', {
+        include_qualified: validatedArgs.include_qualified,
+        class_context: validatedArgs.class_context,
+        namespace_context: validatedArgs.namespace_context
+      });
+
+      try {
+        // Search both unqualified names and qualified context in parallel
+        const enhancedSearchPromises = [];
+
+        // Add qualified context search
+        if (validatedArgs.include_qualified === true) {
+          enhancedSearchPromises.push(
+            this.dbService.searchQualifiedContext(validatedArgs.query, validatedArgs.class_context)
+          );
+        }
+
+        // Add method signature search
+        if (validatedArgs.include_qualified === true) {
+          enhancedSearchPromises.push(
+            this.dbService.searchMethodSignatures(validatedArgs.query)
+          );
+        }
+
+        // Add namespace context search
+        if (validatedArgs.namespace_context) {
+          enhancedSearchPromises.push(
+            this.dbService.searchNamespaceContext(validatedArgs.query, validatedArgs.namespace_context)
+          );
+        }
+
+        // Execute enhanced searches in parallel
+        const enhancedResults = await Promise.all(enhancedSearchPromises);
+
+        // Merge and rank results
+        const mergedEnhancedResults = this.mergeAndRankResults(enhancedResults, validatedArgs);
+
+        // Combine with existing symbols, giving priority to enhanced results
+        const enhancedSymbolIds = new Set(mergedEnhancedResults.map(s => s.id));
+        const filteredExistingSymbols = symbols.filter(s => !enhancedSymbolIds.has(s.id));
+
+        symbols = [...mergedEnhancedResults, ...filteredExistingSymbols];
+
+        this.logger.debug('Enhanced search completed', {
+          enhanced_results: mergedEnhancedResults.length,
+          total_results: symbols.length
+        });
+      } catch (error) {
+        this.logger.warn('Enhanced search with qualified context failed, continuing with standard results:', error);
+      }
+    }
+
     // Apply any additional filtering not handled by enhanced search
     let filteredSymbols = symbols;
 
@@ -649,6 +716,9 @@ export class McpTools {
                 is_exported: validatedArgs.is_exported,
                 repo_ids: repoIds,
                 use_vector: validatedArgs.use_vector,
+                include_qualified: validatedArgs.include_qualified,
+                class_context: validatedArgs.class_context,
+                namespace_context: validatedArgs.namespace_context,
               },
               search_options: {
                 entity_types: validatedArgs.entity_types,
@@ -657,6 +727,9 @@ export class McpTools {
                 is_exported: validatedArgs.is_exported,
                 repo_ids: repoIds,
                 use_vector: validatedArgs.use_vector,
+                include_qualified: validatedArgs.include_qualified,
+                class_context: validatedArgs.class_context,
+                namespace_context: validatedArgs.namespace_context,
               },
               search_mode: 'enhanced_framework_aware',
               absorbed_tools: ['getLaravelRoutes', 'getEloquentModels', 'getLaravelControllers', 'searchLaravelEntities'],
@@ -669,17 +742,18 @@ export class McpTools {
     };
   }
 
-  // Core Tool 4: whoCalls (unchanged)
+  // Core Tool 4: whoCalls
   async whoCalls(args: any) {
     const validatedArgs = validateWhoCallsArgs(args);
-    this.logger.debug('Finding who calls symbol', validatedArgs);
+    this.logger.debug('Finding who calls symbol with enhanced context', validatedArgs);
 
     const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
     if (!symbol) {
       throw new Error('Symbol not found');
     }
 
-    let callers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
+    // Use enhanced method to get callers with rich context
+    let callers = await this.dbService.getDependenciesToWithContext(validatedArgs.symbol_id);
 
     // Filter by dependency type if specified
     if (validatedArgs.dependency_type) {
@@ -749,6 +823,16 @@ export class McpTools {
                       file_path: caller.from_symbol.file?.path,
                     }
                   : null,
+                // Enhanced context
+                calling_object: caller.calling_object,
+                resolved_class: caller.resolved_class,
+                qualified_context: caller.qualified_context,
+                method_signature: caller.method_signature,
+                file_context: caller.file_context,
+                namespace_context: caller.namespace_context,
+                // Intelligent insights
+                call_pattern: this.analyzeCallPattern(caller),
+                cross_file: this.isCrossFileCall(caller, symbol),
               })),
               total_callers: callers.length,
               filters: {
@@ -1547,6 +1631,87 @@ export class McpTools {
       result.dependency_type === DependencyType.SHARES_SCHEMA ||
       result.dependency_type === DependencyType.FRONTEND_BACKEND
     );
+  }
+
+  private analyzeCallPattern(dependency: any): string {
+    // Analyze the calling pattern based on enhanced context
+    if (!dependency.calling_object && !dependency.qualified_context) {
+      return 'direct_call';
+    }
+
+    if (dependency.calling_object) {
+      if (dependency.calling_object.includes('this.') || dependency.calling_object === 'this') {
+        return 'instance_method_call';
+      }
+      if (dependency.calling_object.startsWith('_') || dependency.calling_object.startsWith('m_')) {
+        return 'private_field_call';
+      }
+      if (dependency.calling_object.includes('Service') || dependency.calling_object.includes('Manager')) {
+        return 'service_injection_call';
+      }
+      return 'object_method_call';
+    }
+
+    if (dependency.qualified_context) {
+      if (dependency.qualified_context.includes('.')) {
+        return 'qualified_method_call';
+      }
+    }
+
+    return 'unknown_pattern';
+  }
+
+  private isCrossFileCall(dependency: any, targetSymbol: any): boolean {
+    // Check if the call crosses file boundaries
+    if (!dependency.from_symbol?.file?.path || !targetSymbol?.file?.path) {
+      return false;
+    }
+
+    return dependency.from_symbol.file.path !== targetSymbol.file.path;
+  }
+
+  private mergeAndRankResults(searchResults: any[][], validatedArgs: SearchCodeArgs): any[] {
+    // Flatten all results
+    const allResults: any[] = [];
+    const seenIds = new Set<number>();
+
+    for (const resultSet of searchResults) {
+      for (const result of resultSet) {
+        if (!seenIds.has(result.id)) {
+          seenIds.add(result.id);
+          allResults.push(result);
+        }
+      }
+    }
+
+    // Rank results by relevance
+    return allResults.sort((a, b) => {
+      // Prioritize exact name matches
+      const aExactMatch = a.name?.toLowerCase() === validatedArgs.query.toLowerCase();
+      const bExactMatch = b.name?.toLowerCase() === validatedArgs.query.toLowerCase();
+
+      if (aExactMatch && !bExactMatch) return -1;
+      if (!aExactMatch && bExactMatch) return 1;
+
+      // Prioritize symbols with qualified context (enhanced results)
+      const aHasQualified = !!(a.qualified_context || a.method_signature);
+      const bHasQualified = !!(b.qualified_context || b.method_signature);
+
+      if (aHasQualified && !bHasQualified) return -1;
+      if (!aHasQualified && bHasQualified) return 1;
+
+      // If class context is specified, prioritize matches
+      if (validatedArgs.class_context) {
+        const aClassMatch = a.resolved_class?.toLowerCase().includes(validatedArgs.class_context.toLowerCase());
+        const bClassMatch = b.resolved_class?.toLowerCase().includes(validatedArgs.class_context.toLowerCase());
+
+        if (aClassMatch && !bClassMatch) return -1;
+        if (!aClassMatch && bClassMatch) return 1;
+      }
+
+      // Sort by name as fallback
+      return (a.name || '').localeCompare(b.name || '');
+    }).slice(0, validatedArgs.limit || 100);
   }
 
   private calculateRiskLevel(directImpact: ImpactItem[], transitiveImpact: ImpactItem[], routeImpact: RouteImpactItem[], jobImpact: JobImpactItem[]): string {

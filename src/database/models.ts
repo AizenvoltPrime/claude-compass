@@ -55,6 +55,16 @@ export interface Dependency {
   updated_at: Date;
 }
 
+// Enhanced dependency interface with rich context for advanced C# analysis
+export interface EnhancedDependency extends Dependency {
+  calling_object?: string;
+  resolved_class?: string;
+  qualified_context?: string;
+  method_signature?: string;
+  file_context?: string;
+  namespace_context?: string;
+}
+
 // Enum types
 export enum SymbolType {
   FUNCTION = 'function',
@@ -176,6 +186,16 @@ export interface CreateDependency {
   confidence?: number;
 }
 
+// Enhanced dependency creation interface with rich context for advanced C# analysis
+export interface CreateEnhancedDependency extends CreateDependency {
+  calling_object?: string; // "_cardManager", "this.service"
+  resolved_class?: string; // "CardManager", "UserService"
+  qualified_context?: string; // "CardManager.SetHandPositions"
+  method_signature?: string; // Full signature with parameters
+  file_context?: string; // File path for cross-file analysis
+  namespace_context?: string; // C# namespace information
+}
+
 export interface CreateFileDependency {
   from_file_id: number;
   to_file_id: number;
@@ -200,6 +220,16 @@ export interface SymbolWithFileAndRepository extends Symbol {
 export interface DependencyWithSymbols extends Dependency {
   from_symbol?: SymbolWithFile;
   to_symbol?: SymbolWithFile;
+}
+
+// Enhanced dependency interface with rich context (Phase 4)
+export interface EnhancedDependencyWithSymbols extends DependencyWithSymbols {
+  calling_object?: string;
+  resolved_class?: string;
+  qualified_context?: string;
+  method_signature?: string;
+  file_context?: string;
+  namespace_context?: string;
 }
 
 // Framework-specific models

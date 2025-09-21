@@ -1,5 +1,11 @@
 import Parser from 'tree-sitter';
-import { SymbolType, DependencyType, CreateSymbol, CreateDependency, Visibility } from '../database/models';
+import {
+  SymbolType,
+  DependencyType,
+  CreateSymbol,
+  CreateDependency,
+  Visibility,
+} from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { EncodingConverter } from '../utils/encoding-converter';
 import * as fs from 'fs/promises';
@@ -27,6 +33,12 @@ export interface ParsedDependency {
   // Optional fields for database compatibility
   from_symbol_id?: number;
   to_symbol_id?: number;
+  calling_object?: string;
+  resolved_class?: string;
+  qualified_context?: string;
+  method_signature?: string;
+  file_context?: string;
+  namespace_context?: string;
 }
 
 export interface ParsedImport {
@@ -54,7 +66,7 @@ export enum FrameworkEntityType {
   NEXTJS_ROUTE = 'nextjs_route',
   VUE_COMPOSABLE = 'vue_composable',
   REACT_HOOK = 'react_hook',
-  PINIA_STORE = 'pinia_store'
+  PINIA_STORE = 'pinia_store',
 }
 
 // Framework-specific entity interfaces
@@ -116,7 +128,16 @@ export interface PiniaStore extends FrameworkEntity {
 }
 
 export interface NextJSRoute extends FrameworkEntity {
-  type: 'nextjs-page-route' | 'nextjs-api-route' | 'page' | 'layout' | 'loading' | 'error' | 'not-found' | 'template' | 'api-route';
+  type:
+    | 'nextjs-page-route'
+    | 'nextjs-api-route'
+    | 'page'
+    | 'layout'
+    | 'loading'
+    | 'error'
+    | 'not-found'
+    | 'template'
+    | 'api-route';
   path: string;
   method?: string;
   component?: string;
@@ -203,7 +224,11 @@ export abstract class BaseParser {
   /**
    * Parse a file and extract symbols, dependencies, imports, and exports
    */
-  abstract parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult>;
+  abstract parseFile(
+    filePath: string,
+    content: string,
+    options?: ParseOptions
+  ): Promise<ParseResult>;
 
   /**
    * Get file extensions that this parser supports
@@ -227,13 +252,14 @@ export abstract class BaseParser {
       if (content == null || typeof content !== 'string') {
         this.logger.warn('Invalid content provided to parser', {
           contentType: typeof content,
-          isEmpty: content == null
+          isEmpty: content == null,
         });
         return null;
       }
 
       // Check for extremely large files that might cause issues
-      if (content.length > 5 * 1024 * 1024) { // 5MB limit
+      if (content.length > 5 * 1024 * 1024) {
+        // 5MB limit
         this.logger.warn('Content too large for parsing', { size: content.length });
         return null;
       }
@@ -257,11 +283,16 @@ export abstract class BaseParser {
       const TREE_SITTER_SIZE_LIMIT = 28000;
 
       if (!options?.bypassSizeLimit && normalizedContent.length > TREE_SITTER_SIZE_LIMIT) {
-        this.logger.error('Content exceeds Tree-sitter limit and should be chunked at parser level', {
-          originalSize: normalizedContent.length,
-          limit: TREE_SITTER_SIZE_LIMIT
-        });
-        throw new Error(`File content too large (${normalizedContent.length} bytes). Use ChunkedParser for files over ${TREE_SITTER_SIZE_LIMIT} bytes.`);
+        this.logger.error(
+          'Content exceeds Tree-sitter limit and should be chunked at parser level',
+          {
+            originalSize: normalizedContent.length,
+            limit: TREE_SITTER_SIZE_LIMIT,
+          }
+        );
+        throw new Error(
+          `File content too large (${normalizedContent.length} bytes). Use ChunkedParser for files over ${TREE_SITTER_SIZE_LIMIT} bytes.`
+        );
       }
 
       const tree = this.parser.parse(normalizedContent);
@@ -270,7 +301,7 @@ export abstract class BaseParser {
           this.syntaxErrorCount++;
           // Only log syntax errors at debug level to reduce noise
           this.logger.debug('Syntax tree contains errors', {
-            errorCount: this.countTreeErrors(tree.rootNode)
+            errorCount: this.countTreeErrors(tree.rootNode),
           });
         }
         return tree;
@@ -283,7 +314,6 @@ export abstract class BaseParser {
       return null;
     }
   }
-
 
   /**
    * Enhanced encoding detection and recovery pipeline
@@ -312,18 +342,21 @@ export abstract class BaseParser {
       const encodingResult = await EncodingConverter.detectEncoding(buffer);
 
       if (encodingResult.confidence > 0.7) {
-        const recovered = await EncodingConverter.convertToUtf8(buffer, encodingResult.detectedEncoding);
+        const recovered = await EncodingConverter.convertToUtf8(
+          buffer,
+          encodingResult.detectedEncoding
+        );
         this.logger.info('Encoding recovery successful', {
           filePath,
           detectedEncoding: encodingResult.detectedEncoding,
-          confidence: encodingResult.confidence
+          confidence: encodingResult.confidence,
         });
         return recovered;
       } else {
         this.logger.warn('Low confidence encoding detection, skipping recovery', {
           filePath,
           confidence: encodingResult.confidence,
-          detectedEncoding: encodingResult.detectedEncoding
+          detectedEncoding: encodingResult.detectedEncoding,
         });
       }
 
@@ -366,7 +399,8 @@ export abstract class BaseParser {
       // Check for very long lines that might indicate a minified file or data
       const lines = content.split('\n');
       for (const line of lines) {
-        if (line.length > 10000) { // 10K character line limit
+        if (line.length > 10000) {
+          // 10K character line limit
           return true;
         }
       }
@@ -392,7 +426,10 @@ export abstract class BaseParser {
   /**
    * Extract dependencies from a syntax tree node
    */
-  protected abstract extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[];
+  protected abstract extractDependencies(
+    rootNode: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency[];
 
   /**
    * Extract imports from a syntax tree node
@@ -479,15 +516,17 @@ export abstract class BaseParser {
   /**
    * Check if symbol is exported
    */
-  protected isSymbolExported(node: Parser.SyntaxNode, symbolName: string, content: string): boolean {
+  protected isSymbolExported(
+    node: Parser.SyntaxNode,
+    symbolName: string,
+    content: string
+  ): boolean {
     // This is a basic implementation - language-specific parsers should override
     const parentNode = node.parent;
     if (!parentNode) return false;
 
-    return parentNode.type === 'export_statement' ||
-           parentNode.type === 'export_declaration';
+    return parentNode.type === 'export_statement' || parentNode.type === 'export_declaration';
   }
-
 
   /**
    * Validate parse options
