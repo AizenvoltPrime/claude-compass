@@ -448,4 +448,106 @@ namespace Game {
       expect(getScoreCall).toBeDefined();
     });
   });
+
+  describe('Conditional Block Parsing (REPRODUCTION CASE)', () => {
+    test('should detect method calls in both if and else branches - EXACT GODOT REPRODUCTION', async () => {
+      const content = `
+using Godot;
+
+namespace Game.Cards {
+    public class DeckController : Node {
+        private CardManager _cardManager;
+        private Node3D _handPosition;
+
+        public void SetHandPositions() {
+            var playerHandPos = GetNode3D("PlayerHand");
+
+            if (playerHandPos != null) {
+                // Line 226 equivalent - should be detected ✅
+                _cardManager.SetHandPositions(_handPosition, null);
+            } else {
+                // Line 242 equivalent - should be detected but ISN'T ❌
+                _cardManager.SetHandPositions(playerHandPos, _handPosition);
+            }
+        }
+    }
+
+    public class CardManager : Node {
+        public void SetHandPositions(Node3D playerHandPosition, Node3D opponentHandPosition) {
+            // Implementation
+        }
+    }
+}`;
+
+      const result = await parser.parseFile('test.cs', content);
+
+      const methodCalls = result.dependencies.filter(d =>
+        d.dependency_type === 'calls' && d.to_symbol === 'SetHandPositions'
+      );
+
+      // This test should FAIL initially - demonstrating the bug
+      // We expect 2 SetHandPositions calls but currently only get 1 (if block only)
+      console.log('Found SetHandPositions calls:', methodCalls.length);
+      console.log('Method calls:', methodCalls.map(call => ({
+        from: call.from_symbol,
+        to: call.to_symbol,
+        line: call.line_number,
+        confidence: call.confidence
+      })));
+
+      // This assertion should FAIL initially, proving the issue exists
+      expect(methodCalls.length).toBe(2); // We expect both if and else calls
+
+      // Verify we have both the if block call and else block call
+      const ifBlockCall = methodCalls.find(call => call.line_number === 14); // if block line
+      const elseBlockCall = methodCalls.find(call => call.line_number === 17); // else block line
+
+      expect(ifBlockCall).toBeDefined(); // This should pass (if block works)
+      expect(elseBlockCall).toBeDefined(); // This should FAIL (else block doesn't work)
+
+      // Verify both calls have the correct caller context
+      expect(ifBlockCall?.from_symbol).toContain('SetHandPositions');
+      expect(elseBlockCall?.from_symbol).toContain('SetHandPositions');
+    });
+
+    test('should detect method calls in if-else-if chains', async () => {
+      const content = `
+namespace Game {
+    public class ConditionalTest {
+        private CardManager _cardManager;
+
+        public void TestMethod() {
+            int condition = 1;
+
+            if (condition == 1) {
+                _cardManager.Method1();
+            } else if (condition == 2) {
+                _cardManager.Method2();
+            } else {
+                _cardManager.Method3();
+            }
+        }
+    }
+
+    public class CardManager {
+        public void Method1() { }
+        public void Method2() { }
+        public void Method3() { }
+    }
+}`;
+
+      const result = await parser.parseFile('test.cs', content);
+
+      const methodCalls = result.dependencies.filter(d => d.dependency_type === 'calls');
+
+      const method1Call = methodCalls.find(d => d.to_symbol === 'Method1');
+      const method2Call = methodCalls.find(d => d.to_symbol === 'Method2');
+      const method3Call = methodCalls.find(d => d.to_symbol === 'Method3');
+
+      // These should all be detected if conditional block parsing works correctly
+      expect(method1Call).toBeDefined(); // if block
+      expect(method2Call).toBeDefined(); // else if block
+      expect(method3Call).toBeDefined(); // else block
+    });
+  });
 });
