@@ -79,6 +79,27 @@ import {
   DataContract,
   CreateApiCall,
   CreateDataContract,
+  // Phase 7B imports - Godot Framework Entities
+  GodotScene,
+  GodotNode,
+  GodotScript,
+  GodotAutoload,
+  GodotRelationship,
+  CreateGodotScene,
+  CreateGodotNode,
+  CreateGodotScript,
+  CreateGodotAutoload,
+  CreateGodotRelationship,
+  GodotRelationshipType,
+  GodotEntityType,
+  GodotSceneWithNodes,
+  GodotNodeWithScript,
+  GodotScriptWithScenes,
+  GodotRelationshipWithEntities,
+  GodotSceneSearchOptions,
+  GodotNodeSearchOptions,
+  GodotScriptSearchOptions,
+  GodotRelationshipSearchOptions,
 } from './models';
 import { createComponentLogger } from '../utils/logger';
 import { getEmbeddingService, EmbeddingService } from '../services/embedding-service';
@@ -1836,6 +1857,466 @@ export class DatabaseService {
         language: result.file_language,
       },
     } as SymbolWithFile;
+  }
+
+  // ===== Phase 7B: Godot Framework Entity Operations =====
+  // Implementation of Solution 1: Enhanced Framework Relationships
+
+  // Godot Scene operations
+  async storeGodotScene(data: CreateGodotScene): Promise<GodotScene> {
+    logger.debug('Storing Godot scene', { scene_path: data.scene_path, repo_id: data.repo_id });
+
+    try {
+      // Check if scene already exists
+      const existingScene = await this.db('godot_scenes')
+        .where({ repo_id: data.repo_id, scene_path: data.scene_path })
+        .first();
+
+      if (existingScene) {
+        // Update existing scene
+        const [scene] = await this.db('godot_scenes')
+          .where({ id: existingScene.id })
+          .update({ ...data, updated_at: new Date() })
+          .returning('*');
+        return scene as GodotScene;
+      } else {
+        // Insert new scene
+        const [scene] = await this.db('godot_scenes')
+          .insert(data)
+          .returning('*');
+        return scene as GodotScene;
+      }
+    } catch (error) {
+      logger.error('Failed to store Godot scene', {
+        scene_path: data.scene_path,
+        error: (error as Error).message
+      });
+      throw error;
+    }
+  }
+
+  async getGodotScene(id: number): Promise<GodotScene | null> {
+    const scene = await this.db('godot_scenes')
+      .where({ id })
+      .first();
+    return scene as GodotScene || null;
+  }
+
+  async getGodotSceneWithNodes(id: number): Promise<GodotSceneWithNodes | null> {
+    const scene = await this.getGodotScene(id);
+    if (!scene) return null;
+
+    const nodes = await this.db('godot_nodes')
+      .where({ scene_id: id })
+      .orderBy('node_name');
+
+    const rootNode = nodes.find(node => node.id === scene.root_node_id);
+
+    return {
+      ...scene,
+      nodes: nodes as GodotNode[],
+      root_node: rootNode as GodotNode
+    };
+  }
+
+  async getGodotScenesByRepository(repoId: number): Promise<GodotScene[]> {
+    const scenes = await this.db('godot_scenes')
+      .where({ repo_id: repoId })
+      .orderBy('scene_path');
+    return scenes as GodotScene[];
+  }
+
+  async findGodotSceneByPath(repoId: number, scenePath: string): Promise<GodotScene | null> {
+    const scene = await this.db('godot_scenes')
+      .where({ repo_id: repoId, scene_path: scenePath })
+      .first();
+    return scene as GodotScene || null;
+  }
+
+  // Godot Node operations
+  async storeGodotNode(data: CreateGodotNode): Promise<GodotNode> {
+    logger.debug('Storing Godot node', { node_name: data.node_name, scene_id: data.scene_id });
+
+    try {
+      // Check if node already exists in this scene
+      const existingNode = await this.db('godot_nodes')
+        .where({ scene_id: data.scene_id, node_name: data.node_name })
+        .first();
+
+      if (existingNode) {
+        // Update existing node
+        const [node] = await this.db('godot_nodes')
+          .where({ id: existingNode.id })
+          .update({ ...data, updated_at: new Date() })
+          .returning('*');
+        return node as GodotNode;
+      } else {
+        // Insert new node
+        const [node] = await this.db('godot_nodes')
+          .insert(data)
+          .returning('*');
+        return node as GodotNode;
+      }
+    } catch (error) {
+      logger.error('Failed to store Godot node', {
+        node_name: data.node_name,
+        error: (error as Error).message
+      });
+      throw error;
+    }
+  }
+
+  async getGodotNode(id: number): Promise<GodotNode | null> {
+    const node = await this.db('godot_nodes')
+      .where({ id })
+      .first();
+    return node as GodotNode || null;
+  }
+
+  async getGodotNodeWithScript(id: number): Promise<GodotNodeWithScript | null> {
+    const node = await this.getGodotNode(id);
+    if (!node) return null;
+
+    const script = node.script_path
+      ? await this.findGodotScriptByPath(node.repo_id, node.script_path)
+      : null;
+
+    const scene = await this.getGodotScene(node.scene_id);
+    const parent = node.parent_node_id ? await this.getGodotNode(node.parent_node_id) : null;
+
+    const children = await this.db('godot_nodes')
+      .where({ parent_node_id: id })
+      .orderBy('node_name');
+
+    return {
+      ...node,
+      script: script || undefined,
+      scene: scene || undefined,
+      parent: parent || undefined,
+      children: children as GodotNode[]
+    };
+  }
+
+  async getGodotNodesByScene(sceneId: number): Promise<GodotNode[]> {
+    const nodes = await this.db('godot_nodes')
+      .where({ scene_id: sceneId })
+      .orderBy('node_name');
+    return nodes as GodotNode[];
+  }
+
+  // Godot Script operations
+  async storeGodotScript(data: CreateGodotScript): Promise<GodotScript> {
+    logger.debug('Storing Godot script', { script_path: data.script_path, repo_id: data.repo_id });
+
+    try {
+      // Check if script already exists
+      const existingScript = await this.db('godot_scripts')
+        .where({ repo_id: data.repo_id, script_path: data.script_path })
+        .first();
+
+      if (existingScript) {
+        // Update existing script
+        const [script] = await this.db('godot_scripts')
+          .where({ id: existingScript.id })
+          .update({
+            ...data,
+            signals: JSON.stringify(data.signals || []),
+            exports: JSON.stringify(data.exports || []),
+            updated_at: new Date()
+          })
+          .returning('*');
+
+        // Parse JSON fields back
+        const parsedScript = {
+          ...script,
+          signals: JSON.parse(script.signals),
+          exports: JSON.parse(script.exports)
+        };
+        return parsedScript as GodotScript;
+      } else {
+        // Insert new script
+        const insertData = {
+          ...data,
+          signals: JSON.stringify(data.signals || []),
+          exports: JSON.stringify(data.exports || [])
+        };
+
+        const [script] = await this.db('godot_scripts')
+          .insert(insertData)
+          .returning('*');
+
+        // Parse JSON fields back
+        const parsedScript = {
+          ...script,
+          signals: JSON.parse(script.signals),
+          exports: JSON.parse(script.exports)
+        };
+        return parsedScript as GodotScript;
+      }
+    } catch (error) {
+      logger.error('Failed to store Godot script', {
+        script_path: data.script_path,
+        error: (error as Error).message
+      });
+      throw error;
+    }
+  }
+
+  async getGodotScript(id: number): Promise<GodotScript | null> {
+    const script = await this.db('godot_scripts')
+      .where({ id })
+      .first();
+
+    if (!script) return null;
+
+    // Parse JSON fields
+    return {
+      ...script,
+      signals: JSON.parse(script.signals),
+      exports: JSON.parse(script.exports)
+    } as GodotScript;
+  }
+
+  async getGodotScriptsByRepository(repoId: number): Promise<GodotScript[]> {
+    const scripts = await this.db('godot_scripts')
+      .where({ repo_id: repoId })
+      .orderBy('script_path');
+
+    // Parse JSON fields for all scripts
+    return scripts.map(script => ({
+      ...script,
+      signals: JSON.parse(script.signals),
+      exports: JSON.parse(script.exports)
+    })) as GodotScript[];
+  }
+
+  async findGodotScriptByPath(repoId: number, scriptPath: string): Promise<GodotScript | null> {
+    const script = await this.db('godot_scripts')
+      .where({ repo_id: repoId, script_path: scriptPath })
+      .first();
+
+    if (!script) return null;
+
+    return {
+      ...script,
+      signals: JSON.parse(script.signals),
+      exports: JSON.parse(script.exports)
+    } as GodotScript;
+  }
+
+  // Godot Autoload operations
+  async storeGodotAutoload(data: CreateGodotAutoload): Promise<GodotAutoload> {
+    logger.debug('Storing Godot autoload', { autoload_name: data.autoload_name, repo_id: data.repo_id });
+
+    try {
+      // Check if autoload already exists
+      const existingAutoload = await this.db('godot_autoloads')
+        .where({ repo_id: data.repo_id, autoload_name: data.autoload_name })
+        .first();
+
+      if (existingAutoload) {
+        // Update existing autoload
+        const [autoload] = await this.db('godot_autoloads')
+          .where({ id: existingAutoload.id })
+          .update({ ...data, updated_at: new Date() })
+          .returning('*');
+        return autoload as GodotAutoload;
+      } else {
+        // Insert new autoload
+        const [autoload] = await this.db('godot_autoloads')
+          .insert(data)
+          .returning('*');
+        return autoload as GodotAutoload;
+      }
+    } catch (error) {
+      logger.error('Failed to store Godot autoload', {
+        autoload_name: data.autoload_name,
+        error: (error as Error).message
+      });
+      throw error;
+    }
+  }
+
+  async getGodotAutoloadsByRepository(repoId: number): Promise<GodotAutoload[]> {
+    const autoloads = await this.db('godot_autoloads')
+      .where({ repo_id: repoId })
+      .orderBy('autoload_name');
+    return autoloads as GodotAutoload[];
+  }
+
+  // Godot Relationship operations (Core of Solution 1)
+  async createGodotRelationship(data: CreateGodotRelationship): Promise<GodotRelationship> {
+    logger.debug('Creating Godot relationship', {
+      type: data.relationship_type,
+      from: `${data.from_entity_type}:${data.from_entity_id}`,
+      to: `${data.to_entity_type}:${data.to_entity_id}`
+    });
+
+    try {
+      // Check if relationship already exists
+      const existingRelationship = await this.db('godot_relationships')
+        .where({
+          repo_id: data.repo_id,
+          relationship_type: data.relationship_type,
+          from_entity_type: data.from_entity_type,
+          from_entity_id: data.from_entity_id,
+          to_entity_type: data.to_entity_type,
+          to_entity_id: data.to_entity_id
+        })
+        .first();
+
+      if (existingRelationship) {
+        logger.debug('Godot relationship already exists', { id: existingRelationship.id });
+        return existingRelationship as GodotRelationship;
+      }
+
+      const [relationship] = await this.db('godot_relationships')
+        .insert(data)
+        .returning('*');
+
+      logger.debug('Created Godot relationship', { id: relationship.id });
+      return relationship as GodotRelationship;
+    } catch (error) {
+      logger.error('Failed to create Godot relationship', {
+        type: data.relationship_type,
+        error: (error as Error).message
+      });
+      throw error;
+    }
+  }
+
+  async getGodotRelationshipsByEntity(
+    entityType: GodotEntityType,
+    entityId: number,
+    direction: 'from' | 'to' | 'both' = 'both'
+  ): Promise<GodotRelationship[]> {
+    let query = this.db('godot_relationships');
+
+    if (direction === 'from') {
+      query = query.where({ from_entity_type: entityType, from_entity_id: entityId });
+    } else if (direction === 'to') {
+      query = query.where({ to_entity_type: entityType, to_entity_id: entityId });
+    } else {
+      query = query.where(function() {
+        this.where({ from_entity_type: entityType, from_entity_id: entityId })
+            .orWhere({ to_entity_type: entityType, to_entity_id: entityId });
+      });
+    }
+
+    const relationships = await query.orderBy('relationship_type');
+    return relationships as GodotRelationship[];
+  }
+
+  async getGodotRelationshipsByType(
+    repoId: number,
+    relationshipType: GodotRelationshipType
+  ): Promise<GodotRelationship[]> {
+    const relationships = await this.db('godot_relationships')
+      .where({ repo_id: repoId, relationship_type: relationshipType })
+      .orderBy(['from_entity_type', 'from_entity_id']);
+    return relationships as GodotRelationship[];
+  }
+
+  async getGodotRelationshipsByRepository(repoId: number): Promise<GodotRelationship[]> {
+    const relationships = await this.db('godot_relationships')
+      .where({ repo_id: repoId })
+      .orderBy(['relationship_type', 'from_entity_type', 'from_entity_id']);
+    return relationships as GodotRelationship[];
+  }
+
+  // Search operations for Godot entities
+  async searchGodotScenes(options: GodotSceneSearchOptions): Promise<GodotScene[]> {
+    let query = this.db('godot_scenes').select('*');
+
+    if (options.repo_id) {
+      query = query.where('repo_id', options.repo_id);
+    }
+
+    if (options.has_script !== undefined) {
+      query = query.where('has_script', options.has_script);
+    }
+
+    if (options.query) {
+      query = query.where(function() {
+        this.where('scene_name', 'ilike', `%${options.query}%`)
+            .orWhere('scene_path', 'ilike', `%${options.query}%`);
+      });
+    }
+
+    const scenes = await query
+      .orderBy('scene_path')
+      .limit(options.limit || 50);
+    return scenes as GodotScene[];
+  }
+
+  async searchGodotNodes(options: GodotNodeSearchOptions): Promise<GodotNode[]> {
+    let query = this.db('godot_nodes').select('*');
+
+    if (options.repo_id) {
+      query = query.where('repo_id', options.repo_id);
+    }
+
+    if (options.scene_id) {
+      query = query.where('scene_id', options.scene_id);
+    }
+
+    if (options.node_type) {
+      query = query.where('node_type', options.node_type);
+    }
+
+    if (options.has_script !== undefined) {
+      if (options.has_script) {
+        query = query.whereNotNull('script_path');
+      } else {
+        query = query.whereNull('script_path');
+      }
+    }
+
+    if (options.query) {
+      query = query.where(function() {
+        this.where('node_name', 'ilike', `%${options.query}%`)
+            .orWhere('node_type', 'ilike', `%${options.query}%`);
+      });
+    }
+
+    const nodes = await query
+      .orderBy('node_name')
+      .limit(options.limit || 50);
+    return nodes as GodotNode[];
+  }
+
+  async searchGodotScripts(options: GodotScriptSearchOptions): Promise<GodotScript[]> {
+    let query = this.db('godot_scripts').select('*');
+
+    if (options.repo_id) {
+      query = query.where('repo_id', options.repo_id);
+    }
+
+    if (options.base_class) {
+      query = query.where('base_class', options.base_class);
+    }
+
+    if (options.is_autoload !== undefined) {
+      query = query.where('is_autoload', options.is_autoload);
+    }
+
+    if (options.query) {
+      query = query.where(function() {
+        this.where('class_name', 'ilike', `%${options.query}%`)
+            .orWhere('script_path', 'ilike', `%${options.query}%`);
+      });
+    }
+
+    const scripts = await query
+      .orderBy('script_path')
+      .limit(options.limit || 50);
+
+    // Parse JSON fields for all scripts
+    return scripts.map(script => ({
+      ...script,
+      signals: JSON.parse(script.signals),
+      exports: JSON.parse(script.exports)
+    })) as GodotScript[];
   }
 
   // ===== Phase 3 Service Methods =====

@@ -506,9 +506,10 @@ export class CSharpParser extends ChunkedParser {
     if (!expressionNode) return null;
 
     const methodName = this.getNodeText(expressionNode, content);
+    const callerName = this.findContainingFunction(node, content);
 
     return {
-      from_symbol: 'caller',
+      from_symbol: callerName,
       to_symbol: methodName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
@@ -521,9 +522,10 @@ export class CSharpParser extends ChunkedParser {
     if (!nameNode) return null;
 
     const memberName = this.getNodeText(nameNode, content);
+    const callerName = this.findContainingFunction(node, content);
 
     return {
-      from_symbol: 'accessor',
+      from_symbol: callerName,
       to_symbol: memberName,
       dependency_type: DependencyType.REFERENCES,
       line_number: node.startPosition.row + 1,
@@ -629,6 +631,38 @@ export class CSharpParser extends ChunkedParser {
 
   // Utility methods
 
+  /**
+   * Find the containing function for a call expression node by traversing up the AST
+   */
+  private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {
+    let parent = callNode.parent;
+
+    // Walk up the AST to find containing function, method, or constructor
+    while (parent) {
+      if (parent.type === 'method_declaration' ||
+          parent.type === 'constructor_declaration' ||
+          parent.type === 'property_declaration') {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          return this.getNodeText(nameNode, content);
+        }
+      }
+
+      // Also check for class context to provide better context
+      if (parent.type === 'class_declaration') {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          const className = this.getNodeText(nameNode, content);
+          return `${className}.<unknown>`;
+        }
+      }
+
+      parent = parent.parent;
+    }
+
+    return '<global>';
+  }
+
   private extractModifiers(node: Parser.SyntaxNode, content: string): string[] {
     const modifiers: string[] = [];
 
@@ -673,7 +707,14 @@ export class CSharpParser extends ChunkedParser {
     const returnTypeNode = node.childForFieldName('type');
     const returnType = returnTypeNode ? this.getNodeText(returnTypeNode, content) : 'void';
 
-    return `${modifiers.join(' ')} ${returnType} ${name}()`;
+    // Extract parameters
+    const parametersNode = node.childForFieldName('parameters');
+    let parameters = '()';
+    if (parametersNode) {
+      parameters = this.getNodeText(parametersNode, content);
+    }
+
+    return `${modifiers.join(' ')} ${returnType} ${name}${parameters}`;
   }
 
   private extractPropertySignature(node: Parser.SyntaxNode, content: string): string {
@@ -707,7 +748,14 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node, content);
 
-    return `${modifiers.join(' ')} ${name}()`;
+    // Extract parameters
+    const parametersNode = node.childForFieldName('parameters');
+    let parameters = '()';
+    if (parametersNode) {
+      parameters = this.getNodeText(parametersNode, content);
+    }
+
+    return `${modifiers.join(' ')} ${name}${parameters}`;
   }
 
   // Chunked parsing methods
@@ -737,7 +785,7 @@ export class CSharpParser extends ChunkedParser {
     ];
 
     for (const pattern of boundaryPatterns) {
-      let match;
+      let match: RegExpExecArray | null;
       pattern.lastIndex = 0; // Reset regex state
 
       while ((match = pattern.exec(searchContent)) !== null) {

@@ -805,3 +805,226 @@ export interface CreateDataContract {
   schema_definition?: any;
   drift_detected?: boolean;
 }
+
+// Phase 7B: Godot Framework Entity Models
+// Implementation of Solution 1: Enhanced Framework Relationships
+
+export interface GodotScene {
+  id: number;
+  repo_id: number;
+  scene_path: string;
+  scene_name: string;
+  root_node_id?: number;
+  node_count: number;
+  has_script: boolean;
+  metadata: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface GodotNode {
+  id: number;
+  repo_id: number;
+  scene_id: number;
+  node_name: string;
+  node_type: string;
+  parent_node_id?: number;
+  script_path?: string;
+  properties: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface GodotScript {
+  id: number;
+  repo_id: number;
+  script_path: string;
+  class_name: string;
+  base_class?: string;
+  is_autoload: boolean;
+  signals: Array<{
+    name: string;
+    parameters: Array<{ name: string; type?: string }>;
+    line: number;
+  }>;
+  exports: Array<{
+    name: string;
+    type: string;
+    defaultValue?: any;
+    exportType?: string;
+    line: number;
+  }>;
+  metadata: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface GodotAutoload {
+  id: number;
+  repo_id: number;
+  autoload_name: string;
+  script_path: string;
+  script_id?: number;
+  metadata: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface GodotRelationship {
+  id: number;
+  repo_id: number;
+  relationship_type: GodotRelationshipType;
+  from_entity_type: GodotEntityType;
+  from_entity_id: number;
+  to_entity_type: GodotEntityType;
+  to_entity_id: number;
+  resource_id?: string;
+  confidence: number;
+  metadata: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export enum GodotRelationshipType {
+  SCENE_SCRIPT_ATTACHMENT = 'scene_script_attachment',
+  SCENE_RESOURCE_REFERENCE = 'scene_resource_reference',
+  NODE_HIERARCHY = 'node_hierarchy',
+  SIGNAL_CONNECTION = 'signal_connection',
+  AUTOLOAD_REFERENCE = 'autoload_reference',
+  SCRIPT_INHERITANCE = 'script_inheritance',
+}
+
+export enum GodotEntityType {
+  SCENE = 'scene',
+  NODE = 'node',
+  SCRIPT = 'script',
+  AUTOLOAD = 'autoload',
+}
+
+// Input types for creating Godot records
+export interface CreateGodotScene {
+  repo_id: number;
+  scene_path: string;
+  scene_name: string;
+  root_node_id?: number;
+  node_count?: number;
+  has_script?: boolean;
+  metadata?: Record<string, any>;
+}
+
+export interface CreateGodotNode {
+  repo_id: number;
+  scene_id: number;
+  node_name: string;
+  node_type: string;
+  parent_node_id?: number;
+  script_path?: string;
+  properties?: Record<string, any>;
+}
+
+export interface CreateGodotScript {
+  repo_id: number;
+  script_path: string;
+  class_name: string;
+  base_class?: string;
+  is_autoload?: boolean;
+  signals?: Array<{
+    name: string;
+    parameters: Array<{ name: string; type?: string }>;
+    line: number;
+  }>;
+  exports?: Array<{
+    name: string;
+    type: string;
+    defaultValue?: any;
+    exportType?: string;
+    line: number;
+  }>;
+  metadata?: Record<string, any>;
+}
+
+export interface CreateGodotAutoload {
+  repo_id: number;
+  autoload_name: string;
+  script_path: string;
+  script_id?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface CreateGodotRelationship {
+  repo_id: number;
+  relationship_type: GodotRelationshipType;
+  from_entity_type: GodotEntityType;
+  from_entity_id: number;
+  to_entity_type: GodotEntityType;
+  to_entity_id: number;
+  resource_id?: string;
+  confidence?: number;
+  metadata?: Record<string, any>;
+}
+
+// Query result types with relationships for Godot entities
+export interface GodotSceneWithNodes extends GodotScene {
+  nodes?: GodotNode[];
+  root_node?: GodotNode;
+  repository?: Repository;
+}
+
+export interface GodotNodeWithScript extends GodotNode {
+  script?: GodotScript;
+  scene?: GodotScene;
+  parent?: GodotNode;
+  children?: GodotNode[];
+}
+
+export interface GodotScriptWithScenes extends GodotScript {
+  attached_scenes?: GodotScene[];
+  repository?: Repository;
+}
+
+export interface GodotRelationshipWithEntities extends GodotRelationship {
+  from_scene?: GodotScene;
+  from_node?: GodotNode;
+  from_script?: GodotScript;
+  from_autoload?: GodotAutoload;
+  to_scene?: GodotScene;
+  to_node?: GodotNode;
+  to_script?: GodotScript;
+  to_autoload?: GodotAutoload;
+}
+
+// Search options for Godot entities
+export interface GodotSceneSearchOptions {
+  query?: string;
+  repo_id?: number;
+  has_script?: boolean;
+  limit?: number;
+}
+
+export interface GodotNodeSearchOptions {
+  query?: string;
+  repo_id?: number;
+  scene_id?: number;
+  node_type?: string;
+  has_script?: boolean;
+  limit?: number;
+}
+
+export interface GodotScriptSearchOptions {
+  query?: string;
+  repo_id?: number;
+  base_class?: string;
+  is_autoload?: boolean;
+  limit?: number;
+}
+
+export interface GodotRelationshipSearchOptions {
+  repo_id?: number;
+  relationship_type?: GodotRelationshipType;
+  from_entity_type?: GodotEntityType;
+  from_entity_id?: number;
+  to_entity_type?: GodotEntityType;
+  to_entity_id?: number;
+  min_confidence?: number;
+  limit?: number;
+}
