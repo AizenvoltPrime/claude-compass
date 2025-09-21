@@ -129,8 +129,19 @@ export class SymbolResolver {
     dependency: ParsedDependency
   ): ResolvedDependency | null {
     // Find the source symbol in the current file
-    const fromSymbol = sourceContext.symbols.find(s => s.name === dependency.from_symbol);
+    let fromSymbol = sourceContext.symbols.find(s => s.name === dependency.from_symbol);
+
+    // If not found and from_symbol contains dots (qualified name), try extracting just the method name
+    if (!fromSymbol && dependency.from_symbol.includes('.')) {
+      const methodName = dependency.from_symbol.split('.').pop();
+      if (methodName) {
+        fromSymbol = sourceContext.symbols.find(s => s.name === methodName);
+        // Don't log if we found it via the fallback - this is expected for C# qualified names
+      }
+    }
+
     if (!fromSymbol) {
+      // Only log if we couldn't resolve even with the fallback
       this.logger.debug('Source symbol not found in file context', {
         symbolName: dependency.from_symbol,
         filePath: sourceContext.filePath

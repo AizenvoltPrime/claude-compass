@@ -409,15 +409,15 @@ export class SymbolGraphBuilder {
             qualified_context: resolution.originalDependency.qualified_context
           });
 
-          // Mark this dependency as resolved
-          const depKey = `${resolution.fromSymbol.id}->${resolution.originalDependency.to_symbol}`;
+          // Mark this dependency as resolved (include line number to handle multiple calls on different lines)
+          const depKey = `${resolution.fromSymbol.id}->${resolution.originalDependency.to_symbol}:${resolution.originalDependency.line_number}`;
           resolvedDependencies.add(depKey);
         }
 
         // Fallback for unresolved dependencies - especially important for external calls like Laravel models
         for (const { symbol, dependencies } of symbolDeps) {
           for (const dep of dependencies) {
-            const depKey = `${symbol.id}->${dep.to_symbol}`;
+            const depKey = `${symbol.id}->${dep.to_symbol}:${dep.line_number}`;
 
             // Skip if already resolved by the symbol resolver
             if (resolvedDependencies.has(depKey)) {
@@ -533,7 +533,8 @@ export class SymbolGraphBuilder {
     const uniqueEdges: SymbolEdge[] = [];
 
     for (const edge of edges) {
-      const key = `${edge.from}-${edge.to}-${edge.type}`;
+      // Include line number in the key to allow multiple calls on different lines
+      const key = `${edge.from}-${edge.to}-${edge.type}-${edge.lineNumber}`;
       if (!seen.has(key)) {
         seen.add(key);
         uniqueEdges.push(edge);
