@@ -67,7 +67,20 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
     if (!Array.isArray(args.entity_types)) {
       throw new Error('entity_types must be an array');
     }
-    const validEntityTypes = ['route', 'model', 'controller', 'component', 'job', 'function', 'class', 'interface', 'scene', 'node', 'script', 'autoload'];
+    const validEntityTypes = [
+      'route',
+      'model',
+      'controller',
+      'component',
+      'job',
+      'function',
+      'class',
+      'interface',
+      'scene',
+      'node',
+      'script',
+      'autoload',
+    ];
     for (const entityType of args.entity_types) {
       if (typeof entityType !== 'string' || !validEntityTypes.includes(entityType)) {
         throw new Error(`entity_types must contain valid types: ${validEntityTypes.join(', ')}`);
@@ -192,13 +205,13 @@ export interface SearchCodeArgs {
   symbol_type?: string;
   is_exported?: boolean;
   limit?: number;
-  entity_types?: string[];      // route, model, controller, component, job, etc.
-  framework?: string;           // laravel, vue, react, node
-  use_vector?: boolean;         // enable vector search (future)
-  repo_ids?: number[];          // multi-repository search
-  include_qualified?: boolean;  // search in qualified context
-  class_context?: string;       // filter by class context
-  namespace_context?: string;   // filter by namespace context
+  entity_types?: string[]; // route, model, controller, component, job, etc.
+  framework?: string; // laravel, vue, react, node
+  use_vector?: boolean; // enable vector search (future)
+  repo_ids?: number[]; // multi-repository search
+  include_qualified?: boolean; // search in qualified context
+  class_context?: string; // filter by class context
+  namespace_context?: string; // filter by namespace context
 }
 
 export interface WhoCallsArgs {
@@ -216,11 +229,11 @@ export interface ListDependenciesArgs {
 // Comprehensive impact analysis interface (Phase 6A)
 export interface ImpactOfArgs {
   symbol_id: number;
-  frameworks?: string[];        // Multi-framework impact: ['vue', 'laravel', 'react', 'node']
-  include_tests?: boolean;      // Test coverage impact analysis
-  include_routes?: boolean;     // Route impact analysis
-  include_jobs?: boolean;       // Background job impact analysis
-  max_depth?: number;           // Transitive depth (default 5)
+  frameworks?: string[]; // Multi-framework impact: ['vue', 'laravel', 'react', 'node']
+  include_tests?: boolean; // Test coverage impact analysis
+  include_routes?: boolean; // Route impact analysis
+  include_jobs?: boolean; // Background job impact analysis
+  max_depth?: number; // Transitive depth (default 5)
   confidence_threshold?: number; // Filter by confidence (default 0.7)
 }
 
@@ -229,8 +242,16 @@ export interface ImpactItem {
   name: string;
   type: string;
   file_path: string;
-  impact_type: 'direct' | 'indirect' | 'cross_stack';
+  impact_type:
+    | 'direct'
+    | 'indirect'
+    | 'cross_stack'
+    | 'interface_contract'
+    | 'implementation'
+    | 'delegation';
   confidence: number;
+  relationship_type?: string;
+  relationship_context?: string;
 }
 
 export interface TestImpactItem {
@@ -456,7 +477,7 @@ export class McpTools {
       symbolTypes: [],
       isExported: validatedArgs.is_exported,
       framework: validatedArgs.framework,
-      repoIds: repoIds.length > 0 ? repoIds : (repoId ? [repoId] : [])
+      repoIds: repoIds.length > 0 ? repoIds : repoId ? [repoId] : [],
     };
 
     let symbols = [];
@@ -466,30 +487,48 @@ export class McpTools {
       for (const entityType of validatedArgs.entity_types) {
         switch (entityType) {
           case 'route':
-            symbols.push(...await this.searchRoutes(validatedArgs.query, repoIds, validatedArgs.framework));
+            symbols.push(
+              ...(await this.searchRoutes(validatedArgs.query, repoIds, validatedArgs.framework))
+            );
             break;
           case 'model':
-            symbols.push(...await this.searchModels(validatedArgs.query, repoIds, validatedArgs.framework));
+            symbols.push(
+              ...(await this.searchModels(validatedArgs.query, repoIds, validatedArgs.framework))
+            );
             break;
           case 'controller':
-            symbols.push(...await this.searchControllers(validatedArgs.query, repoIds, validatedArgs.framework));
+            symbols.push(
+              ...(await this.searchControllers(
+                validatedArgs.query,
+                repoIds,
+                validatedArgs.framework
+              ))
+            );
             break;
           case 'component':
-            symbols.push(...await this.searchComponents(validatedArgs.query, repoIds, validatedArgs.framework));
+            symbols.push(
+              ...(await this.searchComponents(
+                validatedArgs.query,
+                repoIds,
+                validatedArgs.framework
+              ))
+            );
             break;
           case 'job':
-            symbols.push(...await this.searchJobs(validatedArgs.query, repoIds, validatedArgs.framework));
+            symbols.push(
+              ...(await this.searchJobs(validatedArgs.query, repoIds, validatedArgs.framework))
+            );
             break;
           case 'scene':
-            symbols.push(...await this.searchGodotScenes(validatedArgs.query, repoIds));
+            symbols.push(...(await this.searchGodotScenes(validatedArgs.query, repoIds)));
             break;
           case 'node':
-            symbols.push(...await this.searchGodotNodes(validatedArgs.query, repoIds));
+            symbols.push(...(await this.searchGodotNodes(validatedArgs.query, repoIds)));
             break;
           case 'script':
             // For Godot framework, search Godot scripts, otherwise search generic scripts
             if (validatedArgs.framework === 'godot') {
-              symbols.push(...await this.searchGodotScripts(validatedArgs.query, repoIds));
+              symbols.push(...(await this.searchGodotScripts(validatedArgs.query, repoIds)));
             } else {
               // Fall through to default case for non-Godot scripts
               const symbolType = this.mapEntityTypeToSymbolType(entityType);
@@ -514,7 +553,7 @@ export class McpTools {
             }
             break;
           case 'autoload':
-            symbols.push(...await this.searchGodotAutoloads(validatedArgs.query, repoIds));
+            symbols.push(...(await this.searchGodotAutoloads(validatedArgs.query, repoIds)));
             break;
           default:
             // Use enhanced search for standard symbol types
@@ -580,11 +619,10 @@ export class McpTools {
       // Choose search method based on use_vector parameter
       if (validatedArgs.use_vector === true) {
         try {
-          symbols = await this.dbService.vectorSearchSymbols(
-            validatedArgs.query,
-            repoId,
-            { ...searchOptions, similarityThreshold: 0.7 }
-          );
+          symbols = await this.dbService.vectorSearchSymbols(validatedArgs.query, repoId, {
+            ...searchOptions,
+            similarityThreshold: 0.7,
+          });
         } catch (error) {
           this.logger.warn('Vector search failed, falling back to fulltext:', error);
           symbols = await this.dbService.fulltextSearchSymbols(
@@ -609,11 +647,15 @@ export class McpTools {
       }
     }
 
-    if (validatedArgs.include_qualified === true || validatedArgs.class_context || validatedArgs.namespace_context) {
+    if (
+      validatedArgs.include_qualified === true ||
+      validatedArgs.class_context ||
+      validatedArgs.namespace_context
+    ) {
       this.logger.debug('Performing enhanced search with qualified context', {
         include_qualified: validatedArgs.include_qualified,
         class_context: validatedArgs.class_context,
-        namespace_context: validatedArgs.namespace_context
+        namespace_context: validatedArgs.namespace_context,
       });
 
       try {
@@ -629,15 +671,16 @@ export class McpTools {
 
         // Add method signature search
         if (validatedArgs.include_qualified === true) {
-          enhancedSearchPromises.push(
-            this.dbService.searchMethodSignatures(validatedArgs.query)
-          );
+          enhancedSearchPromises.push(this.dbService.searchMethodSignatures(validatedArgs.query));
         }
 
         // Add namespace context search
         if (validatedArgs.namespace_context) {
           enhancedSearchPromises.push(
-            this.dbService.searchNamespaceContext(validatedArgs.query, validatedArgs.namespace_context)
+            this.dbService.searchNamespaceContext(
+              validatedArgs.query,
+              validatedArgs.namespace_context
+            )
           );
         }
 
@@ -655,10 +698,13 @@ export class McpTools {
 
         this.logger.debug('Enhanced search completed', {
           enhanced_results: mergedEnhancedResults.length,
-          total_results: symbols.length
+          total_results: symbols.length,
         });
       } catch (error) {
-        this.logger.warn('Enhanced search with qualified context failed, continuing with standard results:', error);
+        this.logger.warn(
+          'Enhanced search with qualified context failed, continuing with standard results:',
+          error
+        );
       }
     }
 
@@ -678,8 +724,11 @@ export class McpTools {
           case 'vue':
             return fileLanguage === 'vue' || s.file?.path?.endsWith('.vue');
           case 'react':
-            return fileLanguage === 'javascript' || fileLanguage === 'typescript' ||
-                   s.file?.path?.includes('components/');
+            return (
+              fileLanguage === 'javascript' ||
+              fileLanguage === 'typescript' ||
+              s.file?.path?.includes('components/')
+            );
           case 'node':
             return fileLanguage === 'javascript' || fileLanguage === 'typescript';
           default:
@@ -744,7 +793,12 @@ export class McpTools {
                 namespace_context: validatedArgs.namespace_context,
               },
               search_mode: 'enhanced_framework_aware',
-              absorbed_tools: ['getLaravelRoutes', 'getEloquentModels', 'getLaravelControllers', 'searchLaravelEntities'],
+              absorbed_tools: [
+                'getLaravelRoutes',
+                'getEloquentModels',
+                'getLaravelControllers',
+                'searchLaravelEntities',
+              ],
             },
             null,
             2
@@ -997,8 +1051,10 @@ export class McpTools {
             name: dep.to_symbol.name,
             type: dep.to_symbol.symbol_type,
             file_path: dep.to_symbol.file?.path || '',
-            impact_type: this.isCrossStackRelationship(dep) ? 'cross_stack' : 'direct',
+            impact_type: this.classifyRelationshipImpact(dep, 'dependency'),
             confidence: dep.confidence || 1.0,
+            relationship_type: dep.dependency_type || 'unknown',
+            relationship_context: this.getRelationshipContext(dep),
           });
 
           const framework = this.determineFramework(dep.to_symbol);
@@ -1013,8 +1069,10 @@ export class McpTools {
             name: caller.from_symbol.name,
             type: caller.from_symbol.symbol_type,
             file_path: caller.from_symbol.file?.path || '',
-            impact_type: this.isCrossStackRelationship(caller) ? 'cross_stack' : 'direct',
+            impact_type: this.classifyRelationshipImpact(caller, 'caller'),
             confidence: caller.confidence || 1.0,
+            relationship_type: caller.dependency_type || 'unknown',
+            relationship_context: this.getRelationshipContext(caller),
           });
 
           const framework = this.determineFramework(caller.from_symbol);
@@ -1088,11 +1146,20 @@ export class McpTools {
         }
       }
 
-      // Calculate overall confidence score
-      const allImpactItems = [...directImpact, ...transitiveImpact];
-      const avgConfidence = allImpactItems.length > 0
-        ? allImpactItems.reduce((sum, item) => sum + item.confidence, 0) / allImpactItems.length
-        : 1.0;
+      // Deduplicate impact items to eliminate overlapping analysis results
+      const deduplicatedDirectImpact = this.deduplicateImpactItems(directImpact);
+      const deduplicatedTransitiveImpact = this.deduplicateImpactItems(
+        transitiveImpact.filter(
+          item => !deduplicatedDirectImpact.some(directItem => directItem.id === item.id)
+        )
+      );
+
+      // Calculate overall confidence score using deduplicated data
+      const allImpactItems = [...deduplicatedDirectImpact, ...deduplicatedTransitiveImpact];
+      const avgConfidence =
+        allImpactItems.length > 0
+          ? allImpactItems.reduce((sum, item) => sum + item.confidence, 0) / allImpactItems.length
+          : 1.0;
 
       return {
         content: [
@@ -1107,8 +1174,8 @@ export class McpTools {
                   file_path: symbol.file?.path,
                 },
                 impact_analysis: {
-                  direct_impact: directImpact,
-                  transitive_impact: transitiveImpact,
+                  direct_impact: deduplicatedDirectImpact,
+                  transitive_impact: deduplicatedTransitiveImpact,
                   test_impact: validatedArgs.include_tests !== false ? testImpact : undefined,
                   route_impact: validatedArgs.include_routes !== false ? routeImpact : undefined,
                   job_impact: validatedArgs.include_jobs !== false ? jobImpact : undefined,
@@ -1117,14 +1184,19 @@ export class McpTools {
                   frameworks_affected: Array.from(frameworksAffected),
                 },
                 summary: {
-                  total_direct_impact: directImpact.length,
-                  total_transitive_impact: transitiveImpact.length,
+                  total_direct_impact: deduplicatedDirectImpact.length,
+                  total_transitive_impact: deduplicatedTransitiveImpact.length,
                   total_route_impact: routeImpact.length,
                   total_job_impact: jobImpact.length,
                   total_test_impact: testImpact.length,
                   frameworks_affected: Array.from(frameworksAffected),
                   confidence_score: avgConfidence,
-                  risk_level: this.calculateRiskLevel(directImpact, transitiveImpact, routeImpact, jobImpact),
+                  risk_level: this.calculateRiskLevel(
+                    directImpact,
+                    transitiveImpact,
+                    routeImpact,
+                    jobImpact
+                  ),
                 },
                 filters: validatedArgs,
                 analysis_mode: 'comprehensive',
@@ -1137,7 +1209,9 @@ export class McpTools {
         ],
       };
     } catch (error) {
-      this.logger.error('Comprehensive impact analysis failed', { error: (error as Error).message });
+      this.logger.error('Comprehensive impact analysis failed', {
+        error: (error as Error).message,
+      });
       return {
         content: [
           {
@@ -1158,7 +1232,11 @@ export class McpTools {
   }
 
   // Helper methods for enhanced search (absorb removed Laravel tools functionality)
-  private async searchRoutes(query: string, repoIds?: number[], framework?: string): Promise<any[]> {
+  private async searchRoutes(
+    query: string,
+    repoIds?: number[],
+    framework?: string
+  ): Promise<any[]> {
     const routes = [];
     const targetRepos = repoIds || [await this.getDefaultRepoId()].filter(Boolean);
 
@@ -1172,27 +1250,33 @@ export class McpTools {
           route.method?.toLowerCase().includes(query.toLowerCase())
       );
 
-      routes.push(...matchingRoutes.map(route => ({
-        id: route.id,
-        name: route.path,
-        symbol_type: 'route',
-        start_line: 0,
-        end_line: 0,
-        is_exported: true,
-        visibility: 'public',
-        signature: `${route.method} ${route.path}`,
-        file: {
-          id: route.repo_id,
-          path: route.path,
-          language: route.framework_type === 'laravel' ? 'php' : 'javascript',
-        },
-      })));
+      routes.push(
+        ...matchingRoutes.map(route => ({
+          id: route.id,
+          name: route.path,
+          symbol_type: 'route',
+          start_line: 0,
+          end_line: 0,
+          is_exported: true,
+          visibility: 'public',
+          signature: `${route.method} ${route.path}`,
+          file: {
+            id: route.repo_id,
+            path: route.path,
+            language: route.framework_type === 'laravel' ? 'php' : 'javascript',
+          },
+        }))
+      );
     }
 
     return routes;
   }
 
-  private async searchModels(query: string, repoIds?: number[], _framework?: string): Promise<any[]> {
+  private async searchModels(
+    query: string,
+    repoIds?: number[],
+    _framework?: string
+  ): Promise<any[]> {
     const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
@@ -1203,12 +1287,16 @@ export class McpTools {
 
       // Enhanced path matching that works with various directory structures
       const isInModelsDirectory =
-        path.includes('/Models/') || path.includes('\\Models\\') ||
-        path.includes('/models/') || path.includes('\\models\\') ||
+        path.includes('/Models/') ||
+        path.includes('\\Models\\') ||
+        path.includes('/models/') ||
+        path.includes('\\models\\') ||
         /[\/\\][Mm]odels[\/\\]/.test(path) ||
         // Additional patterns for edge cases
-        path.endsWith('/Models') || path.endsWith('\\Models') ||
-        path.endsWith('/models') || path.endsWith('\\models') ||
+        path.endsWith('/Models') ||
+        path.endsWith('\\Models') ||
+        path.endsWith('/models') ||
+        path.endsWith('\\models') ||
         /\/app\/[^\/]*Models\//i.test(path);
 
       // Enhanced signature matching for Laravel models
@@ -1223,14 +1311,18 @@ export class McpTools {
         signature.includes('use SoftDeletes');
 
       // Name-based detection for models
-      const hasModelName = name.endsWith('Model') ||
-                          (isClass && /^[A-Z][a-zA-Z]*$/.test(name) && isInModelsDirectory);
+      const hasModelName =
+        name.endsWith('Model') || (isClass && /^[A-Z][a-zA-Z]*$/.test(name) && isInModelsDirectory);
 
       return isClass && (isInModelsDirectory || hasModelSignature || hasModelName);
     });
   }
 
-  private async searchControllers(query: string, repoIds?: number[], _framework?: string): Promise<any[]> {
+  private async searchControllers(
+    query: string,
+    repoIds?: number[],
+    _framework?: string
+  ): Promise<any[]> {
     const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
@@ -1241,14 +1333,19 @@ export class McpTools {
 
       // Enhanced path matching for controllers
       const isInControllersDirectory =
-        path.includes('/Controllers/') || path.includes('\\Controllers\\') ||
-        path.includes('/controllers/') || path.includes('\\controllers\\') ||
+        path.includes('/Controllers/') ||
+        path.includes('\\Controllers\\') ||
+        path.includes('/controllers/') ||
+        path.includes('\\controllers\\') ||
         /[\/\\][Cc]ontrollers[\/\\]/.test(path) ||
         // Additional patterns for Laravel structure
-        path.includes('/Http/Controllers/') || path.includes('\\Http\\Controllers\\') ||
+        path.includes('/Http/Controllers/') ||
+        path.includes('\\Http\\Controllers\\') ||
         /\/app\/Http\/Controllers\//i.test(path) ||
-        path.endsWith('/Controllers') || path.endsWith('\\Controllers') ||
-        path.endsWith('/controllers') || path.endsWith('\\controllers');
+        path.endsWith('/Controllers') ||
+        path.endsWith('\\Controllers') ||
+        path.endsWith('/controllers') ||
+        path.endsWith('\\controllers');
 
       // Enhanced signature matching for Laravel controllers
       const hasControllerSignature =
@@ -1264,19 +1361,26 @@ export class McpTools {
         signature.includes('use ValidatesRequests');
 
       // Name-based detection for controllers
-      const hasControllerName = name.toLowerCase().includes('controller') ||
-                                name.endsWith('Controller') ||
-                                (isClass && /Controller$/.test(name));
+      const hasControllerName =
+        name.toLowerCase().includes('controller') ||
+        name.endsWith('Controller') ||
+        (isClass && /Controller$/.test(name));
 
       // For controller methods, check if the parent class is a controller
       const isControllerMethod = symbol.symbol_type === 'method' && isInControllersDirectory;
 
-      return (isClass && (isInControllersDirectory || hasControllerSignature || hasControllerName)) ||
-             isControllerMethod;
+      return (
+        (isClass && (isInControllersDirectory || hasControllerSignature || hasControllerName)) ||
+        isControllerMethod
+      );
     });
   }
 
-  private async searchComponents(query: string, repoIds?: number[], framework?: string): Promise<any[]> {
+  private async searchComponents(
+    query: string,
+    repoIds?: number[],
+    framework?: string
+  ): Promise<any[]> {
     const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
@@ -1300,13 +1404,17 @@ export class McpTools {
 
       // Enhanced path matching for jobs
       const isInJobsDirectory =
-        path.includes('/jobs/') || path.includes('\\jobs\\') ||
-        path.includes('/Jobs/') || path.includes('\\Jobs\\') ||
+        path.includes('/jobs/') ||
+        path.includes('\\jobs\\') ||
+        path.includes('/Jobs/') ||
+        path.includes('\\Jobs\\') ||
         /[\/\\][Jj]obs[\/\\]/.test(path) ||
         // Additional patterns for Laravel job structure
         /\/app\/Jobs\//i.test(path) ||
-        path.endsWith('/Jobs') || path.endsWith('\\Jobs') ||
-        path.endsWith('/jobs') || path.endsWith('\\jobs');
+        path.endsWith('/Jobs') ||
+        path.endsWith('\\Jobs') ||
+        path.endsWith('/jobs') ||
+        path.endsWith('\\jobs');
 
       // Enhanced signature matching for Laravel jobs
       const hasJobSignature =
@@ -1321,14 +1429,15 @@ export class McpTools {
         signature.includes('use SerializesModels');
 
       // Name-based detection for jobs
-      const hasJobName = name.toLowerCase().includes('job') ||
-                        name.endsWith('Job') ||
-                        /Job$/.test(name) ||
-                        // Common job naming patterns
-                        /Process[A-Z]/.test(name) ||
-                        /Send[A-Z]/.test(name) ||
-                        /Handle[A-Z]/.test(name) ||
-                        /Execute[A-Z]/.test(name);
+      const hasJobName =
+        name.toLowerCase().includes('job') ||
+        name.endsWith('Job') ||
+        /Job$/.test(name) ||
+        // Common job naming patterns
+        /Process[A-Z]/.test(name) ||
+        /Send[A-Z]/.test(name) ||
+        /Handle[A-Z]/.test(name) ||
+        /Execute[A-Z]/.test(name);
 
       return isClass && (isInJobsDirectory || hasJobSignature || hasJobName);
     });
@@ -1338,26 +1447,29 @@ export class McpTools {
   private async searchGodotScenes(query: string, repoIds?: number[]): Promise<any[]> {
     try {
       const results = [];
-      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+      for (const repoId of repoIds || [await this.getDefaultRepoId()].filter(Boolean)) {
         const scenes = await this.dbService.getGodotScenesByRepository(repoId);
-        const filteredScenes = scenes.filter(scene =>
-          scene.scene_name.toLowerCase().includes(query.toLowerCase()) ||
-          scene.scene_path.toLowerCase().includes(query.toLowerCase())
+        const filteredScenes = scenes.filter(
+          scene =>
+            scene.scene_name.toLowerCase().includes(query.toLowerCase()) ||
+            scene.scene_path.toLowerCase().includes(query.toLowerCase())
         );
 
-        results.push(...filteredScenes.map(scene => ({
-          id: scene.id,
-          name: scene.scene_name,
-          file: { path: scene.scene_path },
-          framework: 'godot',
-          entity_type: 'scene',
-          symbol_type: 'scene',
-          metadata: {
-            node_count: scene.node_count,
-            has_script: scene.has_script,
-            ...scene.metadata
-          }
-        })));
+        results.push(
+          ...filteredScenes.map(scene => ({
+            id: scene.id,
+            name: scene.scene_name,
+            file: { path: scene.scene_path },
+            framework: 'godot',
+            entity_type: 'scene',
+            symbol_type: 'scene',
+            metadata: {
+              node_count: scene.node_count,
+              has_script: scene.has_script,
+              ...scene.metadata,
+            },
+          }))
+        );
       }
       return results;
     } catch (error) {
@@ -1369,28 +1481,31 @@ export class McpTools {
   private async searchGodotNodes(query: string, repoIds?: number[]): Promise<any[]> {
     try {
       const results = [];
-      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+      for (const repoId of repoIds || [await this.getDefaultRepoId()].filter(Boolean)) {
         const scenes = await this.dbService.getGodotScenesByRepository(repoId);
         for (const scene of scenes) {
           const nodes = await this.dbService.getGodotNodesByScene(scene.id);
-          const filteredNodes = nodes.filter(node =>
-            node.node_name.toLowerCase().includes(query.toLowerCase()) ||
-            node.node_type.toLowerCase().includes(query.toLowerCase())
+          const filteredNodes = nodes.filter(
+            node =>
+              node.node_name.toLowerCase().includes(query.toLowerCase()) ||
+              node.node_type.toLowerCase().includes(query.toLowerCase())
           );
 
-          results.push(...filteredNodes.map(node => ({
-            id: node.id,
-            name: node.node_name,
-            file: { path: `scene:${node.scene_id}` }, // Reference to scene
-            framework: 'godot',
-            entity_type: 'node',
-            symbol_type: 'node',
-            metadata: {
-              node_type: node.node_type,
-              script_path: node.script_path,
-              properties: node.properties
-            }
-          })));
+          results.push(
+            ...filteredNodes.map(node => ({
+              id: node.id,
+              name: node.node_name,
+              file: { path: `scene:${node.scene_id}` }, // Reference to scene
+              framework: 'godot',
+              entity_type: 'node',
+              symbol_type: 'node',
+              metadata: {
+                node_type: node.node_type,
+                script_path: node.script_path,
+                properties: node.properties,
+              },
+            }))
+          );
         }
       }
       return results;
@@ -1403,29 +1518,32 @@ export class McpTools {
   private async searchGodotScripts(query: string, repoIds?: number[]): Promise<any[]> {
     try {
       const results = [];
-      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+      for (const repoId of repoIds || [await this.getDefaultRepoId()].filter(Boolean)) {
         const scripts = await this.dbService.getGodotScriptsByRepository(repoId);
-        const filteredScripts = scripts.filter(script =>
-          script.class_name.toLowerCase().includes(query.toLowerCase()) ||
-          script.script_path.toLowerCase().includes(query.toLowerCase()) ||
-          (script.base_class && script.base_class.toLowerCase().includes(query.toLowerCase()))
+        const filteredScripts = scripts.filter(
+          script =>
+            script.class_name.toLowerCase().includes(query.toLowerCase()) ||
+            script.script_path.toLowerCase().includes(query.toLowerCase()) ||
+            (script.base_class && script.base_class.toLowerCase().includes(query.toLowerCase()))
         );
 
-        results.push(...filteredScripts.map(script => ({
-          id: script.id,
-          name: script.class_name,
-          file: { path: script.script_path },
-          framework: 'godot',
-          entity_type: 'script',
-          symbol_type: 'class',
-          metadata: {
-            base_class: script.base_class,
-            is_autoload: script.is_autoload,
-            signals: script.signals,
-            exports: script.exports,
-            ...script.metadata
-          }
-        })));
+        results.push(
+          ...filteredScripts.map(script => ({
+            id: script.id,
+            name: script.class_name,
+            file: { path: script.script_path },
+            framework: 'godot',
+            entity_type: 'script',
+            symbol_type: 'class',
+            metadata: {
+              base_class: script.base_class,
+              is_autoload: script.is_autoload,
+              signals: script.signals,
+              exports: script.exports,
+              ...script.metadata,
+            },
+          }))
+        );
       }
       return results;
     } catch (error) {
@@ -1437,26 +1555,29 @@ export class McpTools {
   private async searchGodotAutoloads(query: string, repoIds?: number[]): Promise<any[]> {
     try {
       const results = [];
-      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+      for (const repoId of repoIds || [await this.getDefaultRepoId()].filter(Boolean)) {
         const autoloads = await this.dbService.getGodotAutoloadsByRepository(repoId);
-        const filteredAutoloads = autoloads.filter(autoload =>
-          autoload.autoload_name.toLowerCase().includes(query.toLowerCase()) ||
-          autoload.script_path.toLowerCase().includes(query.toLowerCase())
+        const filteredAutoloads = autoloads.filter(
+          autoload =>
+            autoload.autoload_name.toLowerCase().includes(query.toLowerCase()) ||
+            autoload.script_path.toLowerCase().includes(query.toLowerCase())
         );
 
-        results.push(...filteredAutoloads.map(autoload => ({
-          id: autoload.id,
-          name: autoload.autoload_name,
-          file: { path: autoload.script_path },
-          framework: 'godot',
-          entity_type: 'autoload',
-          symbol_type: 'autoload',
-          metadata: {
-            script_path: autoload.script_path,
-            script_id: autoload.script_id,
-            ...autoload.metadata
-          }
-        })));
+        results.push(
+          ...filteredAutoloads.map(autoload => ({
+            id: autoload.id,
+            name: autoload.autoload_name,
+            file: { path: autoload.script_path },
+            framework: 'godot',
+            entity_type: 'autoload',
+            symbol_type: 'autoload',
+            metadata: {
+              script_path: autoload.script_path,
+              script_id: autoload.script_id,
+              ...autoload.metadata,
+            },
+          }))
+        );
       }
       return results;
     } catch (error) {
@@ -1467,12 +1588,18 @@ export class McpTools {
 
   private getFrameworkPath(framework: string): string {
     switch (framework) {
-      case 'laravel': return 'app/';
-      case 'vue': return '.vue';
-      case 'react': return 'components/';
-      case 'node': return 'server/';
-      case 'godot': return 'scenes/';
-      default: return '';
+      case 'laravel':
+        return 'app/';
+      case 'vue':
+        return '.vue';
+      case 'react':
+        return 'components/';
+      case 'node':
+        return 'server/';
+      case 'godot':
+        return 'scenes/';
+      default:
+        return '';
     }
   }
 
@@ -1484,13 +1611,304 @@ export class McpTools {
   }
 
   private determineFramework(symbol: any): string {
-    if (symbol.file?.path?.includes('app/') || symbol.file?.path?.endsWith('.php')) return 'laravel';
-    if (symbol.file?.path?.endsWith('.vue')) return 'vue';
-    if (symbol.file?.path?.includes('components/') && symbol.file?.path?.endsWith('.tsx')) return 'react';
-    if (symbol.file?.path?.includes('server/') || symbol.file?.path?.includes('api/')) return 'node';
-    if (symbol.file?.path?.endsWith('.tscn') || symbol.file?.path?.endsWith('.godot') ||
-        (symbol.file?.path?.endsWith('.cs') && symbol.file?.path?.includes('scenes/'))) return 'godot';
+    const filePath = symbol.file?.path || '';
+
+    // Laravel detection
+    if (filePath.includes('app/') || filePath.endsWith('.php')) return 'laravel';
+
+    // Vue.js detection
+    if (filePath.endsWith('.vue')) return 'vue';
+
+    // React detection
+    if (filePath.includes('components/') && filePath.endsWith('.tsx')) return 'react';
+
+    // Node.js detection
+    if (filePath.includes('server/') || filePath.includes('api/')) return 'node';
+
+    // Enhanced Godot detection
+    if (this.isGodotFile(filePath)) return 'godot';
+
     return 'unknown';
+  }
+
+  /**
+   * Enhanced Godot framework detection
+   * Recognizes various Godot project patterns and structures
+   */
+  private isGodotFile(filePath: string): boolean {
+    // Direct Godot file types
+    if (filePath.endsWith('.tscn') || filePath.endsWith('.godot') || filePath.endsWith('.tres')) {
+      return true;
+    }
+
+    // GDScript files
+    if (filePath.endsWith('.gd')) {
+      return true;
+    }
+
+    // C# files in Godot project structures
+    if (filePath.endsWith('.cs')) {
+      // Common Godot C# directory patterns
+      const godotDirectoryPatterns = [
+        'scripts/', // Common Godot scripts directory
+        'scenes/', // Godot scenes directory
+        'addons/', // Godot addons directory
+        'autoload/', // Autoload scripts
+        'autoloads/', // Alternative autoload naming
+        'core/', // Core game systems
+        'gameplay/', // Gameplay-specific scripts
+        'ui/', // UI components
+        'managers/', // Game managers
+        'controllers/', // Game controllers
+        'services/', // Game services
+        'components/', // Game components
+        'systems/', // Game systems
+        'entities/', // Game entities
+        'data/', // Game data structures
+        'events/', // Event systems
+        'interfaces/', // Interfaces directory
+        'coordinators/', // Coordinator pattern
+        'phases/', // Game phases
+        'handlers/', // Event/phase handlers
+      ];
+
+      // Check if the file path contains any Godot-specific directory patterns
+      if (godotDirectoryPatterns.some(pattern => filePath.includes(pattern))) {
+        return true;
+      }
+
+      // Check for Godot-specific C# class patterns in the file path or symbol name
+      const godotClassPatterns = [
+        'Node', // Godot Node base class
+        'Node2D', // 2D Node
+        'Node3D', // 3D Node
+        'Control', // UI Control
+        'RigidBody', // Physics body
+        'CharacterBody', // Character controller
+        'StaticBody', // Static physics body
+        'Area', // Area/trigger
+        'CollisionShape', // Collision shapes
+        'MeshInstance', // 3D mesh
+        'Sprite', // 2D sprite
+        'AnimationPlayer', // Animation system
+        'AudioStreamPlayer', // Audio system
+        'Camera', // Camera nodes
+        'SceneTree', // Scene tree
+        'PackedScene', // Scene resources
+        'Resource', // Godot resources
+        'Singleton', // Autoload singletons
+      ];
+
+      // Check if the file path suggests Godot usage
+      if (
+        godotClassPatterns.some(pattern => filePath.toLowerCase().includes(pattern.toLowerCase()))
+      ) {
+        return true;
+      }
+    }
+
+    // Check for project.godot in parent directories (indicates Godot project root)
+    const pathParts = filePath.split('/');
+    for (let i = pathParts.length - 1; i >= 0; i--) {
+      const currentPath = pathParts.slice(0, i).join('/');
+      // This is a simple heuristic - in a real implementation, we might cache this check
+      if (currentPath && (filePath.includes('project_card_game') || filePath.includes('godot'))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Deduplicate impact items by symbol ID, keeping the highest confidence score
+   * This prevents the same symbol from being counted multiple times when it appears
+   * in multiple analysis paths (e.g., both as direct dependency and direct caller)
+   */
+  private deduplicateImpactItems(items: ImpactItem[]): ImpactItem[] {
+    const uniqueItems = new Map<number, ImpactItem>();
+
+    for (const item of items) {
+      const existingItem = uniqueItems.get(item.id);
+
+      if (!existingItem) {
+        // First occurrence of this symbol
+        uniqueItems.set(item.id, item);
+      } else {
+        // Symbol already exists, keep the one with higher confidence
+        // or if confidence is equal, prefer more specific impact types
+        const shouldReplace = this.shouldReplaceImpactItem(existingItem, item);
+        if (shouldReplace) {
+          uniqueItems.set(item.id, item);
+        }
+      }
+    }
+
+    return Array.from(uniqueItems.values());
+  }
+
+  /**
+   * Classify the impact type based on relationship type and context
+   * Provides more granular classification than just cross_stack vs direct
+   */
+  private classifyRelationshipImpact(
+    dependency: any,
+    direction: 'dependency' | 'caller'
+  ):
+    | 'direct'
+    | 'indirect'
+    | 'cross_stack'
+    | 'interface_contract'
+    | 'implementation'
+    | 'delegation' {
+    const depType = dependency.dependency_type;
+
+    // Check for cross-stack relationships first
+    if (this.isCrossStackRelationship(dependency)) {
+      return 'cross_stack';
+    }
+
+    // Classify based on dependency type
+    switch (depType) {
+      case 'implements':
+        return 'interface_contract';
+
+      case 'inherits':
+        return 'implementation';
+
+      case 'calls':
+        // Check if this is a delegation pattern (calling through service/manager)
+        if (this.isDelegationPattern(dependency)) {
+          return 'delegation';
+        }
+        return 'direct';
+
+      case 'references':
+        // Property/field references are typically direct impact
+        return 'direct';
+
+      case 'imports':
+        // Import dependencies are typically infrastructure
+        return 'direct';
+
+      default:
+        return 'direct';
+    }
+  }
+
+  /**
+   * Get additional context about the relationship
+   */
+  private getRelationshipContext(dependency: any): string {
+    const depType = dependency.dependency_type;
+    const fromSymbol = dependency.from_symbol;
+    const toSymbol = dependency.to_symbol;
+
+    const contextParts: string[] = [];
+
+    // Add direction context
+    if (fromSymbol && toSymbol) {
+      contextParts.push(`${fromSymbol.name} ${depType} ${toSymbol.name}`);
+    }
+
+    // Add file context if cross-file
+    if (
+      fromSymbol?.file?.path &&
+      toSymbol?.file?.path &&
+      fromSymbol.file.path !== toSymbol.file.path
+    ) {
+      contextParts.push('cross-file');
+    }
+
+    // Add specific patterns
+    switch (depType) {
+      case 'implements':
+        contextParts.push('interface_implementation');
+        break;
+      case 'inherits':
+        contextParts.push('class_inheritance');
+        break;
+      case 'calls':
+        if (this.isDelegationPattern(dependency)) {
+          contextParts.push('service_delegation');
+        }
+        break;
+    }
+
+    return contextParts.join(', ');
+  }
+
+  /**
+   * Detect delegation patterns (e.g., service calls, manager patterns)
+   */
+  private isDelegationPattern(dependency: any): boolean {
+    const fromSymbol = dependency.from_symbol;
+    const toSymbol = dependency.to_symbol;
+
+    if (!fromSymbol || !toSymbol) return false;
+
+    // Check for common delegation patterns
+    const delegationPatterns = [
+      'Service',
+      'Manager',
+      'Handler',
+      'Controller',
+      'Repository',
+      'Factory',
+      'Provider',
+      'Gateway',
+      'Adapter',
+      'Coordinator',
+    ];
+
+    const fromName = fromSymbol.name || '';
+    const toName = toSymbol.name || '';
+    const fromFile = fromSymbol.file?.path || '';
+    const toFile = toSymbol.file?.path || '';
+
+    // Check if calling from/to service-like classes
+    const isFromService = delegationPatterns.some(
+      pattern => fromName.includes(pattern) || fromFile.includes(pattern.toLowerCase())
+    );
+
+    const isToService = delegationPatterns.some(
+      pattern => toName.includes(pattern) || toFile.includes(pattern.toLowerCase())
+    );
+
+    return isFromService || isToService;
+  }
+
+  /**
+   * Determines whether to replace an existing impact item with a new one
+   * Prioritizes by confidence score, then by impact type specificity
+   */
+  private shouldReplaceImpactItem(existing: ImpactItem, candidate: ImpactItem): boolean {
+    // Priority 1: Higher confidence score
+    if (candidate.confidence > existing.confidence) {
+      return true;
+    }
+
+    if (candidate.confidence < existing.confidence) {
+      return false;
+    }
+
+    // Priority 2: More specific impact type (when confidence is equal)
+    // Priority order: direct > delegation > interface_contract > implementation > cross_stack > indirect
+    const impactTypePriority = {
+      direct: 6,
+      delegation: 5,
+      interface_contract: 4,
+      implementation: 3,
+      cross_stack: 2,
+      indirect: 1,
+    };
+
+    const existingPriority =
+      impactTypePriority[existing.impact_type as keyof typeof impactTypePriority] || 0;
+    const candidatePriority =
+      impactTypePriority[candidate.impact_type as keyof typeof impactTypePriority] || 0;
+
+    return candidatePriority > existingPriority;
   }
 
   // Helper methods for enhanced search
@@ -1515,7 +1933,10 @@ export class McpTools {
   }
 
   // Helper methods for impact analysis
-  private async getImpactedRoutes(symbolId: number, frameworks: Set<string>): Promise<RouteImpactItem[]> {
+  private async getImpactedRoutes(
+    symbolId: number,
+    frameworks: Set<string>
+  ): Promise<RouteImpactItem[]> {
     const routes: RouteImpactItem[] = [];
 
     try {
@@ -1555,11 +1976,12 @@ export class McpTools {
 
     try {
       const jobSymbols = await this.dbService.searchSymbols('job', undefined);
-      const filteredJobs = jobSymbols.filter(symbol =>
-        symbol.symbol_type === 'class' &&
-        (symbol.name?.toLowerCase().includes('job') ||
-         symbol.file?.path?.includes('jobs/') ||
-         symbol.file?.path?.includes('Jobs/'))
+      const filteredJobs = jobSymbols.filter(
+        symbol =>
+          symbol.symbol_type === 'class' &&
+          (symbol.name?.toLowerCase().includes('job') ||
+            symbol.file?.path?.includes('jobs/') ||
+            symbol.file?.path?.includes('Jobs/'))
       );
 
       for (const jobSymbol of filteredJobs) {
@@ -1585,13 +2007,14 @@ export class McpTools {
 
     try {
       const testSymbols = await this.dbService.searchSymbols('test', undefined);
-      const filteredTests = testSymbols.filter(symbol =>
-        symbol.file?.is_test ||
-        symbol.file?.path?.includes('test') ||
-        symbol.file?.path?.includes('Test') ||
-        symbol.file?.path?.includes('spec') ||
-        symbol.file?.path?.includes('.test.') ||
-        symbol.file?.path?.includes('.spec.')
+      const filteredTests = testSymbols.filter(
+        symbol =>
+          symbol.file?.is_test ||
+          symbol.file?.path?.includes('test') ||
+          symbol.file?.path?.includes('Test') ||
+          symbol.file?.path?.includes('spec') ||
+          symbol.file?.path?.includes('.test.') ||
+          symbol.file?.path?.includes('.spec.')
       );
 
       for (const testSymbol of filteredTests) {
@@ -1620,8 +2043,10 @@ export class McpTools {
       const dependencies = await this.dbService.getDependenciesFrom(targetSymbolId);
       const callers = await this.dbService.getDependenciesTo(targetSymbolId);
 
-      return dependencies.some(dep => dep.to_symbol_id === symbolId) ||
-             callers.some(caller => caller.from_symbol_id === symbolId);
+      return (
+        dependencies.some(dep => dep.to_symbol_id === symbolId) ||
+        callers.some(caller => caller.from_symbol_id === symbolId)
+      );
     } catch (error) {
       return false;
     }
@@ -1658,7 +2083,10 @@ export class McpTools {
       if (dependency.calling_object.startsWith('_') || dependency.calling_object.startsWith('m_')) {
         return 'private_field_call';
       }
-      if (dependency.calling_object.includes('Service') || dependency.calling_object.includes('Manager')) {
+      if (
+        dependency.calling_object.includes('Service') ||
+        dependency.calling_object.includes('Manager')
+      ) {
         return 'service_injection_call';
       }
       return 'object_method_call';
@@ -1697,42 +2125,53 @@ export class McpTools {
     }
 
     // Rank results by relevance
-    return allResults.sort((a, b) => {
-      // Prioritize exact name matches
-      const aExactMatch = a.name?.toLowerCase() === validatedArgs.query.toLowerCase();
-      const bExactMatch = b.name?.toLowerCase() === validatedArgs.query.toLowerCase();
+    return allResults
+      .sort((a, b) => {
+        // Prioritize exact name matches
+        const aExactMatch = a.name?.toLowerCase() === validatedArgs.query.toLowerCase();
+        const bExactMatch = b.name?.toLowerCase() === validatedArgs.query.toLowerCase();
 
-      if (aExactMatch && !bExactMatch) return -1;
-      if (!aExactMatch && bExactMatch) return 1;
+        if (aExactMatch && !bExactMatch) return -1;
+        if (!aExactMatch && bExactMatch) return 1;
 
-      // Prioritize symbols with qualified context (enhanced results)
-      const aHasQualified = !!(a.qualified_context || a.method_signature);
-      const bHasQualified = !!(b.qualified_context || b.method_signature);
+        // Prioritize symbols with qualified context (enhanced results)
+        const aHasQualified = !!(a.qualified_context || a.method_signature);
+        const bHasQualified = !!(b.qualified_context || b.method_signature);
 
-      if (aHasQualified && !bHasQualified) return -1;
-      if (!aHasQualified && bHasQualified) return 1;
+        if (aHasQualified && !bHasQualified) return -1;
+        if (!aHasQualified && bHasQualified) return 1;
 
-      // If class context is specified, prioritize matches
-      if (validatedArgs.class_context) {
-        const aClassMatch = a.resolved_class?.toLowerCase().includes(validatedArgs.class_context.toLowerCase());
-        const bClassMatch = b.resolved_class?.toLowerCase().includes(validatedArgs.class_context.toLowerCase());
+        // If class context is specified, prioritize matches
+        if (validatedArgs.class_context) {
+          const aClassMatch = a.resolved_class
+            ?.toLowerCase()
+            .includes(validatedArgs.class_context.toLowerCase());
+          const bClassMatch = b.resolved_class
+            ?.toLowerCase()
+            .includes(validatedArgs.class_context.toLowerCase());
 
-        if (aClassMatch && !bClassMatch) return -1;
-        if (!aClassMatch && bClassMatch) return 1;
-      }
+          if (aClassMatch && !bClassMatch) return -1;
+          if (!aClassMatch && bClassMatch) return 1;
+        }
 
-      // Sort by name as fallback
-      return (a.name || '').localeCompare(b.name || '');
-    }).slice(0, validatedArgs.limit || 100);
+        // Sort by name as fallback
+        return (a.name || '').localeCompare(b.name || '');
+      })
+      .slice(0, validatedArgs.limit || 100);
   }
 
-  private calculateRiskLevel(directImpact: ImpactItem[], transitiveImpact: ImpactItem[], routeImpact: RouteImpactItem[], jobImpact: JobImpactItem[]): string {
-    const totalImpact = directImpact.length + transitiveImpact.length + routeImpact.length + jobImpact.length;
+  private calculateRiskLevel(
+    directImpact: ImpactItem[],
+    transitiveImpact: ImpactItem[],
+    routeImpact: RouteImpactItem[],
+    jobImpact: JobImpactItem[]
+  ): string {
+    const totalImpact =
+      directImpact.length + transitiveImpact.length + routeImpact.length + jobImpact.length;
 
     if (totalImpact > 20) return 'critical';
     if (totalImpact > 10) return 'high';
     if (totalImpact > 5) return 'medium';
     return 'low';
   }
-
 }
