@@ -45,13 +45,13 @@ const program = new Command();
 
 program
   .name('claude-compass')
-  .description('AI-native development environment - analyze codebases and build contextual graphs')
+  .description('AI-native development environment - analyze codebases and build contextual graphs\nSupports: JavaScript, TypeScript, Vue.js, React, Next.js, Node.js, PHP, Laravel, C#, and Godot')
   .version('0.1.0');
 
 // Analyze command
 program
   .command('analyze')
-  .description('Analyze a repository and build graphs')
+  .description('Analyze a repository and build comprehensive graphs for AI assistants\nAutomatically detects: JavaScript/TypeScript, Vue.js, React, Next.js, Node.js, PHP/Laravel, C#/Godot projects')
   .argument('<path>', 'Path to the repository to analyze')
   .option('--no-test-files', 'Exclude test files from analysis')
   .option('--include-node-modules', 'Include node_modules in analysis (not recommended)')

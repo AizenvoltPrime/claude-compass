@@ -678,8 +678,17 @@ export class GraphBuilder {
 
     await traverse(repositoryPath);
 
+    // Generate file extension statistics
+    const extensionStats: Record<string, number> = {};
+    files.forEach(file => {
+      const ext = path.extname(file.path);
+      extensionStats[ext] = (extensionStats[ext] || 0) + 1;
+    });
+
     this.logger.info('File discovery completed', {
       totalFiles: files.length,
+      extensionStats,
+      allowedExtensions: options.fileExtensions,
       patternsUsed: compassIgnore.getPatterns()
     });
 
@@ -780,6 +789,41 @@ export class GraphBuilder {
           success: false
         });
       }
+    }
+
+    // Generate parsing statistics
+    const parseStats = {
+      totalFiles: files.length,
+      successfulParses: results.filter(r => r.success !== false && r.errors.length === 0).length,
+      failedParses: results.filter(r => r.success === false || r.errors.length > 0).length,
+      totalSymbols: results.reduce((sum, r) => sum + r.symbols.length, 0),
+      totalDependencies: results.reduce((sum, r) => sum + r.dependencies.length, 0),
+      byExtension: {} as Record<string, { files: number; symbols: number; errors: number }>
+    };
+
+    // Calculate per-extension statistics
+    results.forEach(result => {
+      const ext = path.extname(result.filePath);
+      if (!parseStats.byExtension[ext]) {
+        parseStats.byExtension[ext] = { files: 0, symbols: 0, errors: 0 };
+      }
+      parseStats.byExtension[ext].files++;
+      parseStats.byExtension[ext].symbols += result.symbols.length;
+      parseStats.byExtension[ext].errors += result.errors.length;
+    });
+
+    this.logger.info('File parsing completed', parseStats);
+
+    // Log any significant parsing failures
+    if (parseStats.failedParses > 0) {
+      const failedFiles = results
+        .filter(r => r.success === false || r.errors.length > 0)
+        .map(r => ({ path: r.filePath, errors: r.errors.length }));
+
+      this.logger.warn('Parsing failures detected', {
+        failedCount: parseStats.failedParses,
+        failedFiles: failedFiles.slice(0, 10) // Limit to first 10 for readability
+      });
     }
 
     return results;
@@ -1489,7 +1533,7 @@ export class GraphBuilder {
     const ext = path.extname(filePath);
 
     // Use provided extensions if specified, otherwise fall back to defaults
-    const allowedExtensions = options.fileExtensions || ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php'];
+    const allowedExtensions = options.fileExtensions || ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php', '.cs'];
 
     this.logger.info('Checking file inclusion', {
       filePath,
@@ -1813,7 +1857,7 @@ export class GraphBuilder {
       includeTestFiles: options.includeTestFiles ?? true,
       includeNodeModules: options.includeNodeModules ?? false,
       maxFiles: options.maxFiles ?? 10000,
-      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php'],
+      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php', '.cs'],
 
       fileSizePolicy: options.fileSizePolicy || this.createDefaultFileSizePolicy(options),
       chunkOverlapLines: options.chunkOverlapLines ?? 100,

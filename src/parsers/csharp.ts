@@ -94,17 +94,59 @@ export class CSharpParser extends ChunkedParser {
     }
 
     try {
+      // Validate syntax tree health
+      const validationErrors = this.validateSyntaxTree(tree.rootNode, filePath);
+
       const symbols = this.extractSymbols(tree.rootNode, content);
       const dependencies = this.extractDependencies(tree.rootNode, content);
       const imports = this.extractImports(tree.rootNode, content);
       const exports = this.extractExports(tree.rootNode, content);
+
+      // Log parsing statistics for C# files
+      logger.debug('C# parsing completed', {
+        filePath,
+        symbolsFound: symbols.length,
+        dependenciesFound: dependencies.length,
+        importsFound: imports.length,
+        exportsFound: exports.length,
+        syntaxErrors: validationErrors.length,
+        hasErrors: tree.rootNode.hasError
+      });
+
+      // Warn if no symbols found in a substantial file (might indicate parsing issues)
+      if (symbols.length === 0 && content.length > 1000) {
+        validationErrors.push({
+          message: 'No symbols extracted from substantial C# file - possible parsing issue',
+          line: 1,
+          column: 1,
+          severity: 'warning'
+        });
+      }
 
       return {
         symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== Visibility.PRIVATE),
         dependencies,
         imports,
         exports,
-        errors: []
+        errors: validationErrors
+      };
+    } catch (error) {
+      logger.error('C# symbol extraction failed', {
+        filePath,
+        error: (error as Error).message
+      });
+
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [{
+          message: `Symbol extraction failed: ${(error as Error).message}`,
+          line: 1,
+          column: 1,
+          severity: 'error'
+        }]
       };
     } finally {
       // Tree-sitter trees are automatically garbage collected in Node.js
@@ -627,6 +669,75 @@ export class CSharpParser extends ChunkedParser {
       export_type: 'named',
       line_number: node.startPosition.row + 1
     };
+  }
+
+  // Validation methods
+
+  /**
+   * Validate syntax tree health and detect common C# parsing issues
+   */
+  private validateSyntaxTree(rootNode: Parser.SyntaxNode, filePath: string): ParseError[] {
+    const errors: ParseError[] = [];
+
+    // Check for general syntax errors
+    if (rootNode.hasError) {
+      const errorNodes = this.findErrorNodes(rootNode);
+      for (const errorNode of errorNodes) {
+        errors.push({
+          message: `C# syntax error at line ${errorNode.startPosition.row + 1}`,
+          line: errorNode.startPosition.row + 1,
+          column: errorNode.startPosition.column + 1,
+          severity: 'error'
+        });
+      }
+    }
+
+    // Check for common C# constructs that should be present
+    const hasNamespaceOrClass = this.findNodesOfType(rootNode, 'namespace_declaration').length > 0 ||
+                                this.findNodesOfType(rootNode, 'class_declaration').length > 0 ||
+                                this.findNodesOfType(rootNode, 'interface_declaration').length > 0 ||
+                                this.findNodesOfType(rootNode, 'struct_declaration').length > 0;
+
+    if (!hasNamespaceOrClass) {
+      // This might be okay for some C# files (like global using files), so make it a warning
+      errors.push({
+        message: 'No namespace, class, interface, or struct declarations found - verify C# file structure',
+        line: 1,
+        column: 1,
+        severity: 'warning'
+      });
+    }
+
+    // Check for potential parsing issues with using directives
+    const usingNodes = this.findNodesOfType(rootNode, 'using_directive');
+    if (usingNodes.length === 0 && filePath.includes('.cs')) {
+      // Most C# files should have at least some using directives
+      errors.push({
+        message: 'No using directives found - verify file is valid C#',
+        line: 1,
+        column: 1,
+        severity: 'warning'
+      });
+    }
+
+    return errors;
+  }
+
+  /**
+   * Find all ERROR nodes in the syntax tree
+   */
+  private findErrorNodes(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
+    const errorNodes: Parser.SyntaxNode[] = [];
+
+    if (node.type === 'ERROR') {
+      errorNodes.push(node);
+    }
+
+    for (const child of node.children) {
+      errorNodes.push(...this.findErrorNodes(child));
+    }
+
+    return errorNodes;
   }
 
   // Utility methods
