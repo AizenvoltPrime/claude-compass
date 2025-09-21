@@ -10,9 +10,9 @@ export interface TransitiveAnalysisOptions {
   includeTypes?: DependencyType[];
   excludeTypes?: DependencyType[];
   confidenceThreshold?: number;
-  // NEW: Cross-stack options
   includeCrossStack?: boolean;
   crossStackConfidenceThreshold?: number;
+  showCallChains?: boolean;
 }
 
 export interface TransitiveResult {
@@ -21,6 +21,7 @@ export interface TransitiveResult {
   depth: number;
   totalConfidence: number; // Confidence score propagated through the path
   dependencies: DependencyWithSymbols[];
+  call_chain?: string; // Human-readable call chain format (when requested)
 }
 
 export interface TransitiveAnalysisResult {
@@ -81,7 +82,6 @@ export class TransitiveAnalyzer {
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
     const confidenceThreshold = options.confidenceThreshold || this.DEFAULT_CONFIDENCE_THRESHOLD;
 
-    // NEW: Cross-stack specific handling
     const includeCrossStack = options.includeCrossStack || false;
     const crossStackThreshold = options.crossStackConfidenceThreshold || 0.7;
 
@@ -134,22 +134,14 @@ export class TransitiveAnalyzer {
 
     maxDepthReached = Math.max(...results.map(r => r.depth), 0);
 
-    const executionTime = Date.now() - startTime;
-
-    logger.debug('Completed transitive caller analysis', {
-      symbolId,
-      totalResults: results.length,
-      maxDepthReached,
-      cyclesDetected: cycles.size,
-      executionTimeMs: executionTime
-    });
+    const enhancedResults = await this.enhanceResultsWithCallChains(results, options.showCallChains || false);
 
     return {
-      results,
+      results: enhancedResults,
       maxDepthReached,
-      totalPaths: results.length,
+      totalPaths: enhancedResults.length,
       cyclesDetected: cycles.size,
-      executionTimeMs: executionTime
+      executionTimeMs: Date.now() - startTime
     };
   }
 
@@ -197,23 +189,14 @@ export class TransitiveAnalyzer {
 
     maxDepthReached = Math.max(...results.map(r => r.depth), 0);
 
-    const executionTime = Date.now() - startTime;
-
-    logger.debug('Completed cross-stack transitive caller analysis', {
-      symbolId,
-      totalResults: results.length,
-      maxDepthReached,
-      cyclesDetected: cycles.size,
-      executionTimeMs: executionTime,
-      crossStackThreshold
-    });
+    const enhancedResults = await this.enhanceResultsWithCallChains(results, options.showCallChains || false);
 
     return {
-      results,
+      results: enhancedResults,
       maxDepthReached,
-      totalPaths: results.length,
+      totalPaths: enhancedResults.length,
       cyclesDetected: cycles.size,
-      executionTimeMs: executionTime
+      executionTimeMs: Date.now() - startTime
     };
   }
 
@@ -276,14 +259,13 @@ export class TransitiveAnalyzer {
         });
 
         // Recurse to find callers of this caller
-        const newVisited = new Set(visited);
         await this.traverseCallersWithCrossStackSupport(
           fromSymbolId,
           newPath,
           currentDepth + 1,
           maxDepth,
           newConfidence,
-          newVisited,
+          visited, // Use shared visited set instead of creating new one
           cycles,
           results,
           options,
@@ -318,14 +300,13 @@ export class TransitiveAnalyzer {
           });
 
           // Recurse to find callers of this cross-stack caller
-          const newVisited = new Set(visited);
           await this.traverseCallersWithCrossStackSupport(
             fromSymbolId,
             newPath,
             currentDepth + 1,
             maxDepth,
             newConfidence,
-            newVisited,
+            visited, // Use shared visited set instead of newVisited
             cycles,
             results,
             options,
@@ -380,22 +361,14 @@ export class TransitiveAnalyzer {
 
     maxDepthReached = Math.max(...results.map(r => r.depth), 0);
 
-    const executionTime = Date.now() - startTime;
-
-    logger.debug('Completed transitive dependency analysis', {
-      symbolId,
-      totalResults: results.length,
-      maxDepthReached,
-      cyclesDetected: cycles.size,
-      executionTimeMs: executionTime
-    });
+    const enhancedResults = await this.enhanceResultsWithCallChains(results, options.showCallChains || false);
 
     return {
-      results,
+      results: enhancedResults,
       maxDepthReached,
-      totalPaths: results.length,
+      totalPaths: enhancedResults.length,
       cyclesDetected: cycles.size,
-      executionTimeMs: executionTime
+      executionTimeMs: Date.now() - startTime
     };
   }
 
@@ -899,6 +872,165 @@ export class TransitiveAnalyzer {
         } : undefined
       } : undefined
     })) as DependencyWithSymbols[];
+  }
+
+  /**
+   * Format a call chain from symbol ID path to human-readable format
+   * Converts [123, 456, 789] to "DeckController._Ready() → InitializeServices() → CardManager.SetHandPositions()"
+   */
+  async formatCallChain(
+    path: number[],
+    includeConfidence: boolean = true,
+    confidenceMap?: Map<number, number>
+  ): Promise<string> {
+    if (path.length === 0) {
+      return '';
+    }
+
+    try {
+      // Resolve symbol names efficiently in batch
+      const symbolNames = await this.resolveSymbolNames(path);
+
+      // Build the call chain string
+      const chainParts: string[] = [];
+
+      for (let i = 0; i < path.length; i++) {
+        const symbolId = path[i];
+        const symbolInfo = symbolNames.get(symbolId);
+
+        if (!symbolInfo) {
+          chainParts.push(`Symbol(${symbolId})`);
+          continue;
+        }
+
+        let part = symbolInfo.name;
+
+        // Add class context for methods
+        if (symbolInfo.className && symbolInfo.className !== symbolInfo.name) {
+          part = `${symbolInfo.className}.${symbolInfo.name}`;
+        }
+
+        // Add parentheses for functions/methods
+        if (symbolInfo.isCallable) {
+          part += '()';
+        }
+
+        // Add confidence score if requested and available
+        if (includeConfidence && confidenceMap?.has(symbolId)) {
+          const confidence = confidenceMap.get(symbolId)!;
+          part += ` [${confidence.toFixed(2)}]`;
+        }
+
+        // Add file context for cross-file calls
+        if (i > 0 && symbolInfo.filePath !== symbolNames.get(path[i-1])?.filePath) {
+          part += ` (${this.getShortFilePath(symbolInfo.filePath)})`;
+        }
+
+        chainParts.push(part);
+      }
+
+      return chainParts.join(' → ');
+    } catch (error) {
+      logger.warn('Failed to format call chain', {
+        path,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return `Call chain [${path.join(' → ')}]`;
+    }
+  }
+
+  /**
+   * Resolve symbol names from IDs efficiently using batch query
+   */
+  private async resolveSymbolNames(symbolIds: number[]): Promise<Map<number, {
+    name: string;
+    className?: string;
+    isCallable: boolean;
+    filePath: string;
+  }>> {
+    const symbolMap = new Map();
+
+    if (symbolIds.length === 0) {
+      return symbolMap;
+    }
+
+    const query = this.db('symbols')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .whereIn('symbols.id', symbolIds)
+      .select(
+        'symbols.id',
+        'symbols.name',
+        'symbols.symbol_type',
+        'symbols.signature',
+        'files.path as file_path'
+      );
+
+    const results = await query;
+
+    for (const row of results) {
+      const isCallable = ['function', 'method'].includes(row.symbol_type);
+
+      // Extract class name from signature for methods
+      let className: string | undefined;
+      if (row.symbol_type === 'method' && row.signature) {
+        const match = row.signature.match(/class\s+(\w+)/);
+        if (match) {
+          className = match[1];
+        }
+      }
+
+      symbolMap.set(row.id, {
+        name: row.name,
+        className,
+        isCallable,
+        filePath: row.file_path || 'unknown'
+      });
+    }
+
+    return symbolMap;
+  }
+
+  /**
+   * Get short file path for display (last 2 directories + filename)
+   */
+  private getShortFilePath(fullPath: string): string {
+    const parts = fullPath.split(/[/\\]/);
+    return parts.length > 3
+      ? `.../${parts.slice(-2).join('/')}`
+      : fullPath;
+  }
+
+  /**
+   * Enhance transitive results with call chains when requested
+   */
+  private async enhanceResultsWithCallChains(
+    results: TransitiveResult[],
+    showCallChains: boolean
+  ): Promise<TransitiveResult[]> {
+    if (!showCallChains || results.length === 0) {
+      return results;
+    }
+
+    // Build confidence map for all paths
+    const confidenceMap = new Map<number, number>();
+    for (const result of results) {
+      confidenceMap.set(result.symbolId, result.totalConfidence);
+    }
+
+    // Format call chains for all results
+    const enhancedResults = await Promise.all(
+      results.map(async (result) => {
+        const fullPath = [...result.path, result.symbolId];
+        const callChain = await this.formatCallChain(fullPath, true, confidenceMap);
+
+        return {
+          ...result,
+          call_chain: callChain
+        };
+      })
+    );
+
+    return enhancedResults;
   }
 
   /**

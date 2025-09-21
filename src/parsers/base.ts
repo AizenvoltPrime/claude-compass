@@ -39,6 +39,10 @@ export interface ParsedDependency {
   method_signature?: string;
   file_context?: string;
   namespace_context?: string;
+  // Parameter context fields (Enhancement 2)
+  parameter_context?: string;
+  call_instance_id?: string;
+  parameter_types?: string[];
 }
 
 export interface ParsedImport {

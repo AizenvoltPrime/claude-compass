@@ -51,6 +51,9 @@ export interface Dependency {
   dependency_type: DependencyType;
   line_number?: number;
   confidence: number;
+  parameter_context?: string;
+  call_instance_id?: string;
+  parameter_types?: string[];
   created_at: Date;
   updated_at: Date;
 }
@@ -63,6 +66,10 @@ export interface EnhancedDependency extends Dependency {
   method_signature?: string;
   file_context?: string;
   namespace_context?: string;
+  // Call chain visualization fields (Enhancement 1)
+  call_chain?: string;
+  path?: number[];
+  depth?: number;
 }
 
 // Enum types
@@ -184,13 +191,16 @@ export interface CreateDependency {
   dependency_type: DependencyType;
   line_number?: number;
   confidence?: number;
+  parameter_context?: string;
+  call_instance_id?: string;
+  parameter_types?: string[];
+  calling_object?: string;
+  qualified_context?: string;
 }
 
 // Enhanced dependency creation interface with rich context for advanced C# analysis
 export interface CreateEnhancedDependency extends CreateDependency {
-  calling_object?: string; // "_cardManager", "this.service"
   resolved_class?: string; // "CardManager", "UserService"
-  qualified_context?: string; // "CardManager.SetHandPositions"
   method_signature?: string; // Full signature with parameters
   file_context?: string; // File path for cross-file analysis
   namespace_context?: string; // C# namespace information
@@ -220,6 +230,10 @@ export interface SymbolWithFileAndRepository extends Symbol {
 export interface DependencyWithSymbols extends Dependency {
   from_symbol?: SymbolWithFile;
   to_symbol?: SymbolWithFile;
+  // Call chain visualization fields (Enhancement 1)
+  call_chain?: string;
+  path?: number[];
+  depth?: number;
 }
 
 // Enhanced dependency interface with rich context (Phase 4)
@@ -230,6 +244,10 @@ export interface EnhancedDependencyWithSymbols extends DependencyWithSymbols {
   method_signature?: string;
   file_context?: string;
   namespace_context?: string;
+  // Call chain visualization fields (Enhancement 1)
+  call_chain?: string;
+  path?: number[];
+  depth?: number;
 }
 
 // Framework-specific models
