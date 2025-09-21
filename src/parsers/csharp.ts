@@ -21,6 +21,78 @@ import { SymbolType, DependencyType, Visibility } from '../database/models';
 const logger = createComponentLogger('csharp-parser');
 
 /**
+ * C# Parse State Interface for tracking parsing context
+ */
+interface CSharpParseState {
+  // String literal tracking
+  inString: 'none' | 'single' | 'double' | 'verbatim' | 'interpolated';
+  stringDelimiter: string;
+  escapeNext: boolean;
+
+  // Comment tracking
+  inComment: 'none' | 'single' | 'multi' | 'xml';
+
+  // Nesting level tracking
+  braceLevel: number;
+  parenLevel: number;
+  bracketLevel: number;
+  angleLevel: number; // For generics
+
+  // C# structure tracking
+  inUsings: boolean;
+  inNamespace: boolean;
+  inClass: boolean;
+  inMethod: boolean;
+  inProperty: boolean;
+  inInterface: boolean;
+  inStruct: boolean;
+  inEnum: boolean;
+
+  // Safe boundary positions
+  lastUsingEnd: number;
+  lastNamespaceEnd: number;
+  lastClassEnd: number;
+  lastMethodEnd: number;
+  lastPropertyEnd: number;
+  lastStatementEnd: number;
+  lastBlockEnd: number;
+  lastEnumEnd: number;
+  lastInterfaceEnd: number;
+  lastStructEnd: number;
+
+  // Context preservation
+  usingDirectives: string[];
+  namespaceContext: string;
+  classContext: string;
+  inheritanceContext: string;
+  currentIndentLevel: number;
+}
+
+/**
+ * Chunk validation result interface
+ */
+interface ChunkValidation {
+  isValid: boolean;
+  issues: string[];
+  hasCompleteUsings: boolean;
+  hasBalancedBraces: boolean;
+  hasSplitClass: boolean;
+}
+
+/**
+ * Top-level declaration interface for AST-based chunking
+ */
+interface TopLevelDeclaration {
+  type: string;
+  startPos: number;
+  endPos: number;
+  startLine: number;
+  endLine: number;
+  name: string;
+  depth: number; // Nesting depth (0 for top-level)
+}
+
+/**
  * C#-specific parser using Tree-sitter with chunked parsing support
  * Handles all major C# language constructs including classes, interfaces,
  * methods, properties, fields, events, delegates, and namespaces
@@ -59,12 +131,121 @@ export class CSharpParser extends ChunkedParser {
     // Check if chunking should be used and is enabled
     if (chunkedOptions.enableChunking !== false &&
         content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
+      // Special case: Check if file contains a single large class that can't be chunked
+      const declarations = this.findTopLevelDeclarations(content);
+      const nonUsingDeclarations = declarations.filter(d => d.type !== 'using_block');
+
+      // Check if we have classes that are too large to chunk
+      const largeDeclarations = nonUsingDeclarations.filter(d =>
+        (d.type === 'class_declaration' || d.type === 'namespace_declaration') &&
+        d.endPos - d.startPos + 1 > this.DEFAULT_CHUNK_SIZE
+      );
+
+      logger.debug('Checking for large declarations', {
+        totalDeclarations: nonUsingDeclarations.length,
+        largeDeclarations: largeDeclarations.map(d => ({
+          name: d.name,
+          type: d.type,
+          size: d.endPos - d.startPos + 1
+        }))
+      });
+
+      // If file has large declarations that would be broken by chunking, parse as single oversized chunk
+      // This happens when we have a very large class that can't be split
+      if (largeDeclarations.length > 0) {
+        // Check if the large declarations contain most of the file content
+        const totalLargeSize = largeDeclarations.reduce((sum, d) => sum + (d.endPos - d.startPos + 1), 0);
+        const fileSize = content.length;
+
+        // If large declarations are more than 80% of file, parse as single chunk
+        if (totalLargeSize > fileSize * 0.8) {
+          logger.info('Processing file with large class/namespace as single oversized chunk', {
+            declarationCount: nonUsingDeclarations.length,
+            largeDeclarationSize: totalLargeSize,
+            fileSize: fileSize,
+            percentage: Math.round(totalLargeSize * 100 / fileSize)
+          });
+          // Bypass the size check by parsing directly
+          const tree = this.parser.parse(content);
+          const result = this.extractFromTree(tree, content, filePath, chunkedOptions);
+          return result;
+        }
+      }
+
       const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
       return this.convertMergedResult(chunkedResult);
     }
 
     // For smaller files or when chunking is disabled, use direct parsing
     return this.parseFileDirectly(filePath, content, chunkedOptions);
+  }
+
+  /**
+   * Extract symbols and dependencies directly from a parsed tree
+   */
+  private extractFromTree(tree: Parser.Tree | null, content: string, filePath: string, options?: ChunkedParseOptions): ParseResult {
+    const validatedOptions = this.validateOptions(options);
+
+    if (!tree || !tree.rootNode) {
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [{
+          message: 'Failed to parse syntax tree',
+          line: 1,
+          column: 1,
+          severity: 'error'
+        }]
+      };
+    }
+
+    try {
+      // Validate syntax tree health
+      const validationErrors = this.validateSyntaxTree(tree.rootNode, filePath);
+
+      const symbols = this.extractSymbols(tree.rootNode, content);
+      const dependencies = this.extractDependencies(tree.rootNode, content);
+      const imports = this.extractImports(tree.rootNode, content);
+      const exports = this.extractExports(tree.rootNode, content);
+
+      logger.info('C# parsing completed for large file', {
+        filePath,
+        symbolsFound: symbols.length,
+        dependenciesFound: dependencies.length,
+        importsFound: imports.length,
+        exportsFound: exports.length,
+        syntaxErrors: validationErrors.length,
+        hasErrors: tree.rootNode.hasError
+      });
+
+      return {
+        symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== Visibility.PRIVATE),
+        dependencies,
+        imports,
+        exports,
+        errors: validationErrors
+      };
+    } catch (error) {
+      logger.error('C# symbol extraction failed', {
+        filePath,
+        error: (error as Error).message
+      });
+
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [{
+          message: `Symbol extraction failed: ${(error as Error).message}`,
+          line: 1,
+          column: 1,
+          severity: 'error'
+        }]
+      };
+    }
   }
 
   /**
@@ -724,13 +905,23 @@ export class CSharpParser extends ChunkedParser {
     // Check for potential parsing issues with using directives
     const usingNodes = this.findNodesOfType(rootNode, 'using_directive');
     if (usingNodes.length === 0 && filePath.includes('.cs')) {
-      // Most C# files should have at least some using directives
-      errors.push({
-        message: 'No using directives found - verify file is valid C#',
-        line: 1,
-        column: 1,
-        severity: 'warning'
-      });
+      // Check if this file might legitimately not need using directives
+      const hasNamespace = this.findNodesOfType(rootNode, 'namespace_declaration').length > 0;
+      const hasClasses = this.findNodesOfType(rootNode, 'class_declaration').length > 0;
+      const hasInterfaces = this.findNodesOfType(rootNode, 'interface_declaration').length > 0;
+      const hasEnums = this.findNodesOfType(rootNode, 'enum_declaration').length > 0;
+      const hasStructs = this.findNodesOfType(rootNode, 'struct_declaration').length > 0;
+
+      // Only warn if the file has no meaningful C# constructs at all
+      // Simple enums, interfaces with primitives, etc. often don't need using directives
+      if (!hasNamespace && !hasClasses && !hasInterfaces && !hasEnums && !hasStructs) {
+        errors.push({
+          message: 'No using directives or C# declarations found - verify file is valid C#',
+          line: 1,
+          column: 1,
+          severity: 'warning'
+        });
+      }
     }
 
     return errors;
@@ -920,51 +1111,348 @@ export class CSharpParser extends ChunkedParser {
 
   // Chunked parsing methods
 
+  /**
+   * Find all top-level declarations in the content using Tree-sitter AST
+   * This is used for intelligent chunk boundary detection
+   */
+  private findTopLevelDeclarations(content: string): TopLevelDeclaration[] {
+    const declarations: TopLevelDeclaration[] = [];
+
+    try {
+      // Parse the content directly with Tree-sitter to get AST
+      // We bypass the normal parseContent to avoid size checks since we need the full file AST
+      const tree = this.parser.parse(content);
+      if (!tree || !tree.rootNode) {
+        logger.warn('Failed to parse content for top-level declarations');
+        return declarations;
+      }
+
+      // Types of top-level constructs we want to preserve intact
+      const topLevelTypes = [
+        'namespace_declaration',
+        'class_declaration',
+        'interface_declaration',
+        'struct_declaration',
+        'enum_declaration',
+        'delegate_declaration'
+      ];
+
+      // Also track file-scoped namespace declarations (C# 10+)
+      const fileScopedNamespace = this.findNodesOfType(tree.rootNode, 'file_scoped_namespace_declaration');
+
+      // Process each type of declaration
+      for (const type of topLevelTypes) {
+        const nodes = this.findNodesOfType(tree.rootNode, type);
+
+        for (const node of nodes) {
+          // Calculate nesting depth
+          let depth = 0;
+          let parent = node.parent;
+          while (parent) {
+            if (topLevelTypes.includes(parent.type)) {
+              depth++;
+            }
+            parent = parent.parent;
+          }
+
+          // Extract declaration name
+          const nameNode = node.childForFieldName('name');
+          const name = nameNode ? this.getNodeText(nameNode, content) : '<anonymous>';
+
+          declarations.push({
+            type,
+            startPos: node.startIndex,
+            endPos: node.endIndex,
+            startLine: node.startPosition.row + 1,
+            endLine: node.endPosition.row + 1,
+            name,
+            depth
+          });
+        }
+      }
+
+      // Sort declarations by position
+      declarations.sort((a, b) => a.startPos - b.startPos);
+
+      // Add using directives as a special "declaration" to preserve them
+      const usingNodes = this.findNodesOfType(tree.rootNode, 'using_directive');
+      if (usingNodes.length > 0) {
+        const firstUsing = usingNodes[0];
+        const lastUsing = usingNodes[usingNodes.length - 1];
+
+        // Group all using directives together
+        declarations.unshift({
+          type: 'using_block',
+          startPos: firstUsing.startIndex,
+          endPos: lastUsing.endIndex,
+          startLine: firstUsing.startPosition.row + 1,
+          endLine: lastUsing.endPosition.row + 1,
+          name: 'using_directives',
+          depth: 0
+        });
+      }
+
+      return declarations;
+    } catch (error) {
+      logger.error('Error finding top-level declarations', { error: (error as Error).message });
+      return declarations;
+    }
+  }
+
+  /**
+   * Extract declaration name for context preservation
+   */
+  private extractDeclarationName(node: Parser.SyntaxNode, content: string): string {
+    const nameNode = node.childForFieldName('name');
+    return nameNode ? this.getNodeText(nameNode, content) : '<anonymous>';
+  }
+
   protected getChunkBoundaries(content: string, maxChunkSize: number): number[] {
     const boundaries: number[] = [];
-    // Search within 85% of max size for safe boundaries
-    const searchLimit = Math.floor(maxChunkSize * 0.85);
-    const searchContent = content.substring(0, Math.min(searchLimit, content.length));
 
-    // C#-specific boundary patterns in order of preference
-    const boundaryPatterns = [
-      // End of namespace declarations
-      /^\s*}\s*(?:\/\/.*)?$\s*^\s*namespace\s+/gm,
-      // End of class/interface/struct declarations
-      /^\s*}\s*(?:\/\/.*)?$\s*^\s*(?:public\s+|private\s+|internal\s+|protected\s+)?(?:partial\s+)?(?:class|interface|struct)\s+/gm,
-      // End of method declarations with proper closure
-      /^\s*}\s*(?:\/\/.*)?$\s*^\s*(?:public\s+|private\s+|internal\s+|protected\s+)?(?:static\s+|virtual\s+|override\s+|abstract\s+)?[\w<>\[\]]+\s+\w+\s*\(/gm,
-      // End of property declarations
-      /^\s*}\s*(?:\/\/.*)?$\s*^\s*(?:public\s+|private\s+|internal\s+|protected\s+)?(?:static\s+)?[\w<>\[\]]+\s+\w+\s*{/gm,
-      // Using directives
-      /^using\s+[\w\.]+;\s*(?:\/\/.*)?$/gm,
-      // Single-line comments
-      /\/\/.*$/gm,
-      // Multi-line comment endings
-      /\*\/\s*$/gm
-    ];
+    // First attempt: Use AST-based chunking
+    const astBoundaries = this.getASTBasedBoundaries(content, maxChunkSize);
+    if (astBoundaries.length > 0) {
+      return astBoundaries;
+    }
 
-    for (const pattern of boundaryPatterns) {
-      let match: RegExpExecArray | null;
-      pattern.lastIndex = 0; // Reset regex state
+    // Fallback: Use improved state-based chunking with strong class boundary preference
+    logger.warn('AST-based chunking failed, using fallback state-based approach');
+    return this.getFallbackBoundaries(content, maxChunkSize);
+  }
 
-      while ((match = pattern.exec(searchContent)) !== null) {
-        const position = match.index + match[0].length;
+  /**
+   * Get chunk boundaries using AST analysis to ensure complete declarations
+   */
+  private getASTBasedBoundaries(content: string, maxChunkSize: number): number[] {
+    const boundaries: number[] = [];
 
-        // Ensure boundary is at a reasonable position
-        if (position > maxChunkSize * 0.3 && position < searchLimit) {
-          boundaries.push(position);
+    // Find all top-level declarations
+    const declarations = this.findTopLevelDeclarations(content);
+
+    if (declarations.length === 0) {
+      logger.warn('No top-level declarations found for AST-based chunking');
+      return boundaries;
+    }
+
+    // Filter out the using block and process declarations
+    const usingBlock = declarations.find(d => d.type === 'using_block');
+    const nonUsingDeclarations = declarations.filter(d => d.type !== 'using_block');
+
+    // If we only have using directives, no chunking needed
+    if (nonUsingDeclarations.length === 0) {
+      return boundaries;
+    }
+
+    // Special case: if entire file is just one large class/namespace, we need to handle it specially
+    if (nonUsingDeclarations.length === 1) {
+      const singleDecl = nonUsingDeclarations[0];
+      if (singleDecl.endPos - singleDecl.startPos + 1 > maxChunkSize) {
+        logger.warn('File contains single large declaration exceeding chunk size', {
+          declaration: singleDecl.name,
+          size: singleDecl.endPos - singleDecl.startPos + 1
+        });
+        // For a single large declaration, we'll need to parse it as an oversized chunk
+        // Return empty boundaries to process the entire file as one chunk
+        return [];
+      }
+    }
+
+    // Extract using directives to preserve in each chunk
+    const usingDirectives = usingBlock ? content.substring(usingBlock.startPos, usingBlock.endPos + 1) : '';
+    const usingSize = usingDirectives.length;
+
+    // Start after using directives
+    let currentChunkStart = usingBlock ? usingBlock.endPos + 1 : 0;
+    let currentChunkSize = 0;
+
+    // Group declarations into chunks
+    for (let i = 0; i < nonUsingDeclarations.length; i++) {
+      const decl = nonUsingDeclarations[i];
+
+      // Calculate size including the declaration
+      const declSize = decl.endPos - decl.startPos + 1;
+      const totalSizeWithUsings = currentChunkSize + declSize + usingSize;
+
+      // Check if we need to create a new chunk
+      if (currentChunkSize > 0 && totalSizeWithUsings > maxChunkSize) {
+        // Create boundary before current declaration
+        const boundaryPos = decl.startPos - 1;
+
+        // Ensure boundary is after previous content
+        if (boundaryPos > currentChunkStart) {
+          boundaries.push(boundaryPos);
+          currentChunkStart = decl.startPos;
+          currentChunkSize = 0;
+        }
+      }
+
+      // For very large single declarations that exceed chunk size
+      if (declSize + usingSize > maxChunkSize) {
+        logger.warn('Single declaration exceeds chunk size, will process as single chunk', {
+          declaration: decl.name,
+          size: declSize,
+          maxChunkSize
+        });
+
+        // If this is not the first declaration in chunk, create boundary before it
+        if (currentChunkSize > 0) {
+          const boundaryPos = decl.startPos - 1;
+          if (boundaryPos > currentChunkStart) {
+            boundaries.push(boundaryPos);
+            currentChunkStart = decl.startPos;
+            currentChunkSize = 0;
+          }
         }
 
-        // Prevent infinite loops with global regex
-        if (pattern.lastIndex === match.index) {
-          pattern.lastIndex++;
+        // For large declarations, we'll process them as a single oversized chunk
+        // Create boundary after this large declaration
+        const boundaryPos = decl.endPos;
+        if (i < nonUsingDeclarations.length - 1) { // Only add boundary if not the last declaration
+          boundaries.push(boundaryPos);
+          currentChunkStart = decl.endPos + 1;
+          currentChunkSize = 0;
+        }
+      } else {
+        // Add declaration to current chunk
+        currentChunkSize += declSize;
+      }
+
+      // For namespace declarations, try to keep their contents together
+      if (decl.type === 'namespace_declaration' && declSize < maxChunkSize) {
+        // Find all declarations within this namespace
+        const namespaceEnd = decl.endPos;
+        let j = i + 1;
+        let namespaceTotalSize = declSize;
+
+        while (j < declarations.length && declarations[j].startPos < namespaceEnd) {
+          const innerDecl = declarations[j];
+          const innerSize = innerDecl.endPos - innerDecl.startPos + 1;
+
+          // If namespace contents fit in chunk, keep together
+          if (namespaceTotalSize + innerSize + usingSize <= maxChunkSize) {
+            namespaceTotalSize += innerSize;
+            j++;
+          } else {
+            break;
+          }
+        }
+
+        // Skip inner declarations we've included
+        if (j > i + 1) {
+          i = j - 1;
+          currentChunkSize = namespaceTotalSize;
         }
       }
     }
 
-    // Sort boundaries by position and remove duplicates
-    return [...new Set(boundaries)].sort((a, b) => a - b);
+    return boundaries;
+  }
+
+  /**
+   * Fallback boundary detection with improved heuristics
+   */
+  private getFallbackBoundaries(content: string, maxChunkSize: number): number[] {
+    const boundaries: number[] = [];
+    const targetChunkSize = Math.floor(maxChunkSize * 0.85);
+
+    let position = 0;
+    let lastBoundary = 0;
+
+    while (position < content.length) {
+      const chunkStart = lastBoundary;
+      const searchStart = chunkStart + Math.floor(targetChunkSize * 0.7);
+      const searchEnd = Math.min(chunkStart + maxChunkSize, content.length);
+
+      // If remaining content fits in one chunk, we're done
+      if (searchEnd >= content.length && (content.length - chunkStart) <= maxChunkSize) {
+        break;
+      }
+
+      // Use improved state tracking with focus on class boundaries
+      const selectedBoundary = this.findBestFallbackBoundary(content, chunkStart, searchStart, searchEnd);
+
+      if (selectedBoundary > chunkStart) {
+        boundaries.push(selectedBoundary);
+        lastBoundary = selectedBoundary;
+        position = selectedBoundary;
+      } else {
+        // Emergency fallback
+        const fallback = Math.min(chunkStart + targetChunkSize, content.length - 1);
+        logger.error('Using emergency fallback boundary', {
+          chunkStart,
+          fallback,
+          contentLength: content.length
+        });
+        boundaries.push(fallback);
+        break;
+      }
+    }
+
+    return boundaries;
+  }
+
+  /**
+   * Find best boundary using state tracking with strong class boundary preference
+   */
+  private findBestFallbackBoundary(content: string, chunkStart: number, searchStart: number, searchEnd: number): number {
+    const state = this.initializeCSharpParseState();
+    const boundaries: Array<{position: number, quality: number, type: string}> = [];
+
+    // Parse from chunk start to build up state
+    for (let i = chunkStart; i < searchEnd && i < content.length; i++) {
+      const char = content[i];
+      const nextChar = i < content.length - 1 ? content[i + 1] : '';
+      const prevChar = i > 0 ? content[i - 1] : '';
+
+      // Update state
+      this.updateCSharpParseState(state, char, nextChar, prevChar, i, content);
+
+      // Only look for boundaries in the search range
+      if (i >= searchStart && i < searchEnd) {
+        // Strongly prefer boundaries after complete classes
+        if (char === '}' && state.braceLevel === 0) {
+          // Check if this might be end of a class/namespace
+          const context = content.substring(Math.max(0, i - 500), i);
+          if (context.includes('class ') || context.includes('interface ') ||
+              context.includes('namespace ') || context.includes('struct ')) {
+            boundaries.push({
+              position: i,
+              quality: 1.0,
+              type: 'class_end'
+            });
+          }
+        }
+
+        // Good boundary: after statement at top level
+        if (char === ';' && state.braceLevel === 0) {
+          boundaries.push({
+            position: i,
+            quality: 0.7,
+            type: 'statement_end'
+          });
+        }
+
+        // OK boundary: after any block
+        if (char === '}' && state.braceLevel === 1) {
+          boundaries.push({
+            position: i,
+            quality: 0.5,
+            type: 'block_end'
+          });
+        }
+      }
+    }
+
+    // Sort by quality, then prefer later positions for larger chunks
+    boundaries.sort((a, b) => {
+      if (Math.abs(a.quality - b.quality) > 0.1) {
+        return b.quality - a.quality;
+      }
+      return b.position - a.position;
+    });
+
+    return boundaries.length > 0 ? boundaries[0].position : -1;
   }
 
   protected mergeChunkResults(chunks: ParseResult[], chunkMetadata: ChunkResult[]): MergedParseResult {
@@ -983,11 +1471,16 @@ export class CSharpParser extends ChunkedParser {
       allErrors.push(...chunk.errors);
     }
 
-    // Remove duplicates
-    const uniqueSymbols = this.removeDuplicateSymbols(allSymbols);
-    const uniqueDependencies = this.removeDuplicateDependencies(allDependencies);
-    const uniqueImports = this.removeDuplicateImports(allImports);
+    // Remove duplicates before context preservation
+    let uniqueSymbols = this.removeDuplicateSymbols(allSymbols);
+    let uniqueDependencies = this.removeDuplicateDependencies(allDependencies);
+    let uniqueImports = this.removeDuplicateImports(allImports);
     const uniqueExports = this.removeDuplicateExports(allExports);
+
+    // Apply C# specific context preservation
+    uniqueImports = this.preserveUsingDirectives(chunks);
+    uniqueSymbols = this.preserveClassContext(chunks, uniqueSymbols);
+    uniqueDependencies = this.preserveInheritanceContext(chunks, uniqueDependencies);
 
     return {
       symbols: uniqueSymbols,
@@ -1000,7 +1493,7 @@ export class CSharpParser extends ChunkedParser {
         totalChunks: chunkMetadata.length,
         duplicatesRemoved: (allSymbols.length - uniqueSymbols.length) +
                           (allDependencies.length - uniqueDependencies.length),
-        crossChunkReferencesFound: 0 // TODO: Implement cross-chunk reference detection
+        crossChunkReferencesFound: this.findCrossChunkReferences(uniqueSymbols, uniqueDependencies)
       }
     };
   }
@@ -1048,5 +1541,549 @@ export class CSharpParser extends ChunkedParser {
       exports: mergedResult.exports,
       errors: mergedResult.errors
     };
+  }
+
+  // State-based chunking helper methods
+
+  private initializeCSharpParseState(): CSharpParseState {
+    return {
+      // String literal tracking
+      inString: 'none',
+      stringDelimiter: '',
+      escapeNext: false,
+
+      // Comment tracking
+      inComment: 'none',
+
+      // Nesting level tracking
+      braceLevel: 0,
+      parenLevel: 0,
+      bracketLevel: 0,
+      angleLevel: 0,
+
+      // C# structure tracking
+      inUsings: false,
+      inNamespace: false,
+      inClass: false,
+      inMethod: false,
+      inProperty: false,
+      inInterface: false,
+      inStruct: false,
+      inEnum: false,
+
+      // Safe boundary positions
+      lastUsingEnd: -1,
+      lastNamespaceEnd: -1,
+      lastClassEnd: -1,
+      lastMethodEnd: -1,
+      lastPropertyEnd: -1,
+      lastStatementEnd: -1,
+      lastBlockEnd: -1,
+      lastEnumEnd: -1,
+      lastInterfaceEnd: -1,
+      lastStructEnd: -1,
+
+      // Context preservation
+      usingDirectives: [],
+      namespaceContext: '',
+      classContext: '',
+      inheritanceContext: '',
+      currentIndentLevel: 0
+    };
+  }
+
+  private updateCSharpParseState(
+    state: CSharpParseState,
+    char: string,
+    nextChar: string,
+    prevChar: string,
+    position: number,
+    content: string
+  ): void {
+    // Update string literal state
+    this.updateStringState(state, char, nextChar, prevChar);
+
+    // Update comment state
+    this.updateCommentState(state, char, nextChar, prevChar);
+
+    // Skip further processing if in string or comment
+    if (state.inString !== 'none' || state.inComment !== 'none') {
+      return;
+    }
+
+    // Update nesting levels
+    this.updateNestingLevels(state, char);
+
+    // Update C# structure context
+    this.updateStructureContext(state, char, position, content);
+
+    // Update safe boundary positions
+    this.updateSafeBoundaryPositions(state, char, position, content);
+  }
+
+  private updateStringState(
+    state: CSharpParseState,
+    char: string,
+    nextChar: string,
+    prevChar: string
+  ): void {
+    // Handle escape sequences
+    if (state.escapeNext) {
+      state.escapeNext = false;
+      return;
+    }
+
+    // Check for escape character
+    if (char === '\\' && state.inString !== 'none' && state.inString !== 'verbatim') {
+      state.escapeNext = true;
+      return;
+    }
+
+    // Handle string entry/exit
+    if (state.inString === 'none') {
+      // Check for string start
+      if (char === '"') {
+        if (prevChar === '@') {
+          state.inString = 'verbatim';
+        } else if (prevChar === '$') {
+          state.inString = 'interpolated';
+        } else {
+          state.inString = 'double';
+        }
+        state.stringDelimiter = '"';
+      } else if (char === "'") {
+        state.inString = 'single';
+        state.stringDelimiter = "'";
+      }
+    } else {
+      // Check for string end
+      if (char === state.stringDelimiter) {
+        // For verbatim strings, check for doubled quotes
+        if (state.inString === 'verbatim' && nextChar === '"') {
+          // Skip - this is an escaped quote in verbatim string
+          return;
+        }
+        state.inString = 'none';
+        state.stringDelimiter = '';
+      }
+    }
+  }
+
+  private updateCommentState(
+    state: CSharpParseState,
+    char: string,
+    nextChar: string,
+    prevChar: string
+  ): void {
+    if (state.inComment === 'none') {
+      // Check for comment start
+      if (char === '/' && nextChar === '/') {
+        state.inComment = 'single';
+      } else if (char === '/' && nextChar === '*') {
+        state.inComment = 'multi';
+      } else if (char === '/' && nextChar === '/' && prevChar === '/') {
+        // XML documentation comment
+        state.inComment = 'xml';
+      }
+    } else if (state.inComment === 'single' || state.inComment === 'xml') {
+      // Single-line and XML comments end at newline
+      if (char === '\n') {
+        state.inComment = 'none';
+      }
+    } else if (state.inComment === 'multi') {
+      // Multi-line comments end with */
+      if (char === '*' && nextChar === '/') {
+        state.inComment = 'none';
+      }
+    }
+  }
+
+  private updateNestingLevels(state: CSharpParseState, char: string): void {
+    switch (char) {
+      case '{':
+        state.braceLevel++;
+        break;
+      case '}':
+        state.braceLevel = Math.max(0, state.braceLevel - 1);
+        break;
+      case '(':
+        state.parenLevel++;
+        break;
+      case ')':
+        state.parenLevel = Math.max(0, state.parenLevel - 1);
+        break;
+      case '[':
+        state.bracketLevel++;
+        break;
+      case ']':
+        state.bracketLevel = Math.max(0, state.bracketLevel - 1);
+        break;
+      case '<':
+        // Simple heuristic for generics (not perfect but good enough)
+        state.angleLevel++;
+        break;
+      case '>':
+        state.angleLevel = Math.max(0, state.angleLevel - 1);
+        break;
+    }
+  }
+
+  private updateStructureContext(
+    state: CSharpParseState,
+    char: string,
+    position: number,
+    content: string
+  ): void {
+    // Get surrounding context for keyword detection
+    const lookBehind = Math.max(0, position - 50);
+    const lookAhead = Math.min(content.length, position + 50);
+    const context = content.substring(lookBehind, lookAhead);
+    const relativePos = position - lookBehind;
+
+    // Check for structure keywords
+    const beforeContext = context.substring(0, relativePos);
+    const afterContext = context.substring(relativePos);
+
+    // Check for using statements
+    if (beforeContext.match(/\busing\s+[\w\.]+$/) && char === ';') {
+      const usingMatch = beforeContext.match(/\busing\s+([\w\.]+)$/);
+      if (usingMatch) {
+        state.usingDirectives.push(usingMatch[1]);
+        state.lastUsingEnd = position;
+      }
+    }
+
+    // Check for namespace
+    if (beforeContext.match(/\bnamespace\s+[\w\.]+\s*$/) && char === '{') {
+      const nsMatch = beforeContext.match(/\bnamespace\s+([\w\.]+)\s*$/);
+      if (nsMatch) {
+        state.inNamespace = true;
+        state.namespaceContext = nsMatch[1];
+      }
+    }
+
+    // Check for class/interface/struct/enum
+    if (char === '{') {
+      if (beforeContext.match(/\bclass\s+\w+/)) {
+        state.inClass = true;
+        const classMatch = beforeContext.match(/\bclass\s+(\w+)/);
+        if (classMatch) {
+          state.classContext = classMatch[1];
+        }
+      } else if (beforeContext.match(/\binterface\s+\w+/)) {
+        state.inInterface = true;
+      } else if (beforeContext.match(/\bstruct\s+\w+/)) {
+        state.inStruct = true;
+      } else if (beforeContext.match(/\benum\s+\w+/)) {
+        state.inEnum = true;
+      }
+    }
+
+    // Check for method or property
+    if (state.inClass && char === '{') {
+      if (beforeContext.match(/\w+\s*\([^)]*\)\s*$/)) {
+        state.inMethod = true;
+      } else if (beforeContext.match(/\bget\s*;|\bset\s*;|\bget\s*\{|\bset\s*\{/)) {
+        state.inProperty = true;
+      }
+    }
+  }
+
+  private updateSafeBoundaryPositions(
+    state: CSharpParseState,
+    char: string,
+    position: number,
+    content: string
+  ): void {
+    // Track indent level
+    if (char === '\n') {
+      let indent = 0;
+      let i = position + 1;
+      while (i < content.length && (content[i] === ' ' || content[i] === '\t')) {
+        indent++;
+        i++;
+      }
+      state.currentIndentLevel = indent;
+    }
+
+    // Update boundary positions when exiting structures
+    if (char === '}') {
+      if (state.braceLevel === 0) {
+        // Top-level closing brace
+        if (state.inNamespace) {
+          state.lastNamespaceEnd = position;
+          state.inNamespace = false;
+        } else if (state.inClass) {
+          state.lastClassEnd = position;
+          state.inClass = false;
+        } else if (state.inInterface) {
+          state.lastInterfaceEnd = position;
+          state.inInterface = false;
+        } else if (state.inStruct) {
+          state.lastStructEnd = position;
+          state.inStruct = false;
+        } else if (state.inEnum) {
+          state.lastEnumEnd = position;
+          state.inEnum = false;
+        }
+      } else if (state.braceLevel === 1 && state.inClass) {
+        // Method or property end
+        if (state.inMethod) {
+          state.lastMethodEnd = position;
+          state.inMethod = false;
+        } else if (state.inProperty) {
+          state.lastPropertyEnd = position;
+          state.inProperty = false;
+        }
+      }
+      state.lastBlockEnd = position;
+    }
+
+    // Track statement ends
+    if (char === ';' && state.braceLevel > 0) {
+      state.lastStatementEnd = position;
+    }
+  }
+
+  private isSafeBoundaryPoint(
+    state: CSharpParseState,
+    position: number,
+    content: string
+  ): boolean {
+    // Not safe if we're inside a string or comment
+    if (state.inString !== 'none' || state.inComment !== 'none') {
+      return false;
+    }
+
+    // Not safe if we have unbalanced parentheses or brackets (but angle brackets are ok - generics)
+    if (state.parenLevel > 0 || state.bracketLevel > 0) {
+      return false;
+    }
+
+    // Check current and next character
+    const char = content[position];
+    const nextChar = position < content.length - 1 ? content[position + 1] : '';
+
+    // Safe after closing braces at any level
+    if (char === '}') {
+      return true;
+    }
+
+    // Safe after semicolons (statement ends)
+    if (char === ';') {
+      return true;
+    }
+
+    // Safe at newlines if we're at brace level 0 or 1
+    if (char === '\n' && state.braceLevel <= 1) {
+      return true;
+    }
+
+    // Safe between method declarations
+    if (char === '\n' && position > 0) {
+      // Look ahead to see if next non-whitespace starts a method/property/class
+      let lookahead = position + 1;
+      while (lookahead < content.length && (content[lookahead] === ' ' || content[lookahead] === '\t' || content[lookahead] === '\n')) {
+        lookahead++;
+      }
+
+      if (lookahead < content.length) {
+        const nextContent = content.substring(lookahead, Math.min(lookahead + 50, content.length));
+        // Check for common C# keywords that start declarations
+        if (nextContent.match(/^(public|private|protected|internal|static|abstract|virtual|override|sealed|partial|class|interface|struct|enum|namespace|using)/)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private calculateBoundaryQuality(
+    state: CSharpParseState,
+    position: number,
+    content: string
+  ): number {
+    let quality = 0.0;
+
+    // High quality: End of complete structures
+    if (position === state.lastNamespaceEnd) {
+      quality += 0.5;
+    } else if (position === state.lastClassEnd || position === state.lastInterfaceEnd || position === state.lastStructEnd) {
+      quality += 0.4;
+    } else if (position === state.lastMethodEnd) {
+      quality += 0.3;
+    } else if (position === state.lastPropertyEnd) {
+      quality += 0.25;
+    } else if (position === state.lastEnumEnd) {
+      quality += 0.35;
+    }
+
+    // Medium quality: Statement and block boundaries
+    if (position === state.lastStatementEnd) {
+      quality += 0.2;
+    }
+    if (position === state.lastBlockEnd) {
+      quality += 0.25;
+    }
+
+    // Using directive boundaries
+    if (position === state.lastUsingEnd) {
+      quality += 0.15;
+    }
+
+    // Context preservation bonus
+    if (state.usingDirectives.length > 0) {
+      quality += 0.1;
+    }
+    if (state.namespaceContext) {
+      quality += 0.1;
+    }
+    if (state.classContext) {
+      quality += 0.05;
+    }
+
+    // Penalty for deep nesting
+    quality -= (state.braceLevel * 0.05);
+
+    // Bonus for clean boundaries (after newline)
+    if (position < content.length - 1 && content[position + 1] === '\n') {
+      quality += 0.1;
+    }
+
+    // Bonus for being at low indent level
+    if (state.currentIndentLevel <= 4) {
+      quality += 0.05;
+    }
+
+    return Math.max(0, Math.min(1, quality));
+  }
+
+
+  // Context preservation methods for merging chunks
+
+  private preserveUsingDirectives(chunkResults: ParseResult[]): ParsedImport[] {
+    const allUsings = new Map<string, ParsedImport>();
+
+    // Collect all unique using directives from all chunks
+    chunkResults.forEach(result => {
+      result.imports.forEach(imp => {
+        // Check if this is a C# using directive
+        if (imp.import_type === 'namespace' || imp.source.startsWith('System') || imp.source.includes('.')) {
+          const key = imp.source;
+          if (!allUsings.has(key)) {
+            allUsings.set(key, {
+              ...imp,
+              import_type: 'namespace' // Normalize import type for C# usings
+            });
+          }
+        }
+      });
+    });
+
+    return Array.from(allUsings.values());
+  }
+
+  private preserveClassContext(chunkResults: ParseResult[], existingSymbols: ParsedSymbol[]): ParsedSymbol[] {
+    const classHierarchy = new Map<string, { parent?: string, interfaces: string[], signature?: string }>();
+
+    // Build complete class hierarchy from all chunks
+    chunkResults.forEach(result => {
+      result.symbols.forEach(symbol => {
+        if (symbol.symbol_type === 'class' || symbol.symbol_type === 'interface') {
+          const existing = classHierarchy.get(symbol.name);
+          if (!existing) {
+            classHierarchy.set(symbol.name, {
+              parent: undefined,
+              interfaces: [],
+              signature: symbol.signature
+            });
+          } else {
+            // Merge signature information from multiple chunks
+            if (symbol.signature && !existing.signature) {
+              existing.signature = symbol.signature;
+            }
+          }
+        }
+      });
+    });
+
+    // Apply preserved context to symbols
+    return existingSymbols.map(symbol => {
+      if ((symbol.symbol_type === 'class' || symbol.symbol_type === 'interface') && classHierarchy.has(symbol.name)) {
+        const hierarchy = classHierarchy.get(symbol.name)!;
+        return {
+          ...symbol,
+          // Preserve or enhance signature with inheritance info
+          signature: symbol.signature || hierarchy.signature || symbol.name
+        };
+      }
+      return symbol;
+    });
+  }
+
+  private preserveInheritanceContext(chunkResults: ParseResult[], existingDependencies: ParsedDependency[]): ParsedDependency[] {
+    const inheritanceMap = new Map<string, Set<string>>();
+
+    // Build inheritance relationships from all chunks
+    chunkResults.forEach(result => {
+      result.dependencies.forEach(dep => {
+        if (dep.dependency_type === 'inherits' || dep.dependency_type === 'implements') {
+          const key = `${dep.from_symbol}:${dep.dependency_type}`;
+          if (!inheritanceMap.has(key)) {
+            inheritanceMap.set(key, new Set());
+          }
+          inheritanceMap.get(key)!.add(dep.to_symbol);
+        }
+      });
+    });
+
+    // Ensure all inheritance relationships are preserved
+    const preservedDeps = [...existingDependencies];
+    inheritanceMap.forEach((targets, key) => {
+      const [source, type] = key.split(':');
+      targets.forEach(target => {
+        const exists = preservedDeps.some(dep =>
+          dep.from_symbol === source &&
+          dep.to_symbol === target &&
+          dep.dependency_type === type
+        );
+
+        if (!exists) {
+          preservedDeps.push({
+            from_symbol: source,
+            to_symbol: target,
+            dependency_type: type as DependencyType,
+            line_number: 0,
+            confidence: 1.0
+          });
+        }
+      });
+    });
+
+    return preservedDeps;
+  }
+
+  private findCrossChunkReferences(symbols: ParsedSymbol[], dependencies: ParsedDependency[]): number {
+    // Count dependencies that reference symbols from different chunks
+    let crossChunkCount = 0;
+    const symbolChunkMap = new Map<string, number>();
+
+    // Map symbols to their chunk indices (approximation based on line numbers)
+    symbols.forEach(symbol => {
+      const chunkIndex = Math.floor((symbol.start_line || 0) / 1000); // Rough estimate
+      symbolChunkMap.set(symbol.name, chunkIndex);
+    });
+
+    // Count cross-chunk dependencies
+    dependencies.forEach(dep => {
+      const sourceChunk = symbolChunkMap.get(dep.from_symbol) || 0;
+      const targetChunk = symbolChunkMap.get(dep.to_symbol) || 0;
+      if (sourceChunk !== targetChunk) {
+        crossChunkCount++;
+      }
+    });
+
+    return crossChunkCount;
   }
 }
