@@ -1497,18 +1497,55 @@ export class GraphBuilder {
         .filter(d => d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== '');
 
       for (const dependency of dependencies) {
+        // Extract the method/function name from qualified names (e.g., "Class.Method" -> "Method")
+        // This handles C# qualified names like "CardManager.SetHandPositions" or "Namespace.Class.Method"
+        const extractMethodName = (qualifiedName: string): string => {
+          const parts = qualifiedName.split('.');
+          // For patterns like "Class.<lambda>" or "Method.<local>", take the first meaningful part
+          const lastPart = parts[parts.length - 1];
+          if (lastPart.startsWith('<') && parts.length > 1) {
+            return parts[parts.length - 2];
+          }
+          return lastPart;
+        };
+
+        const fromMethodName = extractMethodName(dependency.from_symbol);
+
         // Find the specific symbol that contains this dependency call
-        // Must match: name, file, and line range
-        const containingSymbol = fileSymbols.find(symbol =>
-          symbol.name === dependency.from_symbol &&
-          dependency.line_number >= symbol.start_line &&
-          dependency.line_number <= symbol.end_line
-        );
+        // Must match: name (supporting both simple and qualified), file, and line range
+        const containingSymbol = fileSymbols.find(symbol => {
+          // Direct match (for non-qualified names)
+          if (symbol.name === dependency.from_symbol) {
+            return dependency.line_number >= symbol.start_line &&
+                   dependency.line_number <= symbol.end_line;
+          }
+
+          // Qualified name match (for C# and similar languages)
+          if (symbol.name === fromMethodName) {
+            return dependency.line_number >= symbol.start_line &&
+                   dependency.line_number <= symbol.end_line;
+          }
+
+          return false;
+        });
 
         if (containingSymbol) {
           const existingDeps = map.get(containingSymbol.id) || [];
           existingDeps.push(dependency);
           map.set(containingSymbol.id, existingDeps);
+        } else {
+          // Log when we can't find a matching symbol (helps debugging)
+          this.logger.debug('Could not find containing symbol for dependency', {
+            from: dependency.from_symbol,
+            extractedName: fromMethodName,
+            to: dependency.to_symbol,
+            line: dependency.line_number,
+            filePath: filePath,
+            availableSymbols: fileSymbols.map(s => ({
+              name: s.name,
+              lines: `${s.start_line}-${s.end_line}`
+            }))
+          });
         }
       }
     }
