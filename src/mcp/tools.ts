@@ -521,9 +521,15 @@ export class McpTools {
             const symbolType = this.mapEntityTypeToSymbolType(entityType);
             if (symbolType) {
               searchOptions.symbolTypes = [symbolType];
+
+              // For C# projects, when searching for "function", also include "method"
+              // since C# class methods are stored as "method" type, not "function" type
+              if (entityType.toLowerCase() === 'function') {
+                searchOptions.symbolTypes = [SymbolType.FUNCTION, SymbolType.METHOD];
+              }
             }
             // Choose search method based on use_vector parameter
-            let standardSymbols;
+            let standardSymbols: SymbolWithFile[];
             if (validatedArgs.use_vector === true) {
               try {
                 standardSymbols = await this.dbService.vectorSearchSymbols(
@@ -562,6 +568,12 @@ export class McpTools {
         const symbolType = this.mapStringToSymbolType(validatedArgs.symbol_type);
         if (symbolType) {
           searchOptions.symbolTypes = [symbolType];
+
+          // For C# projects, when searching for "function", also include "method"
+          // since C# class methods are stored as "method" type, not "function" type
+          if (validatedArgs.symbol_type.toLowerCase() === 'function') {
+            searchOptions.symbolTypes = [SymbolType.FUNCTION, SymbolType.METHOD];
+          }
         }
       }
 
