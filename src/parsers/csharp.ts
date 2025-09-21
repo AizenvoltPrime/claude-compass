@@ -547,7 +547,20 @@ export class CSharpParser extends ChunkedParser {
     const expressionNode = node.childForFieldName('expression');
     if (!expressionNode) return null;
 
-    const methodName = this.getNodeText(expressionNode, content);
+    // Extract method name, handling different expression types
+    let methodName = '';
+    if (expressionNode.type === 'member_access_expression') {
+      // For member access like obj.Method(), get just the method name
+      const nameNode = expressionNode.childForFieldName('name');
+      methodName = nameNode ? this.getNodeText(nameNode, content) : this.getNodeText(expressionNode, content);
+    } else if (expressionNode.type === 'identifier') {
+      // For simple method calls like Method()
+      methodName = this.getNodeText(expressionNode, content);
+    } else {
+      // For complex expressions, use the full text
+      methodName = this.getNodeText(expressionNode, content);
+    }
+
     const callerName = this.findContainingFunction(node, content);
 
     return {
@@ -555,7 +568,7 @@ export class CSharpParser extends ChunkedParser {
       to_symbol: methodName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
-      confidence: 0.8
+      confidence: 0.9 // Higher confidence with improved extraction
     };
   }
 
@@ -747,40 +760,68 @@ export class CSharpParser extends ChunkedParser {
    */
   private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {
     let parent = callNode.parent;
+    let className = '';
 
     // Walk up the AST to find containing function, method, or constructor
     while (parent) {
       if (parent.type === 'method_declaration' ||
-          parent.type === 'constructor_declaration' ||
-          parent.type === 'property_declaration') {
+          parent.type === 'constructor_declaration') {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
-          return this.getNodeText(nameNode, content);
+          const methodName = this.getNodeText(nameNode, content);
+          // Include class context if available
+          return className ? `${className}.${methodName}` : methodName;
         }
       }
 
-      // Also check for class context to provide better context
-      if (parent.type === 'class_declaration') {
+      if (parent.type === 'property_declaration') {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
-          const className = this.getNodeText(nameNode, content);
-          return `${className}.<unknown>`;
+          const propertyName = this.getNodeText(nameNode, content);
+          // Properties often have getter/setter, so specify it's from property
+          return className ? `${className}.${propertyName}` : propertyName;
+        }
+      }
+
+      // Keep track of class context for better naming
+      if (parent.type === 'class_declaration' && !className) {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          className = this.getNodeText(nameNode, content);
+        }
+      }
+
+      // Check for namespace context
+      if (parent.type === 'namespace_declaration') {
+        const nameNode = parent.childForFieldName('name');
+        if (nameNode) {
+          const namespaceName = this.getNodeText(nameNode, content);
+          return className ? `${namespaceName}.${className}.<unknown>` : `${namespaceName}.<unknown>`;
         }
       }
 
       parent = parent.parent;
     }
 
-    return '<global>';
+    // Return class context if no method found but class is available
+    return className ? `${className}.<unknown>` : '<global>';
   }
 
   private extractModifiers(node: Parser.SyntaxNode, content: string): string[] {
     const modifiers: string[] = [];
 
-    // Look for modifier nodes in the declaration
+    // C# modifier types in tree-sitter-c-sharp grammar
+    const csharpModifierTypes = new Set([
+      'public', 'private', 'internal', 'protected',
+      'static', 'partial', 'abstract', 'sealed',
+      'virtual', 'override', 'readonly', 'async',
+      'const', 'new', 'extern', 'unsafe', 'volatile'
+    ]);
+
+    // Look for actual modifier node types in the declaration
     for (const child of node.children) {
-      if (child.type === 'modifier') {
-        modifiers.push(this.getNodeText(child, content));
+      if (csharpModifierTypes.has(child.type)) {
+        modifiers.push(child.type);
       }
     }
 
@@ -794,7 +835,9 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node, content);
 
-    return `${modifiers.join(' ')} class ${name}`;
+    // Build signature with proper spacing
+    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
+    return `${modifierString}class ${name}`;
   }
 
   private extractInterfaceSignature(node: Parser.SyntaxNode, content: string): string {
@@ -804,7 +847,9 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node, content);
 
-    return `${modifiers.join(' ')} interface ${name}`;
+    // Build signature with proper spacing
+    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
+    return `${modifierString}interface ${name}`;
   }
 
   private extractMethodSignature(node: Parser.SyntaxNode, content: string): string {
@@ -825,7 +870,9 @@ export class CSharpParser extends ChunkedParser {
       parameters = this.getNodeText(parametersNode, content);
     }
 
-    return `${modifiers.join(' ')} ${returnType} ${name}${parameters}`;
+    // Build signature with proper spacing
+    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
+    return `${modifierString}${returnType} ${name}${parameters}`;
   }
 
   private extractPropertySignature(node: Parser.SyntaxNode, content: string): string {
@@ -839,7 +886,9 @@ export class CSharpParser extends ChunkedParser {
     const typeNode = node.childForFieldName('type');
     const type = typeNode ? this.getNodeText(typeNode, content) : 'object';
 
-    return `${modifiers.join(' ')} ${type} ${name}`;
+    // Build signature with proper spacing
+    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
+    return `${modifierString}${type} ${name}`;
   }
 
   private extractDelegateSignature(node: Parser.SyntaxNode, content: string): string {
