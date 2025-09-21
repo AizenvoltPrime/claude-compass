@@ -20,6 +20,14 @@ import { SymbolType, DependencyType, Visibility } from '../database/models';
 
 const logger = createComponentLogger('csharp-parser');
 
+interface EnhancedTypeInfo {
+  type: string;
+  confidence: number;
+  source: 'field' | 'variable' | 'parameter' | 'property';
+  namespace?: string;
+  fullQualifiedName?: string;
+}
+
 /**
  * C# Parse State Interface for tracking parsing context
  */
@@ -98,6 +106,8 @@ interface TopLevelDeclaration {
  * methods, properties, fields, events, delegates, and namespaces
  */
 export class CSharpParser extends ChunkedParser {
+  private currentFilePath?: string;
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(CSharp as any);
@@ -109,6 +119,9 @@ export class CSharpParser extends ChunkedParser {
   }
 
   async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
+    // Store current file path for enhanced context
+    this.currentFilePath = filePath;
+
     const validatedOptions = this.validateOptions(options);
     const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
@@ -725,6 +738,16 @@ export class CSharpParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node, content);
     const visibility = this.getVisibilityFromModifiers(modifiers);
 
+    // Extract field type - in C# AST, type is in variable_declaration child, not directly on field_declaration
+    let fieldType = 'object';
+    const variableDeclarationNode = node.children.find(child => child.type === 'variable_declaration');
+    if (variableDeclarationNode) {
+      const typeNode = variableDeclarationNode.childForFieldName('type');
+      if (typeNode) {
+        fieldType = this.getNodeText(typeNode, content);
+      }
+    }
+
     // Field declarations can contain multiple variables
     const declaratorNodes = this.findNodesOfType(node, 'variable_declarator');
     for (const declarator of declaratorNodes) {
@@ -733,13 +756,17 @@ export class CSharpParser extends ChunkedParser {
 
       const name = this.getNodeText(nameNode, content);
 
+      // Build signature with type information
+      const signature = `${modifiers.join(' ')} ${fieldType} ${name}`.trim();
+
       symbols.push({
         name,
         symbol_type: modifiers.includes('const') ? SymbolType.CONSTANT : SymbolType.VARIABLE,
         start_line: declarator.startPosition.row + 1,
         end_line: declarator.endPosition.row + 1,
         is_exported: modifiers.includes('public'),
-        visibility: visibility || Visibility.PRIVATE
+        visibility: visibility || Visibility.PRIVATE,
+        signature // Include type information in signature for later resolution
       });
     }
 
@@ -812,6 +839,209 @@ export class CSharpParser extends ChunkedParser {
   }
 
   // Dependency extraction helper methods
+
+  /**
+   * Resolve the class type of a calling object by looking up field declarations
+   * @param callingObject - The object name (e.g., "_cardManager")
+   * @param rootNode - The root node to search for field declarations
+   * @param content - The file content
+   * @returns The resolved class type (e.g., "CardManager") or null if not found
+   */
+  private resolveCallingObjectType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): string | null {
+    if (!callingObject || callingObject.trim() === '') {
+      return null;
+    }
+
+    try {
+      // Multi-strategy resolution with fallbacks (Phase 3.2 Enhancement)
+      const strategies = [
+        () => this.resolveFieldType(callingObject, rootNode, content),
+        () => this.resolveLocalVariableType(callingObject, rootNode, content),
+        () => this.resolveParameterType(callingObject, rootNode, content),
+        () => this.resolvePropertyType(callingObject, rootNode, content)
+      ];
+
+      for (const strategy of strategies) {
+        const result = strategy();
+        if (result) {
+          return result.type;
+        }
+      }
+
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+
+  /**
+   * Strategy 1: Resolve field type
+   */
+  private resolveFieldType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+    const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
+    const fieldNodes = this.findNodesOfType(rootNode, 'field_declaration');
+
+    for (const fieldNode of fieldNodes) {
+      let fieldType = '';
+      const variableDeclarationNode = fieldNode.children.find(child => child.type === 'variable_declaration');
+      if (variableDeclarationNode) {
+        const typeNode = variableDeclarationNode.childForFieldName('type');
+        if (typeNode) {
+          fieldType = this.getNodeText(typeNode, content);
+        }
+      }
+      if (!fieldType) continue;
+
+      const declaratorNodes = this.findNodesOfType(fieldNode, 'variable_declarator');
+      for (const declarator of declaratorNodes) {
+        const nameNode = declarator.childForFieldName('name');
+        if (!nameNode) continue;
+
+        const fieldName = this.getNodeText(nameNode, content);
+        if (fieldName === callingObject || fieldName === cleanObjectName) {
+          const resolvedType = this.extractClassNameFromType(fieldType);
+          return {
+            type: resolvedType,
+            confidence: 0.95,
+            source: 'field',
+            fullQualifiedName: fieldType
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Strategy 2: Resolve local variable type
+   */
+  private resolveLocalVariableType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+    const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
+    const localDeclarations = this.findNodesOfType(rootNode, 'local_declaration_statement');
+
+    for (const localDecl of localDeclarations) {
+      const variableDeclaration = this.findNodeOfType(localDecl, 'variable_declaration');
+      if (!variableDeclaration) continue;
+
+      const typeNode = variableDeclaration.childForFieldName('type');
+      if (!typeNode) continue;
+
+      const declarators = this.findNodesOfType(variableDeclaration, 'variable_declarator');
+      for (const declarator of declarators) {
+        const nameNode = declarator.childForFieldName('name');
+        if (!nameNode) continue;
+
+        const varName = this.getNodeText(nameNode, content);
+        if (varName === callingObject || varName === cleanObjectName) {
+          const varType = this.getNodeText(typeNode, content);
+          const resolvedType = this.extractClassNameFromType(varType);
+          return {
+            type: resolvedType,
+            confidence: 0.90,
+            source: 'variable',
+            fullQualifiedName: varType
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Strategy 3: Resolve parameter type
+   */
+  private resolveParameterType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+    const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
+    const methodNodes = this.findNodesOfType(rootNode, 'method_declaration');
+
+    for (const methodNode of methodNodes) {
+      const parameterList = methodNode.childForFieldName('parameters');
+      if (!parameterList) continue;
+
+      for (let i = 0; i < parameterList.childCount; i++) {
+        const child = parameterList.child(i);
+        if (child?.type === 'parameter') {
+          const typeNode = child.childForFieldName('type');
+          const nameNode = child.childForFieldName('name');
+          if (!typeNode || !nameNode) continue;
+
+          const paramName = this.getNodeText(nameNode, content);
+          if (paramName === callingObject || paramName === cleanObjectName) {
+            const paramType = this.getNodeText(typeNode, content);
+            const resolvedType = this.extractClassNameFromType(paramType);
+            return {
+              type: resolvedType,
+              confidence: 0.85,
+              source: 'parameter',
+              fullQualifiedName: paramType
+            };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Strategy 4: Resolve property type
+   */
+  private resolvePropertyType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+    const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
+    const propertyNodes = this.findNodesOfType(rootNode, 'property_declaration');
+
+    for (const propertyNode of propertyNodes) {
+      const typeNode = propertyNode.childForFieldName('type');
+      const nameNode = propertyNode.childForFieldName('name');
+
+      if (!typeNode || !nameNode) continue;
+
+      const propertyName = this.getNodeText(nameNode, content);
+      if (propertyName === callingObject || propertyName === cleanObjectName) {
+        const propertyType = this.getNodeText(typeNode, content);
+        const resolvedType = this.extractClassNameFromType(propertyType);
+        return {
+          type: resolvedType,
+          confidence: 0.88,
+          source: 'property',
+          fullQualifiedName: propertyType
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract the class name from a type declaration, handling interfaces and generic types
+   * @param typeString - The full type string (e.g., "ICardManager", "List<CardData>", "CardManager")
+   * @returns The clean class name (e.g., "CardManager", "List", "CardManager")
+   */
+  private extractClassNameFromType(typeString: string): string {
+    if (!typeString) return typeString;
+
+    // Remove interface prefix (I prefix) - convert ICardManager to CardManager
+    let cleanType = typeString.trim();
+
+    // Handle generic types - extract base type from List<T>, Dictionary<K,V>, etc.
+    const genericMatch = cleanType.match(/^([^<]+)</);
+    if (genericMatch) {
+      cleanType = genericMatch[1];
+    }
+
+    // Remove interface prefix if it follows the IClassName pattern
+    if (cleanType.startsWith('I') && cleanType.length > 1 && /^[A-Z]/.test(cleanType.charAt(1))) {
+      // Check if this looks like an interface name (IClassName -> ClassName)
+      const withoutI = cleanType.substring(1);
+      logger.debug('C# interface type conversion', {
+        original: cleanType,
+        converted: withoutI
+      });
+      return withoutI;
+    }
+
+    return cleanType;
+  }
 
   private extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
@@ -911,18 +1141,56 @@ export class CSharpParser extends ChunkedParser {
 
     const callerName = this.findContainingFunction(node, content);
 
-    // Additional debug logging
-    logger.debug('C# method call extraction details', {
-      methodName,
-      callerName,
-      functionType: functionNode.type,
-      line: node.startPosition.row + 1
-    });
+    // Create qualified method name if we can resolve the calling object type
+    let qualifiedMethodName = methodName;
+
+    if (callingObject && callingObject.trim() !== '') {
+      try {
+        // Find the root node by traversing up the AST
+        let rootNode = node;
+        while (rootNode.parent !== null) {
+          rootNode = rootNode.parent;
+        }
+
+        // Resolve the calling object type
+        const resolvedObjectType = this.resolveCallingObjectType(callingObject, rootNode, content);
+
+        if (resolvedObjectType) {
+          // Create qualified method name: "ClassName.MethodName"
+          qualifiedMethodName = `${resolvedObjectType}.${methodName}`;
+
+          logger.debug('C# calling object type resolved', {
+            callingObject,
+            cleanObjectName: callingObject.trim().replace(/^(this\.|_)/, ''),
+            resolvedType: resolvedObjectType
+          });
+        } else {
+          logger.debug('C# calling object type could not be resolved', {
+            methodName,
+            callingObject,
+            line: node.startPosition.row + 1
+          });
+        }
+      } catch (error) {
+        // Don't let resolution errors break the dependency creation
+        logger.debug('C# calling object resolution failed', {
+          callingObject,
+          methodName,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+
+    // Log method call detection
+    logger.debug('C# method call extraction details');
 
     // Determine confidence based on extraction quality
     let confidence = 0.9;
-    if (callingObject) {
-      // Higher confidence when we have calling object context
+    if (qualifiedMethodName !== methodName) {
+      // Highest confidence when we have resolved qualified method name
+      confidence = 0.98;
+    } else if (callingObject) {
+      // Higher confidence when we have calling object context (even if unresolved)
       confidence = 0.95;
     } else if (functionNode.type === 'identifier' || functionNode.type === 'member_access_expression') {
       // High confidence for simple patterns
@@ -934,10 +1202,18 @@ export class CSharpParser extends ChunkedParser {
 
     return {
       from_symbol: callerName,
-      to_symbol: methodName,
+      to_symbol: methodName,          // ✅ Use unqualified name for reliable symbol matching
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
-      confidence
+      confidence,
+
+      // 🚀 Enhanced context fields for rich analysis
+      calling_object: callingObject || undefined,
+      resolved_class: (qualifiedMethodName !== methodName) ? qualifiedMethodName.split('.')[0] : undefined,
+      qualified_context: (qualifiedMethodName !== methodName) ? qualifiedMethodName : undefined,
+      method_signature: this.buildMethodSignature(methodName, node, content),
+      file_context: this.currentFilePath || undefined,
+      namespace_context: this.getCurrentNamespace(node, content)
     };
   }
 
@@ -2827,4 +3103,205 @@ export class CSharpParser extends ChunkedParser {
 
     return crossChunkCount;
   }
+
+  /**
+   * Build method signature with parameters for enhanced context (Phase 3.1)
+   */
+  private buildMethodSignature(methodName: string, node: Parser.SyntaxNode, content: string): string | undefined {
+    try {
+      // Try to find the method definition by traversing the AST
+      const methodDefinition = this.findMethodDefinition(methodName, node, content);
+      if (methodDefinition) {
+        return this.extractMethodSignatureFromDefinition(methodDefinition, content);
+      }
+
+      // Fallback: build signature from call site if possible
+      const argumentsList = this.extractMethodParameters(node, content);
+      if (argumentsList.length > 0) {
+        return `${methodName}(${argumentsList.join(', ')})`;
+      }
+
+      // Basic fallback
+      return `${methodName}()`;
+    } catch (error) {
+      logger.debug('Failed to build method signature', {
+        methodName,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Extract current namespace context for enhanced analysis (Phase 3.1)
+   */
+  private getCurrentNamespace(node: Parser.SyntaxNode, content: string): string | undefined {
+    try {
+      let current = node;
+
+      // Traverse up the AST to find namespace declaration
+      while (current.parent !== null) {
+        current = current.parent;
+
+        if (current.type === 'namespace_declaration') {
+          const nameNode = current.childForFieldName('name');
+          if (nameNode) {
+            return this.getNodeText(nameNode, content);
+          }
+        }
+      }
+
+      // Check for file-scoped namespace (C# 10 feature)
+      const rootNode = this.findASTRoot(node);
+      for (let i = 0; i < rootNode.childCount; i++) {
+        const child = rootNode.child(i);
+        if (child?.type === 'file_scoped_namespace_declaration') {
+          const nameNode = child.childForFieldName('name');
+          if (nameNode) {
+            return this.getNodeText(nameNode, content);
+          }
+        }
+      }
+
+      return undefined;
+    } catch (error) {
+      logger.debug('Failed to extract namespace context', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Find method definition in the AST for signature extraction
+   */
+  private findMethodDefinition(methodName: string, searchNode: Parser.SyntaxNode, content: string): Parser.SyntaxNode | null {
+    const rootNode = this.findASTRoot(searchNode);
+    return this.findMethodDefinitionRecursive(methodName, rootNode, content);
+  }
+
+  /**
+   * Recursively search for method definition
+   */
+  private findMethodDefinitionRecursive(methodName: string, node: Parser.SyntaxNode, content: string): Parser.SyntaxNode | null {
+    // Check if current node is a method declaration
+    if (node.type === 'method_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode && this.getNodeText(nameNode, content) === methodName) {
+        return node;
+      }
+    }
+
+    // Search children
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i);
+      if (child) {
+        const result = this.findMethodDefinitionRecursive(methodName, child, content);
+        if (result) return result;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract method signature from method definition node
+   */
+  private extractMethodSignatureFromDefinition(methodNode: Parser.SyntaxNode, content: string): string {
+    try {
+      const modifiers = this.extractModifiers(methodNode, content);
+      const returnType = this.extractMethodReturnType(methodNode, content);
+      const nameNode = methodNode.childForFieldName('name');
+      const methodName = nameNode ? this.getNodeText(nameNode, content) : 'Unknown';
+      const parameters = this.extractMethodDefinitionParameters(methodNode, content);
+
+      const modifierString = modifiers.length > 0 ? modifiers.join(' ') + ' ' : '';
+      const returnTypeString = returnType ? returnType + ' ' : 'void ';
+
+      return `${modifierString}${returnTypeString}${methodName}(${parameters.join(', ')})`;
+    } catch (error) {
+      logger.debug('Failed to extract method signature from definition', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return 'Unknown';
+    }
+  }
+
+  /**
+   * Enhanced helper methods for Phase 3 functionality
+   */
+
+  /**
+   * Extract method signature parameters for enhanced context
+   */
+  private extractMethodParameters(node: Parser.SyntaxNode, content: string): string[] {
+    const parameters: string[] = [];
+
+    // Find argument list in invocation
+    const argumentList = this.findNodeOfType(node, 'argument_list');
+    if (argumentList) {
+      for (let i = 0; i < argumentList.childCount; i++) {
+        const child = argumentList.child(i);
+        if (child?.type === 'argument') {
+          const argText = this.getNodeText(child, content).trim();
+          if (argText) parameters.push(argText);
+        }
+      }
+    }
+
+    return parameters;
+  }
+
+  /**
+   * Extract parameters from method definition for signature building
+   */
+  private extractMethodDefinitionParameters(methodNode: Parser.SyntaxNode, content: string): string[] {
+    const parameters: string[] = [];
+
+    const parameterList = methodNode.childForFieldName('parameters');
+    if (parameterList) {
+      for (let i = 0; i < parameterList.childCount; i++) {
+        const child = parameterList.child(i);
+        if (child?.type === 'parameter') {
+          const paramText = this.getNodeText(child, content).trim();
+          if (paramText) parameters.push(paramText);
+        }
+      }
+    }
+
+    return parameters;
+  }
+
+  /**
+   * Extract return type from method definition for signature building
+   */
+  private extractMethodReturnType(methodNode: Parser.SyntaxNode, content: string): string | null {
+    const typeNode = methodNode.childForFieldName('type');
+    return typeNode ? this.getNodeText(typeNode, content) : null;
+  }
+
+  /**
+   * Find root node by traversing up the AST
+   */
+  private findASTRoot(node: Parser.SyntaxNode): Parser.SyntaxNode {
+    let current = node;
+    while (current.parent !== null) {
+      current = current.parent;
+    }
+    return current;
+  }
+
+  /**
+   * Find first child of specific type
+   */
+  private findNodeOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i);
+      if (child?.type === type) {
+        return child;
+      }
+    }
+    return null;
+  }
+
 }

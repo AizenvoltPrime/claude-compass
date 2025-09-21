@@ -16,6 +16,7 @@ import {
   SymbolWithFile,
   SymbolWithFileAndRepository,
   DependencyWithSymbols,
+  EnhancedDependencyWithSymbols,
   // Framework-specific imports
   Route,
   Component,
@@ -3252,6 +3253,191 @@ export class DatabaseService {
       logger.error('Batch embedding generation failed:', error);
       throw error;
     }
+  }
+
+
+  /**
+   * Get dependencies with enhanced context information
+   */
+  async getDependenciesFromWithContext(symbolId: number): Promise<EnhancedDependencyWithSymbols[]> {
+    const results = await this.db('dependencies')
+      .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
+      .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
+      .select(
+        'dependencies.*',
+        'to_symbols.name as to_symbol_name',
+        'to_symbols.symbol_type as to_symbol_type',
+        'to_files.path as to_file_path'
+      )
+      .where('dependencies.from_symbol_id', symbolId);
+
+    return results.map(result => ({
+      ...result,
+      to_symbol: {
+        id: result.to_symbol_id,
+        name: result.to_symbol_name,
+        symbol_type: result.to_symbol_type,
+        file: {
+          id: result.to_file_id,
+          path: result.to_file_path,
+        },
+      },
+      // Enhanced context fields (available due to spread operator)
+      calling_object: result.calling_object,
+      resolved_class: result.resolved_class,
+      qualified_context: result.qualified_context,
+      method_signature: result.method_signature,
+      file_context: result.file_context,
+      namespace_context: result.namespace_context,
+    })) as EnhancedDependencyWithSymbols[];
+  }
+
+  /**
+   * Get callers with enhanced context information
+   */
+  async getDependenciesToWithContext(symbolId: number): Promise<EnhancedDependencyWithSymbols[]> {
+    const results = await this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
+      .select(
+        'dependencies.*',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path'
+      )
+      .where('dependencies.to_symbol_id', symbolId);
+
+    return results.map(result => ({
+      ...result,
+      from_symbol: {
+        id: result.from_symbol_id,
+        name: result.from_symbol_name,
+        symbol_type: result.from_symbol_type,
+        file: {
+          id: result.from_file_id,
+          path: result.from_file_path,
+        },
+      },
+      // Enhanced context fields (available due to spread operator)
+      calling_object: result.calling_object,
+      resolved_class: result.resolved_class,
+      qualified_context: result.qualified_context,
+      method_signature: result.method_signature,
+      file_context: result.file_context,
+      namespace_context: result.namespace_context,
+    })) as EnhancedDependencyWithSymbols[];
+  }
+
+  /**
+   * Search symbols by qualified context
+   */
+  async searchQualifiedContext(query: string, classContext?: string): Promise<SymbolWithFile[]> {
+    let queryBuilder = this.db('dependencies')
+      .join('symbols', 'dependencies.to_symbol_id', 'symbols.id')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language',
+        'dependencies.qualified_context',
+        'dependencies.resolved_class',
+        'dependencies.calling_object'
+      )
+      .whereNotNull('dependencies.qualified_context');
+
+    // Search in qualified context
+    if (query && query.trim()) {
+      queryBuilder = queryBuilder.where('dependencies.qualified_context', 'ilike', `%${query}%`);
+    }
+
+    // Filter by class context if provided
+    if (classContext && classContext.trim()) {
+      queryBuilder = queryBuilder.where('dependencies.resolved_class', 'ilike', `%${classContext}%`);
+    }
+
+    const results = await queryBuilder
+      .groupBy('symbols.id', 'files.path', 'files.language', 'dependencies.qualified_context', 'dependencies.resolved_class', 'dependencies.calling_object')
+      .limit(100);
+
+    return results.map(result => ({
+      ...result,
+      file: {
+        id: result.file_id,
+        path: result.file_path,
+        language: result.file_language,
+      },
+    })) as SymbolWithFile[];
+  }
+
+  /**
+   * Search symbols by method signature
+   */
+  async searchMethodSignatures(query: string): Promise<SymbolWithFile[]> {
+    const results = await this.db('dependencies')
+      .join('symbols', 'dependencies.to_symbol_id', 'symbols.id')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language',
+        'dependencies.method_signature',
+        'dependencies.qualified_context'
+      )
+      .whereNotNull('dependencies.method_signature')
+      .where('dependencies.method_signature', 'ilike', `%${query}%`)
+      .groupBy('symbols.id', 'files.path', 'files.language', 'dependencies.method_signature', 'dependencies.qualified_context')
+      .limit(100);
+
+    return results.map(result => ({
+      ...result,
+      file: {
+        id: result.file_id,
+        path: result.file_path,
+        language: result.file_language,
+      },
+    })) as SymbolWithFile[];
+  }
+
+  /**
+   * Search symbols by namespace context
+   */
+  async searchNamespaceContext(query: string, namespaceContext?: string): Promise<SymbolWithFile[]> {
+    let queryBuilder = this.db('dependencies')
+      .join('symbols', 'dependencies.to_symbol_id', 'symbols.id')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language',
+        'dependencies.namespace_context',
+        'dependencies.qualified_context'
+      )
+      .whereNotNull('dependencies.namespace_context');
+
+    if (query && query.trim()) {
+      queryBuilder = queryBuilder.where(builder => {
+        builder
+          .where('dependencies.namespace_context', 'ilike', `%${query}%`)
+          .orWhere('symbols.name', 'ilike', `%${query}%`);
+      });
+    }
+
+    if (namespaceContext && namespaceContext.trim()) {
+      queryBuilder = queryBuilder.where('dependencies.namespace_context', 'ilike', `%${namespaceContext}%`);
+    }
+
+    const results = await queryBuilder
+      .groupBy('symbols.id', 'files.path', 'files.language', 'dependencies.namespace_context', 'dependencies.qualified_context')
+      .limit(100);
+
+    return results.map(result => ({
+      ...result,
+      file: {
+        id: result.file_id,
+        path: result.file_path,
+        language: result.file_language,
+      },
+    })) as SymbolWithFile[];
   }
 }
 
