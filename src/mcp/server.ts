@@ -261,6 +261,11 @@ export class ClaudeCompassMCPServer {
                   minimum: 0,
                   maximum: 1,
                 },
+                show_call_chains: {
+                  type: 'boolean',
+                  description: 'Include human-readable call chains',
+                  default: false,
+                },
               },
               required: ['symbol_id'],
             },
@@ -298,6 +303,11 @@ export class ClaudeCompassMCPServer {
                 include_cross_stack: {
                   type: 'boolean',
                   description: 'Include cross-stack dependencies (Vue ↔ Laravel)',
+                  default: false,
+                },
+                show_call_chains: {
+                  type: 'boolean',
+                  description: 'Include human-readable call chains',
                   default: false,
                 },
               },
@@ -351,6 +361,11 @@ export class ClaudeCompassMCPServer {
                   default: 0.7,
                   minimum: 0,
                   maximum: 1,
+                },
+                show_call_chains: {
+                  type: 'boolean',
+                  description: 'Include human-readable call chains',
+                  default: false,
                 },
               },
               required: ['symbol_id'],

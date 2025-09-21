@@ -132,6 +132,12 @@ function validateWhoCallsArgs(args: any): WhoCallsArgs {
   if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
     throw new Error('include_indirect must be a boolean');
   }
+  if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
+    throw new Error('include_cross_stack must be a boolean');
+  }
+  if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
+    throw new Error('show_call_chains must be a boolean');
+  }
   return args as WhoCallsArgs;
 }
 
@@ -144,6 +150,12 @@ function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   }
   if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
     throw new Error('include_indirect must be a boolean');
+  }
+  if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
+    throw new Error('include_cross_stack must be a boolean');
+  }
+  if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
+    throw new Error('show_call_chains must be a boolean');
   }
   return args as ListDependenciesArgs;
 }
@@ -184,6 +196,9 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
     }
     args.confidence_threshold = threshold;
   }
+  if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
+    throw new Error('show_call_chains must be a boolean');
+  }
   return args as ImpactOfArgs;
 }
 
@@ -218,12 +233,16 @@ export interface WhoCallsArgs {
   symbol_id: number;
   dependency_type?: string;
   include_indirect?: boolean;
+  include_cross_stack?: boolean;
+  show_call_chains?: boolean;
 }
 
 export interface ListDependenciesArgs {
   symbol_id: number;
   dependency_type?: string;
   include_indirect?: boolean;
+  include_cross_stack?: boolean;
+  show_call_chains?: boolean;
 }
 
 // Comprehensive impact analysis interface (Phase 6A)
@@ -235,6 +254,7 @@ export interface ImpactOfArgs {
   include_jobs?: boolean; // Background job impact analysis
   max_depth?: number; // Transitive depth (default 5)
   confidence_threshold?: number; // Filter by confidence (default 0.7)
+  show_call_chains?: boolean; // Include human-readable call chains
 }
 
 export interface ImpactItem {
@@ -252,6 +272,9 @@ export interface ImpactItem {
   confidence: number;
   relationship_type?: string;
   relationship_context?: string;
+  // Call chain visualization fields (Enhancement 1)
+  call_chain?: string;
+  depth?: number;
 }
 
 export interface TestImpactItem {
@@ -813,59 +836,88 @@ export class McpTools {
     const validatedArgs = validateWhoCallsArgs(args);
     this.logger.debug('Finding who calls symbol with enhanced context', validatedArgs);
 
-    const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
-    if (!symbol) {
-      throw new Error('Symbol not found');
-    }
+    const timeoutMs = 10000;
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('whoCalls operation timed out after 10 seconds')), timeoutMs);
+    });
 
-    // Use enhanced method to get callers with rich context
-    let callers = await this.dbService.getDependenciesToWithContext(validatedArgs.symbol_id);
+    try {
+      const symbol = await Promise.race([
+        this.dbService.getSymbol(validatedArgs.symbol_id),
+        timeoutPromise
+      ]) as any;
+      if (!symbol) {
+        throw new Error('Symbol not found');
+      }
 
-    // Filter by dependency type if specified
-    if (validatedArgs.dependency_type) {
-      const depType = validatedArgs.dependency_type as DependencyType;
-      callers = callers.filter(caller => caller.dependency_type === depType);
-    }
+      let callers = await Promise.race([
+        this.dbService.getDependenciesToWithContext(validatedArgs.symbol_id),
+        timeoutPromise
+      ]) as any;
 
-    // Implement indirect callers (transitive dependencies)
-    if (validatedArgs.include_indirect) {
-      this.logger.debug('Performing transitive caller analysis', {
-        symbol_id: validatedArgs.symbol_id,
-      });
+      if (validatedArgs.dependency_type) {
+        const depType = validatedArgs.dependency_type as DependencyType;
+        callers = callers.filter(caller => caller.dependency_type === depType);
+      }
+
+    let transitiveResults: any[] = [];
+    const skipTransitive = callers.length > 20 || validatedArgs.include_cross_stack;
+
+    if ((validatedArgs.include_indirect || validatedArgs.show_call_chains) && !skipTransitive) {
 
       try {
-        const directCallerIds = callers.map(c => c.from_symbol?.id).filter(Boolean) as number[];
-        const transitiveCallers: DependencyWithSymbols[] = [];
+        const transitiveOptions: TransitiveAnalysisOptions = {
+          maxDepth: 2,
+          includeTypes: validatedArgs.dependency_type
+            ? [validatedArgs.dependency_type as DependencyType]
+            : undefined,
+          confidenceThreshold: 0.5,
+          includeCrossStack: false,
+          showCallChains: validatedArgs.show_call_chains || false,
+        };
 
-        for (const callerId of directCallerIds) {
-          const secondLevelCallers = await this.dbService.getDependenciesTo(callerId);
-          const filteredSecondLevel = validatedArgs.dependency_type
-            ? secondLevelCallers.filter(
-                dep => dep.dependency_type === (validatedArgs.dependency_type as DependencyType)
-              )
-            : secondLevelCallers;
+        const transitiveResult = await transitiveAnalyzer.getTransitiveCallers(
+          validatedArgs.symbol_id,
+          transitiveOptions
+        );
 
-          transitiveCallers.push(...filteredSecondLevel);
+        transitiveResults = transitiveResult.results;
+
+        if (validatedArgs.include_indirect) {
+          const transitiveDependencies = transitiveResult.results
+            .map(result => {
+              const fromSymbol = result.dependencies[0]?.from_symbol;
+              if (!fromSymbol) return null;
+
+              return {
+                id: result.symbolId,
+                from_symbol_id: result.symbolId,
+                to_symbol_id: validatedArgs.symbol_id,
+                dependency_type: result.dependencies[0]?.dependency_type || DependencyType.CALLS,
+                line_number: result.dependencies[0]?.line_number,
+                confidence: result.totalConfidence,
+                created_at: new Date(),
+                updated_at: new Date(),
+                from_symbol: fromSymbol,
+                to_symbol: undefined,
+                call_chain: result.call_chain,
+                path: result.path,
+                depth: result.depth,
+              };
+            })
+            .filter(Boolean);
+
+          callers = [...callers, ...transitiveDependencies];
         }
-
-        const directCallerIdsSet = new Set(directCallerIds);
-        const uniqueTransitiveCallers = transitiveCallers.filter((caller, index, arr) => {
-          const isUnique =
-            arr.findIndex(c => c.from_symbol?.id === caller.from_symbol?.id) === index;
-          const isNotDirectCaller = !directCallerIdsSet.has(caller.from_symbol?.id || -1);
-          return isUnique && isNotDirectCaller;
-        });
-
-        callers = [...callers, ...uniqueTransitiveCallers];
       } catch (error) {
-        this.logger.error('Transitive caller analysis failed', {
+        this.logger.error('Enhanced transitive caller analysis failed', {
           symbol_id: validatedArgs.symbol_id,
           error: (error as Error).message,
         });
       }
     }
 
-    return {
+    const result = {
       content: [
         {
           type: 'text',
@@ -889,21 +941,34 @@ export class McpTools {
                       file_path: caller.from_symbol.file?.path,
                     }
                   : null,
-                // Enhanced context
                 calling_object: caller.calling_object,
                 resolved_class: caller.resolved_class,
                 qualified_context: caller.qualified_context,
                 method_signature: caller.method_signature,
                 file_context: caller.file_context,
                 namespace_context: caller.namespace_context,
-                // Intelligent insights
+                call_chain: caller.call_chain,
+                path: caller.path,
+                depth: caller.depth,
                 call_pattern: this.analyzeCallPattern(caller),
                 cross_file: this.isCrossFileCall(caller, symbol),
               })),
+              transitive_analysis: validatedArgs.show_call_chains ? {
+                total_paths: transitiveResults.length,
+                call_chains: transitiveResults.map(result => ({
+                  symbol_id: result.symbolId,
+                  call_chain: result.call_chain,
+                  depth: result.depth,
+                  confidence: result.totalConfidence,
+                }))
+              } : undefined,
+              parameter_analysis: callers.length < 50 ? await this.getParameterContextAnalysis(validatedArgs.symbol_id) : undefined,
               total_callers: callers.length,
               filters: {
                 dependency_type: validatedArgs.dependency_type,
                 include_indirect: validatedArgs.include_indirect,
+                include_cross_stack: validatedArgs.include_cross_stack,
+                show_call_chains: validatedArgs.show_call_chains,
               },
             },
             null,
@@ -912,6 +977,25 @@ export class McpTools {
         },
       ],
     };
+
+      return result;
+    } catch (error) {
+      this.logger.error('whoCalls operation failed', {
+        error: (error as Error).message,
+        symbolId: validatedArgs.symbol_id
+      });
+
+      // Return a minimal error response
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: (error as Error).message,
+            symbol_id: validatedArgs.symbol_id
+          }, null, 2)
+        }]
+      };
+    }
   }
 
   // Core Tool 5: listDependencies (unchanged)
@@ -919,12 +1003,24 @@ export class McpTools {
     const validatedArgs = validateListDependenciesArgs(args);
     this.logger.debug('Listing dependencies for symbol', validatedArgs);
 
-    const symbol = await this.dbService.getSymbol(validatedArgs.symbol_id);
-    if (!symbol) {
-      throw new Error('Symbol not found');
-    }
+    const timeoutMs = 10000;
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('listDependencies operation timed out after 10 seconds')), timeoutMs);
+    });
 
-    let dependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
+    try {
+      const symbol = await Promise.race([
+        this.dbService.getSymbol(validatedArgs.symbol_id),
+        timeoutPromise
+      ]) as any;
+      if (!symbol) {
+        throw new Error('Symbol not found');
+      }
+
+      let dependencies = await Promise.race([
+        this.dbService.getDependenciesFrom(validatedArgs.symbol_id),
+        timeoutPromise
+      ]) as any;
 
     // Filter by dependency type if specified
     if (validatedArgs.dependency_type) {
@@ -932,49 +1028,61 @@ export class McpTools {
       dependencies = dependencies.filter(dep => dep.dependency_type === depType);
     }
 
-    // Implement indirect dependencies (transitive)
-    if (validatedArgs.include_indirect) {
-      this.logger.debug('Performing transitive dependency analysis', {
-        symbol_id: validatedArgs.symbol_id,
-      });
+    let transitiveResults: any[] = [];
+    const skipTransitive = dependencies.length > 20 || validatedArgs.include_cross_stack;
 
-      const transitiveOptions: TransitiveAnalysisOptions = {
-        maxDepth: 10,
-        includeTypes: validatedArgs.dependency_type
-          ? [validatedArgs.dependency_type as DependencyType]
-          : undefined,
-        confidenceThreshold: 0.1,
-      };
-
+    if ((validatedArgs.include_indirect || validatedArgs.show_call_chains) && !skipTransitive) {
       try {
-        const transitiveResult = await transitiveAnalyzer.getTransitiveDependencies(
-          validatedArgs.symbol_id,
-          transitiveOptions
-        );
+        const transitiveOptions: TransitiveAnalysisOptions = {
+          maxDepth: 2,
+          includeTypes: validatedArgs.dependency_type
+            ? [validatedArgs.dependency_type as DependencyType]
+            : undefined,
+          confidenceThreshold: 0.5,
+          includeCrossStack: false,
+          showCallChains: validatedArgs.show_call_chains || false,
+        };
 
-        const transitiveDependencies = transitiveResult.results
-          .map(result => {
-            const toSymbol = result.dependencies[0]?.to_symbol;
-            if (!toSymbol) return null;
+        const transitiveResult = await Promise.race([
+          transitiveAnalyzer.getTransitiveDependencies(
+            validatedArgs.symbol_id,
+            transitiveOptions
+          ),
+          timeoutPromise
+        ]) as any;
 
-            return {
-              id: result.symbolId,
-              from_symbol_id: validatedArgs.symbol_id,
-              to_symbol_id: result.symbolId,
-              dependency_type: DependencyType.CALLS,
-              line_number: result.dependencies[0].line_number,
-              confidence: result.totalConfidence,
-              created_at: new Date(),
-              updated_at: new Date(),
-              from_symbol: undefined,
-              to_symbol: toSymbol,
-            };
-          })
-          .filter(Boolean);
+        transitiveResults = transitiveResult.results;
 
-        dependencies = [...dependencies, ...transitiveDependencies];
+        // If include_indirect is true, merge transitive results with direct dependencies
+        if (validatedArgs.include_indirect) {
+          const transitiveDependencies = transitiveResult.results
+            .map(result => {
+              const toSymbol = result.dependencies[0]?.to_symbol;
+              if (!toSymbol) return null;
+
+              return {
+                id: result.symbolId,
+                from_symbol_id: validatedArgs.symbol_id,
+                to_symbol_id: result.symbolId,
+                dependency_type: result.dependencies[0]?.dependency_type || DependencyType.CALLS,
+                line_number: result.dependencies[0]?.line_number,
+                confidence: result.totalConfidence,
+                created_at: new Date(),
+                updated_at: new Date(),
+                from_symbol: undefined,
+                to_symbol: toSymbol,
+                // Enhanced context from TransitiveAnalyzer
+                call_chain: result.call_chain,
+                path: result.path,
+                depth: result.depth,
+              };
+            })
+            .filter(Boolean);
+
+          dependencies = [...dependencies, ...transitiveDependencies];
+        }
       } catch (error) {
-        this.logger.error('Transitive dependency analysis failed', {
+        this.logger.error('Enhanced transitive dependency analysis failed', {
           symbol_id: validatedArgs.symbol_id,
           error: (error as Error).message,
         });
@@ -1005,11 +1113,27 @@ export class McpTools {
                       file_path: dep.to_symbol.file?.path,
                     }
                   : null,
+                // New call chain visualization
+                call_chain: dep.call_chain,
+                path: dep.path,
+                depth: dep.depth,
               })),
+              // Enhanced transitive analysis results
+              transitive_analysis: validatedArgs.show_call_chains ? {
+                total_paths: transitiveResults.length,
+                call_chains: transitiveResults.map(result => ({
+                  symbol_id: result.symbolId,
+                  call_chain: result.call_chain,
+                  depth: result.depth,
+                  confidence: result.totalConfidence,
+                }))
+              } : undefined,
               total_dependencies: dependencies.length,
               filters: {
                 dependency_type: validatedArgs.dependency_type,
                 include_indirect: validatedArgs.include_indirect,
+                include_cross_stack: validatedArgs.include_cross_stack,
+                show_call_chains: validatedArgs.show_call_chains,
               },
             },
             null,
@@ -1018,6 +1142,22 @@ export class McpTools {
         },
       ],
     };
+    } catch (error) {
+      this.logger.error('listDependencies operation failed', {
+        error: (error as Error).message,
+        symbolId: validatedArgs.symbol_id
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: (error as Error).message,
+            symbol_id: validatedArgs.symbol_id
+          }, null, 2)
+        }]
+      };
+    }
   }
 
   // Core Tool 6: impactOf (NEW - Phase 6A comprehensive impact analysis)
@@ -1085,10 +1225,11 @@ export class McpTools {
       const confidenceThreshold = validatedArgs.confidence_threshold || 0.7;
 
       try {
-        const transitiveOptions = {
+        const transitiveOptions: TransitiveAnalysisOptions = {
           maxDepth,
           includeTypes: undefined,
           confidenceThreshold,
+          showCallChains: validatedArgs.show_call_chains || false,
         };
 
         const transitiveResult = await transitiveAnalyzer.getTransitiveDependencies(
@@ -1106,6 +1247,8 @@ export class McpTools {
               file_path: toSymbol.file?.path || '',
               impact_type: 'indirect',
               confidence: result.totalConfidence,
+              call_chain: result.call_chain,
+              depth: result.depth,
             });
 
             const framework = this.determineFramework(toSymbol);
@@ -2174,4 +2317,78 @@ export class McpTools {
     if (totalImpact > 5) return 'medium';
     return 'low';
   }
+
+  /**
+   * Get parameter context analysis for a symbol
+   * Enhancement 2: Context-Specific Analysis
+   */
+  private async getParameterContextAnalysis(symbolId: number): Promise<any> {
+    try {
+      const analysis = await this.dbService.groupCallsByParameterContext(symbolId);
+
+      if (analysis.totalCalls === 0) {
+        return undefined; // No parameter context data available
+      }
+
+      return {
+        method_name: analysis.methodName,
+        total_calls: analysis.totalCalls,
+        total_variations: analysis.parameterVariations.length,
+        parameter_variations: analysis.parameterVariations.map(variation => ({
+          parameters: variation.parameter_context,
+          call_count: variation.call_count,
+          average_confidence: variation.confidence_avg,
+          usage_locations: variation.callers.map(caller => ({
+            caller: caller.caller_name,
+            file: caller.file_path,
+            line: caller.line_number
+          })),
+          call_instance_ids: variation.call_instance_ids
+        })),
+        insights: this.generateParameterInsights(analysis.parameterVariations)
+      };
+    } catch (error) {
+      this.logger.warn('Parameter context analysis failed', {
+        symbolId,
+        error: (error as Error).message
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Generate intelligent insights about parameter usage patterns
+   */
+  private generateParameterInsights(variations: any[]): string[] {
+    const insights: string[] = [];
+
+    if (variations.length > 1) {
+      insights.push(`Method called with ${variations.length} different parameter patterns`);
+    }
+
+    // Analyze null usage patterns
+    const nullUsageVariations = variations.filter(v =>
+      v.parameter_context.includes('null')
+    );
+    if (nullUsageVariations.length > 0) {
+      insights.push(`${nullUsageVariations.length} call pattern(s) use null parameters`);
+    }
+
+    // Find most common usage pattern
+    const mostCommon = variations.reduce((prev, current) =>
+      prev.call_count > current.call_count ? prev : current
+    );
+    if (variations.length > 1) {
+      insights.push(`Most common pattern: "${mostCommon.parameter_context}" (${mostCommon.call_count} calls)`);
+    }
+
+    // Analyze confidence levels
+    const lowConfidenceCalls = variations.filter(v => v.confidence_avg < 0.7);
+    if (lowConfidenceCalls.length > 0) {
+      insights.push(`${lowConfidenceCalls.length} parameter pattern(s) have low confidence scores`);
+    }
+
+    return insights;
+  }
+
 }

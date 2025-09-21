@@ -17,6 +17,7 @@ import {
   ChunkResult
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
+import { randomUUID } from 'crypto';
 
 const logger = createComponentLogger('csharp-parser');
 
@@ -1286,20 +1287,49 @@ export class CSharpParser extends ChunkedParser {
       extractionSource: 'ast'
     });
 
+    // Parameter Context Extraction
+    let parameterContext: string | undefined;
+    let parameterTypes: string[] | undefined;
+    let callInstanceId: string | undefined;
+
+    try {
+      // Extract parameter expressions from the method call
+      const parameters = this.extractMethodParameters(node, content);
+
+      if (parameters.length > 0) {
+        // Store raw parameter expressions (e.g., "_handPosition, null")
+        parameterContext = parameters.join(', ');
+
+        // Generate unique call instance ID to distinguish multiple calls to same method
+        callInstanceId = randomUUID();
+
+        // Try to resolve parameter types when possible
+        parameterTypes = this.extractParameterTypes(node, content, parameters);
+
+      }
+    } catch (error) {
+      // Don't let parameter extraction errors break dependency creation
+    }
+
     return {
       from_symbol: callerName,
-      to_symbol: methodName,          // ✅ Use unqualified name for reliable symbol matching
+      to_symbol: methodName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
       confidence,
 
-      // 🚀 Enhanced context fields for rich analysis
+      // Enhanced context fields
       calling_object: callingObject || undefined,
       resolved_class: (qualifiedMethodName !== methodName) ? qualifiedMethodName.split('.')[0] : undefined,
       qualified_context: (qualifiedMethodName !== methodName) ? qualifiedMethodName : undefined,
       method_signature: this.buildMethodSignature(methodName, node, content),
       file_context: this.currentFilePath || undefined,
-      namespace_context: this.getCurrentNamespace(node, content)
+      namespace_context: this.getCurrentNamespace(node, content),
+
+      // Parameter context fields
+      parameter_context: parameterContext,
+      call_instance_id: callInstanceId,
+      parameter_types: parameterTypes
     };
   }
 
@@ -3639,6 +3669,78 @@ export class CSharpParser extends ChunkedParser {
     }
 
     return parameters;
+  }
+
+  /**
+   * Extract parameter types from method call arguments
+   * Attempts to resolve types of parameters when possible
+   */
+  private extractParameterTypes(node: Parser.SyntaxNode, content: string, parameters: string[]): string[] {
+    const parameterTypes: string[] = [];
+
+    try {
+      // Find argument list in the method call
+      const argumentList = this.findNodeOfType(node, 'argument_list');
+      if (!argumentList) {
+        return parameterTypes;
+      }
+
+      for (let i = 0; i < argumentList.childCount; i++) {
+        const child = argumentList.child(i);
+        if (child?.type === 'argument') {
+          const argType = this.inferArgumentType(child, content);
+          parameterTypes.push(argType);
+        }
+      }
+    } catch (error) {
+      logger.debug('Failed to extract parameter types', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    return parameterTypes;
+  }
+
+  /**
+   * Infer the type of an argument expression
+   */
+  private inferArgumentType(argumentNode: Parser.SyntaxNode, content: string): string {
+    const argText = this.getNodeText(argumentNode, content).trim();
+
+    // Handle different argument patterns
+    if (argText === 'null') {
+      return 'null';
+    }
+
+    if (argText === 'true' || argText === 'false') {
+      return 'bool';
+    }
+
+    if (/^\d+$/.test(argText)) {
+      return 'int';
+    }
+
+    if (/^\d+\.\d+[fF]?$/.test(argText)) {
+      return 'float';
+    }
+
+    if (/^".*"$/.test(argText)) {
+      return 'string';
+    }
+
+    if (argText.startsWith('new ')) {
+      const typeMatch = argText.match(/new\s+(\w+)/);
+      return typeMatch ? typeMatch[1] : 'object';
+    }
+
+    // For variables, try to resolve their type (basic heuristics)
+    if (/^[a-zA-Z_]\w*$/.test(argText)) {
+      // Variable name - would need more sophisticated type resolution
+      return 'var';
+    }
+
+    // Default to expression type
+    return 'expression';
   }
 
   /**

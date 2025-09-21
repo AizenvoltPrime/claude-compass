@@ -122,6 +122,43 @@ export class DatabaseService {
     return this.db;
   }
 
+  /**
+   * Safely parse parameter_types field from database
+   * Handles both JSON arrays and legacy comma-separated strings
+   */
+  private safeParseParameterTypes(parameterTypes: any): string[] | undefined {
+    if (!parameterTypes) return undefined;
+
+    // If it's already an array, return it directly
+    if (Array.isArray(parameterTypes)) {
+      return parameterTypes;
+    }
+
+    // If it's a string, try to parse it
+    if (typeof parameterTypes === 'string') {
+      try {
+        // Try parsing as JSON array first
+        const parsed = JSON.parse(parameterTypes);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+        // If not an array, fall back to string splitting
+        return parameterTypes.split(',').map(s => s.trim());
+      } catch (error) {
+        // Fall back to comma-separated string parsing
+        logger.warn('Failed to parse parameter_types as JSON, falling back to comma-separated parsing', {
+          parameterTypes,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return parameterTypes.split(',').map(s => s.trim());
+      }
+    }
+
+    // If it's neither array nor string, return undefined
+    logger.warn('Unexpected parameter_types type', { parameterTypes, type: typeof parameterTypes });
+    return undefined;
+  }
+
   // Repository operations
   async createRepository(data: CreateRepository): Promise<Repository> {
     logger.debug('Creating repository', { name: data.name, path: data.path });
@@ -1176,8 +1213,14 @@ export class DatabaseService {
 
   // Dependency operations
   async createDependency(data: CreateDependency): Promise<Dependency> {
+    // Convert parameter_types array to JSON string for database storage
+    const insertData = {
+      ...data,
+      parameter_types: data.parameter_types ? JSON.stringify(data.parameter_types) : null
+    };
+
     const [dependency] = await this.db('dependencies')
-      .insert(data)
+      .insert(insertData)
       .returning('*');
     return dependency as Dependency;
   }
@@ -1194,10 +1237,16 @@ export class DatabaseService {
     for (let i = 0; i < dependencies.length; i += BATCH_SIZE) {
       const chunk = dependencies.slice(i, i + BATCH_SIZE);
 
+      // Convert parameter_types arrays to JSON strings for database storage
+      const processedChunk = chunk.map(dep => ({
+        ...dep,
+        parameter_types: dep.parameter_types ? JSON.stringify(dep.parameter_types) : null
+      }));
+
       // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
       const chunkResults = await this.db('dependencies')
-        .insert(chunk)
-        .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type'])
+        .insert(processedChunk)
+        .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number'])
         .merge(['line_number', 'confidence', 'updated_at'])
         .returning('*');
 
@@ -3289,6 +3338,10 @@ export class DatabaseService {
       method_signature: result.method_signature,
       file_context: result.file_context,
       namespace_context: result.namespace_context,
+      // Parameter context fields (Enhancement 2)
+      parameter_context: result.parameter_context,
+      call_instance_id: result.call_instance_id,
+      parameter_types: result.parameter_types ? this.safeParseParameterTypes(result.parameter_types) : undefined,
     })) as EnhancedDependencyWithSymbols[];
   }
 
@@ -3325,7 +3378,100 @@ export class DatabaseService {
       method_signature: result.method_signature,
       file_context: result.file_context,
       namespace_context: result.namespace_context,
+      // Parameter context fields (Enhancement 2)
+      parameter_context: result.parameter_context,
+      call_instance_id: result.call_instance_id,
+      parameter_types: result.parameter_types ? this.safeParseParameterTypes(result.parameter_types) : undefined,
     })) as EnhancedDependencyWithSymbols[];
+  }
+
+  /**
+   * Group calls by parameter context to show parameter variations
+   * Enhancement 2: Context-Specific Analysis
+   */
+  async groupCallsByParameterContext(symbolId: number): Promise<{
+    methodName: string;
+    totalCalls: number;
+    parameterVariations: Array<{
+      parameter_context: string;
+      call_instance_ids: string[];
+      call_count: number;
+      confidence_avg: number;
+      line_numbers: number[];
+      callers: Array<{
+        caller_name: string;
+        file_path: string;
+        line_number: number;
+      }>;
+    }>;
+  }> {
+    logger.debug('Grouping calls by parameter context', { symbolId });
+
+    // Get the target symbol information
+    const targetSymbol = await this.getSymbolWithFile(symbolId);
+    if (!targetSymbol) {
+      throw new Error('Symbol not found');
+    }
+
+    // Get all calls to this symbol with parameter context
+    const calls = await this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
+      .where('dependencies.to_symbol_id', symbolId)
+      .whereNotNull('dependencies.parameter_context')
+      .select(
+        'dependencies.*',
+        'from_symbols.name as caller_name',
+        'from_files.path as caller_file_path'
+      );
+
+    // Group calls by parameter context
+    const parameterGroups = new Map<string, any>();
+
+    for (const call of calls) {
+      const paramContext = call.parameter_context || 'no-parameters';
+
+      if (!parameterGroups.has(paramContext)) {
+        parameterGroups.set(paramContext, {
+          parameter_context: paramContext,
+          call_instance_ids: [],
+          call_count: 0,
+          confidence_sum: 0,
+          line_numbers: [],
+          callers: []
+        });
+      }
+
+      const group = parameterGroups.get(paramContext);
+      group.call_instance_ids.push(call.call_instance_id);
+      group.call_count++;
+      group.confidence_sum += call.confidence || 0;
+      group.line_numbers.push(call.line_number);
+      group.callers.push({
+        caller_name: call.caller_name,
+        file_path: call.caller_file_path,
+        line_number: call.line_number
+      });
+    }
+
+    // Convert to array and calculate averages
+    const parameterVariations = Array.from(parameterGroups.values()).map(group => ({
+      ...group,
+      confidence_avg: group.confidence_sum / group.call_count,
+      confidence_sum: undefined // Remove intermediate field
+    }));
+
+    logger.debug('Parameter context grouping completed', {
+      symbolId,
+      totalVariations: parameterVariations.length,
+      totalCalls: calls.length
+    });
+
+    return {
+      methodName: targetSymbol.name,
+      totalCalls: calls.length,
+      parameterVariations
+    };
   }
 
   /**
