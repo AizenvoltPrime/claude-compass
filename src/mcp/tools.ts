@@ -67,7 +67,7 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
     if (!Array.isArray(args.entity_types)) {
       throw new Error('entity_types must be an array');
     }
-    const validEntityTypes = ['route', 'model', 'controller', 'component', 'job', 'function', 'class', 'interface'];
+    const validEntityTypes = ['route', 'model', 'controller', 'component', 'job', 'function', 'class', 'interface', 'scene', 'node', 'script', 'autoload'];
     for (const entityType of args.entity_types) {
       if (typeof entityType !== 'string' || !validEntityTypes.includes(entityType)) {
         throw new Error(`entity_types must contain valid types: ${validEntityTypes.join(', ')}`);
@@ -465,6 +465,42 @@ export class McpTools {
             break;
           case 'job':
             symbols.push(...await this.searchJobs(validatedArgs.query, repoIds, validatedArgs.framework));
+            break;
+          case 'scene':
+            symbols.push(...await this.searchGodotScenes(validatedArgs.query, repoIds));
+            break;
+          case 'node':
+            symbols.push(...await this.searchGodotNodes(validatedArgs.query, repoIds));
+            break;
+          case 'script':
+            // For Godot framework, search Godot scripts, otherwise search generic scripts
+            if (validatedArgs.framework === 'godot') {
+              symbols.push(...await this.searchGodotScripts(validatedArgs.query, repoIds));
+            } else {
+              // Fall through to default case for non-Godot scripts
+              const symbolType = this.mapEntityTypeToSymbolType(entityType);
+              if (symbolType) {
+                searchOptions.symbolTypes = [symbolType];
+              }
+              let standardSymbols;
+              if (validatedArgs.use_vector === true) {
+                standardSymbols = await this.dbService.vectorSearchSymbols(
+                  validatedArgs.query,
+                  repoId,
+                  searchOptions
+                );
+              } else {
+                standardSymbols = await this.dbService.searchSymbols(
+                  validatedArgs.query,
+                  repoId,
+                  searchOptions
+                );
+              }
+              symbols.push(...standardSymbols);
+            }
+            break;
+          case 'autoload':
+            symbols.push(...await this.searchGodotAutoloads(validatedArgs.query, repoIds));
             break;
           default:
             // Use enhanced search for standard symbol types
@@ -1202,12 +1238,144 @@ export class McpTools {
     });
   }
 
+  // Godot-specific search methods
+  private async searchGodotScenes(query: string, repoIds?: number[]): Promise<any[]> {
+    try {
+      const results = [];
+      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+        const scenes = await this.dbService.getGodotScenesByRepository(repoId);
+        const filteredScenes = scenes.filter(scene =>
+          scene.scene_name.toLowerCase().includes(query.toLowerCase()) ||
+          scene.scene_path.toLowerCase().includes(query.toLowerCase())
+        );
+
+        results.push(...filteredScenes.map(scene => ({
+          id: scene.id,
+          name: scene.scene_name,
+          file: { path: scene.scene_path },
+          framework: 'godot',
+          entity_type: 'scene',
+          symbol_type: 'scene',
+          metadata: {
+            node_count: scene.node_count,
+            has_script: scene.has_script,
+            ...scene.metadata
+          }
+        })));
+      }
+      return results;
+    } catch (error) {
+      this.logger.error('Failed to search Godot scenes', { error: error.message });
+      return [];
+    }
+  }
+
+  private async searchGodotNodes(query: string, repoIds?: number[]): Promise<any[]> {
+    try {
+      const results = [];
+      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+        const scenes = await this.dbService.getGodotScenesByRepository(repoId);
+        for (const scene of scenes) {
+          const nodes = await this.dbService.getGodotNodesByScene(scene.id);
+          const filteredNodes = nodes.filter(node =>
+            node.node_name.toLowerCase().includes(query.toLowerCase()) ||
+            node.node_type.toLowerCase().includes(query.toLowerCase())
+          );
+
+          results.push(...filteredNodes.map(node => ({
+            id: node.id,
+            name: node.node_name,
+            file: { path: `scene:${node.scene_id}` }, // Reference to scene
+            framework: 'godot',
+            entity_type: 'node',
+            symbol_type: 'node',
+            metadata: {
+              node_type: node.node_type,
+              script_path: node.script_path,
+              properties: node.properties
+            }
+          })));
+        }
+      }
+      return results;
+    } catch (error) {
+      this.logger.error('Failed to search Godot nodes', { error: error.message });
+      return [];
+    }
+  }
+
+  private async searchGodotScripts(query: string, repoIds?: number[]): Promise<any[]> {
+    try {
+      const results = [];
+      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+        const scripts = await this.dbService.getGodotScriptsByRepository(repoId);
+        const filteredScripts = scripts.filter(script =>
+          script.class_name.toLowerCase().includes(query.toLowerCase()) ||
+          script.script_path.toLowerCase().includes(query.toLowerCase()) ||
+          (script.base_class && script.base_class.toLowerCase().includes(query.toLowerCase()))
+        );
+
+        results.push(...filteredScripts.map(script => ({
+          id: script.id,
+          name: script.class_name,
+          file: { path: script.script_path },
+          framework: 'godot',
+          entity_type: 'script',
+          symbol_type: 'class',
+          metadata: {
+            base_class: script.base_class,
+            is_autoload: script.is_autoload,
+            signals: script.signals,
+            exports: script.exports,
+            ...script.metadata
+          }
+        })));
+      }
+      return results;
+    } catch (error) {
+      this.logger.error('Failed to search Godot scripts', { error: error.message });
+      return [];
+    }
+  }
+
+  private async searchGodotAutoloads(query: string, repoIds?: number[]): Promise<any[]> {
+    try {
+      const results = [];
+      for (const repoId of (repoIds || [await this.getDefaultRepoId()].filter(Boolean))) {
+        const autoloads = await this.dbService.getGodotAutoloadsByRepository(repoId);
+        const filteredAutoloads = autoloads.filter(autoload =>
+          autoload.autoload_name.toLowerCase().includes(query.toLowerCase()) ||
+          autoload.script_path.toLowerCase().includes(query.toLowerCase())
+        );
+
+        results.push(...filteredAutoloads.map(autoload => ({
+          id: autoload.id,
+          name: autoload.autoload_name,
+          file: { path: autoload.script_path },
+          framework: 'godot',
+          entity_type: 'autoload',
+          symbol_type: 'autoload',
+          metadata: {
+            script_path: autoload.script_path,
+            script_id: autoload.script_id,
+            ...autoload.metadata
+          }
+        })));
+      }
+      return results;
+    } catch (error) {
+      this.logger.error('Failed to search Godot autoloads', { error: error.message });
+      return [];
+    }
+  }
+
   private getFrameworkPath(framework: string): string {
     switch (framework) {
       case 'laravel': return 'app/';
       case 'vue': return '.vue';
       case 'react': return 'components/';
       case 'node': return 'server/';
+      case 'godot': return 'scenes/';
       default: return '';
     }
   }
@@ -1224,6 +1392,8 @@ export class McpTools {
     if (symbol.file?.path?.endsWith('.vue')) return 'vue';
     if (symbol.file?.path?.includes('components/') && symbol.file?.path?.endsWith('.tsx')) return 'react';
     if (symbol.file?.path?.includes('server/') || symbol.file?.path?.includes('api/')) return 'node';
+    if (symbol.file?.path?.endsWith('.tscn') || symbol.file?.path?.endsWith('.godot') ||
+        (symbol.file?.path?.endsWith('.cs') && symbol.file?.path?.includes('scenes/'))) return 'godot';
     return 'unknown';
   }
 

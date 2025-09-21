@@ -630,10 +630,15 @@ export class GodotParser extends BaseFrameworkParser {
           validatedOptions as FrameworkParseOptions
         );
 
+        // Extract dependencies for .tscn files using file path context
+        const dependencies = filePath.endsWith('.tscn')
+          ? this.extractTscnDependencies(content, filePath)
+          : [];
+
         return {
           filePath,
           symbols: [],
-          dependencies: [],
+          dependencies,
           imports: [],
           exports: [],
           errors: [],
@@ -723,44 +728,64 @@ export class GodotParser extends BaseFrameworkParser {
     return [];
   }
 
-  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
+  /**
+   * Extract dependencies specifically for .tscn files with file path context
+   */
+  private extractTscnDependencies(content: string, filePath: string): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
-    // Extract dependencies from .tscn files
+    // Extract dependencies from .tscn files - using actual file paths
     if (content.includes('[gd_scene') || content.includes('[gd_resource')) {
-      // Extract external resource dependencies
-      const extResourcePattern = /\[ext_resource[^\]]*path="([^"]+)"[^\]]*id="([^"]+)"/g;
-      let match;
-      let lineNumber = 1;
-
+      const extResources = new Map<string, string>(); // resourceId -> filePath
       const lines = content.split('\n');
+
+      // First pass: Extract all external resource mappings
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-
-        // Reset regex for each line
-        extResourcePattern.lastIndex = 0;
-        while ((match = extResourcePattern.exec(line)) !== null) {
-          const [, resourcePath, resourceId] = match;
-
-          dependencies.push({
-            from_symbol: 'scene',
-            to_symbol: resourcePath,
-            dependency_type: DependencyType.REFERENCES,
-            line_number: i + 1,
-            confidence: 0.9
-          });
+        const extResourceMatch = line.match(/\[ext_resource[^\]]*path="([^"]+)"[^\]]*id="([^"]+)"/);
+        if (extResourceMatch) {
+          const [, resourcePath, resourceId] = extResourceMatch;
+          extResources.set(resourceId, resourcePath);
         }
+      }
+
+      // Second pass: Extract script attachments and resource references
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
         // Extract script attachments from node sections
         if (line.includes('script = ExtResource')) {
           const scriptMatch = line.match(/script = ExtResource\s*\(\s*"([^"]+)"\s*\)/);
           if (scriptMatch) {
+            const resourceId = scriptMatch[1];
+            const scriptPath = extResources.get(resourceId);
+
+            if (scriptPath) {
+              // Create file-to-file dependency using actual paths
+              dependencies.push({
+                from_symbol: filePath, // Current .tscn file
+                to_symbol: scriptPath, // Actual script file path
+                dependency_type: DependencyType.REFERENCES,
+                line_number: i + 1,
+                confidence: 0.95
+              });
+            }
+          }
+        }
+
+        // Extract other resource references (textures, materials, etc.)
+        const resourceRefMatch = line.match(/ExtResource\s*\(\s*"([^"]+)"\s*\)/);
+        if (resourceRefMatch && !line.includes('script =')) {
+          const resourceId = resourceRefMatch[1];
+          const resourcePath = extResources.get(resourceId);
+
+          if (resourcePath) {
             dependencies.push({
-              from_symbol: 'node',
-              to_symbol: scriptMatch[1],
+              from_symbol: filePath, // Current .tscn file
+              to_symbol: resourcePath, // Actual resource file path
               dependency_type: DependencyType.REFERENCES,
               line_number: i + 1,
-              confidence: 0.95
+              confidence: 0.85
             });
           }
         }
@@ -768,6 +793,12 @@ export class GodotParser extends BaseFrameworkParser {
     }
 
     return dependencies;
+  }
+
+  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
+    // This method is kept for compatibility with C# files
+    // For .tscn files, we use extractTscnDependencies which has access to filePath
+    return [];
   }
 
   protected extractImports(rootNode: Parser.SyntaxNode, content: string): ParsedImport[] {
