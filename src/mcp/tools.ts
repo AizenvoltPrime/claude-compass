@@ -38,6 +38,9 @@ function validateGetSymbolArgs(args: any): GetSymbolArgs {
   if (args.include_callers !== undefined && typeof args.include_callers !== 'boolean') {
     throw new Error('include_callers must be a boolean');
   }
+  if (args.group_results !== undefined && typeof args.group_results !== 'boolean') {
+    throw new Error('group_results must be a boolean');
+  }
   return args as GetSymbolArgs;
 }
 
@@ -138,6 +141,9 @@ function validateWhoCallsArgs(args: any): WhoCallsArgs {
   if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
     throw new Error('show_call_chains must be a boolean');
   }
+  if (args.group_results !== undefined && typeof args.group_results !== 'boolean') {
+    throw new Error('group_results must be a boolean');
+  }
   return args as WhoCallsArgs;
 }
 
@@ -156,6 +162,9 @@ function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   }
   if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
     throw new Error('show_call_chains must be a boolean');
+  }
+  if (args.group_results !== undefined && typeof args.group_results !== 'boolean') {
+    throw new Error('group_results must be a boolean');
   }
   return args as ListDependenciesArgs;
 }
@@ -202,6 +211,113 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
   return args as ImpactOfArgs;
 }
 
+/**
+ * Groups dependencies by call site (line number and method name) to reduce verbosity
+ * while preserving all polymorphic relationship information
+ */
+function groupDependenciesByCallSite(dependencies: any[]): any {
+  const groupedByLine = new Map<number, any>();
+
+  for (const dep of dependencies) {
+    const lineNumber = dep.line_number;
+    const methodName = dep.to_symbol?.name;
+
+    if (!methodName) continue;
+
+    const lineKey = `line_${lineNumber}`;
+
+    if (!groupedByLine.has(lineNumber)) {
+      groupedByLine.set(lineNumber, {
+        line_number: lineNumber,
+        method_call: methodName,
+        calls: [],
+        references: [],
+        total_confidence: 0,
+        relationship_count: 0
+      });
+    }
+
+    const group = groupedByLine.get(lineNumber)!;
+
+    // Classify relationship type based on file path and dependency type
+    const relationType = classifyRelationshipType(dep);
+
+    const relationshipInfo = {
+      id: dep.id,
+      type: relationType,
+      target: dep.to_symbol.file_path ?
+        `${getClassFromFilePath(dep.to_symbol.file_path)}.${methodName}` :
+        methodName,
+      confidence: dep.confidence,
+      file_path: dep.to_symbol.file_path
+    };
+
+    // Group by dependency type
+    if (dep.type === 'calls' || dep.dependency_type === 'calls') {
+      group.calls.push(relationshipInfo);
+    } else if (dep.type === 'references' || dep.dependency_type === 'references') {
+      group.references.push(relationshipInfo);
+    } else {
+      // Default to calls for other types
+      group.calls.push(relationshipInfo);
+    }
+
+    group.total_confidence += dep.confidence || 0;
+    group.relationship_count++;
+  }
+
+  // Convert to object format and calculate average confidence
+  const result: any = {};
+  for (const [lineNumber, group] of groupedByLine) {
+    const lineKey = `line_${lineNumber}`;
+    group.average_confidence = group.relationship_count > 0 ?
+      group.total_confidence / group.relationship_count : 0;
+
+    // Remove internal tracking fields
+    delete group.total_confidence;
+    delete group.relationship_count;
+
+    result[lineKey] = group;
+  }
+
+  return result;
+}
+
+/**
+ * Classifies the type of relationship based on file path and context
+ */
+function classifyRelationshipType(dependency: any): string {
+  const filePath = dependency.to_symbol?.file_path || '';
+  const fileName = filePath.split('/').pop() || '';
+
+  // Interface detection
+  if (fileName.startsWith('I') && fileName.includes('.cs')) {
+    return 'interface';
+  }
+
+  // Abstract class detection
+  if (fileName.toLowerCase().includes('abstract')) {
+    return 'abstract';
+  }
+
+  // Implementation detection (concrete classes)
+  if (fileName.includes('.cs') && !fileName.startsWith('I')) {
+    return 'implementation';
+  }
+
+  // Self-reference detection could be added based on calling context
+  // For now, default to implementation
+  return 'implementation';
+}
+
+/**
+ * Extracts class name from file path
+ */
+function getClassFromFilePath(filePath: string): string {
+  const fileName = filePath.split('/').pop() || '';
+  return fileName.replace(/\.(cs|ts|js|php)$/, '');
+}
+
 export interface GetFileArgs {
   file_id?: number;
   file_path?: string;
@@ -212,6 +328,7 @@ export interface GetSymbolArgs {
   symbol_id: number;
   include_dependencies?: boolean;
   include_callers?: boolean;
+  group_results?: boolean;
 }
 
 export interface SearchCodeArgs {
@@ -235,6 +352,7 @@ export interface WhoCallsArgs {
   include_indirect?: boolean;
   include_cross_stack?: boolean;
   show_call_chains?: boolean;
+  group_results?: boolean;
 }
 
 export interface ListDependenciesArgs {
@@ -243,6 +361,7 @@ export interface ListDependenciesArgs {
   include_indirect?: boolean;
   include_cross_stack?: boolean;
   show_call_chains?: boolean;
+  group_results?: boolean;
 }
 
 // Comprehensive impact analysis interface (Phase 6A)
@@ -447,34 +566,66 @@ export class McpTools {
                     }
                   : null,
               },
-              dependencies: dependencies.map(dep => ({
-                id: dep.id,
-                type: dep.dependency_type,
-                line_number: dep.line_number,
-                confidence: dep.confidence,
-                to_symbol: dep.to_symbol
-                  ? {
-                      id: dep.to_symbol.id,
-                      name: dep.to_symbol.name,
-                      type: dep.to_symbol.symbol_type,
-                      file_path: dep.to_symbol.file?.path,
-                    }
-                  : null,
-              })),
-              callers: callers.map(caller => ({
-                id: caller.id,
-                type: caller.dependency_type,
-                line_number: caller.line_number,
-                confidence: caller.confidence,
-                from_symbol: caller.from_symbol
-                  ? {
-                      id: caller.from_symbol.id,
-                      name: caller.from_symbol.name,
-                      type: caller.from_symbol.symbol_type,
-                      file_path: caller.from_symbol.file?.path,
-                    }
-                  : null,
-              })),
+              dependencies: validatedArgs.group_results
+                ? groupDependenciesByCallSite(dependencies.map(dep => ({
+                    id: dep.id,
+                    type: dep.dependency_type,
+                    dependency_type: dep.dependency_type,
+                    line_number: dep.line_number,
+                    confidence: dep.confidence,
+                    to_symbol: dep.to_symbol
+                      ? {
+                          id: dep.to_symbol.id,
+                          name: dep.to_symbol.name,
+                          type: dep.to_symbol.symbol_type,
+                          file_path: dep.to_symbol.file?.path,
+                        }
+                      : null,
+                  })))
+                : dependencies.map(dep => ({
+                    id: dep.id,
+                    type: dep.dependency_type,
+                    line_number: dep.line_number,
+                    confidence: dep.confidence,
+                    to_symbol: dep.to_symbol
+                      ? {
+                          id: dep.to_symbol.id,
+                          name: dep.to_symbol.name,
+                          type: dep.to_symbol.symbol_type,
+                          file_path: dep.to_symbol.file?.path,
+                        }
+                      : null,
+                  })),
+              callers: validatedArgs.group_results
+                ? groupDependenciesByCallSite(callers.map(caller => ({
+                    id: caller.id,
+                    type: caller.dependency_type,
+                    dependency_type: caller.dependency_type,
+                    line_number: caller.line_number,
+                    confidence: caller.confidence,
+                    to_symbol: caller.from_symbol
+                      ? {
+                          id: caller.from_symbol.id,
+                          name: caller.from_symbol.name,
+                          type: caller.from_symbol.symbol_type,
+                          file_path: caller.from_symbol.file?.path,
+                        }
+                      : null,
+                  })))
+                : callers.map(caller => ({
+                    id: caller.id,
+                    type: caller.dependency_type,
+                    line_number: caller.line_number,
+                    confidence: caller.confidence,
+                    from_symbol: caller.from_symbol
+                      ? {
+                          id: caller.from_symbol.id,
+                          name: caller.from_symbol.name,
+                          type: caller.from_symbol.symbol_type,
+                          file_path: caller.from_symbol.file?.path,
+                        }
+                      : null,
+                  })),
             },
             null,
             2
@@ -928,31 +1079,58 @@ export class McpTools {
                 name: symbol.name,
                 type: symbol.symbol_type,
               },
-              callers: callers.map(caller => ({
-                id: caller.id,
-                dependency_type: caller.dependency_type,
-                line_number: caller.line_number,
-                confidence: caller.confidence,
-                from_symbol: caller.from_symbol
-                  ? {
-                      id: caller.from_symbol.id,
-                      name: caller.from_symbol.name,
-                      type: caller.from_symbol.symbol_type,
-                      file_path: caller.from_symbol.file?.path,
-                    }
-                  : null,
-                calling_object: caller.calling_object,
-                resolved_class: caller.resolved_class,
-                qualified_context: caller.qualified_context,
-                method_signature: caller.method_signature,
-                file_context: caller.file_context,
-                namespace_context: caller.namespace_context,
-                call_chain: caller.call_chain,
-                path: caller.path,
-                depth: caller.depth,
-                call_pattern: this.analyzeCallPattern(caller),
-                cross_file: this.isCrossFileCall(caller, symbol),
-              })),
+              callers: validatedArgs.group_results
+                ? groupDependenciesByCallSite(callers.map(caller => ({
+                    id: caller.id,
+                    type: caller.dependency_type,
+                    dependency_type: caller.dependency_type,
+                    line_number: caller.line_number,
+                    confidence: caller.confidence,
+                    to_symbol: caller.from_symbol
+                      ? {
+                          id: caller.from_symbol.id,
+                          name: caller.from_symbol.name,
+                          type: caller.from_symbol.symbol_type,
+                          file_path: caller.from_symbol.file?.path,
+                        }
+                      : null,
+                    calling_object: caller.calling_object,
+                    resolved_class: caller.resolved_class,
+                    qualified_context: caller.qualified_context,
+                    method_signature: caller.method_signature,
+                    file_context: caller.file_context,
+                    namespace_context: caller.namespace_context,
+                    call_chain: caller.call_chain,
+                    path: caller.path,
+                    depth: caller.depth,
+                    call_pattern: this.analyzeCallPattern(caller),
+                    cross_file: this.isCrossFileCall(caller, symbol),
+                  })))
+                : callers.map(caller => ({
+                    id: caller.id,
+                    dependency_type: caller.dependency_type,
+                    line_number: caller.line_number,
+                    confidence: caller.confidence,
+                    from_symbol: caller.from_symbol
+                      ? {
+                          id: caller.from_symbol.id,
+                          name: caller.from_symbol.name,
+                          type: caller.from_symbol.symbol_type,
+                          file_path: caller.from_symbol.file?.path,
+                        }
+                      : null,
+                    calling_object: caller.calling_object,
+                    resolved_class: caller.resolved_class,
+                    qualified_context: caller.qualified_context,
+                    method_signature: caller.method_signature,
+                    file_context: caller.file_context,
+                    namespace_context: caller.namespace_context,
+                    call_chain: caller.call_chain,
+                    path: caller.path,
+                    depth: caller.depth,
+                    call_pattern: this.analyzeCallPattern(caller),
+                    cross_file: this.isCrossFileCall(caller, symbol),
+                  })),
               transitive_analysis: validatedArgs.show_call_chains ? {
                 total_paths: transitiveResults.length,
                 call_chains: transitiveResults.map(result => ({
@@ -1100,24 +1278,44 @@ export class McpTools {
                 name: symbol.name,
                 type: symbol.symbol_type,
               },
-              dependencies: dependencies.map(dep => ({
-                id: dep.id,
-                dependency_type: dep.dependency_type,
-                line_number: dep.line_number,
-                confidence: dep.confidence,
-                to_symbol: dep.to_symbol
-                  ? {
-                      id: dep.to_symbol.id,
-                      name: dep.to_symbol.name,
-                      type: dep.to_symbol.symbol_type,
-                      file_path: dep.to_symbol.file?.path,
-                    }
-                  : null,
-                // New call chain visualization
-                call_chain: dep.call_chain,
-                path: dep.path,
-                depth: dep.depth,
-              })),
+              dependencies: validatedArgs.group_results
+                ? groupDependenciesByCallSite(dependencies.map(dep => ({
+                    id: dep.id,
+                    type: dep.dependency_type,
+                    dependency_type: dep.dependency_type,
+                    line_number: dep.line_number,
+                    confidence: dep.confidence,
+                    to_symbol: dep.to_symbol
+                      ? {
+                          id: dep.to_symbol.id,
+                          name: dep.to_symbol.name,
+                          type: dep.to_symbol.symbol_type,
+                          file_path: dep.to_symbol.file?.path,
+                        }
+                      : null,
+                    // New call chain visualization
+                    call_chain: dep.call_chain,
+                    path: dep.path,
+                    depth: dep.depth,
+                  })))
+                : dependencies.map(dep => ({
+                    id: dep.id,
+                    dependency_type: dep.dependency_type,
+                    line_number: dep.line_number,
+                    confidence: dep.confidence,
+                    to_symbol: dep.to_symbol
+                      ? {
+                          id: dep.to_symbol.id,
+                          name: dep.to_symbol.name,
+                          type: dep.to_symbol.symbol_type,
+                          file_path: dep.to_symbol.file?.path,
+                        }
+                      : null,
+                    // New call chain visualization
+                    call_chain: dep.call_chain,
+                    path: dep.path,
+                    depth: dep.depth,
+                  })),
               // Enhanced transitive analysis results
               transitive_analysis: validatedArgs.show_call_chains ? {
                 total_paths: transitiveResults.length,
@@ -2324,9 +2522,18 @@ export class McpTools {
    */
   private async getParameterContextAnalysis(symbolId: number): Promise<any> {
     try {
+      this.logger.debug('Getting parameter context analysis', { symbolId });
       const analysis = await this.dbService.groupCallsByParameterContext(symbolId);
 
+      this.logger.debug('Parameter context analysis result', {
+        symbolId,
+        totalCalls: analysis.totalCalls,
+        hasParameterVariations: analysis.parameterVariations?.length > 0,
+        methodName: analysis.methodName
+      });
+
       if (analysis.totalCalls === 0) {
+        this.logger.debug('No parameter context data found', { symbolId });
         return undefined; // No parameter context data available
       }
 

@@ -1247,7 +1247,7 @@ export class DatabaseService {
       const chunkResults = await this.db('dependencies')
         .insert(processedChunk)
         .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number'])
-        .merge(['line_number', 'confidence', 'updated_at'])
+        .merge(['line_number', 'confidence', 'updated_at', 'parameter_context', 'call_instance_id', 'parameter_types'])
         .returning('*');
 
       results.push(...(chunkResults as Dependency[]));
@@ -3424,6 +3424,17 @@ export class DatabaseService {
         'from_symbols.name as caller_name',
         'from_files.path as caller_file_path'
       );
+
+    logger.debug('Parameter context query result', {
+      symbolId,
+      callsFound: calls.length,
+      sampleCalls: calls.slice(0, 3).map(call => ({
+        id: call.id,
+        parameter_context: call.parameter_context,
+        caller_name: call.caller_name,
+        line_number: call.line_number
+      }))
+    });
 
     // Group calls by parameter context
     const parameterGroups = new Map<string, any>();
