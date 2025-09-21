@@ -446,7 +446,7 @@ export abstract class BaseParser {
   }
 
   /**
-   * Find all nodes of a specific type
+   * Find all nodes of a specific type using semantic traversal
    */
   protected findNodesOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
     const nodes: Parser.SyntaxNode[] = [];
@@ -455,8 +455,12 @@ export abstract class BaseParser {
       nodes.push(node);
     }
 
-    for (const child of node.children) {
-      nodes.push(...this.findNodesOfType(child, type));
+    // Use namedChildren for semantic traversal, skipping whitespace and punctuation
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child) {
+        nodes.push(...this.findNodesOfType(child, type));
+      }
     }
 
     return nodes;
