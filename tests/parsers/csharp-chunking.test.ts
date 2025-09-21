@@ -99,13 +99,21 @@ namespace Game {
       expect(baseClass).toBeDefined();
       expect(derivedClass).toBeDefined();
 
-      // Check inheritance dependency
-      const inheritance = result.dependencies.find(d =>
+      // Check direct inheritance dependency (Player inherits from Character)
+      const directInheritance = result.dependencies.find(d =>
         d.from_symbol === 'Player' &&
+        d.to_symbol === 'Character' &&
+        d.dependency_type === 'inherits'
+      );
+      expect(directInheritance).toBeDefined();
+
+      // Check transitive inheritance (Character inherits from BaseEntity)
+      const transitiveInheritance = result.dependencies.find(d =>
+        d.from_symbol === 'Character' &&
         d.to_symbol === 'BaseEntity' &&
         d.dependency_type === 'inherits'
       );
-      expect(inheritance).toBeDefined();
+      expect(transitiveInheritance).toBeDefined();
     });
 
     test('should handle partial classes correctly', async () => {
@@ -169,11 +177,20 @@ namespace Game {
       const result = await parser.parseFile('namespaces.cs', content);
 
       // Check that classes in different namespaces are properly identified
-      const gameClasses = result.symbols.filter(s =>
-        s.symbol_type === 'class' &&
-        s.signature?.includes('Game')
+      // The generateNestedNamespaces function creates CoreSystem, UIManager, etc.
+      const coreSystemClass = result.symbols.find(s =>
+        s.symbol_type === 'class' && s.name === 'CoreSystem'
       );
-      expect(gameClasses.length).toBeGreaterThan(0);
+      const uiManagerClass = result.symbols.find(s =>
+        s.symbol_type === 'class' && s.name === 'UIManager'
+      );
+
+      expect(coreSystemClass).toBeDefined();
+      expect(uiManagerClass).toBeDefined();
+
+      // Verify that classes from different namespaces are both found
+      const classCount = result.symbols.filter(s => s.symbol_type === 'class').length;
+      expect(classCount).toBeGreaterThan(1);
     });
 
     test('should preserve interface implementations', async () => {
