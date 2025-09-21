@@ -145,7 +145,7 @@ namespace GameCore.Managers {
     expect(deckControllerUpdatePlayerHand).toBeDefined();
 
     // Get dependencies for verification
-    const dependencies = await knex('symbol_dependencies')
+    const dependencies = await knex('dependencies')
       .where('from_symbol_id', deckControllerInitializeHands!.id)
       .orWhere('from_symbol_id', deckControllerUpdatePlayerHand!.id);
 
@@ -160,11 +160,11 @@ namespace GameCore.Managers {
     expect(initToSetDep).toBeDefined();
 
     // Verify who_calls functionality works
-    const callers = await knex('symbol_dependencies')
-      .join('symbols as from_symbols', 'symbol_dependencies.from_symbol_id', 'from_symbols.id')
-      .where('symbol_dependencies.to_symbol_id', cardManagerSetHandPositions!.id)
-      .where('symbol_dependencies.dependency_type', 'calls')
-      .select('from_symbols.name', 'symbol_dependencies.confidence');
+    const callers = await knex('dependencies')
+      .join('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .where('dependencies.to_symbol_id', cardManagerSetHandPositions!.id)
+      .where('dependencies.dependency_type', 'calls')
+      .select('from_symbols.name', 'dependencies.confidence');
 
     expect(callers.length).toBeGreaterThan(0);
     expect(callers.map(c => c.name)).toContain('InitializeHands');

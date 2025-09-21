@@ -107,6 +107,9 @@ interface TopLevelDeclaration {
  */
 export class CSharpParser extends ChunkedParser {
   private currentFilePath?: string;
+  // Use WeakMap to associate cache with specific tree root nodes
+  private nodeTypeCacheMap: WeakMap<Parser.SyntaxNode, Map<string, Parser.SyntaxNode[]>> = new WeakMap();
+  private typeResolutionCache: Map<string, EnhancedTypeInfo | null> = new Map();
 
   constructor() {
     const parser = new Parser();
@@ -119,6 +122,9 @@ export class CSharpParser extends ChunkedParser {
   }
 
   async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
+    // Clear caches for new file parse
+    this.clearCaches();
+
     // Store current file path for enhanced context
     this.currentFilePath = filePath;
 
@@ -356,81 +362,134 @@ export class CSharpParser extends ChunkedParser {
     }
   }
 
+  /**
+   * Collect all nodes by type in a single AST traversal for performance optimization
+   * This reduces complexity from O(n*m) to O(n) where n is nodes and m is node types
+   */
+  private collectAllNodesByType(rootNode: Parser.SyntaxNode): Map<string, Parser.SyntaxNode[]> {
+    const nodeMap = new Map<string, Parser.SyntaxNode[]>();
+
+    // Single traversal to collect all nodes
+    const traverse = (node: Parser.SyntaxNode) => {
+      // Add node to its type's array
+      if (!nodeMap.has(node.type)) {
+        nodeMap.set(node.type, []);
+      }
+      nodeMap.get(node.type)!.push(node);
+
+      // Traverse children using namedChildren for semantic traversal
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child) {
+          traverse(child);
+        }
+      }
+    };
+
+    traverse(rootNode);
+    return nodeMap;
+  }
+
+  /**
+   * Get nodes of a specific type from the cache or perform a single traversal
+   */
+  private getNodesOfType(rootNode: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
+    // Get or create cache for this specific tree
+    let nodeTypeCache = this.nodeTypeCacheMap.get(rootNode);
+
+    if (!nodeTypeCache) {
+      // Build cache for this specific tree with a single traversal
+      nodeTypeCache = this.collectAllNodesByType(rootNode);
+      this.nodeTypeCacheMap.set(rootNode, nodeTypeCache);
+    }
+
+    return nodeTypeCache.get(type) || [];
+  }
+
+  /**
+   * Clear the node type cache when starting a new file parse
+   */
+  private clearCaches() {
+    // WeakMap automatically cleans up when trees are garbage collected
+    // We only need to clear the type resolution cache
+    this.typeResolutionCache.clear();
+  }
+
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     // Extract namespace declarations
-    const namespaceNodes = this.findNodesOfType(rootNode, 'namespace_declaration');
+    const namespaceNodes = this.getNodesOfType(rootNode, 'namespace_declaration');
     for (const node of namespaceNodes) {
       const symbol = this.extractNamespaceSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract class declarations
-    const classNodes = this.findNodesOfType(rootNode, 'class_declaration');
+    const classNodes = this.getNodesOfType(rootNode, 'class_declaration');
     for (const node of classNodes) {
       const symbol = this.extractClassSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract interface declarations
-    const interfaceNodes = this.findNodesOfType(rootNode, 'interface_declaration');
+    const interfaceNodes = this.getNodesOfType(rootNode, 'interface_declaration');
     for (const node of interfaceNodes) {
       const symbol = this.extractInterfaceSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract struct declarations
-    const structNodes = this.findNodesOfType(rootNode, 'struct_declaration');
+    const structNodes = this.getNodesOfType(rootNode, 'struct_declaration');
     for (const node of structNodes) {
       const symbol = this.extractStructSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract enum declarations
-    const enumNodes = this.findNodesOfType(rootNode, 'enum_declaration');
+    const enumNodes = this.getNodesOfType(rootNode, 'enum_declaration');
     for (const node of enumNodes) {
       const symbol = this.extractEnumSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract method declarations
-    const methodNodes = this.findNodesOfType(rootNode, 'method_declaration');
+    const methodNodes = this.getNodesOfType(rootNode, 'method_declaration');
     for (const node of methodNodes) {
       const symbol = this.extractMethodSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract property declarations
-    const propertyNodes = this.findNodesOfType(rootNode, 'property_declaration');
+    const propertyNodes = this.getNodesOfType(rootNode, 'property_declaration');
     for (const node of propertyNodes) {
       const symbol = this.extractPropertySymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract field declarations
-    const fieldNodes = this.findNodesOfType(rootNode, 'field_declaration');
+    const fieldNodes = this.getNodesOfType(rootNode, 'field_declaration');
     for (const node of fieldNodes) {
       const fieldSymbols = this.extractFieldSymbols(node, content);
       symbols.push(...fieldSymbols);
     }
 
     // Extract event declarations
-    const eventNodes = this.findNodesOfType(rootNode, 'event_declaration');
+    const eventNodes = this.getNodesOfType(rootNode, 'event_declaration');
     for (const node of eventNodes) {
       const eventSymbols = this.extractEventSymbols(node, content);
       symbols.push(...eventSymbols);
     }
 
     // Extract delegate declarations
-    const delegateNodes = this.findNodesOfType(rootNode, 'delegate_declaration');
+    const delegateNodes = this.getNodesOfType(rootNode, 'delegate_declaration');
     for (const node of delegateNodes) {
       const symbol = this.extractDelegateSymbol(node, content);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract constructor declarations
-    const constructorNodes = this.findNodesOfType(rootNode, 'constructor_declaration');
+    const constructorNodes = this.getNodesOfType(rootNode, 'constructor_declaration');
     for (const node of constructorNodes) {
       const symbol = this.extractConstructorSymbol(node, content);
       if (symbol) symbols.push(symbol);
@@ -443,7 +502,7 @@ export class CSharpParser extends ChunkedParser {
     const dependencies: ParsedDependency[] = [];
 
     // Extract method calls
-    const callNodes = this.findNodesOfType(rootNode, 'invocation_expression');
+    const callNodes = this.getNodesOfType(rootNode, 'invocation_expression');
     logger.debug('C# dependency extraction: method calls', {
       invocationExpressionCount: callNodes.length
     });
@@ -469,7 +528,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Extract conditional access expressions (null-conditional operator ?.)
-    const conditionalAccessNodes = this.findNodesOfType(rootNode, 'conditional_access_expression');
+    const conditionalAccessNodes = this.getNodesOfType(rootNode, 'conditional_access_expression');
     logger.debug('C# dependency extraction: conditional access expressions', {
       conditionalAccessCount: conditionalAccessNodes.length
     });
@@ -493,7 +552,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Extract member access expressions
-    const memberAccessNodes = this.findNodesOfType(rootNode, 'member_access_expression');
+    const memberAccessNodes = this.getNodesOfType(rootNode, 'member_access_expression');
     logger.debug('C# dependency extraction: member access expressions', {
       memberAccessCount: memberAccessNodes.length
     });
@@ -513,7 +572,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Extract inheritance relationships
-    const baseListNodes = this.findNodesOfType(rootNode, 'base_list');
+    const baseListNodes = this.getNodesOfType(rootNode, 'base_list');
     logger.debug('C# dependency extraction: inheritance relationships', {
       baseListCount: baseListNodes.length
     });
@@ -528,7 +587,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Extract generic type constraints
-    const constraintNodes = this.findNodesOfType(rootNode, 'type_parameter_constraints_clause');
+    const constraintNodes = this.getNodesOfType(rootNode, 'type_parameter_constraints_clause');
     for (const node of constraintNodes) {
       const constraintDeps = this.extractConstraintDependencies(node, content);
       dependencies.push(...constraintDeps);
@@ -558,14 +617,14 @@ export class CSharpParser extends ChunkedParser {
     const imports: ParsedImport[] = [];
 
     // Extract using directives
-    const usingNodes = this.findNodesOfType(rootNode, 'using_directive');
+    const usingNodes = this.getNodesOfType(rootNode, 'using_directive');
     for (const node of usingNodes) {
       const importObj = this.extractUsingDirective(node, content);
       if (importObj) imports.push(importObj);
     }
 
     // Extract extern alias directives
-    const externAliasNodes = this.findNodesOfType(rootNode, 'extern_alias_directive');
+    const externAliasNodes = this.getNodesOfType(rootNode, 'extern_alias_directive');
     for (const node of externAliasNodes) {
       const importObj = this.extractExternAlias(node, content);
       if (importObj) imports.push(importObj);
@@ -749,7 +808,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Field declarations can contain multiple variables
-    const declaratorNodes = this.findNodesOfType(node, 'variable_declarator');
+    const declaratorNodes = this.getNodesOfType(node, 'variable_declarator');
     for (const declarator of declaratorNodes) {
       const nameNode = declarator.childForFieldName('name');
       if (!nameNode) continue;
@@ -779,7 +838,7 @@ export class CSharpParser extends ChunkedParser {
     const visibility = this.getVisibilityFromModifiers(modifiers);
 
     // Event declarations can contain multiple events
-    const declaratorNodes = this.findNodesOfType(node, 'variable_declarator');
+    const declaratorNodes = this.getNodesOfType(node, 'variable_declarator');
     for (const declarator of declaratorNodes) {
       const nameNode = declarator.childForFieldName('name');
       if (!nameNode) continue;
@@ -852,6 +911,13 @@ export class CSharpParser extends ChunkedParser {
       return null;
     }
 
+    // Check cache first to avoid repeated traversals
+    const cacheKey = callingObject.trim();
+    if (this.typeResolutionCache.has(cacheKey)) {
+      const cached = this.typeResolutionCache.get(cacheKey);
+      return cached ? cached.type : null;
+    }
+
     try {
       // Multi-strategy resolution with fallbacks (Phase 3.2 Enhancement)
       const strategies = [
@@ -864,13 +930,18 @@ export class CSharpParser extends ChunkedParser {
       for (const strategy of strategies) {
         const result = strategy();
         if (result) {
+          // Cache the result for future lookups
+          this.typeResolutionCache.set(cacheKey, result);
           return result.type;
         }
       }
 
-
+      // Cache null result to avoid re-traversing for this object
+      this.typeResolutionCache.set(cacheKey, null);
       return null;
     } catch (error) {
+      // Cache null result even on error
+      this.typeResolutionCache.set(cacheKey, null);
       return null;
     }
   }
@@ -881,7 +952,7 @@ export class CSharpParser extends ChunkedParser {
    */
   private resolveFieldType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
-    const fieldNodes = this.findNodesOfType(rootNode, 'field_declaration');
+    const fieldNodes = this.getNodesOfType(rootNode, 'field_declaration');
 
     for (const fieldNode of fieldNodes) {
       let fieldType = '';
@@ -894,7 +965,7 @@ export class CSharpParser extends ChunkedParser {
       }
       if (!fieldType) continue;
 
-      const declaratorNodes = this.findNodesOfType(fieldNode, 'variable_declarator');
+      const declaratorNodes = this.getNodesOfType(fieldNode, 'variable_declarator');
       for (const declarator of declaratorNodes) {
         const nameNode = declarator.childForFieldName('name');
         if (!nameNode) continue;
@@ -919,7 +990,7 @@ export class CSharpParser extends ChunkedParser {
    */
   private resolveLocalVariableType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
-    const localDeclarations = this.findNodesOfType(rootNode, 'local_declaration_statement');
+    const localDeclarations = this.getNodesOfType(rootNode, 'local_declaration_statement');
 
     for (const localDecl of localDeclarations) {
       const variableDeclaration = this.findNodeOfType(localDecl, 'variable_declaration');
@@ -928,7 +999,7 @@ export class CSharpParser extends ChunkedParser {
       const typeNode = variableDeclaration.childForFieldName('type');
       if (!typeNode) continue;
 
-      const declarators = this.findNodesOfType(variableDeclaration, 'variable_declarator');
+      const declarators = this.getNodesOfType(variableDeclaration, 'variable_declarator');
       for (const declarator of declarators) {
         const nameNode = declarator.childForFieldName('name');
         if (!nameNode) continue;
@@ -954,7 +1025,7 @@ export class CSharpParser extends ChunkedParser {
    */
   private resolveParameterType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
-    const methodNodes = this.findNodesOfType(rootNode, 'method_declaration');
+    const methodNodes = this.getNodesOfType(rootNode, 'method_declaration');
 
     for (const methodNode of methodNodes) {
       const parameterList = methodNode.childForFieldName('parameters');
@@ -989,7 +1060,7 @@ export class CSharpParser extends ChunkedParser {
    */
   private resolvePropertyType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
-    const propertyNodes = this.findNodesOfType(rootNode, 'property_declaration');
+    const propertyNodes = this.getNodesOfType(rootNode, 'property_declaration');
 
     for (const propertyNode of propertyNodes) {
       const typeNode = propertyNode.childForFieldName('type');
@@ -1083,7 +1154,7 @@ export class CSharpParser extends ChunkedParser {
     } else if (functionNode.type === 'conditional_access_expression') {
       // For conditional access calls like obj?.Method() - extract the final method in the chain
       // Look for member_binding_expression nodes which contain the method names in chained calls
-      const memberBindingNodes = this.findNodesOfType(functionNode, 'member_binding_expression');
+      const memberBindingNodes = this.getNodesOfType(functionNode, 'member_binding_expression');
 
       if (memberBindingNodes.length > 0) {
         // Get the last member_binding_expression for the final method in the chain
@@ -1247,8 +1318,30 @@ export class CSharpParser extends ChunkedParser {
       nodeText: this.getNodeText(node, content).substring(0, 100)
     });
 
+    // First, try to extract chained calls using regex for complete coverage
+    // This handles cases like _serviceA?.MethodOne()?.MethodTwo()
+    const expressionText = this.getNodeText(node, content);
+    if (expressionText.includes('?.')) {
+      const callerName = this.findContainingFunction(node, content);
+      const chainedCalls = this.extractChainedCallsFromText(expressionText, callerName, node.startPosition.row + 1);
+
+      if (chainedCalls.length > 0) {
+        // Add these with higher confidence since we detected the pattern
+        for (const call of chainedCalls) {
+          call.confidence = 0.85;
+        }
+        dependencies.push(...chainedCalls);
+
+        logger.debug('C# conditional access chained calls extracted', {
+          count: chainedCalls.length,
+          expression: expressionText.substring(0, 100),
+          methods: chainedCalls.map(d => d.to_symbol)
+        });
+      }
+    }
+
     // Extract all invocation expressions within the conditional access chain
-    const invocationNodes = this.findNodesOfType(node, 'invocation_expression');
+    const invocationNodes = this.getNodesOfType(node, 'invocation_expression');
 
     logger.debug('C# conditional access invocation nodes found', {
       count: invocationNodes.length
@@ -1258,29 +1351,39 @@ export class CSharpParser extends ChunkedParser {
     for (const invocationNode of invocationNodes) {
       const dependency = this.extractCallDependency(invocationNode, content);
       if (dependency) {
-        // Mark as higher confidence since we specifically detected the conditional access pattern
-        dependency.confidence = Math.min(0.95, dependency.confidence + 0.1);
-        dependencies.push(dependency);
+        // Check if we already have this dependency from regex extraction
+        const isDuplicate = dependencies.some(d =>
+          d.to_symbol === dependency.to_symbol &&
+          d.from_symbol === dependency.from_symbol &&
+          d.line_number === dependency.line_number
+        );
 
-        logger.debug('C# conditional access call extracted', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
-          line: dependency.line_number,
-          confidence: dependency.confidence
-        });
+        if (!isDuplicate) {
+          // Mark as higher confidence since we specifically detected the conditional access pattern
+          dependency.confidence = Math.min(0.95, dependency.confidence + 0.1);
+          dependencies.push(dependency);
+
+          logger.debug('C# conditional access call extracted', {
+            from: dependency.from_symbol,
+            to: dependency.to_symbol,
+            line: dependency.line_number,
+            confidence: dependency.confidence
+          });
+        }
       }
     }
 
-    // If we found invocation expressions, we're done - they capture the method calls
+    // If we found dependencies, we're done
     if (dependencies.length > 0) {
-      logger.debug('C# conditional access dependencies extracted from invocations', {
-        count: dependencies.length
+      logger.debug('C# conditional access dependencies extracted', {
+        count: dependencies.length,
+        methods: dependencies.map(d => d.to_symbol)
       });
       return dependencies;
     }
 
     // If no invocation found, check for member access within conditional access
-    const memberAccessNodes = this.findNodesOfType(node, 'member_access_expression');
+    const memberAccessNodes = this.getNodesOfType(node, 'member_access_expression');
     logger.debug('C# conditional access member access nodes found', {
       count: memberAccessNodes.length
     });
@@ -1323,19 +1426,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Fallback: extract using regex pattern matching for complex expressions
-    const expressionText = this.getNodeText(node, content);
-    if (expressionText.includes('?.')) {
-      const callerName = this.findContainingFunction(node, content);
-      const chainedCalls = this.extractChainedCallsFromText(expressionText, callerName, node.startPosition.row + 1);
-      dependencies.push(...chainedCalls);
-
-      if (chainedCalls.length > 0) {
-        logger.debug('C# conditional access dependencies extracted from regex fallback', {
-          count: chainedCalls.length,
-          expression: expressionText.substring(0, 100)
-        });
-      }
-    }
+    // (Already handled above, so we can skip this duplicate code)
 
     return dependencies;
   }
@@ -1346,27 +1437,79 @@ export class CSharpParser extends ChunkedParser {
   private extractChainedCallsFromText(expressionText: string, callerName: string, lineNumber: number): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
-    // Pattern to match method calls in conditional access chains: obj?.Method1()?.Method2()
-    const methodCallPattern = /\?\s*\.?\s*(\w+)\s*\(/g;
+    // First, fix the expression if it's missing closing parentheses
+    // This handles cases where tree-sitter truncates the expression
+    const openParens = (expressionText.match(/\(/g) || []).length;
+    const closeParens = (expressionText.match(/\)/g) || []).length;
+
+    // Check if the last identifier looks like a method that's missing parentheses
+    // Pattern: ends with "?.Identifier" or ".Identifier" without following parentheses
+    const truncatedMethodPattern = /[?.]\s*(\w+)\s*$/;
+    const truncatedMatch = expressionText.match(truncatedMethodPattern);
+
+    if (truncatedMatch) {
+      // Add parentheses to the last identifier to make it look like a method call
+      expressionText = expressionText + '()';
+      logger.debug('C# fixed truncated method call by adding parentheses', {
+        original: expressionText.substring(0, 100),
+        methodName: truncatedMatch[1]
+      });
+    } else if (openParens > closeParens) {
+      // Add missing closing parentheses
+      expressionText = expressionText + ')'.repeat(openParens - closeParens);
+      logger.debug('C# fixed truncated expression by adding closing parentheses', {
+        original: expressionText.substring(0, 100),
+        addedParens: openParens - closeParens
+      });
+    }
+
+    // Pattern to match ALL method calls, including chained ones: obj?.Method1()?.Method2()
+    // This captures any identifier followed by parentheses
+    const methodCallPattern = /(\w+)\s*\(/g;
     let match;
+    const foundMethods: string[] = [];
+
+    logger.debug('C# extractChainedCallsFromText analyzing', {
+      expression: expressionText,
+      callerName: callerName
+    });
 
     while ((match = methodCallPattern.exec(expressionText)) !== null) {
       const methodName = match[1];
-      const dependency: ParsedDependency = {
-        from_symbol: callerName,
-        to_symbol: methodName,
-        dependency_type: DependencyType.CALLS,
-        line_number: lineNumber,
-        confidence: 0.75 // Lower confidence for regex-based extraction
-      };
 
-      dependencies.push(dependency);
+      // Skip if this is likely the initial object name (comes before any ?. or .)
+      const beforeMatch = expressionText.substring(0, match.index);
+      const isInitialObject = !beforeMatch.includes('?.') && !beforeMatch.includes('.') && !beforeMatch.includes('(');
 
-      logger.debug('C# chained conditional access call extracted via regex', {
-        from: dependency.from_symbol,
-        to: dependency.to_symbol,
-        pattern: match[0]
+      // Skip constructor calls (new ClassName())
+      const isConstructor = beforeMatch.trim().endsWith('new');
+
+      logger.debug('C# regex match evaluation', {
+        methodName: methodName,
+        beforeMatch: beforeMatch.substring(Math.max(0, beforeMatch.length - 20)),
+        isInitialObject: isInitialObject,
+        isConstructor: isConstructor,
+        willInclude: !isInitialObject && !isConstructor && !foundMethods.includes(methodName)
       });
+
+      if (!isInitialObject && !isConstructor && !foundMethods.includes(methodName)) {
+        foundMethods.push(methodName);
+        const dependency: ParsedDependency = {
+          from_symbol: callerName,
+          to_symbol: methodName,
+          dependency_type: DependencyType.CALLS,
+          line_number: lineNumber,
+          confidence: 0.75 // Lower confidence for regex-based extraction
+        };
+
+        dependencies.push(dependency);
+
+        logger.debug('C# chained conditional access call extracted via regex', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          pattern: match[0]
+        });
+      }
     }
 
     // If no method calls found, try property access pattern: obj?.Property
@@ -1490,7 +1633,7 @@ export class CSharpParser extends ChunkedParser {
     const dependencies: ParsedDependency[] = [];
 
     // Extract type constraints
-    const constraintNodes = this.findNodesOfType(node, 'type_constraint');
+    const constraintNodes = this.getNodesOfType(node, 'type_constraint');
     for (const constraintNode of constraintNodes) {
       const typeNode = constraintNode.child(0);
       if (typeNode) {
@@ -1545,7 +1688,7 @@ export class CSharpParser extends ChunkedParser {
   }
 
   private findPublicDeclarations(rootNode: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
-    const nodes = this.findNodesOfType(rootNode, type);
+    const nodes = this.getNodesOfType(rootNode, type);
     return nodes.filter(node => {
       const modifiers = this.extractModifiers(node, this.getNodeText(rootNode, ''));
       return modifiers.includes('public');
@@ -1587,10 +1730,10 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Check for common C# constructs that should be present
-    const hasNamespaceOrClass = this.findNodesOfType(rootNode, 'namespace_declaration').length > 0 ||
-                                this.findNodesOfType(rootNode, 'class_declaration').length > 0 ||
-                                this.findNodesOfType(rootNode, 'interface_declaration').length > 0 ||
-                                this.findNodesOfType(rootNode, 'struct_declaration').length > 0;
+    const hasNamespaceOrClass = this.getNodesOfType(rootNode, 'namespace_declaration').length > 0 ||
+                                this.getNodesOfType(rootNode, 'class_declaration').length > 0 ||
+                                this.getNodesOfType(rootNode, 'interface_declaration').length > 0 ||
+                                this.getNodesOfType(rootNode, 'struct_declaration').length > 0;
 
     if (!hasNamespaceOrClass) {
       // This might be okay for some C# files (like global using files), so make it a warning
@@ -1603,14 +1746,14 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Check for potential parsing issues with using directives
-    const usingNodes = this.findNodesOfType(rootNode, 'using_directive');
+    const usingNodes = this.getNodesOfType(rootNode, 'using_directive');
     if (usingNodes.length === 0 && filePath.includes('.cs')) {
       // Check if this file might legitimately not need using directives
-      const hasNamespace = this.findNodesOfType(rootNode, 'namespace_declaration').length > 0;
-      const hasClasses = this.findNodesOfType(rootNode, 'class_declaration').length > 0;
-      const hasInterfaces = this.findNodesOfType(rootNode, 'interface_declaration').length > 0;
-      const hasEnums = this.findNodesOfType(rootNode, 'enum_declaration').length > 0;
-      const hasStructs = this.findNodesOfType(rootNode, 'struct_declaration').length > 0;
+      const hasNamespace = this.getNodesOfType(rootNode, 'namespace_declaration').length > 0;
+      const hasClasses = this.getNodesOfType(rootNode, 'class_declaration').length > 0;
+      const hasInterfaces = this.getNodesOfType(rootNode, 'interface_declaration').length > 0;
+      const hasEnums = this.getNodesOfType(rootNode, 'enum_declaration').length > 0;
+      const hasStructs = this.getNodesOfType(rootNode, 'struct_declaration').length > 0;
 
       // Only warn if the file has no meaningful C# constructs at all
       // Simple enums, interfaces with primitives, etc. often don't need using directives
@@ -2155,11 +2298,11 @@ export class CSharpParser extends ChunkedParser {
       ];
 
       // Also track file-scoped namespace declarations (C# 10+)
-      const fileScopedNamespace = this.findNodesOfType(tree.rootNode, 'file_scoped_namespace_declaration');
+      const fileScopedNamespace = this.getNodesOfType(tree.rootNode, 'file_scoped_namespace_declaration');
 
       // Process each type of declaration
       for (const type of topLevelTypes) {
-        const nodes = this.findNodesOfType(tree.rootNode, type);
+        const nodes = this.getNodesOfType(tree.rootNode, type);
 
         for (const node of nodes) {
           // Calculate nesting depth
@@ -2192,7 +2335,7 @@ export class CSharpParser extends ChunkedParser {
       declarations.sort((a, b) => a.startPos - b.startPos);
 
       // Add using directives as a special "declaration" to preserve them
-      const usingNodes = this.findNodesOfType(tree.rootNode, 'using_directive');
+      const usingNodes = this.getNodesOfType(tree.rootNode, 'using_directive');
       if (usingNodes.length > 0) {
         const firstUsing = usingNodes[0];
         const lastUsing = usingNodes[usingNodes.length - 1];
