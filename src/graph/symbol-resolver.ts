@@ -1,4 +1,4 @@
-import { Symbol, File } from '../database/models';
+import { Symbol, File, SymbolType } from '../database/models';
 import { ParsedDependency, ParsedImport, ParsedExport } from '../parsers/base';
 import { createComponentLogger } from '../utils/logger';
 
@@ -27,10 +27,84 @@ export class SymbolResolver {
   private fileContexts: Map<number, SymbolResolutionContext> = new Map();
   private symbolsByName: Map<string, Symbol[]> = new Map();
   private exportedSymbols: Map<string, { symbol: Symbol; fromFile: number }[]> = new Map();
+  private fieldTypeMap: Map<string, string> = new Map(); // NEW: Field type mapping
   private logger: any;
 
   constructor() {
     this.logger = logger;
+  }
+
+  /**
+   * Register field type mappings for the current file context
+   */
+  public setFieldTypeMap(fieldTypeMap: Map<string, string>): void {
+    this.fieldTypeMap = fieldTypeMap;
+    this.logger.debug('Field type mappings set for symbol resolution', {
+      fieldCount: fieldTypeMap.size,
+      fields: Array.from(fieldTypeMap.entries())
+    });
+  }
+
+  /**
+   * Clear field type mappings (call when switching files)
+   */
+  public clearFieldTypeMap(): void {
+    this.fieldTypeMap.clear();
+    this.logger.debug('Field type mappings cleared');
+  }
+
+  /**
+   * Extract and set field type context for C# file processing
+   */
+  private setFieldTypeContextForFile(sourceContext: SymbolResolutionContext): void {
+    try {
+      // Clear existing field mappings
+      this.clearFieldTypeMap();
+
+      // Find class symbols in the file
+      const classSymbols = sourceContext.symbols.filter(s => s.symbol_type === SymbolType.CLASS);
+
+      if (classSymbols.length > 0) {
+        // For C# files, we need to extract field declarations from the class symbols
+        // This is a simplified approach that looks for property symbols (C# fields are often stored as properties)
+        const fieldSymbols = sourceContext.symbols.filter(s => s.symbol_type === SymbolType.PROPERTY || s.symbol_type === SymbolType.VARIABLE);
+
+        for (const fieldSymbol of fieldSymbols) {
+          // Extract field type from signature if available
+          if (fieldSymbol.signature) {
+            const fieldTypeMatch = fieldSymbol.signature.match(/^(\w+(?:<.*?>)?)\s+(\w+)/);
+            if (fieldTypeMatch) {
+              const fieldType = fieldTypeMatch[1];
+              const fieldName = fieldTypeMatch[2];
+
+              this.fieldTypeMap.set(fieldName, fieldType);
+
+              // Handle interface to class mapping (IHandManager -> HandManager)
+              if (fieldType.startsWith('I') && fieldType.length > 1) {
+                const className = fieldType.substring(1);
+                this.fieldTypeMap.set(fieldName, className);
+              }
+
+              this.logger.debug('Field type extracted from signature', {
+                fieldName,
+                fieldType,
+                signature: fieldSymbol.signature
+              });
+            }
+          }
+        }
+      }
+
+      this.logger.debug('Field type context set for C# file', {
+        filePath: sourceContext.filePath,
+        fieldCount: this.fieldTypeMap.size,
+        fields: Array.from(this.fieldTypeMap.entries())
+      });
+    } catch (error) {
+      this.logger.warn(`Failed to set field context for ${sourceContext.filePath}`, {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
   }
 
   /**
@@ -101,6 +175,11 @@ export class SymbolResolver {
       return [];
     }
 
+    // ENHANCED: Set field type context for C# files
+    if (sourceContext.filePath.endsWith('.cs')) {
+      this.setFieldTypeContextForFile(sourceContext);
+    }
+
     const resolved: ResolvedDependency[] = [];
 
     for (const dependency of dependencies) {
@@ -116,6 +195,11 @@ export class SymbolResolver {
           error: error instanceof Error ? error.message : String(error)
         });
       }
+    }
+
+    // ENHANCED: Clear field context after processing
+    if (sourceContext.filePath.endsWith('.cs')) {
+      this.clearFieldTypeMap();
     }
 
     return resolved;
@@ -150,7 +234,7 @@ export class SymbolResolver {
     }
 
     // Resolve the target symbol with proper scoping
-    const toSymbol = this.resolveTargetSymbol(sourceContext, dependency.to_symbol);
+    const toSymbol = this.resolveTargetSymbol(sourceContext, dependency.to_symbol, dependency);
     if (!toSymbol) {
       this.logger.debug('Target symbol could not be resolved', {
         symbolName: dependency.to_symbol,
@@ -175,8 +259,32 @@ export class SymbolResolver {
    */
   private resolveTargetSymbol(
     sourceContext: SymbolResolutionContext,
-    targetSymbolName: string
+    targetSymbolName: string,
+    dependency?: ParsedDependency
   ): Symbol | null {
+    // NEW: Check for field-based calls with context hints
+    if (dependency?.qualified_context?.startsWith('field_call_')) {
+      const fieldName = dependency.qualified_context.replace('field_call_', '');
+
+      // Try to resolve using field type mapping
+      if (this.fieldTypeMap.has(fieldName)) {
+        const fieldType = this.fieldTypeMap.get(fieldName);
+        if (fieldType && targetSymbolName.includes('.')) {
+          // Target already has class context from parser
+          const memberResult = this.resolveMemberExpression(sourceContext, targetSymbolName);
+          if (memberResult) {
+            this.logger.debug('Resolved symbol via field-based context', {
+              fieldName,
+              fieldType,
+              targetSymbolName,
+              filePath: sourceContext.filePath
+            });
+            return memberResult;
+          }
+        }
+      }
+    }
+
     // Check if this is an object.method pattern (e.g., "areasStore.getAreas")
     if (targetSymbolName.includes('.')) {
       const memberExpressionSymbol = this.resolveMemberExpression(sourceContext, targetSymbolName);
@@ -307,10 +415,37 @@ export class SymbolResolver {
       }
     }
 
-    // C# class-based resolution for qualified method names
-    const csharpMethodSymbol = this.resolveCSharpClassMethod(objectName, methodName);
-    if (csharpMethodSymbol) {
-      return csharpMethodSymbol;
+    // ENHANCED: C# field-based resolution before class-based resolution
+    if (sourceContext.filePath?.endsWith('.cs')) {
+      // NEW: Check for field-based method calls first
+      if (objectName.startsWith('_') && this.fieldTypeMap.has(objectName)) {
+        const fieldType = this.fieldTypeMap.get(objectName);
+        if (fieldType) {
+          // Resolve field type to target class method
+          const classMethodResult = this.resolveCSharpClassMethod(fieldType, methodName);
+          if (classMethodResult) {
+            this.logger.debug('Resolved member expression via field type mapping', {
+              fieldName: objectName,
+              fieldType,
+              methodName,
+              targetFile: classMethodResult.file_id
+            });
+            return classMethodResult;
+          }
+        }
+      }
+
+      // EXISTING: Direct C# class-based resolution
+      const csharpMethodSymbol = this.resolveCSharpClassMethod(objectName, methodName);
+      if (csharpMethodSymbol) {
+        return csharpMethodSymbol;
+      }
+    } else {
+      // For non-C# files, use original C# class-based resolution
+      const csharpMethodSymbol = this.resolveCSharpClassMethod(objectName, methodName);
+      if (csharpMethodSymbol) {
+        return csharpMethodSymbol;
+      }
     }
 
     return null;
