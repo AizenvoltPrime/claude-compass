@@ -502,6 +502,13 @@ export class CSharpParser extends ChunkedParser {
   protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
+    // ENHANCED: Extract field type mappings first for C# classes
+    const fieldTypeMap = this.extractFieldDeclarations(rootNode);
+    logger.debug('C# field type mappings extracted for dependency resolution', {
+      fieldCount: fieldTypeMap.size,
+      fields: Array.from(fieldTypeMap.entries())
+    });
+
     // Extract method calls
     const callNodes = this.getNodesOfType(rootNode, 'invocation_expression');
     logger.debug('C# dependency extraction: method calls', {
@@ -535,7 +542,7 @@ export class CSharpParser extends ChunkedParser {
     });
 
     for (const node of conditionalAccessNodes) {
-      const extractedDependencies = this.extractConditionalAccessDependencies(node, content);
+      const extractedDependencies = this.extractConditionalAccessDependencies(node, content, fieldTypeMap);
       if (extractedDependencies.length > 0) {
         dependencies.push(...extractedDependencies);
         logger.debug('C# conditional access dependencies detected', {
@@ -1506,7 +1513,11 @@ export class CSharpParser extends ChunkedParser {
    * Handles patterns like: obj?.Method(), obj?.Property?.Method(), chained calls, etc.
    * Returns array to support chained method calls that generate multiple dependencies.
    */
-  private extractConditionalAccessDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
+  private extractConditionalAccessDependencies(
+    node: Parser.SyntaxNode,
+    content: string,
+    fieldTypeMap?: Map<string, string>
+  ): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
     const maxChainDepth = 10; // Prevent infinite recursion
 
@@ -1520,7 +1531,12 @@ export class CSharpParser extends ChunkedParser {
     const expressionText = this.getNodeText(node, content);
     if (expressionText.includes('?.')) {
       const callerName = this.findContainingFunction(node, content);
-      const chainedCalls = this.extractChainedCallsFromText(expressionText, callerName, node.startPosition.row + 1);
+      const chainedCalls = this.extractChainedCallsFromText(
+        expressionText,
+        callerName,
+        node.startPosition.row + 1,
+        fieldTypeMap
+      );
 
       if (chainedCalls.length > 0) {
         // Add these with higher confidence since we detected the pattern
@@ -1631,7 +1647,12 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Extract chained method calls from complex conditional access expressions using regex patterns
    */
-  private extractChainedCallsFromText(expressionText: string, callerName: string, lineNumber: number): ParsedDependency[] {
+  private extractChainedCallsFromText(
+    expressionText: string,
+    callerName: string,
+    lineNumber: number,
+    fieldTypeMap?: Map<string, string>
+  ): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
     // First, fix the expression if it's missing closing parentheses
@@ -1690,10 +1711,46 @@ export class CSharpParser extends ChunkedParser {
       });
 
       if (!isInitialObject && !isConstructor && !foundMethods.includes(methodName)) {
+        // ENHANCED: Enhanced field-based call resolution
+        if (fieldTypeMap) {
+          // Check for field access patterns: _fieldName?.MethodName or fieldName?.MethodName
+          const fieldAccessPattern = /(\w+)\s*\?\s*\.?\s*$/;
+          const fieldMatch = beforeMatch.match(fieldAccessPattern);
+
+          if (fieldMatch) {
+            const fieldName = fieldMatch[1];
+            const fieldType = fieldTypeMap.get(fieldName);
+
+            if (fieldType) {
+              // Create qualified dependency with field type context
+              foundMethods.push(methodName);
+              const fieldBasedDependency: ParsedDependency = {
+                from_symbol: callerName,
+                to_symbol: `${fieldType}.${methodName}`, // Include class context
+                dependency_type: DependencyType.CALLS,
+                line_number: lineNumber,
+                confidence: 0.9, // High confidence for field-based resolution
+                qualified_context: `field_call_${fieldName}`
+              };
+              dependencies.push(fieldBasedDependency);
+
+              logger.debug('C# field-based conditional access call extracted', {
+                from: fieldBasedDependency.from_symbol,
+                to: fieldBasedDependency.to_symbol,
+                fieldName: fieldName,
+                fieldType: fieldType,
+                confidence: fieldBasedDependency.confidence
+              });
+              continue; // Skip the fallback logic
+            }
+          }
+        }
+
+        // EXISTING: Original logic for other cases (fallback)
         foundMethods.push(methodName);
         const dependency: ParsedDependency = {
           from_symbol: callerName,
-          to_symbol: methodName,
+          to_symbol: methodName, // No class context - will need resolution
           dependency_type: DependencyType.CALLS,
           line_number: lineNumber,
           confidence: 0.75 // Lower confidence for regex-based extraction
@@ -1824,6 +1881,72 @@ export class CSharpParser extends ChunkedParser {
     return name.charAt(0) === 'I' &&
            name.charAt(1) >= 'A' &&
            name.charAt(1) <= 'Z';
+  }
+
+  /**
+   * Extract field declarations from C# class to build field type mappings
+   */
+  private extractFieldDeclarations(node: Parser.SyntaxNode): Map<string, string> {
+    const fieldMap = new Map<string, string>();
+
+    try {
+      // Find field_declaration nodes in class
+      const fieldNodes = this.getNodesOfType(node, 'field_declaration');
+
+      for (const fieldNode of fieldNodes) {
+        try {
+          // Get type from variable_declaration
+          const varDeclaration = fieldNode.children.find(
+            child => child.type === 'variable_declaration'
+          );
+
+          if (varDeclaration) {
+            const typeNode = varDeclaration.children[0]; // First child is type
+            const declaratorList = varDeclaration.children.find(
+              child => child.type === 'variable_declarator'
+            );
+
+            if (typeNode && declaratorList) {
+              const typeName = typeNode.text;
+              const fieldName = declaratorList.children[0]?.text; // identifier
+
+              if (fieldName && typeName) {
+                fieldMap.set(fieldName, typeName);
+
+                // Handle interface to class mapping (IHandManager -> HandManager)
+                if (typeName.startsWith('I') && typeName.length > 1) {
+                  const className = typeName.substring(1);
+                  fieldMap.set(fieldName, className);
+                }
+
+                logger.debug('C# field declaration extracted', {
+                  fieldName,
+                  typeName,
+                  className: typeName.startsWith('I') && typeName.length > 1 ? typeName.substring(1) : undefined
+                });
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug('C# field extraction failed for individual field', {
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+          // Continue processing other fields if one fails
+          continue;
+        }
+      }
+
+      logger.debug('C# field declarations extracted', {
+        totalFields: fieldMap.size,
+        fields: Array.from(fieldMap.entries()).map(([name, type]) => ({ name, type }))
+      });
+    } catch (error) {
+      logger.debug('C# field declaration extraction failed', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    return fieldMap;
   }
 
   private extractConstraintDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
