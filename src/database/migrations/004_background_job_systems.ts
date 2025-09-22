@@ -1,6 +1,20 @@
 import type { Knex } from 'knex';
 
+/**
+ * Migration 004: Background Job Systems
+ *
+ * Creates background job and worker thread support tables.
+ * Consolidates: Original migration 007
+ *
+ * Features:
+ * - Job queues for queue definitions (Bull, BullMQ, Agenda, Bee, Kue)
+ * - Job definitions for individual job configurations
+ * - Worker threads for Node.js worker thread patterns
+ * - Enhanced transitive analysis indexes
+ */
 export async function up(knex: Knex): Promise<void> {
+  console.log('Creating background job systems tables...');
+
   // Create job_queues table for background job queue definitions
   await knex.schema.createTable('job_queues', (table) => {
     table.increments('id').primary();
@@ -64,25 +78,31 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['repo_id']);
   });
 
-  // Add new indexes for improved transitive analysis performance
-  await knex.schema.raw(`
+  // Add enhanced transitive analysis indexes
+  await knex.raw(`
     CREATE INDEX IF NOT EXISTS idx_dependencies_transitive
-    ON dependencies(from_symbol_id, dependency_type, confidence);
+    ON dependencies(from_symbol_id, dependency_type, confidence)
   `);
 
-  await knex.schema.raw(`
+  await knex.raw(`
     CREATE INDEX IF NOT EXISTS idx_dependencies_reverse_transitive
-    ON dependencies(to_symbol_id, dependency_type, confidence);
+    ON dependencies(to_symbol_id, dependency_type, confidence)
   `);
+
+  console.log('Background job systems tables created successfully');
 }
 
 export async function down(knex: Knex): Promise<void> {
-  // Drop indexes first
-  await knex.schema.raw('DROP INDEX IF EXISTS idx_dependencies_reverse_transitive;');
-  await knex.schema.raw('DROP INDEX IF EXISTS idx_dependencies_transitive;');
+  console.log('Removing background job systems tables...');
+
+  // Drop enhanced indexes first
+  await knex.raw('DROP INDEX IF EXISTS idx_dependencies_reverse_transitive');
+  await knex.raw('DROP INDEX IF EXISTS idx_dependencies_transitive');
 
   // Drop tables in reverse dependency order
   await knex.schema.dropTableIfExists('worker_threads');
   await knex.schema.dropTableIfExists('job_definitions');
   await knex.schema.dropTableIfExists('job_queues');
+
+  console.log('Background job systems tables removed successfully');
 }

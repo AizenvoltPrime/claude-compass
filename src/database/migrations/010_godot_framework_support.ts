@@ -1,15 +1,25 @@
 import type { Knex } from 'knex';
 
+/**
+ * Migration 010: Godot Framework Support
+ *
+ * Creates complete Godot and C# game development support tables.
+ * Consolidates: Original migration 015
+ *
+ * Features:
+ * - Godot scenes for scene file metadata
+ * - Godot nodes for node hierarchy
+ * - Godot scripts for C# scripts with Godot features
+ * - Godot autoloads for singleton definitions
+ * - Godot relationships for entity relationships
+ */
 export async function up(knex: Knex): Promise<void> {
+  console.log('Creating Godot framework support tables...');
+
   // Create godot_scenes table - equivalent to routes/components for other frameworks
-  await knex.schema.createTable('godot_scenes', table => {
+  await knex.schema.createTable('godot_scenes', (table) => {
     table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
+    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
     table.string('scene_path', 500).notNullable(); // Full file path to .tscn file
     table.string('scene_name', 255).notNullable(); // Scene name (usually filename without extension)
     table.integer('root_node_id'); // Will be set after nodes are created
@@ -29,20 +39,10 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Create godot_nodes table - represents individual nodes within scenes
-  await knex.schema.createTable('godot_nodes', table => {
+  await knex.schema.createTable('godot_nodes', (table) => {
     table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table
-      .integer('scene_id')
-      .notNullable()
-      .references('id')
-      .inTable('godot_scenes')
-      .onDelete('CASCADE');
+    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
+    table.integer('scene_id').notNullable().references('id').inTable('godot_scenes').onDelete('CASCADE');
     table.string('node_name', 255).notNullable(); // Node name within the scene
     table.string('node_type', 100).notNullable(); // Node type (Node2D, Control, etc.)
     table.integer('parent_node_id').references('id').inTable('godot_nodes').onDelete('SET NULL'); // Parent-child relationships
@@ -62,14 +62,9 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Create godot_scripts table - represents C# scripts with Godot-specific features
-  await knex.schema.createTable('godot_scripts', table => {
+  await knex.schema.createTable('godot_scripts', (table) => {
     table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
+    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
     table.string('script_path', 500).notNullable(); // Full file path to .cs script
     table.string('class_name', 255).notNullable(); // C# class name
     table.string('base_class', 100); // Godot base class (Node, Control, etc.)
@@ -91,14 +86,9 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Create godot_autoloads table - represents singleton scripts defined in project.godot
-  await knex.schema.createTable('godot_autoloads', table => {
+  await knex.schema.createTable('godot_autoloads', (table) => {
     table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
+    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
     table.string('autoload_name', 255).notNullable(); // Name defined in project.godot
     table.string('script_path', 500).notNullable(); // Path to script file
     table.integer('script_id').references('id').inTable('godot_scripts').onDelete('SET NULL'); // Link to script entity
@@ -114,15 +104,10 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(['repo_id', 'autoload_name'], 'uq_godot_autoloads_repo_name');
   });
 
-  // Create godot_relationships table - the core of Solution 1: Enhanced Framework Relationships
-  await knex.schema.createTable('godot_relationships', table => {
+  // Create godot_relationships table - Enhanced Framework Relationships
+  await knex.schema.createTable('godot_relationships', (table) => {
     table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
+    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
     table.string('relationship_type', 50).notNullable(); // 'scene_script_attachment', 'scene_resource_reference', 'node_hierarchy', 'signal_connection'
     table.string('from_entity_type', 20).notNullable(); // 'scene', 'node', 'script', 'autoload'
     table.integer('from_entity_id').notNullable(); // ID in the corresponding table
@@ -142,21 +127,20 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['confidence'], 'idx_godot_relationships_confidence');
   });
 
-  // Note: Complex CHECK constraints with subqueries not supported in PostgreSQL
-  // Entity integrity will be enforced at the application level
-
-  // Now we can add the foreign key reference for root_node_id in godot_scenes
+  // Add the foreign key reference for root_node_id in godot_scenes
   await knex.raw(`
     ALTER TABLE godot_scenes
     ADD CONSTRAINT fk_godot_scenes_root_node
     FOREIGN KEY (root_node_id) REFERENCES godot_nodes(id) ON DELETE SET NULL
   `);
 
-  console.log('Phase 7B: Created Godot framework entity tables and relationships');
+  console.log('Godot framework support tables created successfully');
 }
 
 export async function down(knex: Knex): Promise<void> {
-  // Drop foreign key constraints first
+  console.log('Removing Godot framework support tables...');
+
+  // Drop foreign key constraint first
   await knex.raw('ALTER TABLE godot_scenes DROP CONSTRAINT IF EXISTS fk_godot_scenes_root_node');
 
   // Drop tables in reverse dependency order
@@ -166,5 +150,5 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('godot_nodes');
   await knex.schema.dropTableIfExists('godot_scenes');
 
-  console.log('Phase 7B: Removed Godot framework entity tables and relationships');
+  console.log('Godot framework support tables removed successfully');
 }
