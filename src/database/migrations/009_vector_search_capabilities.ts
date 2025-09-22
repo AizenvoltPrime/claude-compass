@@ -1,9 +1,27 @@
-import { Knex } from 'knex';
+import type { Knex } from 'knex';
 
+/**
+ * Migration 009: Vector Search Capabilities
+ *
+ * Creates AI/ML and hybrid search support with pgvector.
+ * Consolidates: Original migration 012 (with CRITICAL ordering fix)
+ *
+ * Features:
+ * - pgvector extension creation
+ * - Vector embedding columns for semantic search
+ * - Search vector column with automatic updates
+ * - IVFFlat indexes for vector similarity
+ * - Hybrid search ranking function
+ * - Automatic trigger for search vector updates
+ *
+ * CRITICAL FIX: Since description field exists from Migration 001,
+ * the search vector function will work correctly, eliminating the
+ * ordering dependency issue from original Migration 012/013.
+ */
 export async function up(knex: Knex): Promise<void> {
-  console.log('Adding Phase 6 vector search capabilities...');
+  console.log('Creating vector search capabilities...');
 
-  // Enable pgvector extension
+  // Enable pgvector extension for vector similarity search
   await knex.raw('CREATE EXTENSION IF NOT EXISTS vector');
 
   // Add vector and full-text search columns to symbols table
@@ -21,7 +39,6 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Create vector similarity indexes using IVFFlat algorithm
-  // Note: CONCURRENTLY can't be used in transactions, so we'll create them normally
   await knex.raw(`
     CREATE INDEX IF NOT EXISTS symbols_name_embedding_idx
     ON symbols USING ivfflat (name_embedding vector_cosine_ops)
@@ -48,6 +65,7 @@ export async function up(knex: Knex): Promise<void> {
   `);
 
   // Create function to update search_vector automatically
+  // CRITICAL FIX: description field exists from Migration 001, so this works correctly
   await knex.raw(`
     CREATE OR REPLACE FUNCTION update_symbols_search_vector()
     RETURNS trigger AS $$
@@ -88,11 +106,11 @@ export async function up(knex: Knex): Promise<void> {
     $$ LANGUAGE plpgsql IMMUTABLE;
   `);
 
-  console.log('Phase 6 vector search capabilities added successfully');
+  console.log('Vector search capabilities created successfully (ordering issue resolved)');
 }
 
 export async function down(knex: Knex): Promise<void> {
-  console.log('Removing Phase 6 vector search capabilities...');
+  console.log('Removing vector search capabilities...');
 
   // Drop triggers and functions
   await knex.raw('DROP TRIGGER IF EXISTS symbols_search_vector_update ON symbols');
@@ -115,5 +133,5 @@ export async function down(knex: Knex): Promise<void> {
   });
 
   // Note: We don't drop the vector extension as it might be used by other applications
-  console.log('Phase 6 vector search capabilities removed successfully');
+  console.log('Vector search capabilities removed successfully');
 }

@@ -1,6 +1,20 @@
 import type { Knex } from 'knex';
 
+/**
+ * Migration 005: ORM Entity Relationships
+ *
+ * Creates ORM and database entity tracking tables.
+ * Consolidates: Original migration 008
+ *
+ * Features:
+ * - ORM entities for database entity models
+ * - ORM relationships for entity associations
+ * - ORM repositories for repository pattern implementations
+ * - Enhanced relationship query indexes
+ */
 export async function up(knex: Knex): Promise<void> {
+  console.log('Creating ORM entity relationships tables...');
+
   // Create orm_entities table for database entity models
   await knex.schema.createTable('orm_entities', (table) => {
     table.increments('id').primary();
@@ -8,7 +22,7 @@ export async function up(knex: Knex): Promise<void> {
     table.integer('symbol_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
     table.string('entity_name').notNullable(); // User, Post, Comment
     table.string('table_name').nullable(); // users, posts, comments (database table name)
-    table.string('orm_type').notNullable(); // 'prisma', 'typeorm', 'sequelize', 'mongoose'
+    table.string('orm_type').notNullable(); // 'prisma', 'typeorm', 'sequelize', 'mongoose', 'mikroorm'
     table.integer('schema_file_id').references('id').inTable('files').onDelete('SET NULL');
     table.jsonb('fields').defaultTo('{}'); // field definitions with types
     table.jsonb('indexes').defaultTo('[]'); // database indexes definition
@@ -70,25 +84,31 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(['symbol_id', 'entity_id']);
   });
 
-  // Add new indexes for improved ORM relationship queries
-  await knex.schema.raw(`
+  // Add enhanced indexes for ORM relationship queries
+  await knex.raw(`
     CREATE INDEX IF NOT EXISTS idx_orm_relationships_entity
-    ON orm_relationships(from_entity_id, relationship_type);
+    ON orm_relationships(from_entity_id, relationship_type)
   `);
 
-  await knex.schema.raw(`
+  await knex.raw(`
     CREATE INDEX IF NOT EXISTS idx_orm_relationships_reverse_entity
-    ON orm_relationships(to_entity_id, relationship_type);
+    ON orm_relationships(to_entity_id, relationship_type)
   `);
+
+  console.log('ORM entity relationships tables created successfully');
 }
 
 export async function down(knex: Knex): Promise<void> {
-  // Drop indexes first
-  await knex.schema.raw('DROP INDEX IF EXISTS idx_orm_relationships_reverse_entity;');
-  await knex.schema.raw('DROP INDEX IF EXISTS idx_orm_relationships_entity;');
+  console.log('Removing ORM entity relationships tables...');
+
+  // Drop enhanced indexes first
+  await knex.raw('DROP INDEX IF EXISTS idx_orm_relationships_reverse_entity');
+  await knex.raw('DROP INDEX IF EXISTS idx_orm_relationships_entity');
 
   // Drop tables in reverse dependency order
   await knex.schema.dropTableIfExists('orm_repositories');
   await knex.schema.dropTableIfExists('orm_relationships');
   await knex.schema.dropTableIfExists('orm_entities');
+
+  console.log('ORM entity relationships tables removed successfully');
 }
