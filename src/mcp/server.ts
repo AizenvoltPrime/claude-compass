@@ -105,11 +105,6 @@ export class ClaudeCompassMCPServer {
                   type: 'string',
                   description: 'The path of the file to retrieve (alternative to file_id)',
                 },
-                include_symbols: {
-                  type: 'boolean',
-                  description: 'Whether to include symbols defined in this file',
-                  default: true,
-                },
               },
               additionalProperties: false,
             },
@@ -123,21 +118,6 @@ export class ClaudeCompassMCPServer {
                 symbol_id: {
                   type: 'number',
                   description: 'The ID of the symbol to retrieve',
-                },
-                include_dependencies: {
-                  type: 'boolean',
-                  description: 'Whether to include symbol dependencies',
-                  default: true,
-                },
-                include_callers: {
-                  type: 'boolean',
-                  description: 'Whether to include symbols that call this symbol',
-                  default: false,
-                },
-                group_results: {
-                  type: 'boolean',
-                  description: 'Whether to group dependency results by call site',
-                  default: false,
                 },
               },
               required: ['symbol_id'],
@@ -154,29 +134,10 @@ export class ClaudeCompassMCPServer {
                   type: 'string',
                   description: 'The search query (symbol name or pattern)',
                 },
-                repo_id: {
-                  type: 'number',
-                  description: 'Limit search to specific repository',
-                },
                 repo_ids: {
                   type: 'array',
                   items: { type: 'number' },
-                  description: 'Multi-repository search (Phase 6A enhancement)',
-                },
-                symbol_type: {
-                  type: 'string',
-                  enum: [
-                    'function',
-                    'class',
-                    'interface',
-                    'variable',
-                    'constant',
-                    'type_alias',
-                    'enum',
-                    'method',
-                    'property',
-                  ],
-                  description: 'Filter by symbol type',
+                  description: 'Repository IDs to search in',
                 },
                 entity_types: {
                   type: 'array',
@@ -205,18 +166,11 @@ export class ClaudeCompassMCPServer {
                   type: 'boolean',
                   description: 'Filter by exported symbols only',
                 },
-                use_vector: {
-                  type: 'boolean',
-                  description:
-                    'Enable vector search for semantic similarity (Phase 6A enhancement - future)',
-                  default: false,
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Maximum number of results to return',
-                  default: 100,
-                  minimum: 1,
-                  maximum: 200,
+                search_mode: {
+                  type: 'string',
+                  enum: ['auto', 'exact', 'semantic', 'qualified'],
+                  description: 'Search mode: auto (hybrid), exact (lexical), semantic (vector), qualified (namespace-aware)',
+                  default: 'auto',
                 },
               },
               required: ['query'],
@@ -249,11 +203,6 @@ export class ClaudeCompassMCPServer {
                   description: 'Type of dependency relationship to find',
                   default: 'calls',
                 },
-                include_indirect: {
-                  type: 'boolean',
-                  description: 'Include indirect callers (transitive dependencies)',
-                  default: false,
-                },
                 include_cross_stack: {
                   type: 'boolean',
                   description: 'Include cross-stack callers (Vue ↔ Laravel)',
@@ -266,15 +215,11 @@ export class ClaudeCompassMCPServer {
                   minimum: 0,
                   maximum: 1,
                 },
-                show_call_chains: {
-                  type: 'boolean',
-                  description: 'Include human-readable call chains',
-                  default: false,
-                },
-                group_results: {
-                  type: 'boolean',
-                  description: 'Whether to group dependency results by call site',
-                  default: false,
+                analysis_type: {
+                  type: 'string',
+                  enum: ['quick', 'standard', 'comprehensive'],
+                  description: 'Analysis type for smart defaults: quick (high confidence, shallow), standard (balanced), comprehensive (low confidence, deep)',
+                  default: 'standard',
                 },
               },
               required: ['symbol_id'],
@@ -305,25 +250,16 @@ export class ClaudeCompassMCPServer {
                   ],
                   description: 'Type of dependency relationship to list',
                 },
-                include_indirect: {
-                  type: 'boolean',
-                  description: 'Include indirect dependencies (transitive)',
-                  default: false,
-                },
                 include_cross_stack: {
                   type: 'boolean',
                   description: 'Include cross-stack dependencies (Vue ↔ Laravel)',
                   default: false,
                 },
-                show_call_chains: {
-                  type: 'boolean',
-                  description: 'Include human-readable call chains',
-                  default: false,
-                },
-                group_results: {
-                  type: 'boolean',
-                  description: 'Whether to group dependency results by call site',
-                  default: false,
+                analysis_type: {
+                  type: 'string',
+                  enum: ['quick', 'standard', 'comprehensive'],
+                  description: 'Analysis type for smart defaults: quick (high confidence, shallow), standard (balanced), comprehensive (low confidence, deep)',
+                  default: 'standard',
                 },
               },
               required: ['symbol_id'],
@@ -348,21 +284,6 @@ export class ClaudeCompassMCPServer {
                   },
                   description: 'Multi-framework impact analysis (default: all detected frameworks)',
                 },
-                include_tests: {
-                  type: 'boolean',
-                  description: 'Include test coverage impact analysis',
-                  default: true,
-                },
-                include_routes: {
-                  type: 'boolean',
-                  description: 'Include route impact analysis',
-                  default: true,
-                },
-                include_jobs: {
-                  type: 'boolean',
-                  description: 'Include background job impact analysis',
-                  default: true,
-                },
                 max_depth: {
                   type: 'number',
                   description: 'Transitive analysis depth',
@@ -380,7 +301,13 @@ export class ClaudeCompassMCPServer {
                 show_call_chains: {
                   type: 'boolean',
                   description: 'Include human-readable call chains',
-                  default: false,
+                  default: true,
+                },
+                analysis_type: {
+                  type: 'string',
+                  enum: ['quick', 'standard', 'comprehensive'],
+                  description: 'Analysis type for smart defaults: quick (0.9 threshold, depth 2), standard (0.7 threshold, depth 5), comprehensive (0.5 threshold, depth 10)',
+                  default: 'standard',
                 },
               },
               required: ['symbol_id'],
