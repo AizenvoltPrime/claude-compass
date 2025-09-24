@@ -116,7 +116,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should search with basic query', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId
+        repo_ids: [repoId]
       });
 
       expect(result.content).toBeDefined();
@@ -132,20 +132,19 @@ describe('Enhanced MCP Tools Search', () => {
     test('should support enhanced search options', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
-        use_vector: false,
-        limit: 5
+        repo_ids: [repoId],
+        search_mode: 'exact'
       });
 
       const response = JSON.parse(result.content[0].text);
-      expect(response.results.length).toBeLessThanOrEqual(5);
+      expect(response.results.length).toBeGreaterThanOrEqual(0);
     });
 
     test('should filter by symbol type', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
-        symbol_type: 'function'
+        repo_ids: [repoId],
+        entity_types: ['function']
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -155,7 +154,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should filter by exported status', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
+        repo_ids: [repoId],
         is_exported: true
       });
 
@@ -166,7 +165,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should support framework filtering', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
+        repo_ids: [repoId],
         framework: 'vue'
       });
 
@@ -177,7 +176,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should support entity type filtering', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
+        repo_ids: [repoId],
         entity_types: ['component']
       });
 
@@ -195,11 +194,11 @@ describe('Enhanced MCP Tools Search', () => {
       expect(response.results.length).toBeGreaterThan(0);
     });
 
-    test('should use hybrid search with use_vector flag', async () => {
+    test('should use semantic search with search_mode', async () => {
       const result = await mcpTools.searchCode({
         query: 'user service',
-        repo_id: repoId,
-        use_vector: true
+        repo_ids: [repoId],
+        search_mode: 'semantic'
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -209,7 +208,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should handle multiple entity types', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
+        repo_ids: [repoId],
         entity_types: ['function', 'class', 'component']
       });
 
@@ -223,7 +222,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should include file information in results', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId
+        repo_ids: [repoId]
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -238,7 +237,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should include entity type and framework information', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId
+        repo_ids: [repoId]
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -247,6 +246,266 @@ describe('Enhanced MCP Tools Search', () => {
       const firstResult = response.results[0];
       expect(firstResult.entity_type).toBeDefined();
       expect(firstResult.framework).toBeDefined();
+    });
+  });
+
+  describe('Framework Auto-Detection Tests', () => {
+    test('should auto-detect single framework from entity types', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'User',
+        repo_ids: [repoId],
+        entity_types: ['model']
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters.framework).toBe('laravel');
+      expect(response.query_filters.framework_auto_detected).toBe(true);
+    });
+
+    test('should auto-detect single framework for Vue components', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'UserComponent',
+        repo_ids: [repoId],
+        entity_types: ['component']
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters.framework).toBe('vue');
+      expect(response.query_filters.framework_auto_detected).toBe(true);
+    });
+
+    test('should handle multiple framework detection without auto-selecting', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'User',
+        repo_ids: [repoId],
+        entity_types: ['function', 'class', 'component']
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      // Should not auto-select when multiple frameworks are detected
+      expect(response.query_filters.framework_auto_detected).toBeFalsy();
+    });
+
+    test('should not auto-detect when framework is explicitly specified', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'User',
+        repo_ids: [repoId],
+        entity_types: ['model'],
+        framework: 'vue'
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters.framework).toBe('vue');
+      expect(response.query_filters.framework_auto_detected).toBeFalsy();
+    });
+
+    test('should not auto-detect when no entity types provided', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'User',
+        repo_ids: [repoId]
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters.framework_auto_detected).toBeFalsy();
+    });
+
+    test('should validate against repository framework stack', async () => {
+      // Create a repository with limited framework stack
+      const limitedRepo = await dbService.createRepository({
+        name: `test-limited-framework-${Date.now()}`,
+        path: `/test/limited-${Date.now()}`,
+        framework_stack: ['javascript'] // Only JavaScript, no Vue or Laravel
+      });
+
+      const result = await mcpTools.searchCode({
+        query: 'Test',
+        repo_ids: [limitedRepo.id],
+        entity_types: ['model'] // Would suggest Laravel, but not available
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters.framework_auto_detected).toBeFalsy();
+
+      // Clean up
+      await knex('repositories').where('id', limitedRepo.id).del();
+    });
+  });
+
+  describe('Analysis Type Parameter Tests', () => {
+    test('should accept analysis_type parameter in who_calls', async () => {
+      // First create a test symbol
+      const vueFile = await dbService.createFile({
+        repo_id: repoId,
+        path: '/test/enhanced-mcp-search/TestComponent.vue',
+        language: 'vue',
+        is_generated: false,
+        is_test: false
+      });
+
+      const testSymbol = await dbService.createSymbol({
+        file_id: vueFile.id,
+        name: 'testMethod',
+        symbol_type: SymbolType.FUNCTION,
+        is_exported: true,
+        signature: 'function testMethod()'
+      });
+
+      const result = await mcpTools.whoCalls({
+        symbol_id: testSymbol.id,
+        analysis_type: 'quick'
+      });
+
+      expect(result.content).toBeDefined();
+      const response = JSON.parse(result.content[0].text);
+      expect(response.symbol.name).toBe('testMethod');
+    });
+
+    test('should accept analysis_type parameter in listDependencies', async () => {
+      // Create a test symbol with dependencies
+      const jsFile = await dbService.createFile({
+        repo_id: repoId,
+        path: '/test/enhanced-mcp-search/TestService.js',
+        language: 'javascript',
+        is_generated: false,
+        is_test: false
+      });
+
+      const testSymbol = await dbService.createSymbol({
+        file_id: jsFile.id,
+        name: 'TestService',
+        symbol_type: SymbolType.CLASS,
+        is_exported: true,
+        signature: 'class TestService'
+      });
+
+      const result = await mcpTools.listDependencies({
+        symbol_id: testSymbol.id,
+        analysis_type: 'comprehensive'
+      });
+
+      expect(result.content).toBeDefined();
+      const response = JSON.parse(result.content[0].text);
+      expect(response.symbol.name).toBe('TestService');
+    });
+
+    test('should accept analysis_type parameter in impact_of', async () => {
+      const vueFile = await dbService.createFile({
+        repo_id: repoId,
+        path: '/test/enhanced-mcp-search/ImpactComponent.vue',
+        language: 'vue',
+        is_generated: false,
+        is_test: false
+      });
+
+      const testSymbol = await dbService.createSymbol({
+        file_id: vueFile.id,
+        name: 'ImpactComponent',
+        symbol_type: SymbolType.COMPONENT,
+        is_exported: true,
+        signature: 'export default defineComponent(...)'
+      });
+
+      const result = await mcpTools.impactOf({
+        symbol_id: testSymbol.id,
+        analysis_type: 'standard'
+      });
+
+      expect(result.content).toBeDefined();
+      const response = JSON.parse(result.content[0].text);
+      expect(response.symbol.name).toBe('ImpactComponent');
+    });
+  });
+
+  describe('Search Mode Enhancement Tests', () => {
+    test('should accept all search_mode values', async () => {
+      const searchModes = ['auto', 'exact', 'semantic', 'qualified'];
+
+      for (const mode of searchModes) {
+        const result = await mcpTools.searchCode({
+          query: 'user',
+          repo_ids: [repoId],
+          search_mode: mode
+        });
+
+        const response = JSON.parse(result.content[0].text);
+        expect(response.query_filters.search_mode).toBe(mode);
+        expect(Array.isArray(response.results)).toBe(true);
+      }
+    });
+
+    test('should include search mode in response', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'user',
+        repo_ids: [repoId],
+        search_mode: 'semantic'
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters.search_mode).toBe('semantic');
+    });
+  });
+
+  describe('Response Format Enhancement Tests', () => {
+    test('should include framework_auto_detected in response', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'User',
+        repo_ids: [repoId],
+        entity_types: ['component']
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.query_filters).toHaveProperty('framework_auto_detected');
+      expect(typeof response.query_filters.framework_auto_detected).toBe('boolean');
+    });
+
+    test('should include entity_type and framework in individual results', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'User',
+        repo_ids: [repoId]
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      if (response.results.length > 0) {
+        const firstResult = response.results[0];
+        expect(firstResult).toHaveProperty('entity_type');
+        expect(firstResult).toHaveProperty('framework');
+        expect(typeof firstResult.entity_type).toBe('string');
+        expect(typeof firstResult.framework).toBe('string');
+      }
+    });
+
+    test('should maintain backward compatibility in response structure', async () => {
+      const result = await mcpTools.searchCode({
+        query: 'user',
+        repo_ids: [repoId]
+      });
+
+      const response = JSON.parse(result.content[0].text);
+
+      // Check that all required fields are present
+      expect(response).toHaveProperty('query');
+      expect(response).toHaveProperty('results');
+      expect(response).toHaveProperty('total_results');
+      expect(response).toHaveProperty('query_filters');
+      expect(response).toHaveProperty('search_options');
+
+      // Check query_filters structure - should have core fields
+      expect(response.query_filters).toHaveProperty('framework_auto_detected');
+      expect(response.query_filters).toHaveProperty('repo_ids');
+
+      // Optional fields that may or may not be present depending on query
+      if (response.query_filters.entity_types !== undefined) {
+        expect(Array.isArray(response.query_filters.entity_types)).toBe(true);
+      }
+      if (response.query_filters.framework !== undefined) {
+        expect(typeof response.query_filters.framework).toBe('string');
+      }
+      if (response.query_filters.search_mode !== undefined) {
+        expect(['auto', 'exact', 'semantic', 'qualified']).toContain(response.query_filters.search_mode);
+      }
+      if (response.query_filters.is_exported !== undefined) {
+        expect(typeof response.query_filters.is_exported).toBe('boolean');
+      }
     });
   });
 
@@ -265,22 +524,22 @@ describe('Enhanced MCP Tools Search', () => {
       }).rejects.toThrow('query is required and must be a string');
     });
 
-    test('should validate repo_id type', async () => {
+    test('should validate repo_id deprecation', async () => {
       await expect(async () => {
         await mcpTools.searchCode({
           query: 'test',
-          repo_id: 'invalid'
+          repo_id: 123
         });
-      }).rejects.toThrow('repo_id must be a number');
+      }).rejects.toThrow('repo_id parameter removed. Use repo_ids array instead');
     });
 
-    test('should validate symbol_type type', async () => {
+    test('should validate symbol_type deprecation', async () => {
       await expect(async () => {
         await mcpTools.searchCode({
           query: 'test',
-          symbol_type: 123
+          symbol_type: 'function'
         });
-      }).rejects.toThrow('symbol_type must be a string');
+      }).rejects.toThrow('symbol_type parameter removed. Use entity_types array instead');
     });
 
     test('should validate is_exported type', async () => {
@@ -292,20 +551,13 @@ describe('Enhanced MCP Tools Search', () => {
       }).rejects.toThrow('is_exported must be a boolean');
     });
 
-    test('should validate limit range', async () => {
+    test('should validate limit deprecation', async () => {
       await expect(async () => {
         await mcpTools.searchCode({
           query: 'test',
-          limit: 0
+          limit: 10
         });
-      }).rejects.toThrow('limit must be a number between 1 and 200');
-
-      await expect(async () => {
-        await mcpTools.searchCode({
-          query: 'test',
-          limit: 300
-        });
-      }).rejects.toThrow('limit must be a number between 1 and 200');
+      }).rejects.toThrow('limit parameter removed. Fixed limit of 100 is now used for all searches');
     });
 
     test('should validate entity_types array', async () => {
@@ -335,13 +587,49 @@ describe('Enhanced MCP Tools Search', () => {
       }).rejects.toThrow('framework must be a string');
     });
 
-    test('should validate use_vector type', async () => {
+    test('should validate use_vector deprecation', async () => {
       await expect(async () => {
         await mcpTools.searchCode({
           query: 'test',
-          use_vector: 'yes'
+          use_vector: true
         });
-      }).rejects.toThrow('use_vector must be a boolean');
+      }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+    });
+
+    test('should validate search_mode values', async () => {
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          search_mode: 'invalid'
+        });
+      }).rejects.toThrow('search_mode must be one of: auto, exact, semantic, qualified');
+    });
+
+    test('should validate analysis_type values for who_calls', async () => {
+      await expect(async () => {
+        await mcpTools.whoCalls({
+          symbol_id: 1,
+          analysis_type: 'invalid'
+        });
+      }).rejects.toThrow();
+    });
+
+    test('should validate analysis_type values for listDependencies', async () => {
+      await expect(async () => {
+        await mcpTools.listDependencies({
+          symbol_id: 1,
+          analysis_type: 'invalid'
+        });
+      }).rejects.toThrow();
+    });
+
+    test('should validate analysis_type values for impact_of', async () => {
+      await expect(async () => {
+        await mcpTools.impactOf({
+          symbol_id: 1,
+          analysis_type: 'invalid'
+        });
+      }).rejects.toThrow();
     });
 
     test('should validate repo_ids array', async () => {
@@ -367,7 +655,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should handle empty query results gracefully', async () => {
       const result = await mcpTools.searchCode({
         query: 'nonexistentfunctionname12345',
-        repo_id: repoId
+        repo_ids: [repoId]
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -378,7 +666,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should handle non-existent repository gracefully', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: 999999
+        repo_ids: [999999]
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -390,8 +678,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId,
-        limit: 50
+        repo_ids: [repoId]
       });
 
       const endTime = Date.now();
@@ -404,7 +691,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should handle special characters in query', async () => {
       const result = await mcpTools.searchCode({
         query: 'user@service.test',
-        repo_id: repoId
+        repo_ids: [repoId]
       });
 
       expect(result.content).toBeDefined();
@@ -415,7 +702,7 @@ describe('Enhanced MCP Tools Search', () => {
     test('should provide consistent response format', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
-        repo_id: repoId
+        repo_ids: [repoId]
       });
 
       const response = JSON.parse(result.content[0].text);

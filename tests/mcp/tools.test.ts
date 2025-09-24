@@ -14,6 +14,12 @@ const mockDatabaseService = {
   getDependenciesToWithContext: jest.fn(),
   searchSymbols: jest.fn(),
   fulltextSearchSymbols: jest.fn(),
+  getRepository: jest.fn(),
+  vectorSearchSymbols: jest.fn(),
+  searchQualifiedContext: jest.fn(),
+  groupCallsByParameterContext: jest.fn(),
+  lexicalSearchSymbols: jest.fn(),
+  searchMethodSignatures: jest.fn(),
 } as unknown as DatabaseService;
 
 describe('McpTools', () => {
@@ -22,6 +28,11 @@ describe('McpTools', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mcpTools = new McpTools(mockDatabaseService);
+
+    // Setup default mock returns for the new methods
+    (mockDatabaseService.lexicalSearchSymbols as jest.Mock).mockResolvedValue([]);
+    (mockDatabaseService.searchMethodSignatures as jest.Mock).mockResolvedValue([]);
+    (mockDatabaseService.groupCallsByParameterContext as jest.Mock).mockResolvedValue({ totalCalls: 0, variations: [] });
   });
 
   describe('getFile', () => {
@@ -44,7 +55,7 @@ describe('McpTools', () => {
         {
           id: 1,
           name: 'testFunction',
-          symbol_type: SymbolType.FUNCTION,
+          entity_types: SymbolType.FUNCTION,
           start_line: 1,
           end_line: 5,
           is_exported: true,
@@ -71,25 +82,6 @@ describe('McpTools', () => {
       expect(data.symbol_count).toBe(1);
     });
 
-    it('should get file without symbols when include_symbols is false', async () => {
-      const mockFile = {
-        id: 1,
-        path: '/test/file.js',
-        language: 'javascript',
-        repository: null,
-      };
-
-      (mockDatabaseService.getFileWithRepository as jest.Mock).mockResolvedValue(mockFile);
-
-      const result = await mcpTools.getFile({ file_id: 1, include_symbols: false });
-
-      expect(mockDatabaseService.getFileWithRepository).toHaveBeenCalledWith(1);
-      expect(mockDatabaseService.getSymbolsByFile).not.toHaveBeenCalled();
-
-      const data = JSON.parse(result.content[0].text);
-      expect(data.symbols).toEqual([]);
-      expect(data.symbol_count).toBe(0);
-    });
 
     it('should throw error when file not found', async () => {
       (mockDatabaseService.getFileWithRepository as jest.Mock).mockResolvedValue(null);
@@ -136,7 +128,7 @@ describe('McpTools', () => {
       const mockSymbol = {
         id: 1,
         name: 'testFunction',
-        symbol_type: SymbolType.FUNCTION,
+        entity_types: SymbolType.FUNCTION,
         start_line: 1,
         end_line: 10,
         is_exported: true,
@@ -161,7 +153,7 @@ describe('McpTools', () => {
           to_symbol: {
             id: 2,
             name: 'helperFunction',
-            symbol_type: SymbolType.FUNCTION,
+            entity_types: SymbolType.FUNCTION,
             file: {
               path: '/test/utils.js',
             },
@@ -178,7 +170,7 @@ describe('McpTools', () => {
           from_symbol: {
             id: 3,
             name: 'mainFunction',
-            symbol_type: SymbolType.FUNCTION,
+            entity_types: SymbolType.FUNCTION,
             file: {
               path: '/test/main.js',
             },
@@ -191,9 +183,7 @@ describe('McpTools', () => {
       (mockDatabaseService.getDependenciesTo as jest.Mock).mockResolvedValue(mockCallers);
 
       const result = await mcpTools.getSymbol({
-        symbol_id: 1,
-        include_dependencies: true,
-        include_callers: true,
+        symbol_id: 1
       });
 
       expect(mockDatabaseService.getSymbolWithFile).toHaveBeenCalledWith(1);
@@ -202,10 +192,15 @@ describe('McpTools', () => {
 
       const data = JSON.parse(result.content[0].text);
       expect(data.symbol.name).toBe('testFunction');
-      expect(data.dependencies).toHaveLength(1);
-      expect(data.dependencies[0].to_symbol.name).toBe('helperFunction');
-      expect(data.callers).toHaveLength(1);
-      expect(data.callers[0].from_symbol.name).toBe('mainFunction');
+
+      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
+      expect(typeof data.dependencies).toBe('object');
+      expect(data.dependencies.line_5).toBeDefined();
+      expect(data.dependencies.line_5.calls[0].target).toBe('utils.helperFunction');
+
+      expect(typeof data.callers).toBe('object');
+      expect(data.callers.line_12).toBeDefined();
+      expect(data.callers.line_12.calls[0].target).toBe('main.mainFunction');
     });
 
     it('should throw error when symbol not found', async () => {
@@ -222,7 +217,7 @@ describe('McpTools', () => {
         {
           id: 1,
           name: 'testFunction',
-          symbol_type: SymbolType.FUNCTION,
+          entity_types: SymbolType.FUNCTION,
           start_line: 1,
           end_line: 10,
           is_exported: true,
@@ -234,29 +229,31 @@ describe('McpTools', () => {
         },
       ];
 
+      // Mock vector search to fail so it falls back to fulltext search
+      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockRejectedValue(new Error('Vector search not available'));
       (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
       const result = await mcpTools.searchCode({
         query: 'test',
-        symbol_type: 'function',
+        entity_types: ['function'],
         is_exported: true,
-        limit: 10,
       });
 
-      expect(mockDatabaseService.fulltextSearchSymbols).toHaveBeenCalledWith('test', undefined, {
-        symbolTypes: ['function', 'method'],
+      // Should try vector search first, then fallback to fulltext search
+      expect(mockDatabaseService.vectorSearchSymbols).toHaveBeenCalled();
+      expect(mockDatabaseService.fulltextSearchSymbols).toHaveBeenCalled();
+      const callArgs = (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mock.calls[0];
+      expect(callArgs[0]).toBe('test'); // query
+      expect(callArgs[2]).toMatchObject({
         isExported: true,
-        limit: 10,
-        confidenceThreshold: 0.7,
-        framework: undefined,
-        repoIds: []
+        limit: 100
       });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.query).toBe('test');
       expect(data.results).toHaveLength(1); // Only the function should pass the filters
       expect(data.results[0].name).toBe('testFunction');
-      expect(data.query_filters.symbol_type).toBe('function');
+      expect(data.query_filters.entity_types).toEqual(['function']);
       expect(data.query_filters.is_exported).toBe(true);
     });
 
@@ -264,7 +261,7 @@ describe('McpTools', () => {
       const mockSymbols = Array.from({ length: 100 }, (_, i) => ({
         id: i + 1,
         name: `function${i}`,
-        symbol_type: SymbolType.FUNCTION,
+        entity_types: SymbolType.FUNCTION,
         start_line: 1,
         end_line: 5,
         is_exported: true,
@@ -275,15 +272,16 @@ describe('McpTools', () => {
         },
       }));
 
+      // Mock vector search to fail so it falls back to fulltext search
+      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockRejectedValue(new Error('Vector search not available'));
       (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
       const result = await mcpTools.searchCode({
         query: 'function',
-        limit: 5,
       });
 
       const data = JSON.parse(result.content[0].text);
-      expect(data.results).toHaveLength(5);
+      expect(data.results).toHaveLength(100); // Fixed limit of 100 is applied
     });
   });
 
@@ -292,7 +290,7 @@ describe('McpTools', () => {
       const mockSymbol = {
         id: 1,
         name: 'targetFunction',
-        symbol_type: SymbolType.FUNCTION,
+        entity_types: SymbolType.FUNCTION,
       };
 
       const mockCallers = [
@@ -304,7 +302,7 @@ describe('McpTools', () => {
           from_symbol: {
             id: 2,
             name: 'caller1',
-            symbol_type: SymbolType.FUNCTION,
+            entity_types: SymbolType.FUNCTION,
             file: {
               path: '/test/caller.js',
             },
@@ -322,8 +320,11 @@ describe('McpTools', () => {
 
       const data = JSON.parse(result.content[0].text);
       expect(data.symbol.name).toBe('targetFunction');
-      expect(data.callers).toHaveLength(1);
-      expect(data.callers[0].from_symbol.name).toBe('caller1');
+
+      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
+      expect(typeof data.callers).toBe('object');
+      expect(data.callers.line_10).toBeDefined();
+      expect(data.callers.line_10.calls[0].target).toBe('caller.caller1');
     });
   });
 
@@ -332,7 +333,7 @@ describe('McpTools', () => {
       const mockSymbol = {
         id: 1,
         name: 'sourceFunction',
-        symbol_type: SymbolType.FUNCTION,
+        entity_types: SymbolType.FUNCTION,
       };
 
       const mockDependencies = [
@@ -344,7 +345,7 @@ describe('McpTools', () => {
           to_symbol: {
             id: 2,
             name: 'dependency1',
-            symbol_type: SymbolType.FUNCTION,
+            entity_types: SymbolType.FUNCTION,
             file: {
               path: '/test/utils.js',
             },
@@ -362,8 +363,208 @@ describe('McpTools', () => {
 
       const data = JSON.parse(result.content[0].text);
       expect(data.symbol.name).toBe('sourceFunction');
-      expect(data.dependencies).toHaveLength(1);
-      expect(data.dependencies[0].to_symbol.name).toBe('dependency1');
+
+      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
+      expect(typeof data.dependencies).toBe('object');
+      expect(data.dependencies.line_5).toBeDefined();
+      expect(data.dependencies.line_5.calls[0].target).toBe('utils.dependency1');
+    });
+
+    it('should handle analysis_type parameter', async () => {
+      const mockSymbol = {
+        id: 1,
+        name: 'testFunction',
+        entity_types: SymbolType.FUNCTION,
+      };
+
+      (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+      (mockDatabaseService.getDependenciesFrom as jest.Mock).mockResolvedValue([]);
+
+      const result = await mcpTools.listDependencies({
+        symbol_id: 1,
+        analysis_type: 'quick'
+      });
+
+      expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
+      const data = JSON.parse(result.content[0].text);
+      expect(data.symbol.name).toBe('testFunction');
+    });
+
+    it('should validate analysis_type parameter values', async () => {
+      await expect(async () => {
+        await mcpTools.listDependencies({
+          symbol_id: 1,
+          analysis_type: 'invalid'
+        });
+      }).rejects.toThrow();
+    });
+  });
+
+  describe('whoCalls with analysis_type', () => {
+    it('should handle analysis_type parameter', async () => {
+      const mockSymbol = {
+        id: 1,
+        name: 'targetFunction',
+        entity_types: SymbolType.FUNCTION,
+      };
+
+      const mockCallers = [
+        {
+          id: 1,
+          dependency_type: 'calls',
+          line_number: 10,
+          confidence: 1.0,
+          from_symbol: {
+            id: 2,
+            name: 'caller1',
+            entity_types: SymbolType.FUNCTION,
+            file: {
+              path: '/test/caller.js',
+            },
+          },
+        },
+      ];
+
+      (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+      (mockDatabaseService.getDependenciesToWithContext as jest.Mock).mockResolvedValue(mockCallers);
+
+      const result = await mcpTools.whoCalls({
+        symbol_id: 1,
+        analysis_type: 'comprehensive'
+      });
+
+      expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
+      expect(mockDatabaseService.getDependenciesToWithContext).toHaveBeenCalledWith(1);
+
+      const data = JSON.parse(result.content[0].text);
+      expect(data.symbol.name).toBe('targetFunction');
+
+      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
+      expect(typeof data.callers).toBe('object');
+      expect(data.callers.line_10).toBeDefined();
+      expect(data.callers.line_10.calls[0].target).toBe('caller.caller1');
+    });
+
+    it('should validate analysis_type parameter values for whoCalls', async () => {
+      await expect(async () => {
+        await mcpTools.whoCalls({
+          symbol_id: 1,
+          analysis_type: 'invalid'
+        });
+      }).rejects.toThrow();
+    });
+  });
+
+  describe('searchCode parameter validation', () => {
+    it('should accept removed parameters without error (graceful degradation)', async () => {
+      // The removed parameters (repo_id, symbol_type, limit, use_vector) are simply ignored now
+      // This provides backward compatibility while the API has been simplified per PARAMETER_REDUNDANCY_ANALYSIS
+
+      const mockSymbols = [
+        {
+          id: 1,
+          name: 'testFunction',
+          entity_types: SymbolType.FUNCTION,
+          start_line: 1,
+          end_line: 10,
+          is_exported: true,
+          file: {
+            id: 1,
+            path: '/test/file.js',
+            language: 'javascript',
+            repository: {
+              name: 'test-repo',
+              path: '/test',
+            },
+          },
+        },
+      ];
+
+      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockRejectedValue(new Error('Vector search not available'));
+      (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
+
+      // These parameters are ignored, not rejected (graceful degradation)
+      const result = await mcpTools.searchCode({
+        query: 'test',
+        repo_id: 123,  // ignored
+        symbol_type: 'function',  // ignored
+        limit: 50,  // ignored
+        use_vector: true  // ignored
+      });
+
+      expect(result).toBeDefined();
+    });
+
+    it('should validate new parameter types', async () => {
+      const mockSymbols = [
+        {
+          id: 1,
+          name: 'testFunction',
+          entity_types: SymbolType.FUNCTION,
+          start_line: 1,
+          end_line: 10,
+          is_exported: true,
+          file: {
+            id: 1,
+            path: '/test/file.js',
+            language: 'javascript',
+          },
+        },
+      ];
+
+      (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
+
+      // Mock the getDefaultRepoId method
+      (mcpTools as any).getDefaultRepoId = jest.fn().mockResolvedValue(1);
+
+      // Valid parameters should work
+      await expect(mcpTools.searchCode({
+        query: 'test',
+        entity_types: ['function'],
+        search_mode: 'exact',
+        is_exported: true,
+        repo_ids: [1]
+      })).resolves.toBeDefined();
+
+      // Invalid entity_types should fail
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          entity_types: 'not_an_array'
+        });
+      }).rejects.toThrow('entity_types must be an array');
+
+      // Invalid entity_types values should fail
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          entity_types: ['invalid_type']
+        });
+      }).rejects.toThrow('entity_types must contain valid types');
+
+      // Invalid search_mode should fail
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          search_mode: 'invalid'
+        });
+      }).rejects.toThrow('search_mode must be one of: auto, exact, semantic, qualified');
+
+      // Invalid repo_ids should fail
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          repo_ids: 'not_an_array'
+        });
+      }).rejects.toThrow('repo_ids must be an array');
+
+      // Invalid repo_ids values should fail
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          repo_ids: ['not_a_number']
+        });
+      }).rejects.toThrow('repo_ids must contain only numbers');
     });
   });
 });

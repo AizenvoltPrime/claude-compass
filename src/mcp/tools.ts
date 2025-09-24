@@ -22,9 +22,6 @@ function validateGetFileArgs(args: any): GetFileArgs {
   if (args.file_path && typeof args.file_path !== 'string') {
     throw new Error('file_path must be a string');
   }
-  if (args.include_symbols !== undefined && typeof args.include_symbols !== 'boolean') {
-    throw new Error('include_symbols must be a boolean');
-  }
   return args as GetFileArgs;
 }
 
@@ -32,37 +29,29 @@ function validateGetSymbolArgs(args: any): GetSymbolArgs {
   if (!args.symbol_id || typeof args.symbol_id !== 'number') {
     throw new Error('symbol_id is required and must be a number');
   }
-  if (args.include_dependencies !== undefined && typeof args.include_dependencies !== 'boolean') {
-    throw new Error('include_dependencies must be a boolean');
-  }
-  if (args.include_callers !== undefined && typeof args.include_callers !== 'boolean') {
-    throw new Error('include_callers must be a boolean');
-  }
-  if (args.group_results !== undefined && typeof args.group_results !== 'boolean') {
-    throw new Error('group_results must be a boolean');
-  }
   return args as GetSymbolArgs;
 }
 
 function validateSearchCodeArgs(args: any): SearchCodeArgs {
+  // Check for deprecated parameters per PARAMETER_REDUNDANCY_ANALYSIS
+  if (args.repo_id !== undefined) {
+    throw new Error('repo_id parameter removed. Use repo_ids array instead');
+  }
+  if (args.symbol_type !== undefined) {
+    throw new Error('symbol_type parameter removed. Use entity_types array instead');
+  }
+  if (args.limit !== undefined) {
+    throw new Error('limit parameter removed. Fixed limit of 100 is now used for all searches');
+  }
+  if (args.use_vector !== undefined) {
+    throw new Error('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+  }
+
   if (!args.query || typeof args.query !== 'string') {
     throw new Error('query is required and must be a string');
   }
-  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
-    throw new Error('repo_id must be a number');
-  }
-  if (args.symbol_type !== undefined && typeof args.symbol_type !== 'string') {
-    throw new Error('symbol_type must be a string');
-  }
   if (args.is_exported !== undefined && typeof args.is_exported !== 'boolean') {
     throw new Error('is_exported must be a boolean');
-  }
-  if (args.limit !== undefined) {
-    const limit = Number(args.limit);
-    if (isNaN(limit) || limit < 1 || limit > 200) {
-      throw new Error('limit must be a number between 1 and 200');
-    }
-    args.limit = limit;
   }
 
   // Phase 6A enhanced validation
@@ -95,10 +84,6 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
     throw new Error('framework must be a string');
   }
 
-  if (args.use_vector !== undefined && typeof args.use_vector !== 'boolean') {
-    throw new Error('use_vector must be a boolean');
-  }
-
   if (args.repo_ids !== undefined) {
     if (!Array.isArray(args.repo_ids)) {
       throw new Error('repo_ids must be an array');
@@ -110,16 +95,11 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
     }
   }
 
-  if (args.include_qualified !== undefined && typeof args.include_qualified !== 'boolean') {
-    throw new Error('include_qualified must be a boolean');
-  }
-
-  if (args.class_context !== undefined && typeof args.class_context !== 'string') {
-    throw new Error('class_context must be a string');
-  }
-
-  if (args.namespace_context !== undefined && typeof args.namespace_context !== 'string') {
-    throw new Error('namespace_context must be a string');
+  if (args.search_mode !== undefined) {
+    const validModes = ['auto', 'exact', 'semantic', 'qualified'];
+    if (typeof args.search_mode !== 'string' || !validModes.includes(args.search_mode)) {
+      throw new Error('search_mode must be one of: auto, exact, semantic, qualified');
+    }
   }
 
   return args as SearchCodeArgs;
@@ -132,17 +112,21 @@ function validateWhoCallsArgs(args: any): WhoCallsArgs {
   if (args.dependency_type !== undefined && typeof args.dependency_type !== 'string') {
     throw new Error('dependency_type must be a string');
   }
-  if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
-    throw new Error('include_indirect must be a boolean');
-  }
   if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
     throw new Error('include_cross_stack must be a boolean');
   }
-  if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
-    throw new Error('show_call_chains must be a boolean');
+  if (args.cross_stack_confidence_threshold !== undefined) {
+    const threshold = Number(args.cross_stack_confidence_threshold);
+    if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+      throw new Error('cross_stack_confidence_threshold must be a number between 0 and 1');
+    }
+    args.cross_stack_confidence_threshold = threshold;
   }
-  if (args.group_results !== undefined && typeof args.group_results !== 'boolean') {
-    throw new Error('group_results must be a boolean');
+  if (args.analysis_type !== undefined) {
+    const validTypes = ['quick', 'standard', 'comprehensive'];
+    if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
+      throw new Error('analysis_type must be one of: quick, standard, comprehensive');
+    }
   }
   return args as WhoCallsArgs;
 }
@@ -154,17 +138,14 @@ function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   if (args.dependency_type !== undefined && typeof args.dependency_type !== 'string') {
     throw new Error('dependency_type must be a string');
   }
-  if (args.include_indirect !== undefined && typeof args.include_indirect !== 'boolean') {
-    throw new Error('include_indirect must be a boolean');
-  }
   if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
     throw new Error('include_cross_stack must be a boolean');
   }
-  if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
-    throw new Error('show_call_chains must be a boolean');
-  }
-  if (args.group_results !== undefined && typeof args.group_results !== 'boolean') {
-    throw new Error('group_results must be a boolean');
+  if (args.analysis_type !== undefined) {
+    const validTypes = ['quick', 'standard', 'comprehensive'];
+    if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
+      throw new Error('analysis_type must be one of: quick, standard, comprehensive');
+    }
   }
   return args as ListDependenciesArgs;
 }
@@ -182,15 +163,6 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
   if (args.frameworks !== undefined && !Array.isArray(args.frameworks)) {
     throw new Error('frameworks must be an array');
   }
-  if (args.include_tests !== undefined && typeof args.include_tests !== 'boolean') {
-    throw new Error('include_tests must be a boolean');
-  }
-  if (args.include_routes !== undefined && typeof args.include_routes !== 'boolean') {
-    throw new Error('include_routes must be a boolean');
-  }
-  if (args.include_jobs !== undefined && typeof args.include_jobs !== 'boolean') {
-    throw new Error('include_jobs must be a boolean');
-  }
   if (args.max_depth !== undefined) {
     const maxDepth = Number(args.max_depth);
     if (isNaN(maxDepth) || maxDepth < 1 || maxDepth > 20) {
@@ -207,6 +179,12 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
   }
   if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
     throw new Error('show_call_chains must be a boolean');
+  }
+  if (args.analysis_type !== undefined) {
+    const validTypes = ['quick', 'standard', 'comprehensive'];
+    if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
+      throw new Error('analysis_type must be one of: quick, standard, comprehensive');
+    }
   }
   return args as ImpactOfArgs;
 }
@@ -321,59 +299,44 @@ function getClassFromFilePath(filePath: string): string {
 export interface GetFileArgs {
   file_id?: number;
   file_path?: string;
-  include_symbols?: boolean;
 }
 
 export interface GetSymbolArgs {
   symbol_id: number;
-  include_dependencies?: boolean;
-  include_callers?: boolean;
-  group_results?: boolean;
 }
 
 export interface SearchCodeArgs {
   query: string;
-  repo_id?: number;
-  symbol_type?: string;
-  is_exported?: boolean;
-  limit?: number;
+  repo_ids?: number[];
   entity_types?: string[]; // route, model, controller, component, job, etc.
   framework?: string; // laravel, vue, react, node
-  use_vector?: boolean; // enable vector search (future)
-  repo_ids?: number[]; // multi-repository search
-  include_qualified?: boolean; // search in qualified context
-  class_context?: string; // filter by class context
-  namespace_context?: string; // filter by namespace context
+  is_exported?: boolean;
+  search_mode?: 'auto' | 'exact' | 'semantic' | 'qualified';
 }
 
 export interface WhoCallsArgs {
   symbol_id: number;
   dependency_type?: string;
-  include_indirect?: boolean;
   include_cross_stack?: boolean;
-  show_call_chains?: boolean;
-  group_results?: boolean;
+  cross_stack_confidence_threshold?: number;
+  analysis_type?: 'quick' | 'standard' | 'comprehensive';
 }
 
 export interface ListDependenciesArgs {
   symbol_id: number;
   dependency_type?: string;
-  include_indirect?: boolean;
   include_cross_stack?: boolean;
-  show_call_chains?: boolean;
-  group_results?: boolean;
+  analysis_type?: 'quick' | 'standard' | 'comprehensive';
 }
 
 // Comprehensive impact analysis interface (Phase 6A)
 export interface ImpactOfArgs {
   symbol_id: number;
   frameworks?: string[]; // Multi-framework impact: ['vue', 'laravel', 'react', 'node']
-  include_tests?: boolean; // Test coverage impact analysis
-  include_routes?: boolean; // Route impact analysis
-  include_jobs?: boolean; // Background job impact analysis
   max_depth?: number; // Transitive depth (default 5)
   confidence_threshold?: number; // Filter by confidence (default 0.7)
   show_call_chains?: boolean; // Include human-readable call chains
+  analysis_type?: 'quick' | 'standard' | 'comprehensive';
 }
 
 export interface ImpactItem {
@@ -460,7 +423,32 @@ export class McpTools {
     return this.defaultRepoId;
   }
 
-  // Core Tool 1: getFile (unchanged)
+  // Helper method to get analysis settings based on analysis_type (per PARAMETER_REDUNDANCY_ANALYSIS)
+  private getAnalysisSettings(analysisType: 'quick' | 'standard' | 'comprehensive') {
+    switch (analysisType) {
+      case 'quick':
+        return {
+          maxDepth: 2,
+          confidenceThreshold: 0.9,
+          includeIndirect: false, // quick analysis skips transitive
+        };
+      case 'comprehensive':
+        return {
+          maxDepth: 10,
+          confidenceThreshold: 0.5,
+          includeIndirect: true,
+        };
+      case 'standard':
+      default:
+        return {
+          maxDepth: 5,
+          confidenceThreshold: 0.7,
+          includeIndirect: true,
+        };
+    }
+  }
+
+  // Core Tool 1: getFile (simplified with include_symbols always true)
   async getFile(args: any) {
     const validatedArgs = validateGetFileArgs(args);
 
@@ -476,10 +464,8 @@ export class McpTools {
       throw new Error('File not found');
     }
 
-    let symbols = [];
-    if (validatedArgs.include_symbols !== false) {
-      symbols = await this.dbService.getSymbolsByFile(file.id);
-    }
+    // Always include symbols (include_symbols parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+    const symbols = await this.dbService.getSymbolsByFile(file.id);
 
     return {
       content: [
@@ -522,7 +508,7 @@ export class McpTools {
     };
   }
 
-  // Core Tool 2: getSymbol (unchanged)
+  // Core Tool 2: getSymbol (simplified with improved defaults)
   async getSymbol(args: any) {
     const validatedArgs = validateGetSymbolArgs(args);
 
@@ -531,16 +517,9 @@ export class McpTools {
       throw new Error('Symbol not found');
     }
 
-    let dependencies = [];
-    let callers = [];
-
-    if (validatedArgs.include_dependencies !== false) {
-      dependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
-    }
-
-    if (validatedArgs.include_callers === true) {
-      callers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
-    }
+    // Always include dependencies and callers (parameters removed per PARAMETER_REDUNDANCY_ANALYSIS)
+    const dependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
+    const callers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
 
     return {
       content: [
@@ -566,66 +545,38 @@ export class McpTools {
                     }
                   : null,
               },
-              dependencies: validatedArgs.group_results
-                ? groupDependenciesByCallSite(dependencies.map(dep => ({
-                    id: dep.id,
-                    type: dep.dependency_type,
-                    dependency_type: dep.dependency_type,
-                    line_number: dep.line_number,
-                    confidence: dep.confidence,
-                    to_symbol: dep.to_symbol
-                      ? {
-                          id: dep.to_symbol.id,
-                          name: dep.to_symbol.name,
-                          type: dep.to_symbol.symbol_type,
-                          file_path: dep.to_symbol.file?.path,
-                        }
-                      : null,
-                  })))
-                : dependencies.map(dep => ({
-                    id: dep.id,
-                    type: dep.dependency_type,
-                    line_number: dep.line_number,
-                    confidence: dep.confidence,
-                    to_symbol: dep.to_symbol
-                      ? {
-                          id: dep.to_symbol.id,
-                          name: dep.to_symbol.name,
-                          type: dep.to_symbol.symbol_type,
-                          file_path: dep.to_symbol.file?.path,
-                        }
-                      : null,
-                  })),
-              callers: validatedArgs.group_results
-                ? groupDependenciesByCallSite(callers.map(caller => ({
-                    id: caller.id,
-                    type: caller.dependency_type,
-                    dependency_type: caller.dependency_type,
-                    line_number: caller.line_number,
-                    confidence: caller.confidence,
-                    to_symbol: caller.from_symbol
-                      ? {
-                          id: caller.from_symbol.id,
-                          name: caller.from_symbol.name,
-                          type: caller.from_symbol.symbol_type,
-                          file_path: caller.from_symbol.file?.path,
-                        }
-                      : null,
-                  })))
-                : callers.map(caller => ({
-                    id: caller.id,
-                    type: caller.dependency_type,
-                    line_number: caller.line_number,
-                    confidence: caller.confidence,
-                    from_symbol: caller.from_symbol
-                      ? {
-                          id: caller.from_symbol.id,
-                          name: caller.from_symbol.name,
-                          type: caller.from_symbol.symbol_type,
-                          file_path: caller.from_symbol.file?.path,
-                        }
-                      : null,
-                  })),
+              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              dependencies: groupDependenciesByCallSite(dependencies.map(dep => ({
+                id: dep.id,
+                type: dep.dependency_type,
+                dependency_type: dep.dependency_type,
+                line_number: dep.line_number,
+                confidence: dep.confidence,
+                to_symbol: dep.to_symbol
+                  ? {
+                      id: dep.to_symbol.id,
+                      name: dep.to_symbol.name,
+                      type: dep.to_symbol.symbol_type,
+                      file_path: dep.to_symbol.file?.path,
+                    }
+                  : null,
+              }))),
+              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              callers: groupDependenciesByCallSite(callers.map(caller => ({
+                id: caller.id,
+                type: caller.dependency_type,
+                dependency_type: caller.dependency_type,
+                line_number: caller.line_number,
+                confidence: caller.confidence,
+                to_symbol: caller.from_symbol
+                  ? {
+                      id: caller.from_symbol.id,
+                      name: caller.from_symbol.name,
+                      type: caller.from_symbol.symbol_type,
+                      file_path: caller.from_symbol.file?.path,
+                    }
+                  : null,
+              }))),
             },
             null,
             2
@@ -635,23 +586,55 @@ export class McpTools {
     };
   }
 
-  // Core Tool 3: Enhanced searchCode (Phase 6A - absorbs Laravel tool functionality)
+  // Core Tool 3: Enhanced searchCode (simplified with improved defaults)
   async searchCode(args: any) {
     const validatedArgs = validateSearchCodeArgs(args);
     this.logger.debug('Enhanced search with framework awareness', validatedArgs);
 
-    // Use default repo if no repo_id specified
-    const repoId = validatedArgs.repo_id ?? (await this.getDefaultRepoId());
-    const repoIds = validatedArgs.repo_ids || (repoId ? [repoId] : []);
+    // Use repo_ids or default repo (repo_id parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+    const defaultRepoId = await this.getDefaultRepoId();
+    const repoIds = validatedArgs.repo_ids || (defaultRepoId ? [defaultRepoId] : []);
 
-    // Build search options
+    // Framework auto-detection based on entity_types (per PARAMETER_REDUNDANCY_ANALYSIS)
+    let detectedFramework = validatedArgs.framework;
+    let frameworkAutoDetected = false;
+
+    if (!detectedFramework && validatedArgs.entity_types && repoIds.length > 0) {
+      // Get repository framework stacks to validate auto-detection
+      const repositories = await Promise.all(
+        repoIds.map(repoId => this.dbService.getRepository(repoId))
+      );
+      const frameworkStacks = repositories
+        .filter(repo => repo)
+        .flatMap(repo => repo.framework_stack || []);
+
+      const entityTypes = validatedArgs.entity_types;
+      if (entityTypes.includes('route') || entityTypes.includes('model') || entityTypes.includes('controller')) {
+        if (entityTypes.length === 1 && (entityTypes.includes('model') || entityTypes.includes('controller'))) {
+          // Only auto-detect Laravel if it's in the repository framework stack
+          if (frameworkStacks.includes('laravel')) {
+            detectedFramework = 'laravel';
+            frameworkAutoDetected = true;
+          }
+        }
+      }
+      if (entityTypes.includes('component') && entityTypes.length === 1) {
+        // Only auto-detect Vue if it's in the repository framework stack
+        if (frameworkStacks.includes('vue')) {
+          detectedFramework = 'vue';
+          frameworkAutoDetected = true;
+        }
+      }
+    }
+
+    // Build search options with improved defaults
     const searchOptions = {
-      limit: validatedArgs.limit || 100,
+      limit: 100, // Fixed limit (limit parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
       confidenceThreshold: 0.7,
       symbolTypes: [],
       isExported: validatedArgs.is_exported,
-      framework: validatedArgs.framework,
-      repoIds: repoIds.length > 0 ? repoIds : repoId ? [repoId] : [],
+      framework: detectedFramework, // Use detected framework
+      repoIds: repoIds,
     };
 
     let symbols = [];
@@ -709,20 +692,13 @@ export class McpTools {
               if (symbolType) {
                 searchOptions.symbolTypes = [symbolType];
               }
-              let standardSymbols;
-              if (validatedArgs.use_vector === true) {
-                standardSymbols = await this.dbService.vectorSearchSymbols(
-                  validatedArgs.query,
-                  repoId,
-                  searchOptions
-                );
-              } else {
-                standardSymbols = await this.dbService.searchSymbols(
-                  validatedArgs.query,
-                  repoId,
-                  searchOptions
-                );
-              }
+              // Use new search_mode parameter instead of use_vector
+              const standardSymbols = await this.performSearchByMode(
+                validatedArgs.query,
+                repoIds[0] || defaultRepoId,
+                searchOptions,
+                validatedArgs.search_mode || 'auto'
+              );
               symbols.push(...standardSymbols);
             }
             break;
@@ -741,146 +717,28 @@ export class McpTools {
                 searchOptions.symbolTypes = [SymbolType.FUNCTION, SymbolType.METHOD];
               }
             }
-            // Choose search method based on use_vector parameter
-            let standardSymbols: SymbolWithFile[];
-            if (validatedArgs.use_vector === true) {
-              try {
-                standardSymbols = await this.dbService.vectorSearchSymbols(
-                  validatedArgs.query,
-                  repoId,
-                  { ...searchOptions, similarityThreshold: 0.7 }
-                );
-              } catch (error) {
-                this.logger.warn('Vector search failed, falling back to fulltext:', error);
-                standardSymbols = await this.dbService.fulltextSearchSymbols(
-                  validatedArgs.query,
-                  repoId,
-                  searchOptions
-                );
-              }
-            } else if (validatedArgs.use_vector === false) {
-              standardSymbols = await this.dbService.lexicalSearchSymbols(
-                validatedArgs.query,
-                repoId,
-                searchOptions
-              );
-            } else {
-              // Default to fulltext search
-              standardSymbols = await this.dbService.fulltextSearchSymbols(
-                validatedArgs.query,
-                repoId,
-                searchOptions
-              );
-            }
+            // Use new search_mode parameter for better search logic
+            const standardSymbols = await this.performSearchByMode(
+              validatedArgs.query,
+              repoIds[0] || defaultRepoId,
+              searchOptions,
+              validatedArgs.search_mode || 'auto'
+            );
             symbols.push(...standardSymbols);
         }
       }
     } else {
-      // Enhanced search when no entity types specified - use full search capabilities
-      if (validatedArgs.symbol_type) {
-        const symbolType = this.mapStringToSymbolType(validatedArgs.symbol_type);
-        if (symbolType) {
-          searchOptions.symbolTypes = [symbolType];
-
-          // For C# projects, when searching for "function", also include "method"
-          // since C# class methods are stored as "method" type, not "function" type
-          if (validatedArgs.symbol_type.toLowerCase() === 'function') {
-            searchOptions.symbolTypes = [SymbolType.FUNCTION, SymbolType.METHOD];
-          }
-        }
-      }
-
-      // Choose search method based on use_vector parameter
-      if (validatedArgs.use_vector === true) {
-        try {
-          symbols = await this.dbService.vectorSearchSymbols(validatedArgs.query, repoId, {
-            ...searchOptions,
-            similarityThreshold: 0.7,
-          });
-        } catch (error) {
-          this.logger.warn('Vector search failed, falling back to fulltext:', error);
-          symbols = await this.dbService.fulltextSearchSymbols(
-            validatedArgs.query,
-            repoId,
-            searchOptions
-          );
-        }
-      } else if (validatedArgs.use_vector === false) {
-        symbols = await this.dbService.lexicalSearchSymbols(
-          validatedArgs.query,
-          repoId,
-          searchOptions
-        );
-      } else {
-        // Default to fulltext search
-        symbols = await this.dbService.fulltextSearchSymbols(
-          validatedArgs.query,
-          repoId,
-          searchOptions
-        );
-      }
+      // Enhanced search when no entity types specified - use search_mode for optimal results
+      symbols = await this.performSearchByMode(
+        validatedArgs.query,
+        repoIds[0] || defaultRepoId,
+        searchOptions,
+        validatedArgs.search_mode || 'auto'
+      );
     }
 
-    if (
-      validatedArgs.include_qualified === true ||
-      validatedArgs.class_context ||
-      validatedArgs.namespace_context
-    ) {
-      this.logger.debug('Performing enhanced search with qualified context', {
-        include_qualified: validatedArgs.include_qualified,
-        class_context: validatedArgs.class_context,
-        namespace_context: validatedArgs.namespace_context,
-      });
-
-      try {
-        // Search both unqualified names and qualified context in parallel
-        const enhancedSearchPromises = [];
-
-        // Add qualified context search
-        if (validatedArgs.include_qualified === true) {
-          enhancedSearchPromises.push(
-            this.dbService.searchQualifiedContext(validatedArgs.query, validatedArgs.class_context)
-          );
-        }
-
-        // Add method signature search
-        if (validatedArgs.include_qualified === true) {
-          enhancedSearchPromises.push(this.dbService.searchMethodSignatures(validatedArgs.query));
-        }
-
-        // Add namespace context search
-        if (validatedArgs.namespace_context) {
-          enhancedSearchPromises.push(
-            this.dbService.searchNamespaceContext(
-              validatedArgs.query,
-              validatedArgs.namespace_context
-            )
-          );
-        }
-
-        // Execute enhanced searches in parallel
-        const enhancedResults = await Promise.all(enhancedSearchPromises);
-
-        // Merge and rank results
-        const mergedEnhancedResults = this.mergeAndRankResults(enhancedResults, validatedArgs);
-
-        // Combine with existing symbols, giving priority to enhanced results
-        const enhancedSymbolIds = new Set(mergedEnhancedResults.map(s => s.id));
-        const filteredExistingSymbols = symbols.filter(s => !enhancedSymbolIds.has(s.id));
-
-        symbols = [...mergedEnhancedResults, ...filteredExistingSymbols];
-
-        this.logger.debug('Enhanced search completed', {
-          enhanced_results: mergedEnhancedResults.length,
-          total_results: symbols.length,
-        });
-      } catch (error) {
-        this.logger.warn(
-          'Enhanced search with qualified context failed, continuing with standard results:',
-          error
-        );
-      }
-    }
+    // Qualified search parameters removed per PARAMETER_REDUNDANCY_ANALYSIS
+    // The 'qualified' search_mode provides this functionality when needed
 
     // Apply any additional filtering not handled by enhanced search
     let filteredSymbols = symbols;
@@ -911,8 +769,8 @@ export class McpTools {
       });
     }
 
-    // The limit is already applied by the enhanced search, but ensure we don't exceed it
-    const limit = validatedArgs.limit || 100;
+    // Apply default limit (limit parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+    const limit = 100;
     if (filteredSymbols.length > limit) {
       filteredSymbols = filteredSymbols.slice(0, limit);
     }
@@ -946,25 +804,20 @@ export class McpTools {
               total_results: filteredSymbols.length,
               query_filters: {
                 entity_types: validatedArgs.entity_types,
-                framework: validatedArgs.framework,
-                symbol_type: validatedArgs.symbol_type,
+                framework: detectedFramework,
+                framework_auto_detected: frameworkAutoDetected,
                 is_exported: validatedArgs.is_exported,
                 repo_ids: repoIds,
-                use_vector: validatedArgs.use_vector,
-                include_qualified: validatedArgs.include_qualified,
-                class_context: validatedArgs.class_context,
-                namespace_context: validatedArgs.namespace_context,
+                search_mode: validatedArgs.search_mode,
+                // Deprecated parameters removed per PARAMETER_REDUNDANCY_ANALYSIS: symbol_type, use_vector, include_qualified, class_context, namespace_context
               },
               search_options: {
                 entity_types: validatedArgs.entity_types,
-                framework: validatedArgs.framework,
-                symbol_type: validatedArgs.symbol_type,
+                framework: detectedFramework,
                 is_exported: validatedArgs.is_exported,
                 repo_ids: repoIds,
-                use_vector: validatedArgs.use_vector,
-                include_qualified: validatedArgs.include_qualified,
-                class_context: validatedArgs.class_context,
-                namespace_context: validatedArgs.namespace_context,
+                search_mode: validatedArgs.search_mode,
+                // Deprecated parameters removed per PARAMETER_REDUNDANCY_ANALYSIS: symbol_type, use_vector, include_qualified, class_context, namespace_context
               },
               search_mode: 'enhanced_framework_aware',
               absorbed_tools: [
@@ -1012,19 +865,24 @@ export class McpTools {
       }
 
     let transitiveResults: any[] = [];
-    const skipTransitive = callers.length > 20 || validatedArgs.include_cross_stack;
 
-    if ((validatedArgs.include_indirect || validatedArgs.show_call_chains) && !skipTransitive) {
+    // Use analysis_type to determine smart defaults (replaces include_indirect parameter per PARAMETER_REDUNDANCY_ANALYSIS)
+    const analysisType = validatedArgs.analysis_type || 'standard';
+    const analysisSettings = this.getAnalysisSettings(analysisType);
 
+    const skipTransitive = callers.length > 20 || validatedArgs.include_cross_stack || !analysisSettings.includeIndirect;
+
+    // Include indirect callers based on analysis_type
+    if (!skipTransitive && analysisSettings.includeIndirect) {
       try {
         const transitiveOptions: TransitiveAnalysisOptions = {
-          maxDepth: 2,
+          maxDepth: analysisSettings.maxDepth,
           includeTypes: validatedArgs.dependency_type
             ? [validatedArgs.dependency_type as DependencyType]
             : undefined,
-          confidenceThreshold: 0.5,
+          confidenceThreshold: analysisSettings.confidenceThreshold,
           includeCrossStack: false,
-          showCallChains: validatedArgs.show_call_chains || false,
+          showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
         };
 
         const transitiveResult = await transitiveAnalyzer.getTransitiveCallers(
@@ -1034,7 +892,8 @@ export class McpTools {
 
         transitiveResults = transitiveResult.results;
 
-        if (validatedArgs.include_indirect) {
+        // Always include indirect dependencies (include_indirect parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+        if (true) {
           const transitiveDependencies = transitiveResult.results
             .map(result => {
               const fromSymbol = result.dependencies[0]?.from_symbol;
@@ -1079,59 +938,35 @@ export class McpTools {
                 name: symbol.name,
                 type: symbol.symbol_type,
               },
-              callers: validatedArgs.group_results
-                ? groupDependenciesByCallSite(callers.map(caller => ({
-                    id: caller.id,
-                    type: caller.dependency_type,
-                    dependency_type: caller.dependency_type,
-                    line_number: caller.line_number,
-                    confidence: caller.confidence,
-                    to_symbol: caller.from_symbol
-                      ? {
-                          id: caller.from_symbol.id,
-                          name: caller.from_symbol.name,
-                          type: caller.from_symbol.symbol_type,
-                          file_path: caller.from_symbol.file?.path,
-                        }
-                      : null,
-                    calling_object: caller.calling_object,
-                    resolved_class: caller.resolved_class,
-                    qualified_context: caller.qualified_context,
-                    method_signature: caller.method_signature,
-                    file_context: caller.file_context,
-                    namespace_context: caller.namespace_context,
-                    call_chain: caller.call_chain,
-                    path: caller.path,
-                    depth: caller.depth,
-                    call_pattern: this.analyzeCallPattern(caller),
-                    cross_file: this.isCrossFileCall(caller, symbol),
-                  })))
-                : callers.map(caller => ({
-                    id: caller.id,
-                    dependency_type: caller.dependency_type,
-                    line_number: caller.line_number,
-                    confidence: caller.confidence,
-                    from_symbol: caller.from_symbol
-                      ? {
-                          id: caller.from_symbol.id,
-                          name: caller.from_symbol.name,
-                          type: caller.from_symbol.symbol_type,
-                          file_path: caller.from_symbol.file?.path,
-                        }
-                      : null,
-                    calling_object: caller.calling_object,
-                    resolved_class: caller.resolved_class,
-                    qualified_context: caller.qualified_context,
-                    method_signature: caller.method_signature,
-                    file_context: caller.file_context,
-                    namespace_context: caller.namespace_context,
-                    call_chain: caller.call_chain,
-                    path: caller.path,
-                    depth: caller.depth,
-                    call_pattern: this.analyzeCallPattern(caller),
-                    cross_file: this.isCrossFileCall(caller, symbol),
-                  })),
-              transitive_analysis: validatedArgs.show_call_chains ? {
+              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              callers: groupDependenciesByCallSite(callers.map(caller => ({
+                id: caller.id,
+                type: caller.dependency_type,
+                dependency_type: caller.dependency_type,
+                line_number: caller.line_number,
+                confidence: caller.confidence,
+                to_symbol: caller.from_symbol
+                  ? {
+                      id: caller.from_symbol.id,
+                      name: caller.from_symbol.name,
+                      type: caller.from_symbol.symbol_type,
+                      file_path: caller.from_symbol.file?.path,
+                    }
+                  : null,
+                calling_object: caller.calling_object,
+                resolved_class: caller.resolved_class,
+                qualified_context: caller.qualified_context,
+                method_signature: caller.method_signature,
+                file_context: caller.file_context,
+                namespace_context: caller.namespace_context,
+                call_chain: caller.call_chain,
+                path: caller.path,
+                depth: caller.depth,
+                call_pattern: this.analyzeCallPattern(caller),
+                cross_file: this.isCrossFileCall(caller, symbol),
+              }))),
+              // Always show call chains (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              transitive_analysis: {
                 total_paths: transitiveResults.length,
                 call_chains: transitiveResults.map(result => ({
                   symbol_id: result.symbolId,
@@ -1139,14 +974,13 @@ export class McpTools {
                   depth: result.depth,
                   confidence: result.totalConfidence,
                 }))
-              } : undefined,
+              },
               parameter_analysis: callers.length < 50 ? await this.getParameterContextAnalysis(validatedArgs.symbol_id) : undefined,
               total_callers: callers.length,
               filters: {
                 dependency_type: validatedArgs.dependency_type,
-                include_indirect: validatedArgs.include_indirect,
                 include_cross_stack: validatedArgs.include_cross_stack,
-                show_call_chains: validatedArgs.show_call_chains,
+                // include_indirect and show_call_chains parameters removed per PARAMETER_REDUNDANCY_ANALYSIS (always enabled)
               },
             },
             null,
@@ -1207,18 +1041,24 @@ export class McpTools {
     }
 
     let transitiveResults: any[] = [];
-    const skipTransitive = dependencies.length > 20 || validatedArgs.include_cross_stack;
 
-    if ((validatedArgs.include_indirect || validatedArgs.show_call_chains) && !skipTransitive) {
+    // Use analysis_type to determine smart defaults (replaces include_indirect parameter per PARAMETER_REDUNDANCY_ANALYSIS)
+    const analysisType = validatedArgs.analysis_type || 'standard';
+    const analysisSettings = this.getAnalysisSettings(analysisType);
+
+    const skipTransitive = dependencies.length > 20 || validatedArgs.include_cross_stack || !analysisSettings.includeIndirect;
+
+    // Include indirect dependencies based on analysis_type
+    if (!skipTransitive && analysisSettings.includeIndirect) {
       try {
         const transitiveOptions: TransitiveAnalysisOptions = {
-          maxDepth: 2,
+          maxDepth: analysisSettings.maxDepth,
           includeTypes: validatedArgs.dependency_type
             ? [validatedArgs.dependency_type as DependencyType]
             : undefined,
-          confidenceThreshold: 0.5,
+          confidenceThreshold: analysisSettings.confidenceThreshold,
           includeCrossStack: false,
-          showCallChains: validatedArgs.show_call_chains || false,
+          showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
         };
 
         const transitiveResult = await Promise.race([
@@ -1232,7 +1072,8 @@ export class McpTools {
         transitiveResults = transitiveResult.results;
 
         // If include_indirect is true, merge transitive results with direct dependencies
-        if (validatedArgs.include_indirect) {
+        // Always include indirect dependencies (include_indirect parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+        if (true) {
           const transitiveDependencies = transitiveResult.results
             .map(result => {
               const toSymbol = result.dependencies[0]?.to_symbol;
@@ -1278,46 +1119,29 @@ export class McpTools {
                 name: symbol.name,
                 type: symbol.symbol_type,
               },
-              dependencies: validatedArgs.group_results
-                ? groupDependenciesByCallSite(dependencies.map(dep => ({
-                    id: dep.id,
-                    type: dep.dependency_type,
-                    dependency_type: dep.dependency_type,
-                    line_number: dep.line_number,
-                    confidence: dep.confidence,
-                    to_symbol: dep.to_symbol
-                      ? {
-                          id: dep.to_symbol.id,
-                          name: dep.to_symbol.name,
-                          type: dep.to_symbol.symbol_type,
-                          file_path: dep.to_symbol.file?.path,
-                        }
-                      : null,
-                    // New call chain visualization
-                    call_chain: dep.call_chain,
-                    path: dep.path,
-                    depth: dep.depth,
-                  })))
-                : dependencies.map(dep => ({
-                    id: dep.id,
-                    dependency_type: dep.dependency_type,
-                    line_number: dep.line_number,
-                    confidence: dep.confidence,
-                    to_symbol: dep.to_symbol
-                      ? {
-                          id: dep.to_symbol.id,
-                          name: dep.to_symbol.name,
-                          type: dep.to_symbol.symbol_type,
-                          file_path: dep.to_symbol.file?.path,
-                        }
-                      : null,
-                    // New call chain visualization
-                    call_chain: dep.call_chain,
-                    path: dep.path,
-                    depth: dep.depth,
-                  })),
+              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              dependencies: groupDependenciesByCallSite(dependencies.map(dep => ({
+                id: dep.id,
+                type: dep.dependency_type,
+                dependency_type: dep.dependency_type,
+                line_number: dep.line_number,
+                confidence: dep.confidence,
+                to_symbol: dep.to_symbol
+                  ? {
+                      id: dep.to_symbol.id,
+                      name: dep.to_symbol.name,
+                      type: dep.to_symbol.symbol_type,
+                      file_path: dep.to_symbol.file?.path,
+                    }
+                  : null,
+                // New call chain visualization
+                call_chain: dep.call_chain,
+                path: dep.path,
+                depth: dep.depth,
+              }))),
               // Enhanced transitive analysis results
-              transitive_analysis: validatedArgs.show_call_chains ? {
+              // Always show call chains (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              transitive_analysis: {
                 total_paths: transitiveResults.length,
                 call_chains: transitiveResults.map(result => ({
                   symbol_id: result.symbolId,
@@ -1325,13 +1149,12 @@ export class McpTools {
                   depth: result.depth,
                   confidence: result.totalConfidence,
                 }))
-              } : undefined,
+              },
               total_dependencies: dependencies.length,
               filters: {
                 dependency_type: validatedArgs.dependency_type,
-                include_indirect: validatedArgs.include_indirect,
                 include_cross_stack: validatedArgs.include_cross_stack,
-                show_call_chains: validatedArgs.show_call_chains,
+                // include_indirect and show_call_chains parameters removed per PARAMETER_REDUNDANCY_ANALYSIS (always enabled)
               },
             },
             null,
@@ -1427,7 +1250,7 @@ export class McpTools {
           maxDepth,
           includeTypes: undefined,
           confidenceThreshold,
-          showCallChains: validatedArgs.show_call_chains || false,
+          showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
         };
 
         const transitiveResult = await transitiveAnalyzer.getTransitiveDependencies(
@@ -1459,32 +1282,26 @@ export class McpTools {
         });
       }
 
-      // Route, job, and test impact analysis
-      if (validatedArgs.include_routes !== false) {
-        try {
-          const routes = await this.getImpactedRoutes(validatedArgs.symbol_id, frameworksAffected);
-          routeImpact.push(...routes);
-        } catch (error) {
-          this.logger.warn('Route impact analysis failed', { error: (error as Error).message });
-        }
+      // Always include route, job, and test impact analysis (parameters removed per PARAMETER_REDUNDANCY_ANALYSIS)
+      try {
+        const routes = await this.getImpactedRoutes(validatedArgs.symbol_id, frameworksAffected);
+        routeImpact.push(...routes);
+      } catch (error) {
+        this.logger.warn('Route impact analysis failed', { error: (error as Error).message });
       }
 
-      if (validatedArgs.include_jobs !== false) {
-        try {
-          const jobs = await this.getImpactedJobs(validatedArgs.symbol_id);
-          jobImpact.push(...jobs);
-        } catch (error) {
-          this.logger.warn('Job impact analysis failed', { error: (error as Error).message });
-        }
+      try {
+        const jobs = await this.getImpactedJobs(validatedArgs.symbol_id);
+        jobImpact.push(...jobs);
+      } catch (error) {
+        this.logger.warn('Job impact analysis failed', { error: (error as Error).message });
       }
 
-      if (validatedArgs.include_tests !== false) {
-        try {
-          const tests = await this.getImpactedTests(validatedArgs.symbol_id);
-          testImpact.push(...tests);
-        } catch (error) {
-          this.logger.warn('Test impact analysis failed', { error: (error as Error).message });
-        }
+      try {
+        const tests = await this.getImpactedTests(validatedArgs.symbol_id);
+        testImpact.push(...tests);
+      } catch (error) {
+        this.logger.warn('Test impact analysis failed', { error: (error as Error).message });
       }
 
       // Deduplicate impact items to eliminate overlapping analysis results
@@ -1517,9 +1334,10 @@ export class McpTools {
                 impact_analysis: {
                   direct_impact: deduplicatedDirectImpact,
                   transitive_impact: deduplicatedTransitiveImpact,
-                  test_impact: validatedArgs.include_tests !== false ? testImpact : undefined,
-                  route_impact: validatedArgs.include_routes !== false ? routeImpact : undefined,
-                  job_impact: validatedArgs.include_jobs !== false ? jobImpact : undefined,
+                  // Always include all impact types (include_tests, include_routes, include_jobs parameters removed per PARAMETER_REDUNDANCY_ANALYSIS)
+                  test_impact: testImpact,
+                  route_impact: routeImpact,
+                  job_impact: jobImpact,
                   confidence_score: avgConfidence,
                   impact_depth: maxDepth,
                   frameworks_affected: Array.from(frameworksAffected),
@@ -2268,11 +2086,6 @@ export class McpTools {
     }
   }
 
-  private mapStringToSymbolType(symbolType: string): SymbolType | null {
-    const upperCaseType = symbolType.toUpperCase() as keyof typeof SymbolType;
-    return SymbolType[upperCaseType] || null;
-  }
-
   // Helper methods for impact analysis
   private async getImpactedRoutes(
     symbolId: number,
@@ -2451,55 +2264,7 @@ export class McpTools {
     return dependency.from_symbol.file.path !== targetSymbol.file.path;
   }
 
-  private mergeAndRankResults(searchResults: any[][], validatedArgs: SearchCodeArgs): any[] {
-    // Flatten all results
-    const allResults: any[] = [];
-    const seenIds = new Set<number>();
-
-    for (const resultSet of searchResults) {
-      for (const result of resultSet) {
-        if (!seenIds.has(result.id)) {
-          seenIds.add(result.id);
-          allResults.push(result);
-        }
-      }
-    }
-
-    // Rank results by relevance
-    return allResults
-      .sort((a, b) => {
-        // Prioritize exact name matches
-        const aExactMatch = a.name?.toLowerCase() === validatedArgs.query.toLowerCase();
-        const bExactMatch = b.name?.toLowerCase() === validatedArgs.query.toLowerCase();
-
-        if (aExactMatch && !bExactMatch) return -1;
-        if (!aExactMatch && bExactMatch) return 1;
-
-        // Prioritize symbols with qualified context (enhanced results)
-        const aHasQualified = !!(a.qualified_context || a.method_signature);
-        const bHasQualified = !!(b.qualified_context || b.method_signature);
-
-        if (aHasQualified && !bHasQualified) return -1;
-        if (!aHasQualified && bHasQualified) return 1;
-
-        // If class context is specified, prioritize matches
-        if (validatedArgs.class_context) {
-          const aClassMatch = a.resolved_class
-            ?.toLowerCase()
-            .includes(validatedArgs.class_context.toLowerCase());
-          const bClassMatch = b.resolved_class
-            ?.toLowerCase()
-            .includes(validatedArgs.class_context.toLowerCase());
-
-          if (aClassMatch && !bClassMatch) return -1;
-          if (!aClassMatch && bClassMatch) return 1;
-        }
-
-        // Sort by name as fallback
-        return (a.name || '').localeCompare(b.name || '');
-      })
-      .slice(0, validatedArgs.limit || 100);
-  }
+  // mergeAndRankResults method removed (unused and contained deprecated parameters per PARAMETER_REDUNDANCY_ANALYSIS)
 
   private calculateRiskLevel(
     directImpact: ImpactItem[],
@@ -2596,6 +2361,59 @@ export class McpTools {
     }
 
     return insights;
+  }
+
+  /**
+   * Perform search based on the new search_mode parameter
+   * Replaces the old use_vector logic with improved search mode handling
+   */
+  private async performSearchByMode(
+    query: string,
+    repoId: number,
+    searchOptions: any,
+    searchMode: 'auto' | 'exact' | 'semantic' | 'qualified' = 'auto'
+  ) {
+    switch (searchMode) {
+      case 'semantic':
+        try {
+          return await this.dbService.vectorSearchSymbols(query, repoId, {
+            ...searchOptions,
+            similarityThreshold: 0.7,
+          });
+        } catch (error) {
+          this.logger.warn('Vector search failed, falling back to fulltext:', error);
+          return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
+        }
+
+      case 'exact':
+        return await this.dbService.lexicalSearchSymbols(query, repoId, searchOptions);
+
+      case 'qualified':
+        // Use enhanced search with qualified context
+        try {
+          return await this.dbService.searchQualifiedContext(query, undefined);
+        } catch (error) {
+          this.logger.warn('Qualified search failed, falling back to fulltext:', error);
+          return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
+        }
+
+      case 'auto':
+      default:
+        // Intelligent auto mode: try semantic first, fallback to fulltext
+        try {
+          const vectorResults = await this.dbService.vectorSearchSymbols(query, repoId, {
+            ...searchOptions,
+            similarityThreshold: 0.6,
+          });
+          if (vectorResults.length > 0) {
+            return vectorResults;
+          }
+        } catch (error) {
+          this.logger.debug('Vector search not available, using fulltext:', error);
+        }
+
+        return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
+    }
   }
 
 }
