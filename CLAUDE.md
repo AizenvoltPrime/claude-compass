@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Compass is a dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases. It builds comprehensive dependency graphs using Tree-sitter parsing and exposes them via Model Context Protocol (MCP) for AI integration.
 
-**Current Status**: Phase 7 complete - Enhanced search with hybrid vector+lexical capabilities, tool consolidation from 12 to 6 focused core tools, comprehensive impact analysis, CLI cleanup, and full C#/Godot game development support implemented for production use.
-
 ## Essential Commands
 
 ### Build and Development
@@ -51,9 +49,6 @@ npm run analyze /path/to/project                     # Analyze absolute path
 ./dist/src/cli/index.js analyze . --force-full       # Force full analysis (clears existing data)
 ./dist/src/cli/index.js analyze . --no-test-files    # Exclude test files
 
-# Search with filters
-./dist/src/cli/index.js search "useState" --type function --exported-only
-
 # Clear repository data (with confirmation prompt bypass)
 ./dist/src/cli/index.js clear <repository-name> --yes
 
@@ -61,181 +56,136 @@ npm run analyze /path/to/project                     # Analyze absolute path
 ./dist/src/cli/index.js mcp-server --port 3000 --verbose
 ```
 
-## Architecture Overview
+## Architecture
 
 ### Core Components
 
-1. **Parsers** (`src/parsers/`): Tree-sitter based language parsing
-   - JavaScript/TypeScript support with ES6, CommonJS, dynamic imports
-   - Framework-aware parsing for Vue.js, Next.js, React, and Node.js
-   - Background job parsing (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
-   - Test framework parsing (Jest, Vitest, Cypress, Playwright)
-   - ORM relationship parsing (Prisma, TypeORM, Sequelize, Mongoose)
-   - Package manager parsing (npm, yarn, pnpm, monorepo support)
-   - Chunked parsing for large files (>28KB) with size validation
-   - Encoding detection and recovery for problematic files
-   - Bundle file filtering to skip minified/generated content
-   - Extracts symbols, dependencies, framework entities, and relationships
+**Parser System (`src/parsers/`)**
 
-2. **Database** (`src/database/`): PostgreSQL with pgvector extension
-   - Knex-based migrations and connection management
-   - Stores repositories, files, symbols, dependency graphs, and framework entities
-   - Framework-specific tables: routes, components, composables, framework metadata
-   - Phase 3 tables: job queues, job definitions, worker threads, test suites, test cases, test coverage, ORM entities, workspace projects
+- Multi-language parsing using Tree-sitter
+- Language parsers: JavaScript, TypeScript, PHP, C#
+- Framework parsers: Vue, React, Laravel, Next.js, Godot
+- Chunking strategies for large files
+- Cross-stack dependency detection
 
-3. **Graph Builder** (`src/graph/`): Dependency graph construction
-   - File graph: Import/export relationships between files
-   - Symbol graph: Function calls, references, and inheritance
-   - Transitive analyzer: Advanced dependency traversal with cycle detection and confidence scoring
+**Graph Builder (`src/graph/`)**
 
-4. **MCP Server** (`src/mcp/`): Model Context Protocol implementation
-   - Exposes 6 core tools: get_file, get_symbol, search_code (enhanced), who_calls, list_dependencies, impact_of
-   - Enhanced search with hybrid vector+lexical capabilities and framework awareness
-   - Comprehensive impact analysis tool replacing 6 specialized tools
-   - Streamlined architecture eliminates overlapping tools while maintaining full functionality
+- Constructs dependency graphs from parsed symbols
+- Handles file, symbol, and framework relationships
+- Cross-stack builder for Vue � Laravel connections
+- Call chain analysis and formatting
 
-5. **CLI** (`src/cli/`): Command-line interface using Commander.js
-   - Repository analysis, search, and MCP server management
+**Database Layer (`src/database/`)**
 
-### Technology Stack
+- PostgreSQL with pgvector for enhanced search
+- Knex.js for migrations and queries
+- Services for repositories, symbols, dependencies
+- Full-text search with ranking
 
-- **Language**: TypeScript with ES2022 target
-- **Database**: PostgreSQL with Knex ORM
-- **Parser**: Tree-sitter with language-specific grammars
-- **Protocol**: Model Context Protocol (MCP) for AI integration
-- **Testing**: Jest with comprehensive coverage
-- **Build**: Native TypeScript compiler
+**MCP Integration (`src/mcp/`)**
 
-### Configuration
+- Model Context Protocol server implementation
+- Tools for code search, dependency analysis, impact assessment
+- Consolidated tool interface (6 core tools)
+- Laravel and cross-stack specific tools
 
-- Environment variables in `.env` (see `.env.example`)
-- Database configuration in `knexfile.js`
-- TypeScript config uses strict mode disabled for flexibility
-- Base path alias: `@/*` maps to `src/*`
+**CLI (`src/cli/`)**
 
-## Development Workflow
+- Command-line interface for analysis and queries
+- Progress tracking with ora spinners
+- Repository management commands
 
-### Before Making Changes
+### Database Schema
 
-1. Ensure database is running: `npm run docker:up`
-2. Run migrations: `npm run migrate:latest`
-3. Build project: `npx tsc`
+The system uses PostgreSQL with these core tables:
 
-### After Making Changes
+- `repositories`: Project metadata and framework detection
+- `symbols`: All parsed code symbols with embeddings
+- `dependencies`: Symbol relationships and calls
+- `cross_stack_calls`: Frontend-backend connections
+- `laravel_routes`, `laravel_models`: Framework-specific data
 
-1. Run tests: `npm test`
-2. Verify build: `npx tsc`
+### Parser Flow
 
-### Working with Database
+1. **File Discovery**: Walks directory tree, filters by extensions
+2. **Chunking**: Splits large files into manageable chunks
+3. **Parsing**: Tree-sitter extracts symbols and relationships
+4. **Framework Detection**: Identifies Vue, Laravel, React patterns
+5. **Graph Building**: Constructs dependency relationships
+6. **Database Storage**: Persists with embeddings for search
 
-- Migrations are in `src/database/migrations/` and compiled to `dist/database/migrations/`
-- Always run `npx tsc` before running migrations
-- Database models defined in `src/database/models.ts`
-- Database operations in `src/database/services.ts`
+### Key Concepts
 
-### Testing Strategy
+**Symbol Types**
 
-- Unit tests for parsers, graph builders, and database operations
-- Integration tests for MCP server functionality
-- Test files follow pattern: `*.test.ts` or `*.spec.ts`
-- Test setup in `tests/setup.ts`
+- Functions, classes, interfaces, methods
+- Vue components, composables, stores
+- Laravel routes, controllers, models
+- React components, hooks
 
-## Key Design Patterns
+**Dependency Types**
 
-### Error Handling
+- Function calls, imports/exports
+- Class inheritance, interface implementation
+- Framework-specific (API calls, route handlers)
+- Cross-stack (Vue � Laravel API)
 
-- Comprehensive error handling throughout the system
-- Database connection management with proper cleanup
-- Parser errors collected but don't stop overall analysis
+**Search Capabilities**
 
-### Async Architecture
+- Full-text search with PostgreSQL ranking
+- Vector similarity for semantic search
+- Framework-aware filtering
+- Impact analysis and blast radius
 
-- Heavy use of async/await for I/O operations
-- Database operations use connection pooling
-- File processing handles large codebases efficiently
+## Environment Variables
 
-### Modular Design
+Create a `.env` file with:
 
-- Clear separation between parsing, graph building, and storage
-- MCP server is independent module for AI integration
-- CLI provides unified interface to all functionality
+```bash
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=claude_compass
+DATABASE_USER=claude_compass
+DATABASE_PASSWORD=password
 
-## Current Capabilities (Phase 7 Complete)
+# For test environment
+NODE_ENV=test  # Uses separate test database
 
-**Supported Languages**: JavaScript, TypeScript, JSX, TSX, ES modules, CommonJS, PHP, C#
-**Supported Frameworks**: Vue.js, Next.js, React, Node.js, Laravel, Godot with full framework-aware parsing
-**Background Job Systems**: Bull, BullMQ, Agenda, Bee, Kue, Node.js Worker Threads
-**Test Frameworks**: Jest, Vitest, Cypress, Playwright, Mocha
-**ORM Systems**: Prisma, TypeORM, Sequelize, Mongoose, MikroORM
-**Package Managers**: npm, yarn, pnpm, bun with monorepo support (Nx, Lerna, Turborepo, Rush)
-**Graph Types**: File dependencies, symbol relationships, framework entity relationships, transitive analysis
-**MCP Integration**: Streamlined MCP server with 6 focused core tools, enhanced hybrid search, and comprehensive impact analysis
-**Search Capabilities**: Hybrid vector+lexical search with framework awareness and advanced ranking algorithms
+# Debug mode
+CLAUDE_COMPASS_DEBUG=true
+LOG_LEVEL=debug
+```
 
-**Framework-Specific Features**:
+## Testing Strategy
 
-- **Vue.js**: SFC parsing, Vue Router, Pinia/Vuex, composables, reactive refs
-- **Next.js**: Pages/App router, API routes, middleware, ISR, client/server components
-- **React**: Functional/class components, custom hooks, memo/forwardRef, context
-- **Node.js**: Express/Fastify routes, middleware factories, controllers, validation patterns
-- **Laravel**: Route detection (web.php, api.php), Eloquent models, job queues, service providers, middleware, commands
-- **Godot**: Scene file parsing (.tscn), C# script analysis, node hierarchy, autoload detection, signal extraction
+- Unit tests for parsers and core logic
+- Integration tests for database operations
+- Framework-specific test suites (Vue, Laravel, C#)
+- Cross-stack integration tests
+- Performance benchmarks for large codebases
 
-**Advanced Capabilities (Phases 3-4)**:
+Test files follow pattern: `*.test.ts` in `tests/` directory
+Setup file: `tests/setup.ts` initializes test database
 
-- **Background Jobs**: Queue detection, job definition parsing, worker thread analysis, scheduler recognition
-- **Test-to-Code Linkage**: Test coverage analysis, mock detection, test suite hierarchy, confidence scoring
-- **ORM Relationships**: Entity relationship mapping, CRUD operation detection, database schema analysis
-- **Package Dependencies**: Lock file analysis, workspace relationships, version constraint analysis
-- **Transitive Analysis**: Deep dependency traversal, cycle detection, confidence propagation, performance optimization
-- **Monorepo Support**: Workspace detection, inter-project dependencies, shared configuration analysis
-- **PHP/Laravel Support**: Laravel route/controller detection, Eloquent model relationships, job queues, service providers
+## Common Patterns
 
-**Advanced Parsing Capabilities**:
+### Adding Language Support
 
-- Dynamic route segment extraction
-- Authentication/authorization pattern detection
-- Component dependency mapping and props extraction
-- Middleware chain analysis
-- Data fetching method detection (getStaticProps, getServerSideProps)
-- Swagger/OpenAPI documentation extraction
-- TypeScript interface and type analysis
-- Job queue configuration and processing patterns
-- Test coverage relationship mapping with confidence scores
-- Database entity relationship analysis with foreign key detection
-- Package dependency resolution with workspace support
+1. Add Tree-sitter grammar dependency
+2. Create parser in `src/parsers/languages/`
+3. Implement chunking strategy if needed
+4. Add tests in `tests/parsers/`
+5. Register in multi-parser
 
-## Limitations and Future Phases
+### Debugging Parser Issues
 
-**Current Limitations**:
+```bash
+# Enable debug logging
+CLAUDE_COMPASS_DEBUG=true ./dist/src/cli/index.js analyze /path --verbose
 
-- Vector embeddings not yet populated (infrastructure ready, population planned for Phase 6B)
-- No runtime tracing for dynamic code analysis
-- Limited to static analysis (no dynamic code execution tracing)
+### Database Migrations
 
-**Completed Features** (Phases 3-7 ✅):
-
-- ✅ **Background job detection** (Bull, BullMQ, Agenda, Bee, Kue, Worker Threads)
-- ✅ **ORM relationship mapping** (Prisma, TypeORM, Sequelize, Mongoose, MikroORM)
-- ✅ **Test-to-code linkage analysis** (Jest, Vitest, Cypress, Playwright with confidence scoring)
-- ✅ **Monorepo structure analysis** (Nx, Lerna, Turborepo, Rush)
-- ✅ **Enhanced transitive analysis** with cycle detection and confidence propagation
-- ✅ **Package manager integration** (npm, yarn, pnpm with workspace support)
-- ✅ **PHP/Laravel Support** (Laravel routes, controllers, Eloquent models, job queues, service providers)
-- ✅ **Vue ↔ Laravel Integration** (Cross-stack dependency tracking, API mapping, full-stack impact analysis)
-- ✅ **Tool Consolidation** (12 overlapping tools → 6 focused core tools)
-- ✅ **Enhanced Search** (Hybrid vector+lexical search with framework awareness and advanced ranking)
-- ✅ **Comprehensive Impact Analysis** (Single impact_of tool replacing 6 specialized tools)
-- ✅ **Vector Search Infrastructure** (pgvector database with embeddings ready for population)
-- ✅ **CLI Cleanup** (Legacy commands removed, streamlined interface)
-- ✅ **C#/Godot Support** (Complete game development framework support with C# parsing and Godot scene analysis)
-
-**Planned Features**:
-
-**Phase 8 - Production Hardening (MEDIUM PRIORITY):**
-- Performance optimization and monitoring
-- Enterprise features and security enhancements
-
-**Future Phases:**
-- Python/Django support
-- Additional language integrations
+Migrations in `src/database/migrations/` use Knex
+Naming: `XXX_description.ts` where XXX is sequential
+Always include both `up` and `down` methods
+```
