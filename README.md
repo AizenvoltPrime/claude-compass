@@ -126,10 +126,6 @@ npm test
 - **Search accuracy**: 95% of relationships correctly identified
 - **Response time**: 95% of queries under 500ms
 
-## License
-
-[License information to be added]
-
 ## Contributing
 
 [Contributing guidelines to be added]
