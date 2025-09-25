@@ -1267,6 +1267,9 @@ export class GraphBuilder {
                 to_entity_id: scriptEntity.id
               });
             }
+          } else if (entity.type === 'api_call') {
+            // API calls from Vue components - these will be extracted later by cross-stack builder
+            // API calls will be processed by cross-stack builder
           } else {
             this.logger.debug('Unknown framework entity type', {
               type: entity.type,

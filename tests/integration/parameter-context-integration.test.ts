@@ -139,7 +139,7 @@ describe('Parameter Context Integration Tests', () => {
     const response = JSON.parse(whoCallsResult.content[0].text);
 
     expect(response.symbol.name).toBe('TestSetHandPositions');
-    expect(response.callers).toHaveLength(2);
+    expect(Object.keys(response.callers)).toHaveLength(2); // callers is grouped by line number
     expect(response.parameter_analysis).toBeDefined();
     expect(response.parameter_analysis.total_variations).toBe(2);
 
@@ -225,14 +225,12 @@ describe('Parameter Context Integration Tests', () => {
     // Test whoCalls with call chain visualization
     const whoCallsResult = await mcpTools.whoCalls({
       symbol_id: target.id,
-      include_indirect: true,
-      show_call_chains: true
+      analysis_type: 'standard'
     });
 
     const response = JSON.parse(whoCallsResult.content[0].text);
 
     expect(response.transitive_analysis).toBeDefined();
-    expect(response.filters.show_call_chains).toBe(true);
 
     // Note: The actual call chain formatting would be tested in the
     // TransitiveAnalyzer tests, but this verifies the integration
@@ -282,7 +280,7 @@ describe('Parameter Context Integration Tests', () => {
         dependency_type: DependencyType.CALLS,
         line_number: 226,
         parameter_context: '_handPosition, null',
-        call_instance_id: '226-instance-id',
+        call_instance_id: '123e4567-e89b-12d3-a456-426614174004',
         parameter_types: ['var', 'null'],
         calling_object: '_cardManager'
       }),
@@ -293,7 +291,7 @@ describe('Parameter Context Integration Tests', () => {
         dependency_type: DependencyType.CALLS,
         line_number: 242,
         parameter_context: 'playerHandPos, _handPosition',
-        call_instance_id: '242-instance-id',
+        call_instance_id: '123e4567-e89b-12d3-a456-426614174005',
         parameter_types: ['var', 'var'],
         calling_object: '_cardManager'
       })
@@ -316,11 +314,11 @@ describe('Parameter Context Integration Tests', () => {
 
     expect(nullParamCall).toBeDefined();
     expect(nullParamCall!.line_numbers).toContain(226);
-    expect(nullParamCall!.call_instance_ids).toContain('226-instance-id');
+    expect(nullParamCall!.call_instance_ids).toContain('123e4567-e89b-12d3-a456-426614174004');
 
     expect(twoParamCall).toBeDefined();
     expect(twoParamCall!.line_numbers).toContain(242);
-    expect(twoParamCall!.call_instance_ids).toContain('242-instance-id');
+    expect(twoParamCall!.call_instance_ids).toContain('123e4567-e89b-12d3-a456-426614174005');
 
     // This demonstrates that we can now distinguish between:
     // - Call 1: SetHandPositions(_handPosition, null) (line 226)

@@ -251,9 +251,9 @@ export class LaravelParser extends BaseFrameworkParser {
       },
       {
         name: 'laravel-model',
-        pattern: /class\s+\w+\s+extends\s+Model/,
+        pattern: /class\s+\w+\s+extends\s+(Model|Authenticatable|Pivot)/,
         fileExtensions: ['.php'],
-        description: 'Eloquent model classes extending Model'
+        description: 'Eloquent model classes extending Model, Authenticatable, or Pivot'
       },
       {
         name: 'laravel-route',
@@ -792,6 +792,7 @@ export class LaravelParser extends BaseFrameworkParser {
       content.includes('App\\') ||
       content.includes('Route::') ||
       content.includes('extends Model') ||
+      content.includes('extends Authenticatable') ||
       content.includes('extends Controller')
     );
 
@@ -1035,7 +1036,14 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private isModelFile(filePath: string, content: string): boolean {
     return filePath.includes('/app/Models/') ||
-           (filePath.includes('/app/') && content.includes('extends Model'));
+           (filePath.includes('/app/') && (
+             content.includes('extends Model') ||
+             content.includes('extends Authenticatable') ||
+             content.includes('extends Pivot') ||
+             content.includes('extends User') ||
+             content.includes('use Authenticatable') ||
+             content.includes('use HasFactory')
+           ));
   }
 
   /**
@@ -1045,8 +1053,33 @@ export class LaravelParser extends BaseFrameworkParser {
     const className = this.getClassName(node, content);
     if (!className) return false;
 
-    const modelPattern = new RegExp(`class\\s+${className}\\s+extends\\s+Model`);
-    return modelPattern.test(content);
+    // Laravel model base classes
+    const modelBaseClasses = [
+      'Model',
+      'Authenticatable',
+      'Pivot',
+      'User' // Legacy Laravel user model pattern
+    ];
+
+    for (const baseClass of modelBaseClasses) {
+      const modelPattern = new RegExp(`class\\s+${className}\\s+extends\\s+${baseClass}`);
+      if (modelPattern.test(content)) {
+        return true;
+      }
+    }
+
+    // Check for traits that indicate a model
+    if (content.includes(`class ${className}`) && (
+      content.includes('use Authenticatable') ||
+      content.includes('use HasFactory') ||
+      content.includes('use Notifiable') ||
+      content.includes('protected $fillable') ||
+      content.includes('protected $guarded')
+    )) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

@@ -1722,8 +1722,15 @@ export class DatabaseService {
 
   async getComponentsByType(repoId: number, type: string): Promise<Component[]> {
     const components = await this.db('components')
-      .where({ repo_id: repoId, component_type: type })
-      .orderBy('id');
+      .leftJoin('symbols', 'components.symbol_id', 'symbols.id')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select(
+        'components.*',
+        'files.path as file_path',
+        'symbols.name as symbol_name'
+      )
+      .where({ 'components.repo_id': repoId, 'components.component_type': type })
+      .orderBy('components.id');
     return components as Component[];
   }
 
@@ -2777,6 +2784,21 @@ export class DatabaseService {
   }
 
   /**
+   * Get API calls by endpoint path and HTTP method
+   */
+  async getApiCallsByEndpoint(repoId: number, endpointPath: string, httpMethod: string): Promise<ApiCall[]> {
+    const apiCalls = await this.db('api_calls')
+      .where({
+        repo_id: repoId,
+        endpoint_path: endpointPath,
+        http_method: httpMethod
+      })
+      .orderBy('created_at', 'desc');
+
+    return apiCalls as ApiCall[];
+  }
+
+  /**
    * Get a framework entity by ID (routes, components, etc.)
    */
   async getFrameworkEntityById(id: number): Promise<Route | Component | Composable | null> {
@@ -2823,18 +2845,26 @@ export class DatabaseService {
     const BATCH_SIZE = 100;
     const results: ApiCall[] = [];
 
-    for (let i = 0; i < data.length; i += BATCH_SIZE) {
-      const batch = data.slice(i, i + BATCH_SIZE);
+    try {
+      for (let i = 0; i < data.length; i += BATCH_SIZE) {
+        const batch = data.slice(i, i + BATCH_SIZE);
 
-      const batchResults = await this.db('api_calls')
-        .insert(batch)
-        .returning('*');
 
-      results.push(...(batchResults as ApiCall[]));
+        const batchResults = await this.db('api_calls')
+          .insert(batch)
+          .returning('*');
+
+        results.push(...(batchResults as ApiCall[]));
+      }
+
+      return results;
+    } catch (error) {
+      logger.error('Failed to create API calls', {
+        error: error.message,
+        count: data.length
+      });
+      throw error;
     }
-
-    logger.debug('API calls created successfully', { count: results.length });
-    return results;
   }
 
   /**
@@ -2848,28 +2878,35 @@ export class DatabaseService {
     const BATCH_SIZE = 100;
     const results: DataContract[] = [];
 
-    for (let i = 0; i < data.length; i += BATCH_SIZE) {
-      const batch = data.slice(i, i + BATCH_SIZE);
+    try {
+      for (let i = 0; i < data.length; i += BATCH_SIZE) {
+        const batch = data.slice(i, i + BATCH_SIZE);
 
-      const batchResults = await this.db('data_contracts')
-        .insert(batch)
-        .returning('*');
 
-      results.push(...(batchResults as DataContract[]));
+        const batchResults = await this.db('data_contracts')
+          .insert(batch)
+          .returning('*');
+
+        results.push(...(batchResults as DataContract[]));
+      }
+
+      return results;
+    } catch (error) {
+      logger.error('Failed to create data contracts', {
+        error: error.message,
+        count: data.length
+      });
+      throw error;
     }
-
-    logger.debug('Data contracts created successfully', { count: results.length });
-    return results;
   }
 
   /**
    * Get API calls by component ID
    */
   async getApiCallsByComponent(componentId: number): Promise<ApiCall[]> {
-    logger.debug('Getting API calls by component', { componentId });
 
     const apiCalls = await this.db('api_calls')
-      .where({ frontend_symbol_id: componentId })
+      .where({ caller_symbol_id: componentId })
       .orderBy('created_at', 'desc');
 
     return apiCalls as ApiCall[];
@@ -2991,7 +3028,7 @@ export class DatabaseService {
 
       // Check for orphaned API calls
       const orphanedApiCalls = crossStackData.apiCalls.filter(call =>
-        !call.frontend_symbol_id || !call.backend_route_id
+        !call.caller_symbol_id || !call.endpoint_symbol_id
       );
 
       if (orphanedApiCalls.length > 0) {

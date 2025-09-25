@@ -385,7 +385,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       expect(result.content).toBeDefined();
       const response = JSON.parse(result.content[0].text);
-      expect(response.symbol.name).toBe('TestService');
+      expect(response.query_info.symbol).toBe('TestService');
     });
 
     test('should accept analysis_type parameter in impact_of', async () => {
@@ -412,7 +412,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       expect(result.content).toBeDefined();
       const response = JSON.parse(result.content[0].text);
-      expect(response.symbol.name).toBe('ImpactComponent');
+      expect(response.query_info.symbol).toBe('ImpactComponent');
     });
   });
 
