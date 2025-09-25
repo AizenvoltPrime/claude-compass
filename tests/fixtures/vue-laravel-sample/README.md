@@ -67,12 +67,12 @@ The fixtures include these cross-stack patterns for testing:
 
 ### Expected Cross-Stack Detection Results
 
-#### High Confidence Matches (>0.9)
+#### Primary Relationship Matches
 - Exact URL matches with same HTTP method
 - Perfect schema alignment between TypeScript and PHP
 - Direct API call patterns with consistent naming
 
-#### Medium Confidence Matches (0.7-0.9)
+#### Pattern-Based Matches
 - Parameterized URLs with pattern matching
 - Schema compatibility with minor type differences
 - Indirect API calls through composables/services
@@ -87,7 +87,7 @@ The fixtures include these cross-stack patterns for testing:
 - **Analysis Time**: Should complete full project analysis in <5 seconds
 - **Memory Usage**: Should use <50MB additional memory
 - **Relationship Count**: Should detect 5 API calls and 3 data contracts
-- **Accuracy Rate**: Should achieve >85% confidence on main relationships
+- **Accuracy Rate**: Should detect all main relationships with comprehensive evidence
 
 ## Usage
 
@@ -101,6 +101,6 @@ These fixtures are used by:
 
 When updating cross-stack detection algorithms:
 1. Verify all expected relationships are still detected
-2. Check confidence scores remain within expected ranges
+2. Check relationship evidence is captured comprehensively
 3. Add new test cases for additional patterns
 4. Update performance benchmarks if needed

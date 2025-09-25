@@ -115,13 +115,6 @@ function validateWhoCallsArgs(args: any): WhoCallsArgs {
   if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
     throw new Error('include_cross_stack must be a boolean');
   }
-  if (args.cross_stack_confidence_threshold !== undefined) {
-    const threshold = Number(args.cross_stack_confidence_threshold);
-    if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-      throw new Error('cross_stack_confidence_threshold must be a number between 0 and 1');
-    }
-    args.cross_stack_confidence_threshold = threshold;
-  }
   if (args.analysis_type !== undefined) {
     const validTypes = ['quick', 'standard', 'comprehensive'];
     if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
@@ -170,13 +163,6 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
     }
     args.max_depth = maxDepth;
   }
-  if (args.confidence_threshold !== undefined) {
-    const threshold = Number(args.confidence_threshold);
-    if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-      throw new Error('confidence_threshold must be a number between 0 and 1');
-    }
-    args.confidence_threshold = threshold;
-  }
   if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
     throw new Error('show_call_chains must be a boolean');
   }
@@ -210,7 +196,6 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
         method_call: methodName,
         calls: [],
         references: [],
-        total_confidence: 0,
         relationship_count: 0
       });
     }
@@ -226,7 +211,6 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
       target: dep.to_symbol.file_path ?
         `${getClassFromFilePath(dep.to_symbol.file_path)}.${methodName}` :
         methodName,
-      confidence: dep.confidence,
       file_path: dep.to_symbol.file_path
     };
 
@@ -240,19 +224,15 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
       group.calls.push(relationshipInfo);
     }
 
-    group.total_confidence += dep.confidence || 0;
     group.relationship_count++;
   }
 
-  // Convert to object format and calculate average confidence
+  // Convert to object format
   const result: any = {};
   for (const [lineNumber, group] of groupedByLine) {
     const lineKey = `line_${lineNumber}`;
-    group.average_confidence = group.relationship_count > 0 ?
-      group.total_confidence / group.relationship_count : 0;
 
     // Remove internal tracking fields
-    delete group.total_confidence;
     delete group.relationship_count;
 
     result[lineKey] = group;
@@ -318,7 +298,6 @@ export interface WhoCallsArgs {
   symbol_id: number;
   dependency_type?: string;
   include_cross_stack?: boolean;
-  cross_stack_confidence_threshold?: number;
   analysis_type?: 'quick' | 'standard' | 'comprehensive';
 }
 
@@ -334,7 +313,6 @@ export interface ImpactOfArgs {
   symbol_id: number;
   frameworks?: string[]; // Multi-framework impact: ['vue', 'laravel', 'react', 'node']
   max_depth?: number; // Transitive depth (default 5)
-  confidence_threshold?: number; // Filter by confidence (default 0.7)
   show_call_chains?: boolean; // Include human-readable call chains
   analysis_type?: 'quick' | 'standard' | 'comprehensive';
 }
@@ -351,7 +329,6 @@ export interface ImpactItem {
     | 'interface_contract'
     | 'implementation'
     | 'delegation';
-  confidence: number;
   relationship_type?: string;
   relationship_context?: string;
   // Call chain visualization fields (Enhancement 1)
@@ -364,7 +341,6 @@ export interface TestImpactItem {
   name: string;
   file_path: string;
   test_type: string;
-  confidence: number;
 }
 
 export interface RouteImpactItem {
@@ -372,14 +348,12 @@ export interface RouteImpactItem {
   path: string;
   method: string;
   framework: string;
-  confidence: number;
 }
 
 export interface JobImpactItem {
   id: number;
   name: string;
   type: string;
-  confidence: number;
 }
 
 export class McpTools {
@@ -429,26 +403,30 @@ export class McpTools {
       case 'quick':
         return {
           maxDepth: 2,
-          confidenceThreshold: 0.9,
           includeIndirect: false, // quick analysis skips transitive
         };
       case 'comprehensive':
         return {
           maxDepth: 10,
-          confidenceThreshold: 0.5,
           includeIndirect: true,
         };
       case 'standard':
       default:
         return {
           maxDepth: 5,
-          confidenceThreshold: 0.7,
           includeIndirect: true,
         };
     }
   }
 
-  // Core Tool 1: getFile (simplified with include_symbols always true)
+  /**
+   * Core Tool 1: getFile - Get details about a specific file including its metadata and symbols
+   * Always includes symbols (simplified interface)
+   *
+   * @param args.file_id - The ID of the file to retrieve (alternative to file_path)
+   * @param args.file_path - The path of the file to retrieve (alternative to file_id)
+   * @returns File details with metadata and symbol list
+   */
   async getFile(args: any) {
     const validatedArgs = validateGetFileArgs(args);
 
@@ -508,7 +486,13 @@ export class McpTools {
     };
   }
 
-  // Core Tool 2: getSymbol (simplified with improved defaults)
+  /**
+   * Core Tool 2: getSymbol - Get details about a specific symbol including its dependencies
+   * Always includes dependencies and callers (simplified interface)
+   *
+   * @param args.symbol_id - The ID of the symbol to retrieve
+   * @returns Symbol details with dependencies and callers
+   */
   async getSymbol(args: any) {
     const validatedArgs = validateGetSymbolArgs(args);
 
@@ -551,7 +535,6 @@ export class McpTools {
                 type: dep.dependency_type,
                 dependency_type: dep.dependency_type,
                 line_number: dep.line_number,
-                confidence: dep.confidence,
                 to_symbol: dep.to_symbol
                   ? {
                       id: dep.to_symbol.id,
@@ -567,7 +550,6 @@ export class McpTools {
                 type: caller.dependency_type,
                 dependency_type: caller.dependency_type,
                 line_number: caller.line_number,
-                confidence: caller.confidence,
                 to_symbol: caller.from_symbol
                   ? {
                       id: caller.from_symbol.id,
@@ -586,7 +568,18 @@ export class McpTools {
     };
   }
 
-  // Core Tool 3: Enhanced searchCode (simplified with improved defaults)
+  /**
+   * Core Tool 3: searchCode - Enhanced search for code symbols with framework awareness
+   * Supports multi-mode search: exact (lexical), semantic (vector), auto (hybrid), qualified (namespace-aware)
+   *
+   * @param args.query - The search query (symbol name or pattern)
+   * @param args.entity_types - Framework-aware entity types: route, model, controller, component, job, function, class, interface
+   * @param args.framework - Filter by framework type: laravel, vue, react, node
+   * @param args.is_exported - Filter by exported symbols only
+   * @param args.repo_ids - Repository IDs to search in
+   * @param args.search_mode - Search mode: auto (hybrid), exact (lexical), semantic (vector), qualified (namespace-aware)
+   * @returns List of matching symbols with framework context
+   */
   async searchCode(args: any) {
     const validatedArgs = validateSearchCodeArgs(args);
     this.logger.debug('Enhanced search with framework awareness', validatedArgs);
@@ -630,7 +623,6 @@ export class McpTools {
     // Build search options with improved defaults
     const searchOptions = {
       limit: 100, // Fixed limit (limit parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-      confidenceThreshold: 0.7,
       symbolTypes: [],
       isExported: validatedArgs.is_exported,
       framework: detectedFramework, // Use detected framework
@@ -835,7 +827,15 @@ export class McpTools {
     };
   }
 
-  // Core Tool 4: whoCalls
+  /**
+   * Core Tool 4: whoCalls - Find all symbols that call or reference a specific symbol
+   * Returns simple dependency list format
+   *
+   * @param args.symbol_id - The ID of the symbol to find callers for
+   * @param args.dependency_type - Optional type of dependency relationship to find
+   * @param args.include_cross_stack - Include cross-stack callers (Vue ↔ Laravel)
+   * @returns Simple dependency list with caller information
+   */
   async whoCalls(args: any) {
     const validatedArgs = validateWhoCallsArgs(args);
     this.logger.debug('Finding who calls symbol with enhanced context', validatedArgs);
@@ -880,7 +880,6 @@ export class McpTools {
           includeTypes: validatedArgs.dependency_type
             ? [validatedArgs.dependency_type as DependencyType]
             : undefined,
-          confidenceThreshold: analysisSettings.confidenceThreshold,
           includeCrossStack: false,
           showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
         };
@@ -905,7 +904,6 @@ export class McpTools {
                 to_symbol_id: validatedArgs.symbol_id,
                 dependency_type: result.dependencies[0]?.dependency_type || DependencyType.CALLS,
                 line_number: result.dependencies[0]?.line_number,
-                confidence: result.totalConfidence,
                 created_at: new Date(),
                 updated_at: new Date(),
                 from_symbol: fromSymbol,
@@ -927,65 +925,26 @@ export class McpTools {
       }
     }
 
+    // Phase 4: Simple dependency list format
     const result = {
       content: [
         {
           type: 'text',
-          text: JSON.stringify(
-            {
-              symbol: {
-                id: symbol.id,
-                name: symbol.name,
-                type: symbol.symbol_type,
-              },
-              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-              callers: groupDependenciesByCallSite(callers.map(caller => ({
-                id: caller.id,
-                type: caller.dependency_type,
-                dependency_type: caller.dependency_type,
-                line_number: caller.line_number,
-                confidence: caller.confidence,
-                to_symbol: caller.from_symbol
-                  ? {
-                      id: caller.from_symbol.id,
-                      name: caller.from_symbol.name,
-                      type: caller.from_symbol.symbol_type,
-                      file_path: caller.from_symbol.file?.path,
-                    }
-                  : null,
-                calling_object: caller.calling_object,
-                resolved_class: caller.resolved_class,
-                qualified_context: caller.qualified_context,
-                method_signature: caller.method_signature,
-                file_context: caller.file_context,
-                namespace_context: caller.namespace_context,
-                call_chain: caller.call_chain,
-                path: caller.path,
-                depth: caller.depth,
-                call_pattern: this.analyzeCallPattern(caller),
-                cross_file: this.isCrossFileCall(caller, symbol),
-              }))),
-              // Always show call chains (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-              transitive_analysis: {
-                total_paths: transitiveResults.length,
-                call_chains: transitiveResults.map(result => ({
-                  symbol_id: result.symbolId,
-                  call_chain: result.call_chain,
-                  depth: result.depth,
-                  confidence: result.totalConfidence,
-                }))
-              },
-              parameter_analysis: callers.length < 50 ? await this.getParameterContextAnalysis(validatedArgs.symbol_id) : undefined,
-              total_callers: callers.length,
-              filters: {
-                dependency_type: validatedArgs.dependency_type,
-                include_cross_stack: validatedArgs.include_cross_stack,
-                // include_indirect and show_call_chains parameters removed per PARAMETER_REDUNDANCY_ANALYSIS (always enabled)
-              },
-            },
-            null,
-            2
-          ),
+          text: JSON.stringify({
+            dependencies: callers.map(caller => ({
+              from: caller.from_symbol?.name || 'unknown',
+              to: symbol.name,
+              type: caller.dependency_type,
+              line_number: caller.line_number,
+              file_path: caller.from_symbol?.file?.path
+            })),
+            total_count: callers.length,
+            query_info: {
+              symbol: symbol.name,
+              analysis_type: 'callers',
+              timestamp: new Date().toISOString()
+            }
+          }, null, 2),
         },
       ],
     };
@@ -1010,7 +969,15 @@ export class McpTools {
     }
   }
 
-  // Core Tool 5: listDependencies (unchanged)
+  /**
+   * Core Tool 5: listDependencies - List all dependencies of a specific symbol
+   * Returns simple dependency list format
+   *
+   * @param args.symbol_id - The ID of the symbol to list dependencies for
+   * @param args.dependency_type - Optional type of dependency relationship to list
+   * @param args.include_cross_stack - Include cross-stack dependencies (Vue ↔ Laravel)
+   * @returns Simple dependency list with dependency information
+   */
   async listDependencies(args: any) {
     const validatedArgs = validateListDependenciesArgs(args);
     this.logger.debug('Listing dependencies for symbol', validatedArgs);
@@ -1056,7 +1023,6 @@ export class McpTools {
           includeTypes: validatedArgs.dependency_type
             ? [validatedArgs.dependency_type as DependencyType]
             : undefined,
-          confidenceThreshold: analysisSettings.confidenceThreshold,
           includeCrossStack: false,
           showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
         };
@@ -1085,7 +1051,6 @@ export class McpTools {
                 to_symbol_id: result.symbolId,
                 dependency_type: result.dependencies[0]?.dependency_type || DependencyType.CALLS,
                 line_number: result.dependencies[0]?.line_number,
-                confidence: result.totalConfidence,
                 created_at: new Date(),
                 updated_at: new Date(),
                 from_symbol: undefined,
@@ -1108,61 +1073,31 @@ export class McpTools {
       }
     }
 
-    return {
+    // Phase 4: Simple dependency list format
+    const result = {
       content: [
         {
           type: 'text',
-          text: JSON.stringify(
-            {
-              symbol: {
-                id: symbol.id,
-                name: symbol.name,
-                type: symbol.symbol_type,
-              },
-              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-              dependencies: groupDependenciesByCallSite(dependencies.map(dep => ({
-                id: dep.id,
-                type: dep.dependency_type,
-                dependency_type: dep.dependency_type,
-                line_number: dep.line_number,
-                confidence: dep.confidence,
-                to_symbol: dep.to_symbol
-                  ? {
-                      id: dep.to_symbol.id,
-                      name: dep.to_symbol.name,
-                      type: dep.to_symbol.symbol_type,
-                      file_path: dep.to_symbol.file?.path,
-                    }
-                  : null,
-                // New call chain visualization
-                call_chain: dep.call_chain,
-                path: dep.path,
-                depth: dep.depth,
-              }))),
-              // Enhanced transitive analysis results
-              // Always show call chains (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-              transitive_analysis: {
-                total_paths: transitiveResults.length,
-                call_chains: transitiveResults.map(result => ({
-                  symbol_id: result.symbolId,
-                  call_chain: result.call_chain,
-                  depth: result.depth,
-                  confidence: result.totalConfidence,
-                }))
-              },
-              total_dependencies: dependencies.length,
-              filters: {
-                dependency_type: validatedArgs.dependency_type,
-                include_cross_stack: validatedArgs.include_cross_stack,
-                // include_indirect and show_call_chains parameters removed per PARAMETER_REDUNDANCY_ANALYSIS (always enabled)
-              },
-            },
-            null,
-            2
-          ),
+          text: JSON.stringify({
+            dependencies: dependencies.map(dep => ({
+              from: symbol.name,
+              to: dep.to_symbol?.name || 'unknown',
+              type: dep.dependency_type,
+              line_number: dep.line_number,
+              file_path: dep.to_symbol?.file?.path
+            })),
+            total_count: dependencies.length,
+            query_info: {
+              symbol: symbol.name,
+              analysis_type: 'dependencies',
+              timestamp: new Date().toISOString()
+            }
+          }, null, 2),
         },
       ],
     };
+
+    return result;
     } catch (error) {
       this.logger.error('listDependencies operation failed', {
         error: (error as Error).message,
@@ -1181,7 +1116,18 @@ export class McpTools {
     }
   }
 
-  // Core Tool 6: impactOf (NEW - Phase 6A comprehensive impact analysis)
+  /**
+   * Core Tool 6: impactOf - Comprehensive impact analysis across all frameworks
+   * Returns simple dependency list format with transitive impact analysis
+   *
+   * @param args.symbol_id - The ID of the symbol to analyze impact for
+   * @param args.frameworks - Multi-framework impact analysis (default: all detected frameworks)
+   * @param args.max_depth - Transitive analysis depth (default: 5, min: 1, max: 20)
+   * @param args.page_size - Number of results per page (default: 1000, max: 5000)
+   * @param args.cursor - Pagination cursor for next page
+   * @param args.detail_level - Response detail level: 'summary', 'standard', or 'full'
+   * @returns Comprehensive impact analysis with simple dependency format
+   */
   async impactOf(args: any) {
     const validatedArgs = validateImpactOfArgs(args);
     this.logger.debug('Performing comprehensive impact analysis', validatedArgs);
@@ -1213,7 +1159,6 @@ export class McpTools {
             type: dep.to_symbol.symbol_type,
             file_path: dep.to_symbol.file?.path || '',
             impact_type: this.classifyRelationshipImpact(dep, 'dependency'),
-            confidence: dep.confidence || 1.0,
             relationship_type: dep.dependency_type || 'unknown',
             relationship_context: this.getRelationshipContext(dep),
           });
@@ -1231,7 +1176,6 @@ export class McpTools {
             type: caller.from_symbol.symbol_type,
             file_path: caller.from_symbol.file?.path || '',
             impact_type: this.classifyRelationshipImpact(caller, 'caller'),
-            confidence: caller.confidence || 1.0,
             relationship_type: caller.dependency_type || 'unknown',
             relationship_context: this.getRelationshipContext(caller),
           });
@@ -1243,13 +1187,11 @@ export class McpTools {
 
       // Transitive impact analysis
       const maxDepth = validatedArgs.max_depth || 5;
-      const confidenceThreshold = validatedArgs.confidence_threshold || 0.7;
 
       try {
         const transitiveOptions: TransitiveAnalysisOptions = {
           maxDepth,
           includeTypes: undefined,
-          confidenceThreshold,
           showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
         };
 
@@ -1267,7 +1209,6 @@ export class McpTools {
               type: toSymbol.symbol_type,
               file_path: toSymbol.file?.path || '',
               impact_type: 'indirect',
-              confidence: result.totalConfidence,
               call_chain: result.call_chain,
               depth: result.depth,
             });
@@ -1312,58 +1253,62 @@ export class McpTools {
         )
       );
 
-      // Calculate overall confidence score using deduplicated data
+      // Calculate overall impact score using deduplicated data
       const allImpactItems = [...deduplicatedDirectImpact, ...deduplicatedTransitiveImpact];
-      const avgConfidence =
-        allImpactItems.length > 0
-          ? allImpactItems.reduce((sum, item) => sum + item.confidence, 0) / allImpactItems.length
-          : 1.0;
+
+      // Phase 4: Simple dependency list format for impact analysis
+      const allImpactDependencies = [
+        ...directImpact.map(item => ({
+          from: item.name,
+          to: symbol.name,
+          type: 'impacts' as const,
+          line_number: 0,
+          file_path: item.file_path
+        })),
+        ...transitiveImpact.map(item => ({
+          from: item.name,
+          to: symbol.name,
+          type: 'impacts_indirect' as const,
+          line_number: 0,
+          file_path: item.file_path
+        })),
+        ...routeImpact.map(route => ({
+          from: route.path,
+          to: symbol.name,
+          type: 'route_impact' as const,
+          line_number: 0,
+          file_path: ''
+        })),
+        ...jobImpact.map(job => ({
+          from: job.name,
+          to: symbol.name,
+          type: 'job_impact' as const,
+          line_number: 0,
+          file_path: ''
+        })),
+        ...testImpact.map(test => ({
+          from: test.name,
+          to: symbol.name,
+          type: 'test_impact' as const,
+          line_number: 0,
+          file_path: test.file_path || ''
+        }))
+      ];
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                symbol: {
-                  id: symbol.id,
-                  name: symbol.name,
-                  type: symbol.symbol_type,
-                  file_path: symbol.file?.path,
-                },
-                impact_analysis: {
-                  direct_impact: deduplicatedDirectImpact,
-                  transitive_impact: deduplicatedTransitiveImpact,
-                  // Always include all impact types (include_tests, include_routes, include_jobs parameters removed per PARAMETER_REDUNDANCY_ANALYSIS)
-                  test_impact: testImpact,
-                  route_impact: routeImpact,
-                  job_impact: jobImpact,
-                  confidence_score: avgConfidence,
-                  impact_depth: maxDepth,
-                  frameworks_affected: Array.from(frameworksAffected),
-                },
-                summary: {
-                  total_direct_impact: deduplicatedDirectImpact.length,
-                  total_transitive_impact: deduplicatedTransitiveImpact.length,
-                  total_route_impact: routeImpact.length,
-                  total_job_impact: jobImpact.length,
-                  total_test_impact: testImpact.length,
-                  frameworks_affected: Array.from(frameworksAffected),
-                  confidence_score: avgConfidence,
-                  risk_level: this.calculateRiskLevel(
-                    directImpact,
-                    transitiveImpact,
-                    routeImpact,
-                    jobImpact
-                  ),
-                },
-                filters: validatedArgs,
-                analysis_mode: 'comprehensive',
-                absorbed_tools: ['getCrossStackImpact', 'getApiCalls', 'getDataContracts'],
-              },
-              null,
-              2
-            ),
+            text: JSON.stringify({
+              dependencies: allImpactDependencies,
+              total_count: allImpactDependencies.length,
+              query_info: {
+                symbol: symbol.name,
+                analysis_type: 'impact',
+                timestamp: new Date().toISOString(),
+                frameworks_affected: Array.from(frameworksAffected)
+              }
+            }, null, 2),
           },
         ],
       };
@@ -1880,7 +1825,7 @@ export class McpTools {
   }
 
   /**
-   * Deduplicate impact items by symbol ID, keeping the highest confidence score
+   * Deduplicate impact items by symbol ID, keeping the most specific impact type
    * This prevents the same symbol from being counted multiple times when it appears
    * in multiple analysis paths (e.g., both as direct dependency and direct caller)
    */
@@ -1894,8 +1839,7 @@ export class McpTools {
         // First occurrence of this symbol
         uniqueItems.set(item.id, item);
       } else {
-        // Symbol already exists, keep the one with higher confidence
-        // or if confidence is equal, prefer more specific impact types
+        // Symbol already exists, prefer more specific impact types
         const shouldReplace = this.shouldReplaceImpactItem(existingItem, item);
         if (shouldReplace) {
           uniqueItems.set(item.id, item);
@@ -2039,19 +1983,10 @@ export class McpTools {
 
   /**
    * Determines whether to replace an existing impact item with a new one
-   * Prioritizes by confidence score, then by impact type specificity
+   * Prioritizes by impact type specificity
    */
   private shouldReplaceImpactItem(existing: ImpactItem, candidate: ImpactItem): boolean {
-    // Priority 1: Higher confidence score
-    if (candidate.confidence > existing.confidence) {
-      return true;
-    }
-
-    if (candidate.confidence < existing.confidence) {
-      return false;
-    }
-
-    // Priority 2: More specific impact type (when confidence is equal)
+    // Priority: More specific impact type
     // Priority order: direct > delegation > interface_contract > implementation > cross_stack > indirect
     const impactTypePriority = {
       direct: 6,
@@ -2110,7 +2045,6 @@ export class McpTools {
                     path: route.path || '',
                     method: route.method || 'GET',
                     framework: route.framework_type || framework,
-                    confidence: 0.8,
                   });
                 }
               }
@@ -2145,7 +2079,6 @@ export class McpTools {
             id: jobSymbol.id,
             name: jobSymbol.name,
             type: 'background_job',
-            confidence: 0.7,
           });
         }
       }
@@ -2179,7 +2112,6 @@ export class McpTools {
             name: testSymbol.name,
             file_path: testSymbol.file?.path || '',
             test_type: this.determineTestType(testSymbol.file?.path || ''),
-            confidence: 0.6,
           });
         }
       }
@@ -2309,7 +2241,6 @@ export class McpTools {
         parameter_variations: analysis.parameterVariations.map(variation => ({
           parameters: variation.parameter_context,
           call_count: variation.call_count,
-          average_confidence: variation.confidence_avg,
           usage_locations: variation.callers.map(caller => ({
             caller: caller.caller_name,
             file: caller.file_path,
@@ -2354,11 +2285,6 @@ export class McpTools {
       insights.push(`Most common pattern: "${mostCommon.parameter_context}" (${mostCommon.call_count} calls)`);
     }
 
-    // Analyze confidence levels
-    const lowConfidenceCalls = variations.filter(v => v.confidence_avg < 0.7);
-    if (lowConfidenceCalls.length > 0) {
-      insights.push(`${lowConfidenceCalls.length} parameter pattern(s) have low confidence scores`);
-    }
 
     return insights;
   }

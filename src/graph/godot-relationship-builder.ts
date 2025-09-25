@@ -102,7 +102,6 @@ export class GodotRelationshipBuilder {
                   from_entity_id: scene.id,
                   to_entity_type: GodotEntityType.SCRIPT,
                   to_entity_id: scriptEntity.id,
-                  confidence: 0.95,
                   metadata: {
                     nodeName: node.nodeName,
                     nodeType: node.nodeType,
@@ -156,7 +155,6 @@ export class GodotRelationshipBuilder {
               from_entity_id: parentNode.id,
               to_entity_type: GodotEntityType.NODE,
               to_entity_id: node.id,
-              confidence: 0.9,
               metadata: {
                 parentName: parentNode.nodeName,
                 childName: node.nodeName,
@@ -206,7 +204,6 @@ export class GodotRelationshipBuilder {
               to_entity_type: GodotEntityType.SCENE, // Resource references are stored as metadata
               to_entity_id: scene.id, // Self-reference with metadata
               resource_id: resource.id,
-              confidence: 0.85,
               metadata: {
                 resourcePath: resource.path,
                 resourceType: resource.type,
@@ -261,7 +258,6 @@ export class GodotRelationshipBuilder {
             from_entity_id: autoload.id,
             to_entity_type: GodotEntityType.SCRIPT,
             to_entity_id: scriptEntity.id,
-            confidence: 0.98,
             metadata: {
               autoloadName: autoload.autoloadName,
               scriptPath: autoload.scriptPath,

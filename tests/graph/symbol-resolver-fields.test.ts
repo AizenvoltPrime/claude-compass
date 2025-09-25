@@ -146,7 +146,6 @@ describe('Symbol Resolver Field Resolution', () => {
         to_symbol: 'HandManager.SetHandPositions',
         dependency_type: DependencyType.CALLS,
         line_number: 6,
-        confidence: 0.9,
         qualified_context: 'field_call__handManager'
       };
 
@@ -175,7 +174,6 @@ describe('Symbol Resolver Field Resolution', () => {
         to_symbol: 'UnknownClass.UnknownMethod',
         dependency_type: DependencyType.CALLS,
         line_number: 6,
-        confidence: 0.9,
         qualified_context: 'field_call_unknownField'
       };
 
@@ -298,8 +296,7 @@ describe('Symbol Resolver Field Resolution', () => {
           to_symbol: 'HandManager.SetHandPositions',
           dependency_type: DependencyType.CALLS,
           line_number: 6,
-          confidence: 0.9,
-          qualified_context: 'field_call__handManager'
+            qualified_context: 'field_call__handManager'
         }
       ];
 
@@ -322,8 +319,7 @@ describe('Symbol Resolver Field Resolution', () => {
           from_symbol: 'function1',
           to_symbol: 'function2',
           dependency_type: DependencyType.CALLS,
-          line_number: 5,
-          confidence: 0.8
+          line_number: 5
         }
       ];
 

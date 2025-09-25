@@ -79,7 +79,6 @@ export interface CrossStackGraphData {
   };
   features?: CrossStackFeature[];
   metadata?: {
-    averageConfidence?: number;
     totalApiCalls?: number;
     totalDataContracts?: number;
     analysisTimestamp?: Date;
@@ -93,7 +92,6 @@ export interface CrossStackGraphNode {
   filePath: string;
   framework: 'vue' | 'laravel' | 'cross-stack';
   symbolId?: number;
-  confidence?: number;
 }
 
 export interface CrossStackGraphEdge {
@@ -101,7 +99,6 @@ export interface CrossStackGraphEdge {
   from: string;
   to: string;
   type: 'api_call' | 'shares_schema' | 'frontend_backend';
-  confidence: number;
   metadata?: Record<string, any>;
 }
 
@@ -112,7 +109,6 @@ export interface CrossStackFeature {
   components: CrossStackGraphNode[];
   apiCalls: ApiCall[];
   dataContracts: DataContract[];
-  confidence: number;
 }
 
 export class GraphBuilder {
@@ -143,7 +139,6 @@ export class GraphBuilder {
 
     this.logger.info('Starting repository analysis', {
       path: repositoryPath
-      // Removed detailed options logging to reduce noise
     });
 
     const validatedOptions = this.validateOptions(options);
@@ -270,8 +265,7 @@ export class GraphBuilder {
               name: node.name,
               filePath: node.filePath,
               framework: node.framework,
-              symbolId: node.metadata?.symbolId,
-              confidence: node.metadata?.confidence || 1.0
+              symbolId: node.metadata?.symbolId
             })),
             edges: graph.edges.map((edge: any) => ({
               id: edge.id,
@@ -279,7 +273,6 @@ export class GraphBuilder {
               to: edge.to,
               type: edge.relationshipType === 'api_call' ? 'api_call' :
                     edge.relationshipType === 'shares_schema' ? 'shares_schema' : 'frontend_backend',
-              confidence: edge.confidence,
               metadata: edge.metadata
             }))
           });
@@ -298,8 +291,7 @@ export class GraphBuilder {
                   name: c.name,
                   filePath: c.filePath,
                   framework: c.framework,
-                  symbolId: c.metadata?.symbolId,
-                  confidence: c.metadata?.confidence || 1.0
+                  symbolId: c.metadata?.symbolId
                 })),
                 ...feature.laravelRoutes.map((r: any) => ({
                   id: r.id,
@@ -307,16 +299,13 @@ export class GraphBuilder {
                   name: r.name,
                   filePath: r.filePath,
                   framework: r.framework,
-                  symbolId: r.metadata?.symbolId,
-                  confidence: r.metadata?.confidence || 1.0
+                  symbolId: r.metadata?.symbolId
                 }))
               ],
               apiCalls: [], // Will be populated from database if needed
               dataContracts: [], // Will be populated from database if needed
-              confidence: feature.confidence
             })),
             metadata: {
-              averageConfidence: fullStackGraph.metadata.averageConfidence,
               totalApiCalls: fullStackGraph.apiCallGraph.edges.length,
               totalDataContracts: fullStackGraph.dataContractGraph.edges.length,
               analysisTimestamp: new Date()
@@ -324,8 +313,7 @@ export class GraphBuilder {
           };
           this.logger.info('Cross-stack analysis completed', {
             apiCalls: crossStackGraph.metadata.totalApiCalls,
-            dataContracts: crossStackGraph.metadata.totalDataContracts,
-            averageConfidence: crossStackGraph.metadata.averageConfidence
+            dataContracts: crossStackGraph.metadata.totalDataContracts
           });
         } catch (error) {
           this.logger.error('Cross-stack analysis failed', { error });
@@ -983,7 +971,7 @@ export class GraphBuilder {
                 sampleAvailableFiles: files.map(f => ({
                   path: f.path,
                   normalized: path.normalize(f.path)
-                })).slice(0, 5), // Show first 5 with normalized paths for debugging
+                })).slice(0, 5),
                 parseResultDirectory: path.dirname(parseResult.filePath),
                 parseResultBasename: path.basename(parseResult.filePath)
               });
@@ -1207,8 +1195,7 @@ export class GraphBuilder {
                       from_entity_type: 'scene' as any,
                       from_entity_id: storedScene.id,
                       to_entity_type: 'script' as any,
-                      to_entity_id: scriptEntity.id,
-                      confidence: 0.95
+                      to_entity_id: scriptEntity.id
                     });
                   }
                 }
@@ -1277,8 +1264,7 @@ export class GraphBuilder {
                 from_entity_type: 'autoload' as any,
                 from_entity_id: scriptEntity.id, // We'd need the autoload ID here
                 to_entity_type: 'script' as any,
-                to_entity_id: scriptEntity.id,
-                confidence: 0.98
+                to_entity_id: scriptEntity.id
               });
             }
           } else {
@@ -1534,7 +1520,6 @@ export class GraphBuilder {
           existingDeps.push(dependency);
           map.set(containingSymbol.id, existingDeps);
         } else {
-          // Log when we can't find a matching symbol (helps debugging)
           this.logger.debug('Could not find containing symbol for dependency', {
             from: dependency.from_symbol,
             extractedName: fromMethodName,
@@ -1969,8 +1954,7 @@ export class GraphBuilder {
             from_file_id: sourceFileId,
             to_file_id: sourceFileId, // External calls don't have a target file in our codebase
             dependency_type: dependency.dependency_type,
-            line_number: dependency.line_number,
-            confidence: dependency.confidence || 0.8
+            line_number: dependency.line_number
           });
         }
       }
@@ -2026,8 +2010,7 @@ export class GraphBuilder {
             from_file_id: sourceFileId,
             to_file_id: sourceFileId, // Self-reference to indicate external import
             dependency_type: DependencyType.IMPORTS,
-            line_number: importInfo.line_number || 1,
-            confidence: 0.9
+            line_number: importInfo.line_number || 1
           });
         }
       }
@@ -2066,7 +2049,6 @@ export class GraphBuilder {
       pathToFileId.set(file.path, file.id);
     }
 
-    // Log sample of symbol dependencies for debugging
     if (symbolDependencies.length > 0) {
       this.logger.debug('Sample symbol dependency structure', {
         firstDependency: symbolDependencies[0],
@@ -2093,8 +2075,7 @@ export class GraphBuilder {
             from_file_id: fromFileId,
             to_file_id: toFileId,
             dependency_type: symbolDep.dependency_type,
-            line_number: symbolDep.line_number,
-            confidence: symbolDep.confidence
+            line_number: symbolDep.line_number
           });
         }
       }

@@ -41,7 +41,6 @@ export interface TestCoverage {
   testFile: string;
   targetFile: string;
   coverage_type: 'unit' | 'integration' | 'e2e';
-  confidence: number;
 }
 
 /**
@@ -339,8 +338,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       from_symbol: testSuiteName,
       to_symbol: source,
       dependency_type: DependencyType.TEST_COVERS,
-      line_number: this.getLineNumber(node.startIndex, content),
-      confidence: 0.8
+      line_number: this.getLineNumber(node.startIndex, content)
     };
   }
 
@@ -564,8 +562,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       from_symbol: 'current_function', // This would need better context tracking
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: this.getLineNumber(node.startIndex, content),
-      confidence: 0.9
+      line_number: this.getLineNumber(node.startIndex, content)
     };
   }
 

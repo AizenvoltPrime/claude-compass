@@ -22,7 +22,7 @@ export interface SymbolEdge {
   to: number;
   type: DependencyType;
   lineNumber: number;
-  confidence: number;
+  // confidence: number; // Removed in Phase 3
   // Parameter context fields for C# method calls
   parameter_context?: string;
   call_instance_id?: string;
@@ -110,7 +110,7 @@ export class SymbolGraphBuilder {
         to_symbol_id: edge.to,
         dependency_type: edge.type,
         line_number: edge.lineNumber,
-        confidence: edge.confidence,
+        // comprehensive relationship data (Phase 3)
         // Include parameter context fields from SymbolEdge
         parameter_context: edge.parameter_context,
         call_instance_id: edge.call_instance_id,
@@ -400,7 +400,7 @@ export class SymbolGraphBuilder {
             to: resolution.toSymbol.id,
             type: resolution.originalDependency.dependency_type,
             lineNumber: resolution.originalDependency.line_number,
-            confidence: resolution.confidence,
+            // comprehensive relationship data (Phase 3)
             // Preserve parameter context fields
             parameter_context: resolution.originalDependency.parameter_context,
             call_instance_id: resolution.originalDependency.call_instance_id,
@@ -428,7 +428,7 @@ export class SymbolGraphBuilder {
             const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
 
             if (targetSymbols.length > 0) {
-              // Found target symbols, create edges with reduced confidence
+              // Found target symbols, create edges
               for (const targetSymbol of targetSymbols) {
                 if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
                   continue;
@@ -439,7 +439,7 @@ export class SymbolGraphBuilder {
                   to: targetSymbol.id,
                   type: dep.dependency_type,
                   lineNumber: dep.line_number,
-                  confidence: (dep.confidence || 0.5) * 0.8, // Reduced confidence for fallback resolution
+                  // comprehensive relationship data (Phase 3)
                   // Preserve parameter context fields from fallback resolution
                   parameter_context: dep.parameter_context,
                   call_instance_id: dep.call_instance_id,
@@ -500,7 +500,7 @@ export class SymbolGraphBuilder {
               to: targetSymbol.id,
               type: dep.dependency_type,
               lineNumber: dep.line_number,
-              confidence: dep.confidence || 0.5,
+              // comprehensive relationship data (Phase 3)
               // Preserve parameter context fields from legacy resolution
               parameter_context: dep.parameter_context,
               call_instance_id: dep.call_instance_id,

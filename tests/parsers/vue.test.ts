@@ -955,10 +955,8 @@ onMounted(() => {
 
       const sfcPattern = patterns.find(p => p.name === 'vue-sfc');
       expect(sfcPattern!.fileExtensions).toContain('.vue');
-      expect(sfcPattern!.confidence).toBeGreaterThan(0.8);
 
       const builtInPattern = patterns.find(p => p.name === 'vue-built-in-components');
-      expect(builtInPattern!.confidence).toBeGreaterThan(0.8);
     });
   });
 

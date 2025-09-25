@@ -570,8 +570,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
             from_symbol: 'current_context',
             to_symbol: targetJob,
             dependency_type: DependencyType.PROCESSES_JOB,
-            line_number: this.getLineNumber(node.startIndex, content),
-            confidence: 0.9
+            line_number: this.getLineNumber(node.startIndex, content)
           };
         }
       }
@@ -673,8 +672,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       from_symbol: 'current_function',
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: this.getLineNumber(node.startIndex, content),
-      confidence: 0.9
+      line_number: this.getLineNumber(node.startIndex, content)
     };
   }
 

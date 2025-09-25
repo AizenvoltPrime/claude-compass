@@ -74,11 +74,6 @@ program
     'Specifically analyze Vue.js and Laravel cross-stack relationships',
     false
   )
-  .option(
-    '--confidence-threshold <threshold>',
-    'Cross-stack relationship confidence threshold (0.0-1.0)',
-    '0.7'
-  )
   .option('--force-full', 'Force full analysis instead of incremental analysis', false)
   .option('--verbose', 'Enable verbose logging')
   .action(async (repositoryPath, options) => {
@@ -115,7 +110,6 @@ program
         // Cross-stack analysis options
         enableCrossStack: options.crossStack === true || options.vueLaravel === true,
         crossStackFrameworks: options.vueLaravel === true ? ['vue', 'laravel'] : undefined,
-        crossStackConfidenceThreshold: parseFloat(options.confidenceThreshold),
 
         // File size policy options (using aggressive preset)
         fileSizePolicy: {
@@ -189,13 +183,6 @@ program
             `${getEmoji('🎛️', 'Features:')} Feature clusters: ${result.crossStackGraph.features?.length || 0}`
           )
         );
-        if (result.crossStackGraph.metadata?.averageConfidence !== undefined) {
-          console.log(
-            chalk.magenta(
-              `${getEmoji('💯', 'Confidence:')} Average confidence: ${(result.crossStackGraph.metadata.averageConfidence * 100).toFixed(1)}%`
-            )
-          );
-        }
       }
 
       if (result.errors.length > 0) {

@@ -85,7 +85,6 @@ describe('Parameter Context Integration Tests', () => {
       to_symbol_id: target.id,
       dependency_type: DependencyType.CALLS,
       line_number: 9001,
-      confidence: 0.95,
       parameter_context: '_handPosition, null',
       call_instance_id: '123e4567-e89b-12d3-a456-426614174001',
       parameter_types: ['var', 'null'],
@@ -98,7 +97,6 @@ describe('Parameter Context Integration Tests', () => {
       to_symbol_id: target.id,
       dependency_type: DependencyType.CALLS,
       line_number: 9002,
-      confidence: 0.92,
       parameter_context: 'playerHandPos, _handPosition',
       call_instance_id: '123e4567-e89b-12d3-a456-426614174002',
       parameter_types: ['var', 'var'],
@@ -213,14 +211,12 @@ describe('Parameter Context Integration Tests', () => {
         to_symbol_id: caller2.id,
         dependency_type: DependencyType.CALLS,
         line_number: 9003,
-        confidence: 0.9
       }),
       dbService.createDependency({
         from_symbol_id: caller2.id,
         to_symbol_id: target.id,
         dependency_type: DependencyType.CALLS,
         line_number: 9004,
-        confidence: 0.85,
         parameter_context: 'testParam',
         call_instance_id: '123e4567-e89b-12d3-a456-426614174003'
       })
@@ -285,7 +281,6 @@ describe('Parameter Context Integration Tests', () => {
         to_symbol_id: setHandPositions[0].id,
         dependency_type: DependencyType.CALLS,
         line_number: 226,
-        confidence: 0.95,
         parameter_context: '_handPosition, null',
         call_instance_id: '226-instance-id',
         parameter_types: ['var', 'null'],
@@ -297,7 +292,6 @@ describe('Parameter Context Integration Tests', () => {
         to_symbol_id: setHandPositions[0].id,
         dependency_type: DependencyType.CALLS,
         line_number: 242,
-        confidence: 0.92,
         parameter_context: 'playerHandPos, _handPosition',
         call_instance_id: '242-instance-id',
         parameter_types: ['var', 'var'],

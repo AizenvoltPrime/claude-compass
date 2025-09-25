@@ -1,5 +1,7 @@
 import type { Knex } from 'knex';
 import { getDatabaseConnection, closeDatabaseConnection } from './connection';
+import { PaginationParams, PaginatedResponse, createPaginatedQuery } from './pagination';
+import { withCache, cacheable, queryCache } from './cache';
 import {
   Repository,
   File,
@@ -698,7 +700,6 @@ export class DatabaseService {
   ): Promise<SymbolWithFile[]> {
     const {
       limit = 100,
-      confidenceThreshold = 0.5,
       symbolTypes = [],
       isExported,
       framework,
@@ -1074,7 +1075,6 @@ export class DatabaseService {
 
     return results.map((result: any) => ({
       ...result,
-      confidence: result.vector_score,
       match_type: 'vector' as const,
       search_rank: result.vector_score
     }));
@@ -1088,7 +1088,7 @@ export class DatabaseService {
     repoIds: number[],
     options: HybridSearchOptions = {}
   ): Promise<SymbolWithFile[]> {
-    const { limit = 100, confidenceThreshold = 0.5, weights } = options;
+    const { limit = 100, weights } = options;
 
     // Use provided weights or defaults
     const searchWeights = weights || {
@@ -1119,7 +1119,7 @@ export class DatabaseService {
     ]);
 
     // Merge and rank results with explicit weights
-    return this.rankAndMergeResults(lexicalResults, vectorResults, fullTextResults, searchWeights, { limit, confidenceThreshold });
+    return this.rankAndMergeResults(lexicalResults, vectorResults, fullTextResults, searchWeights, { limit });
   }
 
   /**
@@ -1130,9 +1130,9 @@ export class DatabaseService {
     vectorResults: SymbolWithFile[],
     fullTextResults: SymbolWithFile[],
     weights: { lexical: number; vector: number; fulltext: number },
-    options: { limit?: number; confidenceThreshold?: number }
+    options: { limit?: number }
   ): SymbolWithFile[] {
-    const { limit = 100, confidenceThreshold = 0.5 } = options;
+    const { limit = 100 } = options;
     const resultMap = new Map<number, { symbol: SymbolWithFile; scores: number[]; sources: string[] }>();
 
     logger.debug('Merging results with explicit weights', {
@@ -1175,7 +1175,7 @@ export class DatabaseService {
       entry.sources.push('fulltext');
     });
 
-    // Calculate final scores and filter by confidence
+    // Calculate final scores
     const rankedResults = Array.from(resultMap.values())
       .map(entry => {
         const finalScore =
@@ -1186,11 +1186,10 @@ export class DatabaseService {
         return {
           symbol: entry.symbol,
           score: finalScore,
-          confidence: Math.min(1, entry.sources.length / 2), // More sources = higher confidence
           sources: entry.sources
         };
       })
-      .filter(result => result.confidence >= confidenceThreshold)
+      // Phase 4: Return all results
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
 
@@ -1247,7 +1246,7 @@ export class DatabaseService {
       const chunkResults = await this.db('dependencies')
         .insert(processedChunk)
         .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number'])
-        .merge(['line_number', 'confidence', 'updated_at', 'parameter_context', 'call_instance_id', 'parameter_types'])
+        .merge(['line_number', 'updated_at', 'parameter_context', 'call_instance_id', 'parameter_types'])
         .returning('*');
 
       results.push(...(chunkResults as Dependency[]));
@@ -1259,7 +1258,7 @@ export class DatabaseService {
   // File dependency operations
 
   /**
-   * Deduplicate file dependencies by keeping the entry with highest confidence
+   * Deduplicate file dependencies by keeping the first entry
    * for each unique combination of from_file_id, to_file_id, dependency_type
    */
   private deduplicateFileDependencies(dependencies: CreateFileDependency[]): CreateFileDependency[] {
@@ -1269,8 +1268,8 @@ export class DatabaseService {
       const key = `${dep.from_file_id}-${dep.to_file_id}-${dep.dependency_type}`;
       const existing = uniqueMap.get(key);
 
-      // Keep the entry with higher confidence, or first entry if confidence is equal
-      if (!existing || (dep.confidence || 0) > (existing.confidence || 0)) {
+      // Keep the first entry
+      if (!existing) {
         uniqueMap.set(key, dep);
       }
     }
@@ -1305,7 +1304,7 @@ export class DatabaseService {
       const chunkResults = await this.db('file_dependencies')
         .insert(chunk)
         .onConflict(['from_file_id', 'to_file_id', 'dependency_type'])
-        .merge(['line_number', 'confidence', 'updated_at'])
+        .merge(['line_number', 'updated_at'])
         .returning('*');
 
       results.push(...(chunkResults as FileDependency[]));
@@ -3032,25 +3031,6 @@ export class DatabaseService {
         });
       }
 
-      // Check for low confidence relationships
-      const lowConfidenceApiCalls = crossStackData.apiCalls.filter(call =>
-        call.confidence < 0.7
-      );
-
-      if (lowConfidenceApiCalls.length > 0) {
-        recommendations.push(`Consider reviewing ${lowConfidenceApiCalls.length} API calls with low confidence scores`);
-        checks.push({
-          name: 'Confidence Scores',
-          status: 'pass', // This is a warning, not a failure
-          message: `${lowConfidenceApiCalls.length} API calls have low confidence scores`
-        });
-      } else {
-        checks.push({
-          name: 'Confidence Scores',
-          status: 'pass',
-          message: 'All API calls have acceptable confidence scores'
-        });
-      }
 
       const healthy = issues.length === 0;
 
@@ -3086,7 +3066,6 @@ export class DatabaseService {
     summary: {
       totalApiCalls: number;
       totalDataContracts: number;
-      averageConfidence: number;
       driftDetected: number;
     };
   }> {
@@ -3098,9 +3077,6 @@ export class DatabaseService {
       const totalApiCalls = crossStackData.apiCalls.length;
       const totalDataContracts = crossStackData.dataContracts.length;
 
-      const averageConfidence = totalApiCalls > 0
-        ? crossStackData.apiCalls.reduce((sum, call) => sum + call.confidence, 0) / totalApiCalls
-        : 1.0;
 
       const driftDetected = crossStackData.dataContracts.filter(contract =>
         contract.drift_detected
@@ -3108,10 +3084,8 @@ export class DatabaseService {
 
       let status: 'healthy' | 'warning' | 'error' = 'healthy';
 
-      if (driftDetected > 0 || averageConfidence < 0.5) {
+      if (driftDetected > 0) {
         status = 'error';
-      } else if (averageConfidence < 0.7) {
-        status = 'warning';
       }
 
       return {
@@ -3120,7 +3094,6 @@ export class DatabaseService {
         summary: {
           totalApiCalls,
           totalDataContracts,
-          averageConfidence,
           driftDetected
         }
       };
@@ -3132,7 +3105,6 @@ export class DatabaseService {
         summary: {
           totalApiCalls: 0,
           totalDataContracts: 0,
-          averageConfidence: 0,
           driftDetected: 0
         }
       };
@@ -3396,7 +3368,6 @@ export class DatabaseService {
       parameter_context: string;
       call_instance_ids: string[];
       call_count: number;
-      confidence_avg: number;
       line_numbers: number[];
       callers: Array<{
         caller_name: string;
@@ -3447,7 +3418,6 @@ export class DatabaseService {
           parameter_context: paramContext,
           call_instance_ids: [],
           call_count: 0,
-          confidence_sum: 0,
           line_numbers: [],
           callers: []
         });
@@ -3456,7 +3426,6 @@ export class DatabaseService {
       const group = parameterGroups.get(paramContext);
       group.call_instance_ids.push(call.call_instance_id);
       group.call_count++;
-      group.confidence_sum += call.confidence || 0;
       group.line_numbers.push(call.line_number);
       group.callers.push({
         caller_name: call.caller_name,
@@ -3468,8 +3437,6 @@ export class DatabaseService {
     // Convert to array and calculate averages
     const parameterVariations = Array.from(parameterGroups.values()).map(group => ({
       ...group,
-      confidence_avg: group.confidence_sum / group.call_count,
-      confidence_sum: undefined // Remove intermediate field
     }));
 
     logger.debug('Parameter context grouping completed', {
@@ -3595,6 +3562,309 @@ export class DatabaseService {
         language: result.file_language,
       },
     })) as SymbolWithFile[];
+  }
+
+  // ===== PHASE 1: PAGINATED QUERY METHODS =====
+  // These methods provide pagination support for large result sets
+  // Phase 1: Paginated query methods for performance
+
+  /**
+   * Get dependencies TO a symbol with pagination support (callers)
+   * Phase 1: Pagination support for large result sets
+   */
+  async getDependenciesToWithContextPaginated(
+    symbolId: number,
+    paginationParams: PaginationParams = {}
+  ): Promise<PaginatedResponse<EnhancedDependencyWithSymbols>> {
+    const baseQuery = this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
+      .select(
+        'dependencies.*',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path'
+      )
+      .where('dependencies.to_symbol_id', symbolId)
+      .orderBy('dependencies.id', 'asc');
+
+    // Count query for total results
+    const countQuery = this.db('dependencies')
+      .count('* as count')
+      .where('dependencies.to_symbol_id', symbolId);
+
+    const result = await createPaginatedQuery<any>(
+      baseQuery,
+      paginationParams,
+      countQuery,
+      'dependencies.id'
+    );
+
+    // Transform results to match EnhancedDependencyWithSymbols interface
+    result.data = result.data.map(row => ({
+      ...row,
+      from_symbol: {
+        id: row.from_symbol_id,
+        name: row.from_symbol_name,
+        symbol_type: row.from_symbol_type,
+        file: {
+          id: row.from_file_id,
+          path: row.from_file_path,
+        },
+      },
+      calling_object: row.calling_object,
+      resolved_class: row.resolved_class,
+      qualified_context: row.qualified_context,
+      method_signature: row.method_signature,
+      file_context: row.file_context,
+      namespace_context: row.namespace_context,
+      parameter_context: row.parameter_context,
+      call_instance_id: row.call_instance_id,
+      parameter_types: row.parameter_types ? this.safeParseParameterTypes(row.parameter_types) : undefined,
+    })) as EnhancedDependencyWithSymbols[];
+
+    return result;
+  }
+
+  /**
+   * Get dependencies FROM a symbol with pagination support (dependencies)
+   * Phase 1: Pagination support for large result sets
+   */
+  async getDependenciesFromWithContextPaginated(
+    symbolId: number,
+    paginationParams: PaginationParams = {}
+  ): Promise<PaginatedResponse<EnhancedDependencyWithSymbols>> {
+    const baseQuery = this.db('dependencies')
+      .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
+      .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
+      .select(
+        'dependencies.*',
+        'to_symbols.name as to_symbol_name',
+        'to_symbols.symbol_type as to_symbol_type',
+        'to_files.path as to_file_path'
+      )
+      .where('dependencies.from_symbol_id', symbolId)
+      .orderBy('dependencies.id', 'asc');
+
+    // Count query for total results
+    const countQuery = this.db('dependencies')
+      .count('* as count')
+      .where('dependencies.from_symbol_id', symbolId);
+
+    const result = await createPaginatedQuery<any>(
+      baseQuery,
+      paginationParams,
+      countQuery,
+      'dependencies.id'
+    );
+
+    // Transform results to match EnhancedDependencyWithSymbols interface
+    result.data = result.data.map(row => ({
+      ...row,
+      to_symbol: {
+        id: row.to_symbol_id,
+        name: row.to_symbol_name,
+        symbol_type: row.to_symbol_type,
+        file: {
+          id: row.to_file_id,
+          path: row.to_file_path,
+        },
+      },
+      calling_object: row.calling_object,
+      resolved_class: row.resolved_class,
+      qualified_context: row.qualified_context,
+      method_signature: row.method_signature,
+      file_context: row.file_context,
+      namespace_context: row.namespace_context,
+      parameter_context: row.parameter_context,
+      call_instance_id: row.call_instance_id,
+      parameter_types: row.parameter_types ? this.safeParseParameterTypes(row.parameter_types) : undefined,
+    })) as EnhancedDependencyWithSymbols[];
+
+    return result;
+  }
+
+  /**
+   * Get symbol with caching support
+   * Phase 1: Cached version of frequently accessed method
+   */
+  async getSymbolCached(symbolId: number): Promise<SymbolWithFile | null> {
+    return withCache(
+      'getSymbol',
+      { symbolId },
+      async () => {
+        const result = await this.db('symbols')
+          .leftJoin('files', 'symbols.file_id', 'files.id')
+          .select(
+            'symbols.*',
+            'files.path as file_path',
+            'files.language as file_language'
+          )
+          .where('symbols.id', symbolId)
+          .first();
+
+        if (!result) return null;
+
+        return {
+          ...result,
+          file: {
+            id: result.file_id,
+            path: result.file_path,
+            language: result.file_language,
+          },
+        } as SymbolWithFile;
+      },
+      300000 // 5 minute cache
+    );
+  }
+
+  /**
+   * Get dependencies with caching support
+   * Phase 1: Cached version for frequently accessed dependency queries
+   */
+  async getDependenciesToCached(
+    symbolId: number,
+    dependencyTypes?: string[]
+  ): Promise<EnhancedDependencyWithSymbols[]> {
+    return withCache(
+      'getDependenciesTo',
+      { symbolId, dependencyTypes },
+      async () => {
+        let query = this.db('dependencies')
+          .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+          .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
+          .select(
+            'dependencies.*',
+            'from_symbols.name as from_symbol_name',
+            'from_symbols.symbol_type as from_symbol_type',
+            'from_files.path as from_file_path'
+          )
+          .where('dependencies.to_symbol_id', symbolId);
+
+        if (dependencyTypes && dependencyTypes.length > 0) {
+          query = query.whereIn('dependencies.dependency_type', dependencyTypes);
+        }
+
+        const results = await query;
+
+        return results.map(result => ({
+          ...result,
+          from_symbol: {
+            id: result.from_symbol_id,
+            name: result.from_symbol_name,
+            symbol_type: result.from_symbol_type,
+            file: {
+              id: result.from_file_id,
+              path: result.from_file_path,
+            },
+          },
+          calling_object: result.calling_object,
+          resolved_class: result.resolved_class,
+          qualified_context: result.qualified_context,
+          method_signature: result.method_signature,
+          file_context: result.file_context,
+          namespace_context: result.namespace_context,
+          parameter_context: result.parameter_context,
+          call_instance_id: result.call_instance_id,
+          parameter_types: result.parameter_types ? this.safeParseParameterTypes(result.parameter_types) : undefined,
+        })) as EnhancedDependencyWithSymbols[];
+      },
+      180000 // 3 minute cache for dependency queries
+    );
+  }
+
+  /**
+   * Invalidates cache entries when data changes
+   * Phase 1: Cache invalidation for data consistency
+   */
+  invalidateCacheForSymbol(symbolId: number): void {
+    queryCache.invalidateByPattern(`getSymbol:${JSON.stringify({ symbolId })}`);
+    queryCache.invalidateByPattern(`getDependenciesTo:${JSON.stringify({ symbolId })}`);
+    queryCache.invalidateByPattern(`getDependenciesFrom:${JSON.stringify({ symbolId })}`);
+  }
+
+  /**
+   * Invalidates all dependency-related cache entries
+   * Phase 1: Bulk cache invalidation after data updates
+   */
+  invalidateDependencyCache(): void {
+    queryCache.invalidateByPattern('getDependencies');
+    queryCache.invalidateByPattern('whoCalls');
+    queryCache.invalidateByPattern('impactOf');
+  }
+
+  /**
+   * Gets cache statistics for monitoring
+   * Phase 1: Performance monitoring support
+   */
+  getCacheStats() {
+    return queryCache.getStats();
+  }
+
+  /**
+   * Search symbols with pagination support
+   * Phase 1: Pagination support for large search results
+   */
+  async searchSymbolsPaginated(
+    options: SymbolSearchOptions & PaginationParams
+  ): Promise<PaginatedResponse<SymbolWithFile>> {
+    const { repoIds, symbolTypes, isExported, page_size, cursor, offset, ...searchOptions } = options;
+
+    let queryBuilder = this.db('symbols')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language'
+      )
+      .orderBy('symbols.id', 'asc');
+
+    // Apply filters
+    if (repoIds && repoIds.length > 0) {
+      queryBuilder = queryBuilder.whereIn('files.repository_id', repoIds);
+    }
+
+    if (symbolTypes && symbolTypes.length > 0) {
+      queryBuilder = queryBuilder.whereIn('symbols.symbol_type', symbolTypes);
+    }
+
+    if (isExported !== undefined) {
+      queryBuilder = queryBuilder.where('symbols.is_exported', isExported);
+    }
+
+    // Count query for total results (with same filters)
+    let countQuery = this.db('symbols')
+      .leftJoin('files', 'symbols.file_id', 'files.id')
+      .count('* as count');
+
+    if (repoIds && repoIds.length > 0) {
+      countQuery = countQuery.whereIn('files.repository_id', repoIds);
+    }
+    if (symbolTypes && symbolTypes.length > 0) {
+      countQuery = countQuery.whereIn('symbols.symbol_type', symbolTypes);
+    }
+    if (isExported !== undefined) {
+      countQuery = countQuery.where('symbols.is_exported', isExported);
+    }
+
+    const result = await createPaginatedQuery<any>(
+      queryBuilder,
+      { page_size, cursor, offset },
+      countQuery,
+      'symbols.id'
+    );
+
+    // Transform results to match SymbolWithFile interface
+    result.data = result.data.map(row => ({
+      ...row,
+      file: {
+        id: row.file_id,
+        path: row.file_path,
+        language: row.file_language,
+      },
+    })) as SymbolWithFile[];
+
+    return result;
   }
 }
 

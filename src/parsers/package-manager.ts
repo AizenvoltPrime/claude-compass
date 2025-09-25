@@ -212,7 +212,6 @@ export class PackageManagerParser extends BaseFrameworkParser {
           to_symbol: dep.name,
           dependency_type: DependencyType.PACKAGE_DEPENDENCY,
           line_number: index + 10, // Approximate line numbers
-          confidence: 1.0
         });
       });
 
@@ -285,8 +284,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
                 from_symbol: 'package-lock',
                 to_symbol: packageName,
                 dependency_type: DependencyType.PACKAGE_DEPENDENCY,
-                line_number: index + 5,
-                confidence: 1.0
+                line_number: index + 5
               });
             }
           }
@@ -356,8 +354,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
             from_symbol: 'yarn-lock',
             to_symbol: currentPackage.split('@')[0],
             dependency_type: DependencyType.PACKAGE_DEPENDENCY,
-            line_number: lineNumber,
-            confidence: 0.9
+            line_number: lineNumber
           });
         }
       }
@@ -417,8 +414,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
             from_symbol: 'pnpm-lock',
             to_symbol: packageName,
             dependency_type: DependencyType.PACKAGE_DEPENDENCY,
-            line_number: lineNumber,
-            confidence: 0.9
+            line_number: lineNumber
           });
         }
       }
@@ -485,8 +481,7 @@ export class PackageManagerParser extends BaseFrameworkParser {
             from_symbol: fileName.replace('.json', ''),
             to_symbol: workspace.name,
             dependency_type: DependencyType.WORKSPACE_DEPENDENCY,
-            line_number: index + 5,
-            confidence: 1.0
+            line_number: index + 5
           });
         });
       }

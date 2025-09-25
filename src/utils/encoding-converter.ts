@@ -7,7 +7,6 @@ const logger = createComponentLogger('encoding-converter');
  */
 export interface EncodingDetectionResult {
   detectedEncoding: string;
-  confidence: number;
   hasIssues: boolean;
   hasBOM: boolean;
   bomBytes?: Buffer;
@@ -65,7 +64,6 @@ export class EncodingConverter {
         logger.debug('BOM detected', { encoding: bomResult.detectedEncoding });
         return {
           detectedEncoding: bomResult.detectedEncoding!,
-          confidence: 1.0, // BOM gives us 100% confidence
           hasIssues: false,
           hasBOM: bomResult.hasBOM,
           bomBytes: bomResult.bomBytes,
@@ -78,11 +76,10 @@ export class EncodingConverter {
 
       // Step 3: UTF-8 validation
       const utf8Result = this.validateUTF8(buffer);
-      if (utf8Result.isValid && utf8Result.confidence > 0.9) {
-        logger.debug('High-confidence UTF-8 detected');
+      if (utf8Result.isValid) {
+        logger.debug('Valid UTF-8 detected');
         return {
           detectedEncoding: 'utf-8',
-          confidence: utf8Result.confidence,
           hasIssues: stats.replacementChars > 0,
           hasBOM: false,
           metadata: stats
@@ -91,11 +88,10 @@ export class EncodingConverter {
 
       // Step 4: UTF-16 detection (without BOM)
       const utf16Result = this.detectUTF16(buffer);
-      if (utf16Result.confidence > 0.8) {
+      if (utf16Result.encoding !== 'utf-8') {
         logger.debug('UTF-16 detected without BOM', { encoding: utf16Result.encoding });
         return {
           detectedEncoding: utf16Result.encoding,
-          confidence: utf16Result.confidence,
           hasIssues: false,
           hasBOM: false,
           metadata: stats
@@ -106,8 +102,7 @@ export class EncodingConverter {
       const extendedResult = this.detectExtendedASCII(buffer, stats);
 
       logger.debug('Encoding detection completed', {
-        detectedEncoding: extendedResult.detectedEncoding,
-        confidence: extendedResult.confidence
+        detectedEncoding: extendedResult.detectedEncoding
       });
 
       return {
@@ -122,7 +117,6 @@ export class EncodingConverter {
 
       return {
         detectedEncoding: 'utf-8',
-        confidence: 0.1,
         hasIssues: true,
         hasBOM: false,
         metadata: {
@@ -152,8 +146,7 @@ export class EncodingConverter {
         encoding = detection.detectedEncoding;
 
         logger.debug('Auto-detected encoding', {
-          encoding,
-          confidence: detection.confidence
+          encoding
         });
       }
 
@@ -336,7 +329,7 @@ export class EncodingConverter {
   /**
    * Validate if buffer is valid UTF-8
    */
-  private static validateUTF8(buffer: Buffer): { isValid: boolean; confidence: number; issues: string[] } {
+  private static validateUTF8(buffer: Buffer): { isValid: boolean; issues: string[] } {
     const issues: string[] = [];
 
     try {
@@ -392,18 +385,17 @@ export class EncodingConverter {
       const sequenceValidityRatio = totalSequences > 0 ? validSequences / totalSequences : 1;
       const replacementRatio = decoded.length > 0 ? replacementCount / decoded.length : 0;
 
-      const confidence = sequenceValidityRatio * (1 - replacementRatio * 2);
+      // Simple threshold-based validation without confidence scoring
+      const isValid = sequenceValidityRatio > 0.8 && replacementRatio < 0.1;
 
       return {
-        isValid: confidence > 0.8,
-        confidence: Math.max(0, Math.min(1, confidence)),
+        isValid,
         issues
       };
 
     } catch (error) {
       return {
         isValid: false,
-        confidence: 0,
         issues: ['utf8-decode-error']
       };
     }
@@ -412,9 +404,9 @@ export class EncodingConverter {
   /**
    * Detect UTF-16 encoding (LE or BE) without BOM
    */
-  private static detectUTF16(buffer: Buffer): { encoding: string; confidence: number } {
+  private static detectUTF16(buffer: Buffer): { encoding: string } {
     if (buffer.length < 4) {
-      return { encoding: 'utf-8', confidence: 0 };
+      return { encoding: 'utf-8' };
     }
 
     // Check for UTF-16 patterns
@@ -434,22 +426,22 @@ export class EncodingConverter {
 
     // Strong indication of UTF-16 if many nulls in consistent positions
     if (leRatio > 0.3) {
-      return { encoding: 'utf-16le', confidence: Math.min(1, leRatio * 2) };
+      return { encoding: 'utf-16le' };
     }
     if (beRatio > 0.3) {
-      return { encoding: 'utf-16be', confidence: Math.min(1, beRatio * 2) };
+      return { encoding: 'utf-16be' };
     }
 
-    return { encoding: 'utf-8', confidence: 0 };
+    return { encoding: 'utf-8' };
   }
 
   /**
    * Detect extended ASCII encoding (Windows-1252 vs ISO-8859-1)
    */
-  private static detectExtendedASCII(buffer: Buffer, stats: any): { detectedEncoding: string; confidence: number } {
+  private static detectExtendedASCII(buffer: Buffer, stats: any): { detectedEncoding: string } {
     // If no high-bit characters, it's plain ASCII (treat as UTF-8)
     if (stats.highBitChars === 0) {
-      return { detectedEncoding: 'utf-8', confidence: 0.9 };
+      return { detectedEncoding: 'utf-8' };
     }
 
     // Look for Windows-1252 specific characters
@@ -464,12 +456,11 @@ export class EncodingConverter {
     }
 
     if (windows1252Chars > 0) {
-      const confidence = Math.min(0.95, 0.5 + (windows1252Chars / stats.highBitChars) * 0.45);
-      return { detectedEncoding: 'windows-1252', confidence };
+      return { detectedEncoding: 'windows-1252' };
     }
 
     // Default to ISO-8859-1 for extended ASCII
-    return { detectedEncoding: 'iso-8859-1', confidence: 0.7 };
+    return { detectedEncoding: 'iso-8859-1' };
   }
 
   /**

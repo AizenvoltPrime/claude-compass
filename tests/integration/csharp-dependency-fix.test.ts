@@ -164,7 +164,7 @@ namespace GameCore.Managers {
       .join('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .where('dependencies.to_symbol_id', cardManagerSetHandPositions!.id)
       .where('dependencies.dependency_type', 'calls')
-      .select('from_symbols.name', 'dependencies.confidence');
+      .select('from_symbols.name', 'dependencies.dependency_type');
 
     expect(callers.length).toBeGreaterThan(0);
     expect(callers.map(c => c.name)).toContain('InitializeHands');

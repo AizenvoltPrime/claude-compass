@@ -376,8 +376,7 @@ export class JavaScriptParser extends ChunkedParser {
       from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1,
-      confidence: 1.0
+      line_number: node.startPosition.row + 1
     };
   }
 

@@ -789,11 +789,9 @@ return [
 
       const controllerPattern = patterns.find(p => p.name === 'laravel-controller');
       expect(controllerPattern!.fileExtensions).toContain('.php');
-      expect(controllerPattern!.confidence).toBe(0.9);
       expect(controllerPattern!.description).toBe('Laravel controller classes extending base Controller');
 
       const modelPattern = patterns.find(p => p.name === 'laravel-model');
-      expect(modelPattern!.confidence).toBe(0.9);
       expect(modelPattern!.description).toBe('Eloquent model classes extending Model');
     });
   });

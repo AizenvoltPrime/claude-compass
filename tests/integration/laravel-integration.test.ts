@@ -168,7 +168,7 @@ app.mount('#app');
     it('should detect Laravel through composer.json', async () => {
       const result = await builder.analyzeRepository(testProjectPath, { forceFullAnalysis: true });
 
-      // Should detect Laravel framework with high confidence
+      // Should detect Laravel framework based on file patterns
       expect(result.repository.framework_stack).toContain('laravel');
 
       // Query framework detection metadata

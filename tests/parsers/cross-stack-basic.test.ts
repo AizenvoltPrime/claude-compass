@@ -5,23 +5,23 @@ describe('CrossStackParser - Basic Tests', () => {
   let parser: CrossStackParser;
 
   beforeEach(() => {
-    parser = new CrossStackParser(0.7);
+    parser = new CrossStackParser();
   });
 
   describe('constructor', () => {
-    it('should create parser with default confidence threshold', () => {
+    it('should create parser with default configuration', () => {
       const defaultParser = new CrossStackParser();
       expect(defaultParser).toBeDefined();
     });
 
-    it('should create parser with custom confidence threshold', () => {
-      const customParser = new CrossStackParser(0.8);
+    it('should create parser with custom configuration', () => {
+      const customParser = new CrossStackParser();
       expect(customParser).toBeDefined();
     });
 
-    it('should handle invalid confidence threshold gracefully', () => {
-      expect(() => new CrossStackParser(-1)).not.toThrow();
-      expect(() => new CrossStackParser(1.5)).not.toThrow();
+    it('should handle initialization gracefully', () => {
+      expect(() => new CrossStackParser()).not.toThrow();
+      expect(() => new CrossStackParser()).not.toThrow();
     });
   });
 

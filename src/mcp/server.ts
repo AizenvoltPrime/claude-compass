@@ -12,6 +12,7 @@ import {
 
 import { DatabaseService, databaseService } from '../database';
 import { createComponentLogger } from '../utils/logger';
+import { compressResponsePayload, optimizeResponsePayload, DEFAULT_COMPRESSION_CONFIG } from '../utils/response-compression';
 import { McpTools } from './tools';
 import { McpResources } from './resources';
 
@@ -208,19 +209,8 @@ export class ClaudeCompassMCPServer {
                   description: 'Include cross-stack callers (Vue ↔ Laravel)',
                   default: false,
                 },
-                cross_stack_confidence_threshold: {
-                  type: 'number',
-                  description: 'Confidence threshold for cross-stack relationships (0.0-1.0)',
-                  default: 0.7,
-                  minimum: 0,
-                  maximum: 1,
-                },
-                analysis_type: {
-                  type: 'string',
-                  enum: ['quick', 'standard', 'comprehensive'],
-                  description: 'Analysis type for smart defaults: quick (high confidence, shallow), standard (balanced), comprehensive (low confidence, deep)',
-                  default: 'standard',
-                },
+                // REMOVED: cross_stack_confidence_threshold (Phase 4)
+                // REMOVED: analysis_type - no longer needed with simple dependency lists (Phase 4)
               },
               required: ['symbol_id'],
             },
@@ -255,12 +245,7 @@ export class ClaudeCompassMCPServer {
                   description: 'Include cross-stack dependencies (Vue ↔ Laravel)',
                   default: false,
                 },
-                analysis_type: {
-                  type: 'string',
-                  enum: ['quick', 'standard', 'comprehensive'],
-                  description: 'Analysis type for smart defaults: quick (high confidence, shallow), standard (balanced), comprehensive (low confidence, deep)',
-                  default: 'standard',
-                },
+                // REMOVED: analysis_type - no longer needed with simple dependency lists (Phase 4)
               },
               required: ['symbol_id'],
             },
@@ -291,24 +276,25 @@ export class ClaudeCompassMCPServer {
                   minimum: 1,
                   maximum: 20,
                 },
-                confidence_threshold: {
+                // REMOVED: confidence_threshold (Phase 4)
+                page_size: {
                   type: 'number',
-                  description: 'Filter results by confidence score',
-                  default: 0.7,
-                  minimum: 0,
-                  maximum: 1,
+                  description: 'Number of results per page (default: 1000, max: 5000)',
+                  default: 1000,
+                  minimum: 1,
+                  maximum: 5000,
                 },
-                show_call_chains: {
-                  type: 'boolean',
-                  description: 'Include human-readable call chains',
-                  default: true,
-                },
-                analysis_type: {
+                cursor: {
                   type: 'string',
-                  enum: ['quick', 'standard', 'comprehensive'],
-                  description: 'Analysis type for smart defaults: quick (0.9 threshold, depth 2), standard (0.7 threshold, depth 5), comprehensive (0.5 threshold, depth 10)',
+                  description: 'Pagination cursor for next page',
+                },
+                detail_level: {
+                  type: 'string',
+                  enum: ['summary', 'standard', 'full'],
+                  description: 'Response detail level',
                   default: 'standard',
                 },
+                // REMOVED: analysis_type - no longer needed with simple dependency lists (Phase 4)
               },
               required: ['symbol_id'],
               additionalProperties: false,
@@ -334,35 +320,60 @@ export class ClaudeCompassMCPServer {
       };
     });
 
-    // Handle tool calls
+    // Handle tool calls with response optimization
     this.server.setRequestHandler(CallToolRequestSchema, async request => {
       const { name, arguments: args } = request.params;
 
       logger.debug('Received tool call', { name, args });
 
       try {
+        let response: any;
+
         switch (name) {
           case 'get_file':
-            return await this.tools.getFile(args);
+            response = await this.tools.getFile(args);
+            break;
 
           case 'get_symbol':
-            return await this.tools.getSymbol(args);
+            response = await this.tools.getSymbol(args);
+            break;
 
           case 'search_code':
-            return await this.tools.searchCode(args);
+            response = await this.tools.searchCode(args);
+            break;
 
           case 'who_calls':
-            return await this.tools.whoCalls(args);
+            response = await this.tools.whoCalls(args);
+            break;
 
           case 'list_dependencies':
-            return await this.tools.listDependencies(args);
+            response = await this.tools.listDependencies(args);
+            break;
 
           case 'impact_of':
-            return await this.tools.impactOf(args);
+            response = await this.tools.impactOf(args);
+            break;
 
           default:
             return this.formatErrorResponse(-32601, `Unknown tool: ${name}`, request.params);
         }
+
+        // Apply Phase 1 performance optimizations
+        response = optimizeResponsePayload(response);
+
+        // Apply compression if payload is large enough
+        const compressionEnabled = process.env.MCP_COMPRESSION_ENABLED !== 'false';
+        if (compressionEnabled) {
+          response = await compressResponsePayload(response, DEFAULT_COMPRESSION_CONFIG);
+        }
+
+        logger.debug('Tool call completed with optimizations', {
+          name,
+          compressed: response.metadata?.compressed,
+          compressionRatio: response.metadata?.compressionRatio
+        });
+
+        return response;
       } catch (error) {
         logger.error('Tool call failed', { name, error: (error as Error).message });
 

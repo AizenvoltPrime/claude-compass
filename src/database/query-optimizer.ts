@@ -83,12 +83,10 @@ export class QueryOptimizer {
             d.to_symbol_id,
             d.dependency_type,
             d.line_number,
-            d.confidence,
             d.created_at,
             d.updated_at,
             1 as depth,
-            ARRAY[d.from_symbol_id] as path,
-            d.confidence as total_confidence
+            ARRAY[d.from_symbol_id] as path
           FROM dependencies d
           WHERE d.to_symbol_id = ?
             ${dependencyTypes ? `AND d.dependency_type = ANY(?)` : ''}
@@ -102,17 +100,14 @@ export class QueryOptimizer {
             d.to_symbol_id,
             d.dependency_type,
             d.line_number,
-            d.confidence,
             d.created_at,
             d.updated_at,
             tc.depth + 1,
-            tc.path || d.from_symbol_id,
-            tc.total_confidence * d.confidence
+            tc.path || d.from_symbol_id
           FROM dependencies d
           INNER JOIN transitive_callers tc ON d.to_symbol_id = tc.from_symbol_id
           WHERE tc.depth < ?
             AND NOT (d.from_symbol_id = ANY(tc.path)) -- Cycle detection
-            AND tc.total_confidence > 0.01 -- Confidence threshold
             ${dependencyTypes ? `AND d.dependency_type = ANY(?)` : ''}
         )
         SELECT
@@ -130,7 +125,7 @@ export class QueryOptimizer {
         LEFT JOIN files ff ON fs.file_id = ff.id
         LEFT JOIN symbols ts ON tc.to_symbol_id = ts.id
         LEFT JOIN files tf ON ts.file_id = tf.id
-        ORDER BY tc.depth, tc.total_confidence DESC
+        ORDER BY tc.depth, tc.id DESC
         LIMIT ?
       `, [
         symbolId,
@@ -209,12 +204,10 @@ export class QueryOptimizer {
             d.to_symbol_id,
             d.dependency_type,
             d.line_number,
-            d.confidence,
             d.created_at,
             d.updated_at,
             1 as depth,
-            ARRAY[d.to_symbol_id] as path,
-            d.confidence as total_confidence
+            ARRAY[d.to_symbol_id] as path
           FROM dependencies d
           WHERE d.from_symbol_id = ?
             ${dependencyTypes ? `AND d.dependency_type = ANY(?)` : ''}
@@ -228,17 +221,14 @@ export class QueryOptimizer {
             d.to_symbol_id,
             d.dependency_type,
             d.line_number,
-            d.confidence,
             d.created_at,
             d.updated_at,
             td.depth + 1,
-            td.path || d.to_symbol_id,
-            td.total_confidence * d.confidence
+            td.path || d.to_symbol_id
           FROM dependencies d
           INNER JOIN transitive_dependencies td ON d.from_symbol_id = td.to_symbol_id
           WHERE td.depth < ?
             AND NOT (d.to_symbol_id = ANY(td.path)) -- Cycle detection
-            AND td.total_confidence > 0.01 -- Confidence threshold
             ${dependencyTypes ? `AND d.dependency_type = ANY(?)` : ''}
         )
         SELECT
@@ -256,7 +246,7 @@ export class QueryOptimizer {
         LEFT JOIN files ff ON fs.file_id = ff.id
         LEFT JOIN symbols ts ON td.to_symbol_id = ts.id
         LEFT JOIN files tf ON ts.file_id = tf.id
-        ORDER BY td.depth, td.total_confidence DESC
+        ORDER BY td.depth, td.id DESC
         LIMIT ?
       `, [
         symbolId,
@@ -345,7 +335,7 @@ export class QueryOptimizer {
       }
 
       query = query
-        .orderBy('d.confidence', 'desc')
+        .orderBy('d.id', 'desc')
         .limit(options.maxResults || this.DEFAULT_MAX_RESULTS);
 
       const results = await this.executeWithTimeout(query, options.timeoutMs);
@@ -395,7 +385,6 @@ export class QueryOptimizer {
       to_symbol_id: row.to_symbol_id,
       dependency_type: row.dependency_type,
       line_number: row.line_number,
-      confidence: row.confidence,
       created_at: row.created_at,
       updated_at: row.updated_at,
       from_symbol: row.from_symbol_id ? {

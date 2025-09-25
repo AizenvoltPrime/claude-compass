@@ -50,7 +50,6 @@ export interface Dependency {
   to_symbol_id: number;
   dependency_type: DependencyType;
   line_number?: number;
-  confidence: number;
   parameter_context?: string;
   call_instance_id?: string;
   parameter_types?: string[];
@@ -70,6 +69,76 @@ export interface EnhancedDependency extends Dependency {
   call_chain?: string;
   path?: number[];
   depth?: number;
+}
+
+// ===== PHASE 2: SIMPLIFIED DEPENDENCY INTERFACES =====
+// These interfaces support the "Return Everything, Let AI Decide" approach
+// by providing comprehensive relationship data for AI analysis
+
+/**
+ * Simplified dependency interface for Phase 2+ implementation
+ * Focuses on core dependency relationships without filtering thresholds
+ */
+export interface SimplifiedDependency {
+  from_symbol: string;
+  to_symbol: string;
+  dependency_type: DependencyType;
+  line_number?: number;
+  file_path?: string;
+}
+
+/**
+ * Simple dependency response format for MCP tools
+ * Phase 2: Clean response format with comprehensive relationship data
+ */
+export interface SimplifiedDependencyResponse {
+  dependencies: SimplifiedDependency[];
+  total_count: number;
+  query_info: {
+    symbol: string;
+    analysis_type: 'callers' | 'dependencies' | 'impact';
+    timestamp: string;
+  };
+}
+
+/**
+ * Simple cross-stack relationship for Vue ↔ Laravel analysis
+ * Phase 2: Comprehensive cross-stack analysis with all relationship data
+ */
+export interface SimpleCrossStackRelationship {
+  from_component: string;
+  to_endpoint: string;
+  relationship_type: 'api_call' | 'data_binding' | 'route_reference';
+  method?: string; // HTTP method for API calls
+  url_pattern?: string; // Route pattern
+  line_number?: number;
+}
+
+/**
+ * Simplified API call interface
+ * Phase 2: Comprehensive URL/method matching with all detected relationships
+ */
+export interface SimpleApiCall {
+  component: string;
+  method: string; // HTTP method (GET, POST, etc.)
+  url: string; // Request URL or pattern
+  controller_method?: string; // Laravel controller method
+  route_name?: string; // Laravel route name
+  line_number?: number;
+}
+
+/**
+ * Response format for simplified dependency list
+ * Phase 2: Flat list format optimized for AI processing
+ */
+export interface FlatDependencyResponse {
+  data: SimplifiedDependency[];
+  metadata: {
+    total_results: number;
+    query_type: string;
+    execution_time_ms: number;
+    optimizations_applied: string[];
+  };
 }
 
 // Enum types
@@ -116,7 +185,6 @@ export interface FileDependency {
   to_file_id: number;
   dependency_type: DependencyType;
   line_number?: number;
-  confidence: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -190,7 +258,6 @@ export interface CreateDependency {
   to_symbol_id: number;
   dependency_type: DependencyType;
   line_number?: number;
-  confidence?: number;
   parameter_context?: string;
   call_instance_id?: string;
   parameter_types?: string[];
@@ -211,7 +278,6 @@ export interface CreateFileDependency {
   to_file_id: number;
   dependency_type: DependencyType;
   line_number?: number;
-  confidence?: number;
 }
 
 // Query result types with relationships
@@ -363,7 +429,6 @@ export interface ComposableSearchOptions {
 // Phase 6 - Enhanced search options
 export interface SymbolSearchOptions {
   limit?: number;
-  confidenceThreshold?: number;
   symbolTypes?: SymbolType[];
   isExported?: boolean;
   framework?: string;
@@ -385,7 +450,6 @@ export interface HybridSearchOptions extends SymbolSearchOptions {
 export interface SearchResult<T = any> {
   item: T;
   score: number;
-  confidence: number;
   matchType: 'lexical' | 'vector' | 'fulltext';
 }
 
@@ -474,7 +538,6 @@ export interface ApiCall {
   url_pattern: string;
   request_schema: any;
   response_schema: any;
-  confidence: number;
   created_at: Date;
 }
 
@@ -566,7 +629,6 @@ export interface ORMRelationship {
   foreign_key?: string;
   through_table?: string;
   inverse_relationship_id?: number;
-  confidence: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -639,7 +701,6 @@ export interface TestCoverage {
   target_symbol_id: number;
   coverage_type: TestCoverageType;
   line_number?: number;
-  confidence: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -772,7 +833,6 @@ export interface CreateORMRelationship {
   foreign_key?: string;
   through_table?: string;
   inverse_relationship_id?: number;
-  confidence?: number;
 }
 
 export interface CreateORMRepository {
@@ -808,7 +868,6 @@ export interface CreateTestCoverage {
   target_symbol_id: number;
   coverage_type: TestCoverageType;
   line_number?: number;
-  confidence?: number;
 }
 
 export interface CreatePackageDependency {
@@ -842,7 +901,6 @@ export interface CreateApiCall {
   url_pattern: string;
   request_schema?: any;
   response_schema?: any;
-  confidence?: number;
 }
 
 export interface CreateDataContract {
@@ -927,7 +985,6 @@ export interface GodotRelationship {
   to_entity_type: GodotEntityType;
   to_entity_id: number;
   resource_id?: string;
-  confidence: number;
   metadata: Record<string, any>;
   created_at: Date;
   updated_at: Date;
@@ -1007,7 +1064,6 @@ export interface CreateGodotRelationship {
   to_entity_type: GodotEntityType;
   to_entity_id: number;
   resource_id?: string;
-  confidence?: number;
   metadata?: Record<string, any>;
 }
 
@@ -1073,6 +1129,5 @@ export interface GodotRelationshipSearchOptions {
   from_entity_id?: number;
   to_entity_type?: GodotEntityType;
   to_entity_id?: number;
-  min_confidence?: number;
   limit?: number;
 }

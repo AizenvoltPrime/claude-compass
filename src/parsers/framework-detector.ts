@@ -9,7 +9,6 @@ const logger = createComponentLogger('framework-detector');
  */
 export interface FrameworkDetectionResult {
   frameworks: DetectedFramework[];
-  confidence: number;
   metadata: {
     hasPackageJson: boolean;
     hasComposerJson: boolean;
@@ -24,7 +23,6 @@ export interface FrameworkDetectionResult {
 export interface DetectedFramework {
   name: string;
   version?: string;
-  confidence: number;
   evidence: FrameworkEvidence[];
   features: string[];
 }
@@ -36,7 +34,6 @@ export interface FrameworkEvidence {
   type: 'dependency' | 'devDependency' | 'config' | 'directory' | 'file';
   source: string;
   value: string;
-  confidence: number;
 }
 
 /**
@@ -52,7 +49,6 @@ interface FrameworkPattern {
     configs?: string[];
     features?: string[];
   };
-  baseConfidence: number;
 }
 
 /**
@@ -71,7 +67,6 @@ export class FrameworkDetector {
         configs: ['vue.config.js', 'vite.config.js'],
         features: ['sfc', 'composition-api', 'vue-router', 'pinia', 'vuex']
       },
-      baseConfidence: 0.8
     },
 
     // Next.js
@@ -85,7 +80,6 @@ export class FrameworkDetector {
         configs: ['next.config.js', 'next.config.mjs'],
         features: ['pages-router', 'app-router', 'api-routes', 'middleware', 'ssr']
       },
-      baseConfidence: 0.9
     },
 
     // React
@@ -99,7 +93,6 @@ export class FrameworkDetector {
         configs: ['craco.config.js', 'react-app-env.d.ts'],
         features: ['hooks', 'jsx', 'tsx', 'context']
       },
-      baseConfidence: 0.7
     },
 
     // Node.js/Express
@@ -113,7 +106,6 @@ export class FrameworkDetector {
         configs: ['nodemon.json', 'pm2.config.js'],
         features: ['express-routes', 'middleware', 'rest-api']
       },
-      baseConfidence: 0.6
     },
 
     // Test Frameworks
@@ -127,7 +119,6 @@ export class FrameworkDetector {
         configs: ['jest.config.js', 'vitest.config.js', 'cypress.json', 'playwright.config.js'],
         features: ['unit-tests', 'integration-tests', 'e2e-tests', 'test-coverage']
       },
-      baseConfidence: 0.7
     },
 
     // Package Managers
@@ -141,7 +132,6 @@ export class FrameworkDetector {
         configs: ['lerna.json', 'nx.json', 'turbo.json', 'pnpm-workspace.yaml'],
         features: ['workspaces', 'monorepo', 'package-management']
       },
-      baseConfidence: 0.9
     },
 
     // Background Job Systems
@@ -155,7 +145,6 @@ export class FrameworkDetector {
         configs: ['bull.config.js', 'agenda.config.js'],
         features: ['job-queues', 'worker-threads', 'job-scheduling', 'background-processing']
       },
-      baseConfidence: 0.8
     },
 
     // ORM Systems
@@ -169,7 +158,6 @@ export class FrameworkDetector {
         configs: ['ormconfig.json', 'mikro-orm.config.js', 'sequelize.config.js'],
         features: ['database-models', 'migrations', 'relationships', 'orm-mapping']
       },
-      baseConfidence: 0.8
     },
 
     // Laravel Framework
@@ -198,7 +186,6 @@ export class FrameworkDetector {
           'dependency-injection'
         ]
       },
-      baseConfidence: 0.9
     },
 
     // Godot Game Engine
@@ -220,7 +207,6 @@ export class FrameworkDetector {
           'scene-tree'
         ]
       },
-      baseConfidence: 0.95
     }
   ];
 
@@ -248,21 +234,18 @@ export class FrameworkDetector {
           projectPath
         );
 
-        if (detection.confidence > 0.2) {
+        // Only include frameworks that have strong evidence (dependencies, configs)
+        // to avoid false positives from shared directory structures
+        const hasStrongEvidence = detection.evidence.some(e =>
+          e.type === 'dependency' || e.type === 'devDependency' || e.type === 'config'
+        );
+        if (hasStrongEvidence) {
           detectedFrameworks.push(detection);
         }
       }
 
-      // Sort by confidence
-      detectedFrameworks.sort((a, b) => b.confidence - a.confidence);
-
-      const overallConfidence = detectedFrameworks.length > 0
-        ? detectedFrameworks.reduce((sum, fw) => sum + fw.confidence, 0) / detectedFrameworks.length
-        : 0;
-
       return {
         frameworks: detectedFrameworks,
-        confidence: Math.min(overallConfidence, 1.0),
         metadata: {
           hasPackageJson: packageJson !== null,
           hasComposerJson: composerJson !== null,
@@ -275,7 +258,6 @@ export class FrameworkDetector {
       logger.error(`Framework detection failed for ${projectPath}`, { error });
       return {
         frameworks: [],
-        confidence: 0,
         metadata: {
           hasPackageJson: false,
           hasComposerJson: false,
@@ -298,7 +280,6 @@ export class FrameworkDetector {
     projectPath: string
   ): Promise<DetectedFramework> {
     const evidence: FrameworkEvidence[] = [];
-    let confidence = 0;
     const features: string[] = [];
 
     // Check dependencies
@@ -308,10 +289,8 @@ export class FrameworkDetector {
           evidence.push({
             type: 'dependency',
             source: 'package.json',
-            value: `${dep}@${packageJson.dependencies[dep]}`,
-            confidence: 0.8
+            value: `${dep}@${packageJson.dependencies[dep]}`
           });
-          confidence += 0.8;
         }
       }
     }
@@ -323,10 +302,8 @@ export class FrameworkDetector {
           evidence.push({
             type: 'devDependency',
             source: 'package.json',
-            value: `${dep}@${packageJson.devDependencies[dep]}`,
-            confidence: 0.6
+            value: `${dep}@${packageJson.devDependencies[dep]}`
           });
-          confidence += 0.6;
         }
       }
     }
@@ -338,10 +315,8 @@ export class FrameworkDetector {
           evidence.push({
             type: 'dependency',
             source: 'composer.json',
-            value: `${dep}@${composerJson.require[dep]}`,
-            confidence: 0.8
+            value: `${dep}@${composerJson.require[dep]}`
           });
-          confidence += 0.8;
         }
       }
     }
@@ -353,10 +328,8 @@ export class FrameworkDetector {
           evidence.push({
             type: 'devDependency',
             source: 'composer.json',
-            value: `${dep}@${composerJson['require-dev'][dep]}`,
-            confidence: 0.6
+            value: `${dep}@${composerJson['require-dev'][dep]}`
           });
-          confidence += 0.6;
         }
       }
     }
@@ -368,10 +341,8 @@ export class FrameworkDetector {
           evidence.push({
             type: 'config',
             source: 'filesystem',
-            value: configFile,
-            confidence: 0.7
+            value: configFile
           });
-          confidence += 0.7;
         }
       }
     }
@@ -383,10 +354,8 @@ export class FrameworkDetector {
           evidence.push({
             type: 'directory',
             source: 'filesystem',
-            value: dir,
-            confidence: 0.4
+            value: dir
           });
-          confidence += 0.4;
         }
       }
     }
@@ -402,21 +371,9 @@ export class FrameworkDetector {
       features.push(...await this.detectNodeJSFeatures(projectPath, packageJson));
     }
 
-    // Require at least one strong evidence type (dependency, devDependency, or config)
-    // to avoid false positives based purely on directory structure
-    const hasStrongEvidence = evidence.some(e =>
-      e.type === 'dependency' || e.type === 'devDependency' || e.type === 'config'
-    );
-
-    // If no strong evidence, set confidence to 0 to filter out weak detections
-    const finalConfidence = hasStrongEvidence
-      ? Math.min(confidence * pattern.baseConfidence, 1.0)
-      : 0;
-
     return {
       name: pattern.name,
       version: this.extractFrameworkVersion(pattern.name, packageJson),
-      confidence: finalConfidence,
       evidence,
       features
     };
@@ -752,7 +709,7 @@ export class FrameworkDetector {
 
     // Add framework-specific parsers based on detection and file type
     for (const framework of detectionResult.frameworks) {
-      if (framework.confidence < 0.3) continue;
+      // Process all frameworks (removed confidence filtering)
 
       switch (framework.name) {
         case 'vue':

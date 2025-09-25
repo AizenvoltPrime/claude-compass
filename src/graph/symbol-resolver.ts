@@ -16,7 +16,6 @@ export interface ResolvedDependency {
   fromSymbol: Symbol;
   toSymbol: Symbol;
   originalDependency: ParsedDependency;
-  confidence: number;
 }
 
 /**
@@ -243,14 +242,10 @@ export class SymbolResolver {
       return null;
     }
 
-    // Calculate confidence based on resolution method
-    const confidence = this.calculateConfidence(sourceContext, toSymbol, dependency);
-
     return {
       fromSymbol,
       toSymbol,
-      originalDependency: dependency,
-      confidence
+      originalDependency: dependency
     };
   }
 
@@ -754,57 +749,6 @@ export class SymbolResolver {
     return false;
   }
 
-  /**
-   * Calculate confidence score for a resolved dependency
-   */
-  private calculateConfidence(
-    sourceContext: SymbolResolutionContext,
-    targetSymbol: Symbol,
-    dependency: ParsedDependency
-  ): number {
-    // Base confidence
-    let confidence = 0.5;
-
-    // Same file - higher confidence
-    if (targetSymbol.file_id === sourceContext.fileId) {
-      confidence = 0.9;
-    }
-    // Explicitly imported - high confidence
-    else if (this.isExplicitlyImported(sourceContext, targetSymbol.name)) {
-      confidence = 0.8;
-    }
-    // Store method resolution - high confidence
-    else if (this.isStoreMethodResolution(sourceContext, targetSymbol)) {
-      confidence = 0.85;
-    }
-    // Single global export - medium confidence
-    else {
-      const exportedOptions = this.exportedSymbols.get(targetSymbol.name) || [];
-      if (exportedOptions.length === 1) {
-        confidence = 0.6;
-      } else {
-        // Multiple exports - lower confidence
-        confidence = 0.3;
-      }
-    }
-
-    // Adjust based on dependency type
-    switch (dependency.dependency_type) {
-      case 'calls':
-        confidence *= 1.0; // Function calls are usually explicit
-        break;
-      case 'references':
-        confidence *= 0.8; // References might be less certain
-        break;
-      case 'imports':
-        confidence = 0.95; // Imports are very explicit
-        break;
-      default:
-        confidence *= 0.7;
-    }
-
-    return Math.min(confidence, 1.0);
-  }
 
   /**
    * Check if a symbol is explicitly imported in the file
@@ -814,7 +758,7 @@ export class SymbolResolver {
   }
 
   /**
-   * Check if this is a store method resolution (high confidence pattern)
+   * Check if this is a store method resolution
    */
   private isStoreMethodResolution(sourceContext: SymbolResolutionContext, targetSymbol: Symbol): boolean {
     // Check if target symbol is a method in a store file

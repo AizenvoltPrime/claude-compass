@@ -59,10 +59,7 @@ namespace Game.Cards {
       expect(updatePositionsCall?.from_symbol).toContain('SetHandPositions');
       expect(validateLayoutCall?.from_symbol).toContain('SetHandPositions');
 
-      // Verify high confidence for conditional access calls
-      expect(setHandPositionsCall?.confidence).toBeGreaterThan(0.8);
-      expect(updatePositionsCall?.confidence).toBeGreaterThan(0.8);
-      expect(validateLayoutCall?.confidence).toBeGreaterThan(0.8);
+      // Verify conditional access calls are properly detected
     });
 
     test('should detect chained conditional access calls', async () => {
@@ -369,11 +366,11 @@ namespace Game.Cards {
       expect(callers.some(caller => caller.includes('SetupPlayerPositions'))).toBe(true);
       expect(callers.some(caller => caller.includes('CardManager') && caller.includes('SetHandPositions'))).toBe(true);
 
-      // Verify the conditional access call has appropriate confidence
+      // Verify the conditional access call is detected correctly
       const conditionalAccessCall = methodCalls.find(call =>
         call.from_symbol.includes('CardManager') && call.from_symbol.includes('SetHandPositions')
       );
-      expect(conditionalAccessCall?.confidence).toBeGreaterThan(0.8);
+      expect(conditionalAccessCall).toBeDefined();
     });
   });
 
@@ -492,7 +489,6 @@ namespace Game.Cards {
         from: call.from_symbol,
         to: call.to_symbol,
         line: call.line_number,
-        confidence: call.confidence
       })));
 
       // This assertion should FAIL initially, proving the issue exists

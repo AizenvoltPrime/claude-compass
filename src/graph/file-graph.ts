@@ -80,7 +80,6 @@ export class FileGraphBuilder {
         to_file_id: edge.to,
         dependency_type: DependencyType.IMPORTS,
         line_number: edge.lineNumber,
-        confidence: edge.isDynamic ? 0.8 : 1.0
       });
     }
 
