@@ -11,6 +11,7 @@ Claude Compass creates comprehensive dependency maps of your codebase. Instead o
 ## The Problem
 
 AI assistants suffer from **context gaps** - they make suggestions without understanding:
+
 - Hidden dependencies and framework relationships
 - Blast radius of changes
 - Cross-stack connections (Vue ↔ Laravel)
@@ -24,21 +25,25 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 ### Core Capabilities
 
 **🔍 Parse and Map Code Reality**
+
 - Parse codebases with Tree-sitter
 - Build multiple graph types (files, symbols, framework-specific)
 - Extract framework relationships (routes, jobs, cross-stack connections)
 
 **📊 Dependency Analysis**
+
 - Map function calls, imports, and framework relationships
 - Track cross-stack dependencies (Vue ↔ Laravel)
 - Build comprehensive dependency graphs with confidence scoring
 
 **🔌 MCP Integration**
+
 - Expose graphs and tools via Model Context Protocol
 - Enable AI assistants to query dependency information
 - Provide impact analysis and blast radius calculation
 
 **🔧 Framework Understanding**
+
 - Detect Vue components, Laravel routes, background jobs
 - Map API calls between frontend and backend
 - Track test coverage relationships
@@ -46,6 +51,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 ### Supported Frameworks
 
 **Languages & Frameworks:**
+
 - ✅ **JavaScript/TypeScript** - Full ES6, CommonJS, dynamic imports support
 - ✅ **Vue.js** - Single File Components, Vue Router, Pinia/Vuex, composables
 - ✅ **Next.js** - Pages/App router, API routes, middleware, SSR/SSG
@@ -56,6 +62,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 - ✅ **Cross-stack Integration** - Vue ↔ Laravel dependency tracking and API mapping
 
 **Advanced Features:**
+
 - ✅ **Background Jobs** - Bull, BullMQ, Agenda, Bee, Kue, Worker Threads
 - ✅ **Test Frameworks** - Jest, Vitest, Cypress, Playwright with coverage analysis
 - ✅ **ORM Systems** - Prisma, TypeORM, Sequelize, Mongoose, MikroORM
@@ -66,6 +73,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 ## Architecture
 
 ### Technology Stack
+
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
 - **Search**: PostgreSQL full-text search with ranking
@@ -73,6 +81,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 - **MCP Server**: Node.js/TypeScript implementation
 
 ### Graph Types
+
 - **File Graph**: Import/export relationships
 - **Symbol Graph**: Function calls, inheritance, references
 - **Framework Graphs**: Routes, dependency injection, jobs, ORM entities
@@ -112,10 +121,10 @@ npm test
 ## Roadmap
 
 **Future Development:**
+
 - **Specification Tracking & Drift Detection** - API contract validation and documentation integration
 - **Python/Django Support** - Python framework support for web development
 - **Enhanced AI Integration** - Advanced AI-powered code analysis and suggestions
-
 
 ## Success Metrics
 
@@ -128,4 +137,47 @@ npm test
 
 ## Contributing
 
-[Contributing guidelines to be added]
+We welcome contributions! Please follow these guidelines:
+
+### Getting Started
+
+1. Fork the repository
+2. Clone your fork: `git clone https://github.com/your-username/claude-compass.git`
+3. Install dependencies: `npm install --force` (required due to Tree-sitter dependencies)
+4. Set up the database: `npm run docker:up && npm run migrate:latest`
+
+### Development Workflow
+
+1. Create a feature branch: `git checkout -b feature/your-feature-name`
+2. Make your changes following the existing code style
+3. Add tests for new functionality
+4. Run tests individually (full test suite has Tree-sitter dependency conflicts): `npm test -- tests/specific-test.test.ts`
+5. Build the project: `npx tsc`
+6. Commit with descriptive messages
+7. Push to your fork and create a pull request
+
+### Code Guidelines
+
+- Follow TypeScript best practices
+- Add JSDoc comments for public APIs
+- Maintain test coverage for new features
+- Use existing patterns for parsers and database operations
+- Follow the established project structure in `src/`
+
+### Testing
+
+- Write unit tests for new parsers in `tests/parsers/`
+- Add integration tests for database operations
+- Test framework-specific features thoroughly
+- Run tests individually due to Tree-sitter dependency conflicts: `npm test -- tests/specific-test.test.ts`
+- Use `NODE_ENV=test` for test database operations
+- Ensure relevant tests pass before submitting PRs
+
+### Pull Request Process
+
+1. Update documentation if needed
+2. Add yourself to contributors if it's your first contribution
+3. Ensure CI passes
+4. Request review from maintainers
+
+For questions or discussions, please open an issue first.
