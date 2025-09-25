@@ -52,7 +52,6 @@ export interface FrameworkPattern {
   name: string;
   pattern: RegExp;
   fileExtensions: string[];
-  confidence: number;
   description: string;
 }
 
@@ -365,35 +364,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     return exports;
   }
 
-  /**
-   * Get confidence score for framework detection
-   */
-  public getFrameworkConfidence(filePath: string, content: string): number {
-    let totalConfidence = 0;
-    let matchCount = 0;
-
-    for (const pattern of this.patterns) {
-      const ext = path.extname(filePath);
-
-      // Check file extension match
-      if (pattern.fileExtensions.includes(ext)) {
-        totalConfidence += pattern.confidence * 0.3; // 30% weight for extension
-        matchCount++;
-      }
-
-      // Check content pattern match
-      try {
-        if (pattern.pattern.test(content)) {
-          totalConfidence += pattern.confidence * 0.7; // 70% weight for content
-          matchCount++;
-        }
-      } catch (error) {
-        logger.warn(`Pattern test failed for ${pattern.name}`, { error });
-      }
-    }
-
-    return matchCount > 0 ? Math.min(totalConfidence / matchCount, 1.0) : 0;
-  }
 
   /**
    * Implementation of parseFileDirectly required by ChunkedParser
@@ -675,8 +645,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         from_symbol: 'caller',
         to_symbol: functionName,
         dependency_type: 'calls' as DependencyType,
-        line_number: node.startPosition.row + 1,
-        confidence: 0.8
+        line_number: node.startPosition.row + 1
       };
     } catch (error) {
       return null;

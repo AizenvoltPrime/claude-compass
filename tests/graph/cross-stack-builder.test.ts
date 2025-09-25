@@ -211,7 +211,6 @@ describe('CrossStackGraphBuilder', () => {
           url_pattern: '/api/users',
           request_schema: null,
           response_schema: { type: 'array', items: { $ref: '#/definitions/User' } },
-          confidence: 0.95,
           created_at: new Date()
         },
         {
@@ -223,7 +222,6 @@ describe('CrossStackGraphBuilder', () => {
           url_pattern: '/api/users/{id}',
           request_schema: null,
           response_schema: { $ref: '#/definitions/User' },
-          confidence: 0.90,
           created_at: new Date()
         }
       ];
@@ -235,7 +233,6 @@ describe('CrossStackGraphBuilder', () => {
       expect(result.edges.length).toBeGreaterThan(0);
       expect(result.nodes.length).toBe(result.nodes.length);
       expect(result.edges.length).toBe(result.edges.length);
-      expect(result.metadata.confidence).toBeGreaterThan(0.8);
 
       // Check that Vue components are represented as nodes
       const vueComponentNodes = result.nodes.filter(node => node.type === 'vue_component');
@@ -287,7 +284,6 @@ describe('CrossStackGraphBuilder', () => {
         url_pattern: `/api/data/${i}`,
         request_schema: null,
         response_schema: { $ref: '#/definitions/Data' },
-        confidence: 0.8 + (Math.random() * 0.2), // Random confidence between 0.8-1.0
         created_at: new Date()
       }));
 
@@ -448,8 +444,7 @@ describe('CrossStackGraphBuilder', () => {
             backend_route_id: 1,
             method: 'GET',
             url_pattern: '/api/users',
-            confidence: 0.95,
-            created_at: new Date()
+              created_at: new Date()
           }
         ] as ApiCall[],
         dataContracts: [
@@ -547,7 +542,6 @@ describe('CrossStackGraphBuilder', () => {
       expect(result.edges).toHaveLength(0);
       expect(result.nodes.length).toBe(0);
       expect(result.edges.length).toBe(0);
-      expect(result.metadata.confidence).toBe(0);
     });
 
     it('should handle database errors gracefully', async () => {
@@ -619,40 +613,25 @@ describe('CrossStackGraphBuilder', () => {
       }).not.toThrow();
     });
 
-    it('should validate confidence scores', async () => {
-      const invalidApiCalls: ApiCall[] = [
+    it('should handle API calls without valid symbol mapping', async () => {
+      const apiCallsWithoutMapping: ApiCall[] = [
         {
           id: 1,
           repo_id: 1,
-          frontend_symbol_id: 1,
-          backend_route_id: 1,
+          frontend_symbol_id: 999, // Non-existent symbol
+          backend_route_id: 999,   // Non-existent route
           method: 'GET',
           url_pattern: '/api/test',
           request_schema: null,
           response_schema: null,
-          confidence: 1.5, // Invalid confidence > 1.0
-          created_at: new Date()
-        },
-        {
-          id: 2,
-          repo_id: 1,
-          frontend_symbol_id: 2,
-          backend_route_id: 2,
-          method: 'POST',
-          url_pattern: '/api/test2',
-          request_schema: null,
-          response_schema: null,
-          confidence: -0.1, // Invalid confidence < 0.0
           created_at: new Date()
         }
       ];
 
-      const result = await builder.buildAPICallGraph([], [], invalidApiCalls);
+      const result = await builder.buildAPICallGraph([], [], apiCallsWithoutMapping);
 
       expect(result).toBeDefined();
-      // Should handle invalid confidence scores gracefully
-      expect(result.metadata.confidence).toBeGreaterThanOrEqual(0);
-      expect(result.metadata.confidence).toBeLessThanOrEqual(1);
+      expect(result.nodes).toHaveLength(0);
     });
   });
 
@@ -692,12 +671,12 @@ describe('CrossStackGraphBuilder', () => {
         {
           id: 1, repo_id: 1, frontend_symbol_id: 1, backend_route_id: 1,
           method: 'GET', url_pattern: '/api/users', request_schema: null, response_schema: null,
-          confidence: 0.9, created_at: new Date()
+          created_at: new Date()
         },
         {
           id: 2, repo_id: 1, frontend_symbol_id: 2, backend_route_id: 2,
           method: 'GET', url_pattern: '/api/users/{id}', request_schema: null, response_schema: null,
-          confidence: 0.8, created_at: new Date()
+          created_at: new Date()
         }
       ];
 
@@ -705,11 +684,6 @@ describe('CrossStackGraphBuilder', () => {
 
       expect(result.nodes.length).toBe(4); // 2 components + 2 routes (API calls create edges, not nodes)
       expect(result.edges.length).toBeGreaterThanOrEqual(0); // Edges depend on valid symbol/entity mapping
-      expect(result.metadata.confidence).toBeCloseTo(0.85, 2); // (0.9 + 0.8) / 2
-      // Note: confidenceDistribution not implemented in current interface
-      // expect(result.metrics.confidenceDistribution.high).toBe(1); // confidence > 0.8
-      // expect(result.metrics.confidenceDistribution.medium).toBe(1); // 0.6 ≤ confidence ≤ 0.8
-      // expect(result.metrics.confidenceDistribution.low).toBe(0); // confidence < 0.6
     });
   });
 });

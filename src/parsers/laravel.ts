@@ -185,7 +185,6 @@ export interface LaravelApiSchema extends FrameworkEntity {
   httpMethod: string;
   requestValidation?: ValidationRule[];
   responseSchema?: any;
-  confidence: number;
   location: {
     line: number;
     column: number;
@@ -212,7 +211,6 @@ export interface LaravelResponseSchema extends FrameworkEntity {
   controllerAction: string;
   responseType: 'json' | 'resource' | 'collection' | 'custom';
   structure: any;
-  confidence: number;
   framework: 'laravel';
 }
 
@@ -249,63 +247,54 @@ export class LaravelParser extends BaseFrameworkParser {
         name: 'laravel-controller',
         pattern: /class\s+\w+Controller\s+extends\s+(Controller|BaseController)/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Laravel controller classes extending base Controller'
       },
       {
         name: 'laravel-model',
         pattern: /class\s+\w+\s+extends\s+Model/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Eloquent model classes extending Model'
       },
       {
         name: 'laravel-route',
         pattern: /Route::(get|post|put|delete|patch|any|match|resource|group)/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel route definitions using Route facade'
       },
       {
         name: 'laravel-middleware',
         pattern: /class\s+\w+\s+(implements\s+.*Middleware|extends\s+.*Middleware)/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel middleware classes'
       },
       {
         name: 'laravel-service-provider',
         pattern: /class\s+\w+ServiceProvider\s+extends\s+ServiceProvider/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Laravel service provider classes'
       },
       {
         name: 'laravel-job',
         pattern: /class\s+\w+\s+implements\s+.*ShouldQueue/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel queueable job classes'
       },
       {
         name: 'laravel-command',
         pattern: /class\s+\w+\s+extends\s+Command/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel Artisan command classes'
       },
       {
         name: 'laravel-migration',
         pattern: /class\s+\w+\s+extends\s+Migration/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel database migration classes'
       },
       {
         name: 'laravel-seeder',
         pattern: /class\s+\w+\s+extends\s+Seeder/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel database seeder classes'
       },
       // Missing Laravel entity patterns from improvement plan
@@ -313,70 +302,60 @@ export class LaravelParser extends BaseFrameworkParser {
         name: 'laravel-form-request',
         pattern: /class\s+\w+\s+extends\s+FormRequest/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Laravel Form Request classes for validation'
       },
       {
         name: 'laravel-event',
         pattern: /class\s+\w+\s+implements\s+.*ShouldBroadcast/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Laravel Event classes with broadcasting'
       },
       {
         name: 'laravel-mail',
         pattern: /class\s+\w+\s+extends\s+Mailable/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Laravel Mail classes'
       },
       {
         name: 'laravel-policy',
         pattern: /class\s+\w+.*Policy/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel Policy classes for authorization'
       },
       {
         name: 'laravel-listener',
         pattern: /class\s+\w+.*\s+public\s+function\s+handle/,
         fileExtensions: ['.php'],
-        confidence: 0.7,
         description: 'Laravel Event Listener classes'
       },
       {
         name: 'laravel-factory',
         pattern: /class\s+\w+Factory\s+extends\s+Factory/,
         fileExtensions: ['.php'],
-        confidence: 0.9,
         description: 'Laravel Factory classes for model generation'
       },
       {
         name: 'laravel-trait',
         pattern: /trait\s+\w+/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'PHP Traits used in Laravel applications'
       },
       {
         name: 'laravel-resource',
         pattern: /class\s+\w+\s+extends\s+.*Resource/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel API Resource classes'
       },
       {
         name: 'laravel-observer',
         pattern: /class\s+\w+Observer/,
         fileExtensions: ['.php'],
-        confidence: 0.8,
         description: 'Laravel Model Observer classes'
       },
       {
         name: 'laravel-service',
         pattern: /class\s+\w+Service/,
         fileExtensions: ['.php'],
-        confidence: 0.7,
         description: 'Laravel Service classes for business logic'
       }
     ];
@@ -436,11 +415,6 @@ export class LaravelParser extends BaseFrameworkParser {
       // Extract response schema
       const responseSchema = this.extractResponseSchema(methodNode, content);
 
-      // Calculate confidence based on available information
-      let confidence = 0.5;
-      if (requestValidation.length > 0) confidence += 0.2;
-      if (responseSchema) confidence += 0.2;
-      if (httpMethod !== 'GET') confidence += 0.1; // Non-GET methods more likely to be API
 
       return {
         type: 'api_schema',
@@ -451,7 +425,6 @@ export class LaravelParser extends BaseFrameworkParser {
         httpMethod,
         requestValidation: requestValidation.length > 0 ? requestValidation : undefined,
         responseSchema,
-        confidence,
         location: {
           line: methodNode.startPosition.row + 1,
           column: methodNode.startPosition.column,

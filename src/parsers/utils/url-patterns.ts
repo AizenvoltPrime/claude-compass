@@ -18,7 +18,6 @@ export interface UrlPattern {
   normalized: string;
   parameters: RouteParameter[];
   queryParams: string[];
-  confidence: number;
   isStatic: boolean;
 }
 
@@ -44,7 +43,6 @@ export function normalizeUrlPattern(url: string): UrlPattern {
       normalized: '',
       parameters: [],
       queryParams: [],
-      confidence: 0,
       isStatic: false
     };
   }
@@ -52,12 +50,10 @@ export function normalizeUrlPattern(url: string): UrlPattern {
   let normalized = url.trim();
   const parameters: RouteParameter[] = [];
   const queryParams: string[] = [];
-  let confidence = 1.0;
 
   // Remove template literal backticks if present
   if (normalized.startsWith('`') && normalized.endsWith('`')) {
     normalized = normalized.slice(1, -1);
-    confidence *= 0.95; // Slightly lower confidence for template literals
   }
 
   // Remove leading/trailing whitespace and normalize slashes
@@ -109,7 +105,6 @@ export function normalizeUrlPattern(url: string): UrlPattern {
           optional: false,
           originalPattern: match
         });
-        confidence *= 0.8; // Lower confidence for string concatenation
         return `{${paramName}}`;
       }
     }
@@ -138,16 +133,12 @@ export function normalizeUrlPattern(url: string): UrlPattern {
   // Determine if URL is static (no parameters)
   const isStatic = parameters.length === 0 && queryParams.length === 0;
 
-  // Adjust confidence based on complexity
-  if (parameters.length > 3) confidence *= 0.9; // Many parameters reduce confidence
-  if (normalized.includes('..') || normalized.includes('//')) confidence *= 0.5; // Invalid patterns
 
   return {
     original: url,
     normalized,
     parameters,
     queryParams,
-    confidence: Math.max(0, Math.min(1, confidence)),
     isStatic
   };
 }
@@ -407,32 +398,6 @@ export function parseUrlConstruction(code: string): UrlPattern[] {
   return patterns;
 }
 
-/**
- * Validates URL pattern quality and returns confidence adjustments
- */
-export function validateUrlPattern(pattern: UrlPattern): number {
-  let confidence = pattern.confidence;
-
-  // Penalize overly complex patterns
-  if (pattern.parameters.length > 5) {
-    confidence *= 0.7;
-  }
-
-  // Penalize unclear parameter names
-  const unclearParams = pattern.parameters.filter(p =>
-    p.name.length < 2 || /^[a-z]$/.test(p.name)
-  );
-  if (unclearParams.length > 0) {
-    confidence *= 0.8;
-  }
-
-  // Boost confidence for well-structured REST patterns
-  if (isRestfulPattern(pattern.normalized)) {
-    confidence *= 1.1;
-  }
-
-  return Math.max(0, Math.min(1, confidence));
-}
 
 /**
  * Checks if a URL follows RESTful conventions

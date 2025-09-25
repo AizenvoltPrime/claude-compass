@@ -28,7 +28,6 @@ export enum CrossStackErrorType {
   SCHEMA_COMPATIBILITY_ERROR = 'schema_compatibility_error',
   DATABASE_OPERATION_ERROR = 'database_operation_error',
   GRAPH_CONSTRUCTION_ERROR = 'graph_construction_error',
-  CONFIDENCE_CALCULATION_ERROR = 'confidence_calculation_error',
   MEMORY_PRESSURE = 'memory_pressure',
   PERFORMANCE_DEGRADATION = 'performance_degradation',
   SCHEMA_DRIFT_DETECTED = 'schema_drift_detected',
@@ -59,7 +58,6 @@ export interface CrossStackMetrics {
   executionTimeMs: number;
   memoryUsedMB: number;
   cacheHitRate: number;
-  confidenceScore: number;
   errorCount: number;
   timestamp: Date;
 }
@@ -93,7 +91,6 @@ export class CrossStackErrorHandler extends EventEmitter {
   private readonly MAX_METRICS = 5000;
   private readonly PERFORMANCE_THRESHOLD_MS = 5000;
   private readonly MEMORY_THRESHOLD_MB = 100;
-  private readonly CONFIDENCE_THRESHOLD = 0.3;
 
   constructor() {
     super();
@@ -178,7 +175,6 @@ export class CrossStackErrorHandler extends EventEmitter {
     executionTimeMs: number,
     memoryUsedMB: number,
     cacheHitRate: number = 0,
-    confidenceScore: number = 0,
     errorCount: number = 0
   ): void {
     const metrics: CrossStackMetrics = {
@@ -186,7 +182,6 @@ export class CrossStackErrorHandler extends EventEmitter {
       executionTimeMs,
       memoryUsedMB,
       cacheHitRate,
-      confidenceScore,
       errorCount,
       timestamp: new Date()
     };
@@ -213,15 +208,6 @@ export class CrossStackErrorHandler extends EventEmitter {
       );
     }
 
-    // Check for low confidence scores
-    if (confidenceScore > 0 && confidenceScore < this.CONFIDENCE_THRESHOLD) {
-      this.handleError(
-        CrossStackErrorType.RELATIONSHIP_ACCURACY_ALERT,
-        ErrorSeverity.LOW,
-        `Operation ${operationType} produced low confidence score: ${confidenceScore}`,
-        { metrics }
-      );
-    }
 
     // Emit metrics event
     this.emit('metrics', metrics);
@@ -384,8 +370,7 @@ export class CrossStackErrorHandler extends EventEmitter {
       performance: {
         avgExecutionTime: recentMetrics.reduce((sum, m) => sum + m.executionTimeMs, 0) / Math.max(recentMetrics.length, 1),
         avgMemoryUsage: recentMetrics.reduce((sum, m) => sum + m.memoryUsedMB, 0) / Math.max(recentMetrics.length, 1),
-        avgCacheHitRate: recentMetrics.reduce((sum, m) => sum + m.cacheHitRate, 0) / Math.max(recentMetrics.length, 1),
-        avgConfidenceScore: recentMetrics.reduce((sum, m) => sum + m.confidenceScore, 0) / Math.max(recentMetrics.length, 1)
+        avgCacheHitRate: recentMetrics.reduce((sum, m) => sum + m.cacheHitRate, 0) / Math.max(recentMetrics.length, 1)
       },
       health: {
         overallStatus: this.calculateHealthStatus(recentErrors, recentMetrics),
@@ -411,7 +396,6 @@ export class CrossStackErrorHandler extends EventEmitter {
       [CrossStackErrorType.SCHEMA_COMPATIBILITY_ERROR]: 'Use partial schema matching',
       [CrossStackErrorType.DATABASE_OPERATION_ERROR]: 'Retry with exponential backoff',
       [CrossStackErrorType.GRAPH_CONSTRUCTION_ERROR]: 'Build graph with available data only',
-      [CrossStackErrorType.CONFIDENCE_CALCULATION_ERROR]: 'Use default confidence values',
       [CrossStackErrorType.MEMORY_PRESSURE]: 'Enable streaming mode',
       [CrossStackErrorType.PERFORMANCE_DEGRADATION]: 'Increase batch size and caching',
       [CrossStackErrorType.SCHEMA_DRIFT_DETECTED]: 'Flag for manual review',

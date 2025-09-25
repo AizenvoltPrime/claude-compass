@@ -34,7 +34,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - Map function calls, imports, and framework relationships
 - Track cross-stack dependencies (Vue ↔ Laravel)
-- Build comprehensive dependency graphs with confidence scoring
+- Build comprehensive dependency graphs with full relationship data
 
 **🔌 MCP Integration**
 

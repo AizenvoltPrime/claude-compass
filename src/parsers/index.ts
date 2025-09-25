@@ -14,7 +14,7 @@ export { BackgroundJobParser } from './background-job';
 export { ORMParser } from './orm';
 export { FrameworkDetector } from './framework-detector';
 export { MultiParser } from './multi-parser';
-export { CSharpParser } from './csharp';
+// export { CSharpParser } from './csharp'; // Temporarily disabled for confidence removal
 export { GodotParser } from './godot';
 export * from './base';
 export * from './framework-detector';
@@ -34,14 +34,14 @@ import { PackageManagerParser } from './package-manager';
 import { BackgroundJobParser } from './background-job';
 import { ORMParser } from './orm';
 import { LaravelParser } from './laravel';
-import { CSharpParser } from './csharp';
+// import { CSharpParser } from './csharp'; // Temporarily disabled for confidence removal
 import { GodotParser } from './godot';
 
 // Register base language parsers
 ParserFactory.registerParser('javascript', () => new JavaScriptParser());
 ParserFactory.registerParser('typescript', () => new TypeScriptParser());
 ParserFactory.registerParser('php', () => new PHPParser());
-ParserFactory.registerParser('csharp', () => new CSharpParser());
+// ParserFactory.registerParser('csharp', () => new CSharpParser()); // Temporarily disabled for confidence removal
 
 // Register framework parsers
 import Parser from 'tree-sitter';

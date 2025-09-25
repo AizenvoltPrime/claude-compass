@@ -41,7 +41,6 @@ export interface VueApiCall extends FrameworkEntity {
   method: string;
   requestType?: string;
   responseType?: string;
-  confidence: number;
   location: {
     line: number;
     column: number;
@@ -60,7 +59,6 @@ export interface VueTypeInterface extends FrameworkEntity {
     optional: boolean;
   }>;
   usage: 'request' | 'response' | 'generic';
-  confidence: number;
   framework: 'vue';
 }
 
@@ -368,7 +366,6 @@ export class VueParser extends BaseFrameworkParser {
     let url = '';
     let requestType: string | undefined;
     let responseType: string | undefined;
-    let confidence = 0.5;
 
     // Pattern 1: fetch('/api/users')
     if (functionName === 'fetch' || functionName === '$fetch') {
@@ -376,7 +373,6 @@ export class VueParser extends BaseFrameworkParser {
       if (result) {
         url = result.url;
         method = result.method;
-        confidence = result.confidence;
         requestType = result.requestType;
         responseType = result.responseType;
       }
@@ -387,7 +383,6 @@ export class VueParser extends BaseFrameworkParser {
       if (result) {
         url = result.url;
         method = result.method;
-        confidence = result.confidence;
         requestType = result.requestType;
         responseType = result.responseType;
       }
@@ -398,7 +393,6 @@ export class VueParser extends BaseFrameworkParser {
       if (result) {
         url = result.url;
         method = result.method;
-        confidence = result.confidence;
         requestType = result.requestType;
         responseType = result.responseType;
       }
@@ -418,7 +412,6 @@ export class VueParser extends BaseFrameworkParser {
       method: method.toUpperCase(),
       requestType,
       responseType,
-      confidence: Math.min(confidence * urlPattern.confidence, 1.0),
       location: {
         line: node.startPosition.row + 1,
         column: node.startPosition.column,
@@ -437,7 +430,6 @@ export class VueParser extends BaseFrameworkParser {
   private parseFetchCall(argsNode: Parser.SyntaxNode | null, scriptContent: string): {
     url: string;
     method: string;
-    confidence: number;
     requestType?: string;
     responseType?: string;
   } | null {
@@ -445,7 +437,6 @@ export class VueParser extends BaseFrameworkParser {
 
     let url = '';
     let method = 'GET';
-    let confidence = 0.8;
     let requestType: string | undefined;
     let responseType: string | undefined;
 
@@ -454,7 +445,6 @@ export class VueParser extends BaseFrameworkParser {
     if (urlArg) {
       url = this.extractStringValue(urlArg, scriptContent);
       if (url.includes('${') || url.includes('" + ') || url.includes("' + ")) {
-        confidence *= 0.9; // Slight penalty for dynamic URLs
       }
     }
 
@@ -475,7 +465,7 @@ export class VueParser extends BaseFrameworkParser {
       }
     }
 
-    return url ? { url, method, confidence, requestType, responseType } : null;
+    return url ? { url, method, requestType, responseType } : null;
   }
 
   /**
@@ -484,14 +474,12 @@ export class VueParser extends BaseFrameworkParser {
   private parseAxiosCall(functionNode: Parser.SyntaxNode, argsNode: Parser.SyntaxNode | null, scriptContent: string): {
     url: string;
     method: string;
-    confidence: number;
     requestType?: string;
     responseType?: string;
   } | null {
     const fullCall = functionNode.text;
     let method = 'GET';
     let url = '';
-    let confidence = 0.9;
 
     // Extract method from function name (axios.get, axios.post, etc.)
     if (fullCall) {
@@ -509,7 +497,7 @@ export class VueParser extends BaseFrameworkParser {
       }
     }
 
-    return url ? { url, method, confidence } : null;
+    return url ? { url, method } : null;
   }
 
   /**
@@ -518,7 +506,6 @@ export class VueParser extends BaseFrameworkParser {
   private parseUseFetchCall(argsNode: Parser.SyntaxNode | null, scriptContent: string): {
     url: string;
     method: string;
-    confidence: number;
     requestType?: string;
     responseType?: string;
   } | null {
@@ -529,14 +516,12 @@ export class VueParser extends BaseFrameworkParser {
 
     let url = '';
     let method = 'GET';
-    let confidence = 0.9;
     let responseType: string | undefined;
 
     // Handle different useFetch patterns
     if (urlArg.type === 'arrow_function' || urlArg.type === 'function_expression') {
       // useFetch(() => `/api/users/${id}`)
       url = this.extractUrlFromFunction(urlArg, scriptContent);
-      confidence *= 0.8; // Dynamic URLs have lower confidence
     } else {
       // useFetch('/api/users')
       url = this.extractStringValue(urlArg, scriptContent);
@@ -549,7 +534,7 @@ export class VueParser extends BaseFrameworkParser {
       responseType = this.extractGenericType(parentCall, scriptContent);
     }
 
-    return url ? { url, method, confidence, responseType } : null;
+    return url ? { url, method, responseType } : null;
   }
 
   /**
@@ -633,7 +618,6 @@ export class VueParser extends BaseFrameworkParser {
       filePath,
       properties,
       usage,
-      confidence: 0.9,
       framework: 'vue',
       metadata: {
         isInterface: true,
@@ -654,14 +638,13 @@ export class VueParser extends BaseFrameworkParser {
 
     const typeName = nameNode.text;
 
-    // For type aliases, we'll extract what we can but with lower confidence
+    // For type aliases, we'll extract what we can
     return {
       type: 'type_interface',
       name: typeName,
       filePath,
       properties: [], // Type aliases are harder to analyze structurally
       usage: 'generic',
-      confidence: 0.7,
       framework: 'vue',
       metadata: {
         isInterface: false,
@@ -1037,71 +1020,61 @@ export class VueParser extends BaseFrameworkParser {
         name: 'vue-sfc',
         pattern: /<template>|<script>|<style>/,
         fileExtensions: ['.vue'],
-        confidence: 0.95,
         description: 'Vue Single File Component',
       },
       {
         name: 'vue-composition-api',
         pattern: /import\s+\{[^}]*\}\s+from\s+['"]vue['"]|defineComponent|setup\s*\(/,
         fileExtensions: ['.js', '.ts', '.vue'],
-        confidence: 0.8,
         description: 'Vue Composition API usage',
       },
       {
         name: 'vue-composable',
         pattern: /export\s+(default\s+)?function\s+use[A-Z]\w*|const\s+use[A-Z]\w*\s*=/,
         fileExtensions: ['.js', '.ts'],
-        confidence: 0.85,
         description: 'Vue composable function',
       },
       {
         name: 'vue-router',
         pattern: /createRouter|useRouter|useRoute|router\.(push|replace)|RouterView|RouterLink/,
         fileExtensions: ['.js', '.ts', '.vue'],
-        confidence: 0.9,
-        description: 'Vue Router usage',
+          description: 'Vue Router usage',
       },
       {
         name: 'pinia-store',
         pattern: /defineStore|usePinia|createPinia/,
         fileExtensions: ['.js', '.ts'],
-        confidence: 0.9,
-        description: 'Pinia store definition',
+          description: 'Pinia store definition',
       },
       {
         name: 'vue-built-in-components',
         pattern: /<Teleport|<Suspense|<KeepAlive|<Transition|<TransitionGroup/,
         fileExtensions: ['.vue', '.js', '.jsx', '.ts', '.tsx'],
-        confidence: 0.95,
         description: 'Vue 3 built-in components',
       },
       {
         name: 'vue-advanced-composition',
         pattern: /provide\s*\(|inject\s*\(|defineExpose\s*\(|defineModel\s*\(/,
         fileExtensions: ['.vue', '.js', '.ts'],
-        confidence: 0.9,
-        description: 'Vue 3 advanced Composition API',
+          description: 'Vue 3 advanced Composition API',
       },
       {
         name: 'vueuse-composables',
         pattern: /@vueuse\/core|@vueuse\/head|use[A-Z]\w*(?:Storage|Element|Mouse|Keyboard|Network|Browser)/,
         fileExtensions: ['.js', '.ts', '.vue'],
-        confidence: 0.85,
         description: 'VueUse composables library',
       },
       {
         name: 'vite-patterns',
         pattern: /import\.meta\.glob|import\.meta\.env|import\.meta\.hot/,
         fileExtensions: ['.js', '.ts', '.vue'],
-        confidence: 0.9,
-        description: 'Vite-specific patterns',
+          description: 'Vite-specific patterns',
       },
       {
         name: 'vue-testing',
         pattern: /@vue\/test-utils|mount\s*\(|shallowMount\s*\(|\.stories\./,
         fileExtensions: ['.js', '.ts', '.spec.js', '.test.js', '.stories.js'],
-        confidence: 0.9,
-        description: 'Vue testing patterns',
+          description: 'Vue testing patterns',
       },
     ];
   }
@@ -4053,7 +4026,6 @@ export class VueParser extends BaseFrameworkParser {
       return null;
     }
 
-    // Skip common built-in methods to reduce noise
     const skipMethods = ['console', 'log', 'error', 'warn', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'toString', 'valueOf'];
     if (skipMethods.includes(functionName)) return null;
 
@@ -4064,8 +4036,7 @@ export class VueParser extends BaseFrameworkParser {
       from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1,
-      confidence: 1.0
+      line_number: node.startPosition.row + 1
     };
   }
 

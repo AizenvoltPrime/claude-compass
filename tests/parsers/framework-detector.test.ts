@@ -20,7 +20,7 @@ describe('FrameworkDetector', () => {
   });
 
   describe('Vue.js detection', () => {
-    it('should detect Vue.js project with high confidence', async () => {
+    it('should detect Vue.js project based on dependencies', async () => {
       const mockPackageJson = {
         dependencies: {
           'vue': '^3.0.0',
@@ -62,7 +62,6 @@ describe('FrameworkDetector', () => {
 
       expect(result.frameworks).toHaveLength(1);
       expect(result.frameworks[0].name).toBe('vue');
-      expect(result.frameworks[0].confidence).toBeGreaterThan(0.7);
       expect(result.frameworks[0].features).toContain('vue-router');
     });
 
@@ -307,9 +306,8 @@ describe('FrameworkDetector', () => {
     it('should return applicable frameworks for Vue file', () => {
       const detectionResult = {
         frameworks: [
-          { name: 'vue', confidence: 0.9, evidence: [], features: [] }
+          { name: 'vue', version: '3.0.0', evidence: [], features: [] }
         ],
-        confidence: 0.9,
         metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
@@ -322,10 +320,8 @@ describe('FrameworkDetector', () => {
     it('should return applicable frameworks for Next.js API route', () => {
       const detectionResult = {
         frameworks: [
-          { name: 'nextjs', confidence: 0.9, evidence: [], features: [] },
-          { name: 'react', confidence: 0.8, evidence: [], features: [] }
+          { name: 'nextjs', version: '13.0.0', evidence: [], features: [] }
         ],
-        confidence: 0.85,
         metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
@@ -338,9 +334,8 @@ describe('FrameworkDetector', () => {
     it('should return applicable frameworks for React component', () => {
       const detectionResult = {
         frameworks: [
-          { name: 'react', confidence: 0.8, evidence: [], features: [] }
+          { name: 'react', version: '18.0.0', evidence: [], features: [] }
         ],
-        confidence: 0.8,
         metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
@@ -350,13 +345,12 @@ describe('FrameworkDetector', () => {
       expect(frameworks).toContain('react');
     });
 
-    it('should filter out low confidence frameworks', () => {
+    it('should only include detected frameworks', () => {
       const detectionResult = {
         frameworks: [
-          { name: 'vue', confidence: 0.2, evidence: [], features: [] }, // Low confidence
-          { name: 'react', confidence: 0.8, evidence: [], features: [] }
+          { name: 'react', version: '18.0.0', evidence: [], features: [] }
+          // Vue not detected/included
         ],
-        confidence: 0.5,
         metadata: { hasPackageJson: true, hasComposerJson: false, hasConfigFiles: true, directoryStructure: [] }
       };
 
@@ -376,7 +370,6 @@ describe('FrameworkDetector', () => {
       const result = await detector.detectFrameworks('/mock/project');
 
       expect(result.frameworks).toHaveLength(0);
-      expect(result.confidence).toBe(0);
       expect(result.metadata.hasPackageJson).toBe(false);
     });
 
@@ -388,7 +381,6 @@ describe('FrameworkDetector', () => {
       const result = await detector.detectFrameworks('/mock/project');
 
       expect(result.frameworks).toHaveLength(0);
-      expect(result.confidence).toBe(0);
     });
   });
 });

@@ -63,7 +63,6 @@ describe('PackageManagerParser', () => {
       expect(result.dependencies[0]).toMatchObject({
         from_symbol: 'my-app',
         dependency_type: DependencyType.PACKAGE_DEPENDENCY,
-        confidence: 1,
       });
     });
 

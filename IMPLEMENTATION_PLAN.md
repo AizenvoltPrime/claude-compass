@@ -116,8 +116,7 @@ CREATE TABLE dependencies (
     from_symbol_id INTEGER REFERENCES symbols(id),
     to_symbol_id INTEGER REFERENCES symbols(id),
     dependency_type VARCHAR, -- calls, imports, inherits, implements
-    line_number INTEGER,
-    confidence FLOAT DEFAULT 1.0
+    line_number INTEGER
 );
 ```
 
@@ -297,7 +296,6 @@ interface MCPTools {
       file_path: string;
       line_number: number;
       relationship_type: string;
-      confidence: number;
     }[];
   };
 
@@ -308,7 +306,6 @@ interface MCPTools {
       type: 'calls' | 'imports' | 'inherits' | 'api_call' | 'shares_schema';
       file_path: string;
       line_number: number;
-      confidence: number;
     }[];
   };
 
@@ -320,7 +317,6 @@ interface MCPTools {
     include_tests?: boolean;
     include_jobs?: boolean;
     include_routes?: boolean;
-    confidence_threshold?: number;
   }): {
     affected_symbols: {
       id: string;
@@ -328,37 +324,31 @@ interface MCPTools {
       type: string;
       file_path: string;
       impact_type: 'direct' | 'indirect' | 'cross_stack';
-      confidence: number;
     }[];
     affected_routes: {
       id: string;
       path: string;
       method: string;
       framework: string;
-      confidence: number;
     }[];
     affected_jobs: {
       id: string;
       name: string;
       type: string;
-      confidence: number;
     }[];
     affected_tests: {
       id: string;
       name: string;
       file_path: string;
       test_type: string;
-      confidence: number;
     }[];
     cross_stack_relationships: {
       frontend_symbol: string;
       backend_symbol: string;
       relationship_type: string;
-      confidence: number;
     }[];
     blast_radius_summary: {
       total_affected: number;
-      high_confidence_count: number;
       frameworks_affected: string[];
       risk_level: 'low' | 'medium' | 'high' | 'critical';
     };
@@ -450,7 +440,7 @@ interface MCPTools {
 
 **Additional Enhancements Implemented:**
 
-- ✅ **Framework Detection System**: Evidence-based detection with confidence scoring
+- ✅ **Framework Detection System**: Evidence-based detection with comprehensive relationship mapping
 - ✅ **Database Schema**: Complete framework entities (routes, components, composables, metadata)
 - ✅ **Advanced Parsing Features**: Dynamic routes, data fetching methods, auth patterns, validation
 - ✅ **Comprehensive Test Coverage**: 100% test pass rate across all framework parsers
@@ -498,10 +488,10 @@ interface MCPTools {
 **Additional Enhancements Implemented:**
 
 - ✅ Comprehensive background job parser supporting Bull, BullMQ, Agenda, Bee, Kue, Worker Threads
-- ✅ Complete test framework parser with test coverage analysis and confidence scoring
+- ✅ Complete test framework parser with test coverage analysis
 - ✅ Advanced ORM parser supporting Prisma, TypeORM, Sequelize, Mongoose, MikroORM
 - ✅ Sophisticated package manager parser with monorepo support (Nx, Lerna, Turborepo, Rush)
-- ✅ Enhanced transitive analyzer with cycle detection and confidence propagation
+- ✅ Enhanced transitive analyzer with cycle detection
 - ✅ 95%+ test coverage including comprehensive edge case testing
 - ✅ Performance validation and stress testing for production readiness
 
@@ -559,7 +549,7 @@ interface MCPTools {
 **Additional Enhancements Implemented:**
 
 - ✅ **Cross-Stack Parser**: Complete Vue ↔ Laravel integration parser (`src/parsers/cross-stack.ts`)
-- ✅ **Database Schema**: New tables for API calls and data contracts with confidence scoring
+- ✅ **Database Schema**: New tables for API calls and data contracts
 - ✅ **MCP Tools**: Enhanced tools for cross-stack analysis (`getApiCalls`, `getDataContracts`, `getCrossStackImpact`)
 - ✅ **Graph Builder**: Cross-stack graph building with sophisticated URL pattern matching
 - ✅ **Test Coverage**: Comprehensive test suite including Vue-Laravel integration tests
@@ -675,7 +665,6 @@ async impactOf(change: {
   include_tests?: boolean;
   include_jobs?: boolean;
   include_routes?: boolean;
-  confidence_threshold?: number;
 }) {
   // Absorb functionality from removed tools:
   // - get_cross_stack_impact → cross-stack relationships
@@ -762,7 +751,7 @@ async impactOf(change: {
 
 - ✅ `impact_of` tool provides complete blast radius across all frameworks (not just Vue ↔ Laravel)
 - ✅ Includes routes, jobs, tests, and cross-stack relationships in single comprehensive analysis
-- ✅ Confidence scoring accurately predicts change impact risk across all entity types
+- ✅ Impact analysis accurately predicts change risk across all entity types
 - ✅ Replaces 6 specialized tools with single powerful comprehensive tool
 
 **Architecture Success:**
@@ -1111,25 +1100,10 @@ interface ImpactAnalysis {
       affected_symbols: Array.from(affected),
       affected_routes: this.getAffectedRoutes(affected),
       affected_jobs: this.getAffectedJobs(affected),
-      affected_tests: testImpacts,
-      confidence: this.calculateConfidence(change, affected)
+      affected_tests: testImpacts
     };
   }
 
-  private calculateConfidence(
-    change: ChangeDescription,
-    affected: Set<string>
-  ): number {
-    // Higher confidence for well-tested, documented code
-    // Lower confidence for dynamic code, reflection, etc.
-    let baseConfidence = 0.8;
-
-    if (change.involves_dynamic_code) baseConfidence *= 0.6;
-    if (change.has_test_coverage) baseConfidence *= 1.2;
-    if (change.is_well_documented) baseConfidence *= 1.1;
-
-    return Math.min(baseConfidence, 1.0);
-  }
 }
 ```
 
@@ -1249,7 +1223,7 @@ describe('ImpactAnalysis', () => {
     // Then should identify all affected routes and components
     expect(impact.affected_routes).toContain('/api/auth/signup');
     expect(impact.affected_symbols).toContain('components/SignupForm');
-    expect(impact.confidence).toBeGreaterThan(0.8);
+    expect(impact.affected_symbols.length).toBeGreaterThan(0);
   });
 });
 ```
@@ -1492,7 +1466,7 @@ Without structure (graphs, edges, summaries) and proper distribution (MCP), prom
 - **Performance**: Large repositories causing slowdowns
   - _Mitigation_: Incremental processing, caching strategies
 - **Accuracy**: Static analysis missing dynamic relationships
-  - _Mitigation_: Framework-aware parsing, confidence scoring
+  - _Mitigation_: Framework-aware parsing, relationship validation
 
 ### Business Risks
 
@@ -1517,7 +1491,7 @@ Without structure (graphs, edges, summaries) and proper distribution (MCP), prom
 ### Developer Experience
 
 - Time to understand new codebase: < 2 hours (vs 2 days)
-- Confidence in refactoring: 90% of developers feel confident
+- Developer confidence in refactoring: 90% of developers feel secure making changes
 - Bug introduction rate: 50% reduction in breaking changes
 - Documentation freshness: 90% of specs match implementation
 
@@ -1673,7 +1647,7 @@ npm run build
 - **Architecture**: Robust Tree-sitter → GraphBuilder → Database → MCP pipeline
 - **Database**: PostgreSQL with pgvector extension ready, comprehensive 15+ table schema
 - **Framework Support**: Vue.js, Next.js, React, Node.js, Laravel with deep framework awareness
-- **Cross-Stack**: Industry-leading Vue ↔ Laravel integration with confidence scoring
+- **Cross-Stack**: Industry-leading Vue ↔ Laravel integration with comprehensive relationship mapping
 - **Quality**: 95%+ test coverage, comprehensive error handling, MCP protocol compliance
 - **Performance**: Chunked parsing for large files, transitive analysis with cycle detection
 
@@ -1681,7 +1655,7 @@ npm run build
 
 - **Ground Truth**: Static analysis provides accurate dependency relationships
 - **Framework Awareness**: Captures real Vue Router, Laravel routes, React hooks, etc.
-- **Cross-Stack Integration**: Maps Vue components to Laravel endpoints with confidence scoring
+- **Cross-Stack Integration**: Maps Vue components to Laravel endpoints with comprehensive evidence tracking
 - **Modular Design**: Clean separation enables easy Phase 6 enhancement
 
 ### Gap Analysis: Current vs Complete Dependency Analysis Vision
@@ -1693,7 +1667,7 @@ npm run build
 - Framework-aware parsing captures hidden dependencies
 - Cross-stack analysis reveals Vue ↔ Laravel relationships
 - Transitive analysis provides comprehensive dependency understanding
-- Confidence scoring for relationship strength
+- Relationship validation for improved accuracy
 
 **Core MCP Tools**: ✅ **Strong**
 
@@ -1713,7 +1687,7 @@ npm run build
 
 - ✅ Sophisticated Vue ↔ Laravel impact analysis
 - ❌ Missing comprehensive blast radius for routes, jobs, tests
-- ❌ No comprehensive confidence scoring for impact predictions
+- ❌ No comprehensive priority scoring for impact predictions
 
 #### ❌ Major Gaps
 

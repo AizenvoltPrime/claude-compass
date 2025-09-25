@@ -39,7 +39,6 @@ export interface CrossStackNode {
   metadata: {
     symbolId?: number;
     entityId?: string;
-    confidence?: number;
     [key: string]: any;
   };
 }
@@ -53,7 +52,6 @@ export interface CrossStackEdge {
   to: string;
   relationshipType: 'api_call' | 'shares_schema' | 'frontend_backend';
   dependencyType: DependencyType;
-  confidence: number;
   evidence: string[];
   metadata: {
     urlPattern?: string;
@@ -74,7 +72,6 @@ export interface CrossStackGraphData {
     laravelRoutes: number;
     apiCalls: number;
     dataContracts: number;
-    confidence: number;
   };
 }
 
@@ -88,7 +85,6 @@ export interface FullStackFeatureGraph {
   metadata: {
     totalFeatures: number;
     crossStackRelationships: number;
-    averageConfidence: number;
   };
 }
 
@@ -101,7 +97,6 @@ export interface FeatureCluster {
   vueComponents: CrossStackNode[];
   laravelRoutes: CrossStackNode[];
   sharedSchemas: CrossStackNode[];
-  confidence: number;
   metadata: {
     [key: string]: any;
   };
@@ -117,7 +112,7 @@ export class CrossStackGraphBuilder {
 
   constructor(database: DatabaseService) {
     this.database = database;
-    this.crossStackParser = new CrossStackParser(0.7, database); // 70% confidence threshold + caching
+    this.crossStackParser = new CrossStackParser(database); // No confidence threshold needed
     this.logger = logger;
   }
 
@@ -142,7 +137,6 @@ export class CrossStackGraphBuilder {
 
     const nodes: CrossStackNode[] = [];
     const edges: CrossStackEdge[] = [];
-    let totalConfidence = 0;
 
     // Create nodes for Vue components
     for (const component of safeVueComponents) {
@@ -250,7 +244,6 @@ export class CrossStackGraphBuilder {
           to: toId,
           relationshipType: 'api_call',
           dependencyType: DependencyType.API_CALL,
-          confidence: apiCall.confidence,
           evidence: ['api_call_detected'],
           metadata: {
             urlPattern: apiCall.url_pattern,
@@ -260,11 +253,9 @@ export class CrossStackGraphBuilder {
           }
         });
 
-        totalConfidence += apiCall.confidence;
       }
     }
 
-    const averageConfidence = edges.length > 0 ? totalConfidence / edges.length : 0;
 
     return {
       nodes,
@@ -274,7 +265,6 @@ export class CrossStackGraphBuilder {
         laravelRoutes: safeLaravelRoutes.length,
         apiCalls: safeApiCalls.length,
         dataContracts: 0,
-        confidence: averageConfidence
       }
     };
   }
@@ -300,7 +290,6 @@ export class CrossStackGraphBuilder {
 
     const nodes: CrossStackNode[] = [];
     const edges: CrossStackEdge[] = [];
-    let totalConfidence = 0;
 
     // Create nodes for TypeScript interfaces
     for (const tsInterface of safeTypescriptInterfaces) {
@@ -344,8 +333,6 @@ export class CrossStackGraphBuilder {
         const fromId = `ts_interface_${frontendType.id}`;
         const toId = `php_dto_${backendType.id}`;
 
-        // Calculate confidence based on schema compatibility
-        const confidence = this.calculateSchemaConfidence(contract);
 
         edges.push({
           id: edgeId,
@@ -353,20 +340,16 @@ export class CrossStackGraphBuilder {
           to: toId,
           relationshipType: 'shares_schema',
           dependencyType: DependencyType.SHARES_SCHEMA,
-          confidence,
           evidence: ['schema_structure_match'],
           metadata: {
-            schemaCompatibility: confidence,
             driftDetected: contract.drift_detected,
             lastVerified: contract.last_verified
           }
         });
 
-        totalConfidence += confidence;
       }
     }
 
-    const averageConfidence = edges.length > 0 ? totalConfidence / edges.length : 0;
 
     return {
       nodes,
@@ -376,7 +359,6 @@ export class CrossStackGraphBuilder {
         laravelRoutes: 0,
         apiCalls: 0,
         dataContracts: safeDataContracts.length,
-        confidence: averageConfidence
       }
     };
   }
@@ -495,7 +477,6 @@ export class CrossStackGraphBuilder {
   async buildFullStackFeatureGraph(repoId: number): Promise<FullStackFeatureGraph> {
     this.logger.info('Building full-stack feature graph with performance optimization', { repoId });
 
-    // Debug: Verify repository exists before proceeding
     try {
       const repoExists = await this.database.getRepository(repoId);
       this.logger.debug('Repository verification for cross-stack analysis', {
@@ -573,7 +554,6 @@ export class CrossStackGraphBuilder {
             matches: relationships.map(rel => ({
               vueUrl: rel.vueApiCall.url,
               laravelPath: rel.laravelRoute.path,
-              confidence: rel.matchConfidence
             }))
           });
 
@@ -596,7 +576,6 @@ export class CrossStackGraphBuilder {
         }
       }
 
-      // Debug: Check if repository has symbols before attempting data contract detection
       const allSymbols = await this.database.getSymbolsByRepository(repoId);
 
       this.logger.info('Total symbols check before data contract detection', {
@@ -613,8 +592,6 @@ export class CrossStackGraphBuilder {
       const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
       const phpDtos = [...phpClasses, ...phpInterfaces]; // PHP DTOs are typically classes or interfaces
 
-
-      // Debug: Log symbol IDs to check if they exist
       this.logger.info('Symbol IDs for data contract detection', {
         repoId,
         tsCount: typescriptInterfaces.length,
@@ -639,7 +616,6 @@ export class CrossStackGraphBuilder {
             contracts: dataContractMatches.map(match => ({
               tsType: match.typescriptInterface.name,
               phpType: match.phpDto.name,
-              confidence: match.confidence
             }))
           });
 
@@ -668,11 +644,10 @@ export class CrossStackGraphBuilder {
                 frontend_type_id: match.typescriptInterface.id,
                 backend_type_id: match.phpDto.id,
                 schema_definition: JSON.stringify({
-                  compatibility: match.confidence,
                   tsType: match.typescriptInterface.name,
                   phpType: match.phpDto.name
                 }),
-                drift_detected: match.confidence < 0.8 // Mark as drift if low confidence
+                drift_detected: false // No confidence-based drift detection
               }));
 
               await this.database.createDataContracts(dataContractsToCreate);
@@ -710,10 +685,6 @@ export class CrossStackGraphBuilder {
 
       // Calculate overall metrics
       const totalRelationships = apiCallGraph.edges.length + dataContractGraph.edges.length;
-      const totalConfidence = (
-        apiCallGraph.metadata.confidence * apiCallGraph.edges.length +
-        dataContractGraph.metadata.confidence * dataContractGraph.edges.length
-      ) / Math.max(totalRelationships, 1);
 
       // Performance monitoring
       const finalMemory = process.memoryUsage();
@@ -728,7 +699,6 @@ export class CrossStackGraphBuilder {
         crossStackRelationships: totalRelationships,
         executionTimeMs: executionTime,
         memoryUsedMB: totalMemoryUsed / (1024 * 1024),
-        averageConfidence: totalConfidence
       });
 
       return {
@@ -738,8 +708,7 @@ export class CrossStackGraphBuilder {
         metadata: {
           totalFeatures: features.length,
           crossStackRelationships: totalRelationships,
-          averageConfidence: totalConfidence
-        }
+          }
       };
     } catch (error) {
       this.logger.error('Failed to build full-stack feature graph', { error, repoId });
@@ -758,20 +727,19 @@ export class CrossStackGraphBuilder {
     const features: FeatureCluster[] = [];
     let totalApiCalls = 0;
     let totalDataContracts = 0;
-    let totalConfidenceSum = 0;
     let totalRelationships = 0;
 
     // Build empty graphs to accumulate results
     let apiCallGraph: CrossStackGraphData = {
       nodes: [],
       edges: [],
-      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0, confidence: 0 }
+      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 }
     };
 
     let dataContractGraph: CrossStackGraphData = {
       nodes: [],
       edges: [],
-      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0, confidence: 0 }
+      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 }
     };
 
     try {
@@ -805,7 +773,6 @@ export class CrossStackGraphBuilder {
         apiCallGraph.edges.push(...batchApiCallGraph.edges);
 
         totalApiCalls += batch.apiCalls.length;
-        totalConfidenceSum += batchApiCallGraph.metadata.confidence * batch.apiCalls.length;
       }
 
       // Process data contracts batch (skip heavy symbol fetching in streaming mode)
@@ -820,7 +787,6 @@ export class CrossStackGraphBuilder {
         dataContractGraph.edges.push(...batchDataContractGraph.edges);
 
         totalDataContracts += batch.dataContracts.length;
-        totalConfidenceSum += batchDataContractGraph.metadata.confidence * batch.dataContracts.length;
       }
 
       // Force garbage collection hint after processing
@@ -830,14 +796,12 @@ export class CrossStackGraphBuilder {
 
       // Update metadata
       totalRelationships = apiCallGraph.edges.length + dataContractGraph.edges.length;
-      const averageConfidence = totalRelationships > 0 ? totalConfidenceSum / totalRelationships : 0;
 
       apiCallGraph.metadata = {
         vueComponents: apiCallGraph.nodes.filter(n => n.type === 'vue_component').length,
         laravelRoutes: apiCallGraph.nodes.filter(n => n.type === 'laravel_route').length,
         apiCalls: totalApiCalls,
         dataContracts: 0,
-        confidence: averageConfidence
       };
 
       dataContractGraph.metadata = {
@@ -845,7 +809,6 @@ export class CrossStackGraphBuilder {
         laravelRoutes: 0,
         apiCalls: 0,
         dataContracts: totalDataContracts,
-        confidence: averageConfidence
       };
 
       // Identify feature clusters from the accumulated graphs
@@ -861,7 +824,6 @@ export class CrossStackGraphBuilder {
         totalDataContracts,
         totalRelationships,
         executionTimeMs: executionTime,
-        averageConfidence
       });
 
       return {
@@ -871,7 +833,6 @@ export class CrossStackGraphBuilder {
         metadata: {
           totalFeatures: identifiedFeatures.length,
           crossStackRelationships: totalRelationships,
-          averageConfidence
         }
       };
     } catch (error) {
@@ -907,7 +868,6 @@ export class CrossStackGraphBuilder {
               url_pattern: edge.metadata.urlPattern || '',
               request_schema: edge.metadata.requestSchema,
               response_schema: edge.metadata.responseSchema,
-              confidence: edge.confidence
             });
           }
         }
@@ -996,7 +956,6 @@ export class CrossStackGraphBuilder {
           n.name.toLowerCase().includes(featureName.toLowerCase())
         );
 
-        // Calculate cluster confidence
         const relatedEdges = [
           ...apiCallGraph.edges.filter(e =>
             vueComponents.some(vc => vc.id === e.from) ||
@@ -1007,9 +966,6 @@ export class CrossStackGraphBuilder {
           )
         ];
 
-        const confidence = relatedEdges.length > 0
-          ? relatedEdges.reduce((sum, edge) => sum + edge.confidence, 0) / relatedEdges.length
-          : 0;
 
         if (vueComponents.length > 0 || laravelRoutes.length > 0) {
           features.push({
@@ -1018,8 +974,7 @@ export class CrossStackGraphBuilder {
             vueComponents,
             laravelRoutes,
             sharedSchemas,
-            confidence,
-            metadata: {
+              metadata: {
               apiCallCount: relatedEdges.filter(e => e.relationshipType === 'api_call').length,
               schemaCount: relatedEdges.filter(e => e.relationshipType === 'shares_schema').length
             }
@@ -1040,15 +995,6 @@ export class CrossStackGraphBuilder {
     return match ? match[1] : name;
   }
 
-  /**
-   * Calculate schema confidence from data contract
-   */
-  private calculateSchemaConfidence(contract: DataContract): number {
-    if (contract.schema_definition && typeof contract.schema_definition === 'object') {
-      return contract.schema_definition.compatibility || 0.5;
-    }
-    return 0.5; // Default confidence
-  }
 
   /**
    * Extract API calls from Vue components by reading their source files
@@ -1199,7 +1145,6 @@ export class CrossStackGraphBuilder {
             url,
             normalizedUrl: url,
             method,
-            confidence: 0.8,
             location: {
               line: content.substring(0, match.index).split('\n').length,
               column: match.index - content.lastIndexOf('\n', match.index) - 1
@@ -1273,7 +1218,6 @@ export class CrossStackGraphBuilder {
           method,
           normalizedPath: path,
           controller: route.metadata.handlerSymbolId,
-          confidence: 0.9,
           filePath: route.filePath
         });
       } catch (error) {
@@ -1353,7 +1297,6 @@ export class CrossStackGraphBuilder {
           relationships.push({
             vueApiCall: apiCall,
             laravelRoute: route,
-            matchConfidence: 0.9,
             evidenceTypes: ['url_pattern_match', 'http_method_match']
           });
         }
@@ -1474,8 +1417,7 @@ export class CrossStackGraphBuilder {
           contracts: dataContractMatches.map(match => ({
             tsType: match.typescriptInterface.name,
             phpType: match.phpDto.name,
-            confidence: match.confidence
-          }))
+              }))
         });
 
         // Create data contracts in database
@@ -1486,7 +1428,7 @@ export class CrossStackGraphBuilder {
             frontend_type_id: match.typescriptInterface.id,
             backend_type_id: match.phpDto.id,
             schema_definition: JSON.stringify({
-              compatibility: 'compatible' // Based on match confidence
+              compatibility: 'compatible' // Simplified compatibility
             }),
             drift_detected: false
           }));
@@ -1517,7 +1459,6 @@ export class CrossStackGraphBuilder {
   private detectDataContractMatches(typescriptInterfaces: Symbol[], phpDtos: Symbol[]): Array<{
     typescriptInterface: Symbol;
     phpDto: Symbol;
-    confidence: number;
   }> {
     // Performance safeguards for data contract matching
     const MAX_TS_INTERFACES = 50;
@@ -1547,12 +1488,11 @@ export class CrossStackGraphBuilder {
     const matches: Array<{
       typescriptInterface: Symbol;
       phpDto: Symbol;
-      confidence: number;
     }> = [];
 
     const startTime = Date.now();
 
-    // Match by exact name (highest confidence)
+    // Match by exact name
     for (const tsInterface of limitedTsInterfaces) {
       for (const phpDto of limitedPhpDtos) {
         // Early termination if too many matches found
@@ -1565,23 +1505,11 @@ export class CrossStackGraphBuilder {
         }
 
 
-        // Exact name match
+        // Exact name match only
         if (tsInterface.name === phpDto.name) {
           matches.push({
             typescriptInterface: tsInterface,
-            phpDto: phpDto,
-            confidence: 0.95
-          });
-          continue;
-        }
-
-        const patternConfidence = this.calculatePatternMatch(tsInterface.name, phpDto.name);
-
-        if (patternConfidence > 0) {
-          matches.push({
-            typescriptInterface: tsInterface,
-            phpDto: phpDto,
-            confidence: patternConfidence * 0.9 // Slightly lower than exact match
+            phpDto: phpDto
           });
         }
       }
@@ -1594,12 +1522,11 @@ export class CrossStackGraphBuilder {
 
     const processingTime = Date.now() - startTime;
 
-    // Remove duplicate matches (keep highest confidence)
+    // Remove duplicate matches
     const uniqueMatches = new Map<string, typeof matches[0]>();
     for (const match of matches) {
       const key = `${match.typescriptInterface.id}-${match.phpDto.id}`;
-      const existing = uniqueMatches.get(key);
-      if (!existing || match.confidence > existing.confidence) {
+      if (!uniqueMatches.has(key)) {
         uniqueMatches.set(key, match);
       }
     }
@@ -1619,8 +1546,7 @@ export class CrossStackGraphBuilder {
 
         finalMatches.push({
           typescriptInterface: userTsInterfaces[0],
-          phpDto: userPhpSymbols[0],
-          confidence: 0.95
+          phpDto: userPhpSymbols[0]
         });
       }
     }
@@ -1638,7 +1564,6 @@ export class CrossStackGraphBuilder {
       matchDetails: finalMatches.map(match => ({
         ts: match.typescriptInterface.name,
         php: match.phpDto.name,
-        confidence: match.confidence
       }))
     });
 
@@ -1648,57 +1573,6 @@ export class CrossStackGraphBuilder {
   /**
    * Calculate pattern-based matching (e.g., User interface with UserController)
    */
-  private calculatePatternMatch(tsName: string, phpName: string): number {
-    // Be much more restrictive to prevent cartesian product explosion
-
-    // Only allow very specific, high-confidence patterns
-    const tsBaseName = tsName.replace(/(Interface|Type)$/i, '');
-
-    // Only match specific, well-known patterns with high confidence
-    const highConfidencePatterns = [
-      // Exact base name match (e.g., User -> User)
-      { pattern: new RegExp(`^${tsBaseName}$`, 'i'), confidence: 0.8 },
-      // Model pattern (e.g., User -> UserModel, but only for Models)
-      { pattern: new RegExp(`^${tsBaseName}Model$`, 'i'), confidence: 0.6 }
-    ];
-
-    for (const { pattern, confidence } of highConfidencePatterns) {
-      if (pattern.test(phpName)) {
-        return confidence;
-      }
-    }
-
-    // Additional restriction: only match if names are very similar
-    // This prevents User interface from matching UserController, UserRequest, etc.
-    const similarity = this.calculateStringSimilarity(tsBaseName.toLowerCase(), phpName.toLowerCase());
-
-    // Only return confidence if similarity is very high (> 0.9) and confidence is low
-    if (similarity > 0.9) {
-      const confidence = similarity * 0.3; // Low confidence for non-exact matches
-      return confidence;
-    }
-
-    return 0;
-  }
-
-  /**
-   * Calculate string similarity using simple character-based comparison
-   */
-  private calculateStringSimilarity(str1: string, str2: string): number {
-    const maxLength = Math.max(str1.length, str2.length);
-    if (maxLength === 0) return 1;
-
-    let matches = 0;
-    const minLength = Math.min(str1.length, str2.length);
-
-    for (let i = 0; i < minLength; i++) {
-      if (str1[i] === str2[i]) {
-        matches++;
-      }
-    }
-
-    return matches / maxLength;
-  }
 
   /**
    * Store detected relationships in database
@@ -1780,7 +1654,6 @@ export class CrossStackGraphBuilder {
               backend_route_id: matchingRoute.metadata.id,
               method: relationship.vueApiCall.method,
               url_pattern: relationship.vueApiCall.url,
-              confidence: relationship.matchConfidence || 0.8,
               request_schema: null,
               response_schema: null
             });

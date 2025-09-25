@@ -17,7 +17,7 @@ Claude Compass provides:
 - ✅ Test framework parsing (Jest, Vitest, Cypress, Playwright)
 - ✅ ORM relationship parsing (Prisma, TypeORM, Sequelize, Mongoose)
 - ✅ Package manager parsing (npm, yarn, pnpm, monorepo support)
-- ✅ Enhanced transitive analysis with cycle detection and confidence scoring
+- ✅ Enhanced transitive analysis with cycle detection and comprehensive relationship mapping
 - ✅ Chunked parsing for large files with size validation
 - ✅ Encoding detection and recovery for problematic files
 - ✅ Bundle file filtering and CompassIgnore support
@@ -293,7 +293,7 @@ const impactResponse = await mcpClient.callTool('impact_of', {
   include_routes: true,
   include_jobs: true,
   include_tests: true,
-  confidence_threshold: 0.7,
+  max_depth: 5,
   max_depth: 5
 });
 
@@ -374,10 +374,10 @@ Claude Compass includes:
 - ✅ **PHP/Laravel support**: Laravel routes, controllers, Eloquent models, job queues, service providers, middleware
 - ✅ **C#/Godot support**: Godot scene parsing (.tscn), C# script analysis, node hierarchy, autoload detection, signal extraction
 - ✅ **Background job detection**: Bull, BullMQ, Agenda, Bee, Kue, Worker Threads with configuration analysis
-- ✅ **Test-to-code linkage**: Jest, Vitest, Cypress, Playwright with coverage analysis and confidence scoring
+- ✅ **Test-to-code linkage**: Jest, Vitest, Cypress, Playwright with coverage analysis and comprehensive mapping
 - ✅ **ORM relationship mapping**: Prisma, TypeORM, Sequelize, Mongoose entity relationships and CRUD operations
 - ✅ **Package manager integration**: npm, yarn, pnpm with monorepo support (Nx, Lerna, Turborepo, Rush)
-- ✅ **Enhanced transitive analysis**: Deep dependency traversal with cycle detection and confidence propagation
+- ✅ **Enhanced transitive analysis**: Deep dependency traversal with cycle detection and comprehensive relationship tracking
 - ✅ **Map HTTP routes to handlers**: Express/Fastify routes with middleware chains and controllers
 - ✅ **Component dependency detection**: Vue/React component relationships and props extraction
 - ✅ **Hooks/composables analysis**: Custom hooks, Vue composables, and React state management
@@ -405,12 +405,12 @@ Claude Compass includes:
 - 🧪 **Test Analysis**: Test suite parsing, coverage mapping, mock detection
 - 🗄️ **ORM Relationships**: Entity mapping, relationship detection, database schema analysis
 - 📦 **Package Management**: Dependency analysis, workspace detection, monorepo support
-- 🔄 **Transitive Analysis**: Deep dependency traversal, cycle detection, confidence scoring
+- 🔄 **Transitive Analysis**: Deep dependency traversal, cycle detection, comprehensive relationship mapping
 - 🔧 **Large File Processing**: Chunked parsing for files up to 20MB
 - 🎯 **Smart Filtering**: Bundle files and generated content automatically filtered
 - 🛠️ **Encoding Recovery**: Handles encoding issues and problematic files
 - 🔌 **Enhanced MCP Integration**: 6 focused core tools with framework-aware AI assistant integration
-- 🔍 **Advanced Search**: Hybrid vector+lexical search with framework awareness and confidence scoring
+- 🔍 **Advanced Search**: Hybrid vector+lexical search with framework awareness and relevance scoring
 - 🎯 **Impact Analysis**: Comprehensive blast radius analysis with routes, jobs, tests, and cross-stack relationships
 - 🌐 **Cross-Stack Integration**: Vue ↔ Laravel API mapping, dependency tracking, full-stack impact analysis
 - 🗃️ **Vector Search Infrastructure**: pgvector with embeddings, full-text search, and advanced ranking

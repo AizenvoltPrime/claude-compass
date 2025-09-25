@@ -62,12 +62,12 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1, 2, 3];
-      const result = await analyzer.formatCallChain(path, false);
+      const result = await analyzer.formatCallChain(path);
 
       expect(result).toBe('_Ready() → InitializeServices() → SetHandPositions() (CardManager.cs)');
     });
 
-    test('should include confidence scores when requested', async () => {
+    test('should format call chain with comprehensive data', async () => {
       // Configure the symbols query mock with test data
       const testSymbolData = [
         { id: 1, name: '_Ready', symbol_type: 'method', signature: '', file_path: 'DeckController.cs' },
@@ -82,10 +82,9 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1, 2];
-      const confidenceMap = new Map([[1, 0.95], [2, 0.87]]);
-      const result = await analyzer.formatCallChain(path, true, confidenceMap);
+      const result = await analyzer.formatCallChain(path);
 
-      expect(result).toBe('_Ready() [0.95] → InitializeServices() [0.87]');
+      expect(result).toBe('_Ready() → InitializeServices()');
     });
 
     test('should show cross-file context', async () => {
@@ -103,7 +102,7 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1, 2];
-      const result = await analyzer.formatCallChain(path, false);
+      const result = await analyzer.formatCallChain(path);
 
       expect(result).toBe('InitializeServices() → SetHandPositions() (.../Managers/CardManager.cs)');
     });
@@ -122,7 +121,7 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1];
-      const result = await analyzer.formatCallChain(path, false);
+      const result = await analyzer.formatCallChain(path);
 
       expect(result).toBe('CardManager.SetHandPositions()');
     });
@@ -142,13 +141,13 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1, 2];
-      const result = await analyzer.formatCallChain(path, false);
+      const result = await analyzer.formatCallChain(path);
 
       expect(result).toBe('PlayerCount → maxPlayers');
     });
 
     test('should handle empty path gracefully', async () => {
-      const result = await analyzer.formatCallChain([], false);
+      const result = await analyzer.formatCallChain([]);
       expect(result).toBe('');
     });
 
@@ -167,7 +166,7 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1, 2];
-      const result = await analyzer.formatCallChain(path, false);
+      const result = await analyzer.formatCallChain(path);
 
       expect(result).toBe('_Ready() → Symbol(2)');
     });
@@ -186,7 +185,7 @@ describe('Call Chain Formatting Tests', () => {
       });
 
       const path = [1, 2, 3];
-      const result = await analyzer.formatCallChain(path, false);
+      const result = await analyzer.formatCallChain(path);
 
       expect(result).toBe('Call chain [1 → 2 → 3]');
     });
@@ -213,7 +212,6 @@ describe('Call Chain Formatting Tests', () => {
           symbolId: 3,
           path: [1, 2],
           depth: 2,
-          totalConfidence: 0.85,
           dependencies: []
         }
       ];
@@ -221,9 +219,8 @@ describe('Call Chain Formatting Tests', () => {
       const enhancedResults = await (analyzer as any).enhanceResultsWithCallChains(results, true);
 
       expect(enhancedResults).toHaveLength(1);
-      expect(enhancedResults[0].call_chain).toBe('_Ready() → InitializeServices() → SetHandPositions() [0.85] (CardManager.cs)');
+      expect(enhancedResults[0].call_chain).toBe('_Ready() → InitializeServices() → SetHandPositions() (CardManager.cs)');
       expect(enhancedResults[0].symbolId).toBe(3);
-      expect(enhancedResults[0].totalConfidence).toBe(0.85);
     });
 
     test('should not enhance results when showCallChains is false', async () => {
@@ -232,7 +229,6 @@ describe('Call Chain Formatting Tests', () => {
           symbolId: 3,
           path: [1, 2],
           depth: 2,
-          totalConfidence: 0.85,
           dependencies: []
         }
       ];
@@ -287,7 +283,7 @@ describe('Call Chain Formatting Tests', () => {
       const options = {
         maxDepth: 5,
         showCallChains: true,
-        confidenceThreshold: 0.5
+        maxResults: 100
       };
 
       // Mock the database methods that would be called

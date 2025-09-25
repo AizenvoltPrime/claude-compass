@@ -23,7 +23,6 @@ const logger = createComponentLogger('csharp-parser');
 
 interface EnhancedTypeInfo {
   type: string;
-  confidence: number;
   source: 'field' | 'variable' | 'parameter' | 'property';
   namespace?: string;
   fullQualifiedName?: string;
@@ -523,7 +522,6 @@ export class CSharpParser extends ChunkedParser {
           from: dependency.from_symbol,
           to: dependency.to_symbol,
           line: dependency.line_number,
-          confidence: dependency.confidence,
           type: dependency.dependency_type
         });
       } else {
@@ -1005,7 +1003,6 @@ export class CSharpParser extends ChunkedParser {
           const resolvedType = this.extractClassNameFromType(fieldType);
           return {
             type: resolvedType,
-            confidence: 0.95,
             source: 'field',
             fullQualifiedName: fieldType
           };
@@ -1040,7 +1037,6 @@ export class CSharpParser extends ChunkedParser {
           const resolvedType = this.extractClassNameFromType(varType);
           return {
             type: resolvedType,
-            confidence: 0.90,
             source: 'variable',
             fullQualifiedName: varType
           };
@@ -1074,7 +1070,6 @@ export class CSharpParser extends ChunkedParser {
             const resolvedType = this.extractClassNameFromType(paramType);
             return {
               type: resolvedType,
-              confidence: 0.85,
               source: 'parameter',
               fullQualifiedName: paramType
             };
@@ -1104,7 +1099,6 @@ export class CSharpParser extends ChunkedParser {
         const resolvedType = this.extractClassNameFromType(propertyType);
         return {
           type: resolvedType,
-          confidence: 0.88,
           source: 'property',
           fullQualifiedName: propertyType
         };
@@ -1285,14 +1279,6 @@ export class CSharpParser extends ChunkedParser {
     // Log method call detection
     logger.debug('C# method call extraction details');
 
-    // Determine confidence using standardized methodology
-    const confidence = this.calculateMethodCallConfidence({
-      functionNodeType: functionNode.type,
-      hasQualifiedName: qualifiedMethodName !== methodName,
-      hasCallingObject: Boolean(callingObject),
-      methodNameClean: !methodName.includes('(') && !methodName.includes('.') && methodName.length > 0,
-      extractionSource: 'ast'
-    });
 
     // Parameter Context Extraction
     let parameterContext: string | undefined;
@@ -1323,7 +1309,6 @@ export class CSharpParser extends ChunkedParser {
       to_symbol: methodName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
-      confidence,
 
       // Enhanced context fields
       calling_object: callingObject || undefined,
@@ -1352,76 +1337,9 @@ export class CSharpParser extends ChunkedParser {
       to_symbol: memberName,
       dependency_type: DependencyType.REFERENCES,
       line_number: node.startPosition.row + 1,
-      confidence: 0.7
     };
   }
 
-  /**
-   * Standardized confidence score calculation for method calls
-   * This ensures consistent confidence scoring across the entire system
-   */
-  private calculateMethodCallConfidence(params: {
-    functionNodeType: string;
-    hasQualifiedName: boolean;
-    hasCallingObject: boolean;
-    methodNameClean: boolean;
-    extractionSource: 'ast' | 'text' | 'inferred';
-  }): number {
-    const { functionNodeType, hasQualifiedName, hasCallingObject, methodNameClean, extractionSource } = params;
-
-    // Base confidence by extraction source
-    let baseConfidence = 0.5; // Default for inferred
-    switch (extractionSource) {
-      case 'ast':
-        baseConfidence = 0.9;
-        break;
-      case 'text':
-        baseConfidence = 0.7;
-        break;
-      case 'inferred':
-        baseConfidence = 0.5;
-        break;
-    }
-
-    // Quality modifiers (applied multiplicatively)
-    let qualityMultiplier = 1.0;
-
-    // Type resolution bonus
-    if (hasQualifiedName) {
-      qualityMultiplier += 0.08; // +8% for qualified names
-    }
-
-    // Calling context bonus
-    if (hasCallingObject) {
-      qualityMultiplier += 0.05; // +5% for calling object context
-    }
-
-    // Node type confidence adjustments
-    if (functionNodeType === 'identifier' || functionNodeType === 'member_access_expression') {
-      qualityMultiplier += 0.0; // Standard confidence for common patterns
-    } else if (functionNodeType === 'generic_name' || functionNodeType === 'qualified_name') {
-      qualityMultiplier -= 0.05; // -5% for more complex patterns
-    } else {
-      qualityMultiplier -= 0.1; // -10% for complex expressions
-    }
-
-    // Method name cleanliness
-    if (!methodNameClean) {
-      qualityMultiplier -= 0.2; // -20% for unclean method names
-    }
-
-    // Calculate final confidence (capped at 1.0)
-    const finalConfidence = Math.min(baseConfidence * qualityMultiplier, 1.0);
-
-    logger.debug('C# confidence calculation', {
-      baseConfidence,
-      qualityMultiplier,
-      finalConfidence,
-      params
-    });
-
-    return finalConfidence;
-  }
 
   private extractConstructorDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
     // Get the type being constructed
@@ -1484,21 +1402,12 @@ export class CSharpParser extends ChunkedParser {
 
     const callerName = this.findContainingFunction(node, content);
 
-    // Determine confidence using standardized methodology
-    const confidence = this.calculateMethodCallConfidence({
-      functionNodeType: typeNode.type,
-      hasQualifiedName: typeNode.type === 'qualified_name',
-      hasCallingObject: true, // Constructor calls always have 'new' as calling context
-      methodNameClean: !typeName.includes('(') && !typeName.includes('.') && typeName.length > 0,
-      extractionSource: 'ast'
-    });
 
     return {
       from_symbol: callerName,
       to_symbol: typeName, // Constructor calls create dependency on the type
       dependency_type: DependencyType.CALLS, // Constructor calls are method calls to constructors
       line_number: node.startPosition.row + 1,
-      confidence,
 
       // Enhanced context fields
       calling_object: 'new', // Indicate this is a constructor call
@@ -1539,10 +1448,6 @@ export class CSharpParser extends ChunkedParser {
       );
 
       if (chainedCalls.length > 0) {
-        // Add these with higher confidence since we detected the pattern
-        for (const call of chainedCalls) {
-          call.confidence = 0.85;
-        }
         dependencies.push(...chainedCalls);
 
         logger.debug('C# conditional access chained calls extracted', {
@@ -1572,15 +1477,12 @@ export class CSharpParser extends ChunkedParser {
         );
 
         if (!isDuplicate) {
-          // Mark as higher confidence since we specifically detected the conditional access pattern
-          dependency.confidence = Math.min(0.95, dependency.confidence + 0.1);
           dependencies.push(dependency);
 
           logger.debug('C# conditional access call extracted', {
             from: dependency.from_symbol,
             to: dependency.to_symbol,
             line: dependency.line_number,
-            confidence: dependency.confidence
           });
         }
       }
@@ -1617,7 +1519,6 @@ export class CSharpParser extends ChunkedParser {
         to_symbol: memberName,
         dependency_type: isMethodCall ? DependencyType.CALLS : DependencyType.REFERENCES,
         line_number: node.startPosition.row + 1,
-        confidence: 0.85 // High confidence for conditional access
       };
 
       dependencies.push(dependency);
@@ -1729,7 +1630,6 @@ export class CSharpParser extends ChunkedParser {
                 to_symbol: `${fieldType}.${methodName}`, // Include class context
                 dependency_type: DependencyType.CALLS,
                 line_number: lineNumber,
-                confidence: 0.9, // High confidence for field-based resolution
                 qualified_context: `field_call_${fieldName}`
               };
               dependencies.push(fieldBasedDependency);
@@ -1739,7 +1639,6 @@ export class CSharpParser extends ChunkedParser {
                 to: fieldBasedDependency.to_symbol,
                 fieldName: fieldName,
                 fieldType: fieldType,
-                confidence: fieldBasedDependency.confidence
               });
               continue; // Skip the fallback logic
             }
@@ -1753,7 +1652,6 @@ export class CSharpParser extends ChunkedParser {
           to_symbol: methodName, // No class context - will need resolution
           dependency_type: DependencyType.CALLS,
           line_number: lineNumber,
-          confidence: 0.75 // Lower confidence for regex-based extraction
         };
 
         dependencies.push(dependency);
@@ -1776,7 +1674,6 @@ export class CSharpParser extends ChunkedParser {
           to_symbol: propertyName,
           dependency_type: DependencyType.REFERENCES,
           line_number: lineNumber,
-          confidence: 0.70 // Lower confidence for property access via regex
         };
 
         dependencies.push(dependency);
@@ -1843,7 +1740,6 @@ export class CSharpParser extends ChunkedParser {
         to_symbol: baseName,
         dependency_type: dependencyType,
         line_number: node.startPosition.row + 1,
-        confidence: 0.9
       });
     }
 
@@ -1964,7 +1860,6 @@ export class CSharpParser extends ChunkedParser {
           to_symbol: typeName,
           dependency_type: DependencyType.REFERENCES,
           line_number: constraintNode.startPosition.row + 1,
-          confidence: 0.8
         });
       }
     }
@@ -2457,7 +2352,7 @@ export class CSharpParser extends ChunkedParser {
 
   /**
    * Deduplicate dependencies based on from_symbol, to_symbol, dependency_type, and line_number.
-   * When duplicates are found, prefer the one with higher confidence.
+   * When duplicates are found, prefer the more specific one.
    */
   private deduplicateDependencies(dependencies: ParsedDependency[]): ParsedDependency[] {
     const uniqueMap = new Map<string, ParsedDependency>();
@@ -2471,26 +2366,12 @@ export class CSharpParser extends ChunkedParser {
         // First occurrence, add it
         uniqueMap.set(key, dependency);
       } else {
-        // Duplicate found, keep the one with higher confidence
-        if (dependency.confidence > existing.confidence) {
-          uniqueMap.set(key, dependency);
-
-          logger.debug('C# dependency deduplication: replaced with higher confidence', {
-            key,
-            oldConfidence: existing.confidence,
-            newConfidence: dependency.confidence,
-            from: dependency.from_symbol,
-            to: dependency.to_symbol
-          });
-        } else {
-          logger.debug('C# dependency deduplication: ignored lower confidence duplicate', {
-            key,
-            existingConfidence: existing.confidence,
-            duplicateConfidence: dependency.confidence,
-            from: dependency.from_symbol,
-            to: dependency.to_symbol
-          });
-        }
+        // Duplicate found, keep first occurrence
+        logger.debug('C# dependency deduplication: ignored duplicate', {
+          key,
+          from: dependency.from_symbol,
+          to: dependency.to_symbol
+        });
       }
     }
 
@@ -3594,7 +3475,6 @@ export class CSharpParser extends ChunkedParser {
             to_symbol: target,
             dependency_type: type as DependencyType,
             line_number: 0,
-            confidence: 1.0
           });
         }
       });

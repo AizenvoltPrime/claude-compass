@@ -149,7 +149,6 @@ describe('McpTools', () => {
           id: 1,
           dependency_type: 'calls',
           line_number: 5,
-          confidence: 1.0,
           to_symbol: {
             id: 2,
             name: 'helperFunction',
@@ -166,7 +165,6 @@ describe('McpTools', () => {
           id: 2,
           dependency_type: 'calls',
           line_number: 12,
-          confidence: 1.0,
           from_symbol: {
             id: 3,
             name: 'mainFunction',
@@ -298,7 +296,6 @@ describe('McpTools', () => {
           id: 1,
           dependency_type: 'calls',
           line_number: 10,
-          confidence: 1.0,
           from_symbol: {
             id: 2,
             name: 'caller1',
@@ -319,12 +316,14 @@ describe('McpTools', () => {
       expect(mockDatabaseService.getDependenciesToWithContext).toHaveBeenCalledWith(1);
 
       const data = JSON.parse(result.content[0].text);
-      expect(data.symbol.name).toBe('targetFunction');
+      expect(data.query_info.symbol).toBe('targetFunction');
 
-      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
-      expect(typeof data.callers).toBe('object');
-      expect(data.callers.line_10).toBeDefined();
-      expect(data.callers.line_10.calls[0].target).toBe('caller.caller1');
+      // Results are now in dependencies array format
+      expect(Array.isArray(data.dependencies)).toBe(true);
+      expect(data.total_count).toBeGreaterThan(0);
+      expect(data.dependencies[0].from).toBe('caller1');
+      expect(data.dependencies[0].to).toBe('targetFunction');
+      expect(data.dependencies[0].type).toBe('calls');
     });
   });
 
@@ -341,7 +340,6 @@ describe('McpTools', () => {
           id: 1,
           dependency_type: 'calls',
           line_number: 5,
-          confidence: 1.0,
           to_symbol: {
             id: 2,
             name: 'dependency1',
@@ -362,12 +360,14 @@ describe('McpTools', () => {
       expect(mockDatabaseService.getDependenciesFrom).toHaveBeenCalledWith(1);
 
       const data = JSON.parse(result.content[0].text);
-      expect(data.symbol.name).toBe('sourceFunction');
+      expect(data.query_info.symbol).toBe('sourceFunction');
 
-      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
-      expect(typeof data.dependencies).toBe('object');
-      expect(data.dependencies.line_5).toBeDefined();
-      expect(data.dependencies.line_5.calls[0].target).toBe('utils.dependency1');
+      // Results are now in dependencies array format
+      expect(Array.isArray(data.dependencies)).toBe(true);
+      expect(data.total_count).toBeGreaterThan(0);
+      expect(data.dependencies[0].from).toBe('sourceFunction');
+      expect(data.dependencies[0].to).toBeDefined();
+      expect(data.dependencies[0].type).toBe('calls');
     });
 
     it('should handle analysis_type parameter', async () => {
@@ -387,7 +387,7 @@ describe('McpTools', () => {
 
       expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
       const data = JSON.parse(result.content[0].text);
-      expect(data.symbol.name).toBe('testFunction');
+      expect(data.query_info.symbol).toBe('testFunction');
     });
 
     it('should validate analysis_type parameter values', async () => {
@@ -413,7 +413,6 @@ describe('McpTools', () => {
           id: 1,
           dependency_type: 'calls',
           line_number: 10,
-          confidence: 1.0,
           from_symbol: {
             id: 2,
             name: 'caller1',
@@ -437,12 +436,13 @@ describe('McpTools', () => {
       expect(mockDatabaseService.getDependenciesToWithContext).toHaveBeenCalledWith(1);
 
       const data = JSON.parse(result.content[0].text);
-      expect(data.symbol.name).toBe('targetFunction');
+      expect(data.query_info.symbol).toBe('targetFunction');
 
-      // Results are now grouped by line number (per PARAMETER_REDUNDANCY_ANALYSIS)
-      expect(typeof data.callers).toBe('object');
-      expect(data.callers.line_10).toBeDefined();
-      expect(data.callers.line_10.calls[0].target).toBe('caller.caller1');
+      // Results are now in dependencies array format
+      expect(Array.isArray(data.dependencies)).toBe(true);
+      expect(data.total_count).toBeGreaterThan(0);
+      expect(data.dependencies[0].from).toBeDefined();
+      expect(data.dependencies[0].to).toBe('targetFunction');
     });
 
     it('should validate analysis_type parameter values for whoCalls', async () => {
@@ -456,9 +456,9 @@ describe('McpTools', () => {
   });
 
   describe('searchCode parameter validation', () => {
-    it('should accept removed parameters without error (graceful degradation)', async () => {
-      // The removed parameters (repo_id, symbol_type, limit, use_vector) are simply ignored now
-      // This provides backward compatibility while the API has been simplified per PARAMETER_REDUNDANCY_ANALYSIS
+    it('should reject removed parameters with helpful error messages', async () => {
+      // The removed parameters (repo_id, symbol_type, limit, use_vector) now throw helpful errors
+      // This guides users to use the new parameter names per PARAMETER_REDUNDANCY_ANALYSIS
 
       const mockSymbols = [
         {
@@ -483,16 +483,13 @@ describe('McpTools', () => {
       (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockRejectedValue(new Error('Vector search not available'));
       (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
-      // These parameters are ignored, not rejected (graceful degradation)
-      const result = await mcpTools.searchCode({
-        query: 'test',
-        repo_id: 123,  // ignored
-        symbol_type: 'function',  // ignored
-        limit: 50,  // ignored
-        use_vector: true  // ignored
-      });
-
-      expect(result).toBeDefined();
+      // These parameters should throw errors with helpful messages
+      await expect(async () => {
+        await mcpTools.searchCode({
+          query: 'test',
+          repo_id: 123
+        });
+      }).rejects.toThrow('repo_id parameter removed. Use repo_ids array instead');
     });
 
     it('should validate new parameter types', async () => {

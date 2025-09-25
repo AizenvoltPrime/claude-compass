@@ -57,8 +57,7 @@ export class MultiParser {
           detectionResult = await this.detector.detectFrameworks(projectRoot);
           if (detectionResult && detectionResult.frameworks) {
             logger.debug(`Detected frameworks for ${filePath}`, {
-              frameworks: detectionResult.frameworks.map(f => f.name),
-              confidence: detectionResult.confidence
+              frameworks: detectionResult.frameworks.map(f => f.name)
             });
           } else {
             logger.debug(`No frameworks detected for ${filePath}`);
@@ -67,7 +66,6 @@ export class MultiParser {
           logger.warn(`Framework detection failed for ${filePath}`, { error: error.message });
           detectionResult = {
             frameworks: [],
-            confidence: 0,
             metadata: { hasPackageJson: false, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
           };
         }
@@ -187,7 +185,7 @@ export class MultiParser {
           emptyResult.errors.push(...filteredErrors);
         }
 
-        emptyResult.parsers = applicableParsers; // Ensure we return the attempted parsers
+        emptyResult.parsers = applicableParsers;
         return emptyResult;
       }
 
@@ -228,8 +226,7 @@ export class MultiParser {
       detectionResult = await this.detector.detectFrameworks(projectPath);
       logger.info(`Project framework detection completed`, {
         projectPath,
-        frameworks: detectionResult.frameworks.map(f => `${f.name}@${f.version || 'unknown'}`),
-        confidence: detectionResult.confidence
+        frameworks: detectionResult.frameworks.map(f => `${f.name}@${f.version || 'unknown'}`)
       });
     }
 
@@ -527,7 +524,7 @@ export class MultiParser {
       });
 
       // Use CrossStackParser to detect relationships
-      const crossStackParser = new CrossStackParser(0.7); // 70% confidence threshold
+      const crossStackParser = new CrossStackParser(); // No confidence threshold needed
       const relationships = await crossStackParser.detectApiCallRelationships(vueResults, laravelResults);
 
       if (relationships.length > 0) {

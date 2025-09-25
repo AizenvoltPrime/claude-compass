@@ -86,7 +86,6 @@ describe('C# Field Resolution', () => {
 
       expect(fieldBasedDep).toBeDefined();
       expect(fieldBasedDep?.from_symbol).toBe('CardManager.SetHandPositions'); // From qualified method name
-      expect(fieldBasedDep?.confidence).toBe(0.85); // High confidence for field-based resolution (adjusted by conditional access processing)
       expect(fieldBasedDep?.dependency_type).toBe(DependencyType.CALLS);
     });
 
@@ -136,7 +135,6 @@ describe('C# Field Resolution', () => {
       );
 
       expect(fallbackDep).toBeDefined();
-      expect(fallbackDep?.confidence).toBe(0.85); // Confidence adjusted by conditional access processing
     });
   });
 
@@ -193,7 +191,6 @@ describe('C# Field Resolution', () => {
 
       expect(targetDep).toBeDefined();
       expect(targetDep?.dependency_type).toBe(DependencyType.CALLS);
-      expect(targetDep?.confidence).toBe(0.85); // Confidence adjusted by conditional access processing
       expect(targetDep?.line_number).toBeGreaterThan(0);
     });
   });

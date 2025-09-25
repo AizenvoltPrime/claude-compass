@@ -40,7 +40,6 @@ export interface GodotScene extends FrameworkEntity {
   resources: GodotResource[];
   connections: GodotConnection[];
   framework: 'godot';
-  confidence: number;
 }
 
 /**
@@ -55,7 +54,6 @@ export interface GodotNode extends FrameworkEntity {
   script?: string;
   properties: Record<string, any>;
   framework: 'godot';
-  confidence: number;
 }
 
 /**
@@ -70,7 +68,6 @@ export interface GodotScript extends FrameworkEntity {
   isAutoload: boolean;
   attachedScenes: string[];
   framework: 'godot';
-  confidence: number;
 }
 
 /**
@@ -82,7 +79,6 @@ export interface GodotAutoload extends FrameworkEntity {
   scriptPath: string;
   className: string;
   framework: 'godot';
-  confidence: number;
 }
 
 /**
@@ -94,7 +90,6 @@ export interface GodotResource extends FrameworkEntity {
   resourcePath?: string;
   properties: Record<string, any>;
   framework: 'godot';
-  confidence: number;
 }
 
 /**
@@ -155,49 +150,42 @@ export class GodotParser extends BaseFrameworkParser {
         name: 'godot-project',
         pattern: /\[application\]|\[rendering\]|\[physics\]/,
         fileExtensions: ['.godot'],
-        confidence: 0.98,
         description: 'Godot project configuration file',
       },
       {
         name: 'godot-scene',
         pattern: /\[gd_scene\s+load_steps=\d+\s+format=\d+\]/,
         fileExtensions: ['.tscn'],
-        confidence: 0.95,
         description: 'Godot scene file',
       },
       {
         name: 'godot-csharp-script',
         pattern: /extends\s+(Node|Control|RigidBody|CharacterBody|Resource)|class\s+\w+\s*:\s*(Node|Control|RigidBody|CharacterBody|Resource)/,
         fileExtensions: ['.cs'],
-        confidence: 0.9,
         description: 'C# script extending Godot classes',
       },
       {
         name: 'godot-export-attribute',
         pattern: /\[Export\]|\[Export\s*\(|\[Signal\]/,
         fileExtensions: ['.cs'],
-        confidence: 0.85,
         description: 'Godot C# export attributes',
       },
       {
         name: 'godot-api-calls',
         pattern: /GD\.Print|GetNode|EmitSignal|CallDeferred|AddChild|QueueFree/,
         fileExtensions: ['.cs'],
-        confidence: 0.8,
         description: 'Godot C# API calls',
       },
       {
         name: 'godot-input-handling',
         pattern: /_Ready\s*\(|_Process\s*\(|_PhysicsProcess\s*\(|_Input\s*\(/,
         fileExtensions: ['.cs'],
-        confidence: 0.85,
         description: 'Godot C# lifecycle methods',
       },
       {
         name: 'godot-node-types',
         pattern: /Node2D|Node3D|Area2D|Area3D|CollisionShape2D|CollisionShape3D|Sprite2D|Sprite3D|Camera2D|Camera3D/,
         fileExtensions: ['.cs', '.tscn'],
-        confidence: 0.8,
         description: 'Godot node type references',
       }
     ];
@@ -321,8 +309,7 @@ export class GodotParser extends BaseFrameworkParser {
                 children: [],
                 properties: {},
                 framework: 'godot',
-                confidence: 0.9
-              };
+                  };
             }
           }
         } else if (trimmed && !trimmed.startsWith(';') && currentSection) {
@@ -363,7 +350,6 @@ export class GodotParser extends BaseFrameworkParser {
         resources,
         connections,
         framework: 'godot',
-        confidence: 0.95
       };
 
       return scene;
@@ -408,7 +394,6 @@ export class GodotParser extends BaseFrameworkParser {
         isAutoload,
         attachedScenes: [], // TODO: Find scenes that reference this script
         framework: 'godot',
-        confidence: 0.9
       };
 
       return script;
@@ -458,7 +443,6 @@ export class GodotParser extends BaseFrameworkParser {
             scriptPath,
             className,
             framework: 'godot',
-            confidence: 0.95
           });
         }
       }
@@ -766,8 +750,7 @@ export class GodotParser extends BaseFrameworkParser {
                 from_symbol: filePath, // Current .tscn file
                 to_symbol: scriptPath, // Actual script file path
                 dependency_type: DependencyType.REFERENCES,
-                line_number: i + 1,
-                confidence: 0.95
+                line_number: i + 1
               });
             }
           }
@@ -784,8 +767,7 @@ export class GodotParser extends BaseFrameworkParser {
               from_symbol: filePath, // Current .tscn file
               to_symbol: resourcePath, // Actual resource file path
               dependency_type: DependencyType.REFERENCES,
-              line_number: i + 1,
-              confidence: 0.85
+              line_number: i + 1
             });
           }
         }

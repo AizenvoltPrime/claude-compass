@@ -110,28 +110,24 @@ export class ORMParser extends BaseFrameworkParser {
         name: 'prisma-schema',
         pattern: /model\s+\w+\s*{|enum\s+\w+\s*{|generator\s+\w+\s*{/,
         fileExtensions: ['.prisma'],
-        confidence: 0.9,
         description: 'Prisma schema definition with models and enums'
       },
       {
         name: 'typeorm-entity',
         pattern: /@Entity\s*\(|@Column\s*\(|@PrimaryGeneratedColumn\s*\(/,
         fileExtensions: ['.ts', '.js'],
-        confidence: 0.8,
         description: 'TypeORM entity with decorators'
       },
       {
         name: 'sequelize-model',
         pattern: /sequelize\.define\s*\(|Model\.init\s*\(|DataTypes\./,
         fileExtensions: ['.ts', '.js'],
-        confidence: 0.8,
         description: 'Sequelize model definition'
       },
       {
         name: 'mongoose-schema',
         pattern: /new\s+Schema\s*\(|mongoose\.model\s*\(|Schema\s*\(/,
         fileExtensions: ['.ts', '.js'],
-        confidence: 0.8,
         description: 'Mongoose schema definition'
       }
     ];
@@ -1103,8 +1099,7 @@ export class ORMParser extends BaseFrameworkParser {
           from_symbol: 'unknown',
           to_symbol: memberNode.text,
           dependency_type: DependencyType.CALLS,
-          line_number: node.startPosition.row + 1,
-          confidence: 0.8
+          line_number: node.startPosition.row + 1
         });
       }
     }

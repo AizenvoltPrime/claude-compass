@@ -38,7 +38,6 @@ export interface ApiCallInfo {
   method: string;
   requestType?: string;
   responseType?: string;
-  confidence: number;
   location: {
     line: number;
     column: number;
@@ -58,7 +57,6 @@ export interface LaravelRoute_CrossStack {
   normalizedPath: string;
   requestValidation?: ValidationRule[];
   responseSchema?: any;
-  confidence: number;
   filePath: string;
 }
 
@@ -68,7 +66,6 @@ export interface LaravelRoute_CrossStack {
 export interface CrossStackRelationship {
   vueApiCall: ApiCallInfo;
   laravelRoute: LaravelRoute_CrossStack;
-  matchConfidence: number;
   evidenceTypes: string[];
   urlSimilarity: UrlSimilarity;
   schemaCompatibility?: SchemaCompatibility;
@@ -102,7 +99,6 @@ export interface ApiCallMatch {
   vueCall: ApiCallInfo;
   laravelRoute: LaravelRoute_CrossStack;
   similarity: UrlSimilarity;
-  confidence: number;
 }
 
 /**
@@ -112,18 +108,15 @@ export interface SchemaMatch {
   vueInterface: VueTypeInterface;
   laravelValidation: ValidationRule[];
   compatibility: SchemaCompatibility;
-  confidence: number;
 }
 
 /**
  * Main cross-stack parser class
  */
 export class CrossStackParser {
-  private confidenceThreshold: number;
   private database?: DatabaseService;
 
-  constructor(confidenceThreshold: number = 0.7, database?: DatabaseService) {
-    this.confidenceThreshold = confidenceThreshold;
+  constructor(database?: DatabaseService) {
     this.database = database;
   }
 
@@ -228,22 +221,12 @@ export class CrossStackParser {
 
         for (const match of urlMatches) {
           try {
-            if (match.confidence >= this.confidenceThreshold) {
-              const relationship = this.createCrossStackRelationship(match);
-              if (relationship) {
-                relationships.push(relationship);
-                successfulRelationships++;
-              } else {
-                failedRelationships++;
-              }
+            const relationship = this.createCrossStackRelationship(match);
+            if (relationship) {
+              relationships.push(relationship);
+              successfulRelationships++;
             } else {
-              // Log low confidence matches for monitoring
-              crossStackErrorHandler.handleError(
-                CrossStackErrorType.RELATIONSHIP_ACCURACY_ALERT,
-                ErrorSeverity.LOW,
-                `Match confidence ${match.confidence} below threshold ${this.confidenceThreshold}`,
-                { match: match.vueCall.url + ' -> ' + match.laravelRoute.path }
-              );
+              failedRelationships++;
             }
           } catch (error) {
             failedRelationships++;
@@ -260,16 +243,12 @@ export class CrossStackParser {
         // Record performance metrics
         const endTime = process.hrtime.bigint();
         const executionTime = Number(endTime - startTime) / 1000000;
-        const avgConfidence = relationships.length > 0
-          ? relationships.reduce((sum, r) => sum + r.matchConfidence, 0) / relationships.length
-          : 0;
 
         crossStackErrorHandler.recordMetrics(
           'detectApiCallRelationships',
           executionTime,
           process.memoryUsage().heapUsed / (1024 * 1024),
           0, // Cache hit rate not applicable here
-          avgConfidence,
           failedRelationships
         );
 
@@ -293,7 +272,7 @@ export class CrossStackParser {
   /**
    * Match URL patterns between Vue API calls and Laravel routes
    * Performance optimized with caching for repeated pattern matches
-   * Now supports method mismatches with reduced confidence
+   * Now supports method mismatches
    */
   matchUrlPatterns(
     vueApiCalls: ApiCallInfo[],
@@ -315,25 +294,17 @@ export class CrossStackParser {
         );
 
         if (similarity.score > 0.3) { // Minimum threshold for consideration
-          const confidence = this.calculateMatchConfidence({
-            vueCall,
-            laravelRoute,
-            similarity,
-            confidence: 0, // Will be calculated
-          });
-
           matches.push({
             vueCall,
             laravelRoute,
             similarity,
-            confidence,
           });
         }
       }
     }
 
-    // Sort by confidence (highest first)
-    matches.sort((a, b) => b.confidence - a.confidence);
+    // Sort by similarity score (highest first)
+    matches.sort((a, b) => b.similarity.score - a.similarity.score);
 
     const endTime = process.hrtime.bigint();
     const executionTime = Number(endTime - startTime) / 1000000;
@@ -381,7 +352,6 @@ export class CrossStackParser {
             vueInterface: tsInterface,
             laravelValidation: phpValidationRules,
             compatibility,
-            confidence: compatibility.score,
           });
         }
       }
@@ -400,53 +370,9 @@ export class CrossStackParser {
       executionTimeMs: executionTime
     });
 
-    return matches.sort((a, b) => b.confidence - a.confidence);
+    return matches.sort((a, b) => b.compatibility.score - a.compatibility.score);
   }
 
-  /**
-   * Calculate overall match confidence for an API call match
-   * Enhanced to handle method mismatches and fix floating point precision
-   */
-  calculateMatchConfidence(match: ApiCallMatch): number {
-    // Special case: perfect exact matches should get 1.0 confidence
-    if (match.similarity.matchType === 'exact' &&
-        match.similarity.score === 1.0 &&
-        match.vueCall.method.toLowerCase() === match.laravelRoute.method.toLowerCase()) {
-      return 1.0;
-    }
-
-    let confidence = 0;
-
-    // URL similarity contributes heavily to confidence
-    confidence += match.similarity.score * 0.6;
-
-    // HTTP method handling - exact match gives boost, mismatch gives penalty
-    if (match.vueCall.method.toLowerCase() === match.laravelRoute.method.toLowerCase()) {
-      confidence += 0.2;
-    } else {
-      // Penalize method mismatches but don't eliminate them completely
-      confidence -= 0.15;
-    }
-
-    // Static URLs are more reliable than dynamic ones
-    if (match.similarity.matchType === 'exact') {
-      confidence += 0.15;
-    } else if (match.similarity.matchType === 'parameters') {
-      confidence += 0.12;
-    } else if (match.similarity.matchType === 'structure') {
-      // Structure matches with parameters should get a decent boost
-      const hasCompatibleParams = match.similarity.parameterMatches.some(p => p.compatible);
-      confidence += hasCompatibleParams ? 0.11 : 0.05;
-    }
-
-    // Evidence quality
-    const evidenceQuality = match.similarity.evidence.length / 5; // Normalize to 0-1
-    confidence += evidenceQuality * 0.05;
-
-    // Round to avoid floating point precision issues
-    const result = Math.min(1.0, Math.max(0.0, confidence));
-    return Math.round(result * 1000) / 1000; // Round to 3 decimal places
-  }
 
   /**
    * Extract Vue API calls from parse results
@@ -466,7 +392,6 @@ export class CrossStackParser {
               method: vueCall.method,
               requestType: vueCall.requestType,
               responseType: vueCall.responseType,
-              confidence: vueCall.confidence,
               location: vueCall.location,
               filePath: vueCall.filePath,
               componentName: this.extractComponentName(vueCall.filePath),
@@ -483,7 +408,6 @@ export class CrossStackParser {
                 method: apiCall.method,
                 requestType: apiCall.requestType,
                 responseType: apiCall.responseType,
-                confidence: 1.0,
                 location: apiCall.location || { line: 0, column: 0 },
                 filePath: result.filePath,
                 componentName: entity.name
@@ -517,7 +441,6 @@ export class CrossStackParser {
               controller: laravelRoute.controller,
               action: laravelRoute.action,
               normalizedPath: urlPattern.normalized,
-              confidence: urlPattern.confidence,
               filePath: laravelRoute.filePath,
             });
           }
@@ -532,7 +455,6 @@ export class CrossStackParser {
               controller: routeProps.controller,
               action: routeProps.action,
               normalizedPath: urlPattern.normalized,
-              confidence: 1.0,
               filePath: result.filePath,
             });
           }
@@ -548,7 +470,6 @@ export class CrossStackParser {
               normalizedPath: urlPattern.normalized,
               requestValidation: apiSchema.requestValidation,
               responseSchema: apiSchema.responseSchema,
-              confidence: apiSchema.confidence,
               filePath: apiSchema.filePath,
             });
           }
@@ -577,7 +498,6 @@ export class CrossStackParser {
         to_symbol: match.laravelRoute.controller || 'UnknownController',
         dependency_type: DependencyType.API_CALL,
         line_number: match.vueCall.location.line,
-        confidence: match.confidence,
       };
 
       // Create metadata entity
@@ -589,7 +509,6 @@ export class CrossStackParser {
           vueCall: match.vueCall,
           laravelRoute: match.laravelRoute,
           similarity: match.similarity,
-          confidence: match.confidence,
           evidenceTypes,
           framework: 'cross-stack',
         },
@@ -598,7 +517,6 @@ export class CrossStackParser {
       return {
         vueApiCall: match.vueCall,
         laravelRoute: match.laravelRoute,
-        matchConfidence: match.confidence,
         evidenceTypes,
         urlSimilarity: match.similarity,
         dependency,
@@ -813,12 +731,11 @@ export class CrossStackParser {
                 vueCall,
                 laravelRoute,
                 similarity: {
-                  score: basicSimilarity * 0.6, // Lower confidence for basic matching
+                  score: basicSimilarity * 0.6, // Lower score for basic matching
                   matchType: 'partial',
                   evidence: ['fallback_basic_match'],
                   parameterMatches: []
                 },
-                confidence: basicSimilarity * 0.6
               });
             }
           }
@@ -826,7 +743,7 @@ export class CrossStackParser {
       }
 
       logger.debug(`Created ${matches.length} basic fallback matches`);
-      return matches.sort((a, b) => b.confidence - a.confidence);
+      return matches.sort((a, b) => b.similarity.score - a.similarity.score);
     } catch (error) {
       crossStackErrorHandler.handleError(
         CrossStackErrorType.PATTERN_MATCH_FAILURE,

@@ -24,12 +24,15 @@ export interface ParsedSymbol {
   file_id?: number;
 }
 
+// ===== PHASE 3: SIMPLIFIED PARSED DEPENDENCY =====
+// Confidence field removed - parser focuses on dependency extraction without scoring
+
 export interface ParsedDependency {
   from_symbol: string;
   to_symbol: string;
   dependency_type: DependencyType;
   line_number: number;
-  confidence: number;
+  // REMOVED: confidence: number; // Phase 3 - Let AI decide relevance instead of parser confidence
   // Optional fields for database compatibility
   from_symbol_id?: number;
   to_symbol_id?: number;
@@ -303,7 +306,6 @@ export abstract class BaseParser {
       if (tree && tree.rootNode) {
         if (tree.rootNode.hasError) {
           this.syntaxErrorCount++;
-          // Only log syntax errors at debug level to reduce noise
           this.logger.debug('Syntax tree contains errors', {
             errorCount: this.countTreeErrors(tree.rootNode),
           });
@@ -345,24 +347,15 @@ export abstract class BaseParser {
       const buffer = await fs.readFile(filePath);
       const encodingResult = await EncodingConverter.detectEncoding(buffer);
 
-      if (encodingResult.confidence > 0.7) {
-        const recovered = await EncodingConverter.convertToUtf8(
-          buffer,
-          encodingResult.detectedEncoding
-        );
-        this.logger.info('Encoding recovery successful', {
-          filePath,
-          detectedEncoding: encodingResult.detectedEncoding,
-          confidence: encodingResult.confidence,
-        });
-        return recovered;
-      } else {
-        this.logger.warn('Low confidence encoding detection, skipping recovery', {
-          filePath,
-          confidence: encodingResult.confidence,
-          detectedEncoding: encodingResult.detectedEncoding,
-        });
-      }
+      const recovered = await EncodingConverter.convertToUtf8(
+        buffer,
+        encodingResult.detectedEncoding
+      );
+      this.logger.info('Encoding recovery successful', {
+        filePath,
+        detectedEncoding: encodingResult.detectedEncoding,
+      });
+      return recovered;
 
       return null;
     } catch (error) {

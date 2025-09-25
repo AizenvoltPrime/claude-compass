@@ -146,7 +146,6 @@ describe('Vue-Laravel Integration', () => {
         call => call.url_pattern === '/api/users' && call.method === 'GET'
       );
       expect(userApiCall).toBeDefined();
-      expect(userApiCall!.confidence).toBeGreaterThan(0.8);
 
       // Verify schema relationship exists
       const userDataContract = crossStackDeps.dataContracts.find(
@@ -226,7 +225,6 @@ describe('Vue-Laravel Integration', () => {
       const apiCall = content.impact_analysis.direct_impact[0];
       expect(apiCall.url_pattern).toBe('/api/users');
       expect(apiCall.method).toBe('GET');
-      expect(apiCall.confidence).toBeGreaterThan(0.7);
       expect(apiCall.response_schema).toBeDefined();
     });
 
@@ -340,8 +338,6 @@ describe('Vue-Laravel Integration', () => {
 
       // Validate API calls
       for (const apiCall of crossStackDeps.apiCalls) {
-        expect(apiCall.confidence).toBeGreaterThan(0.5);
-        expect(apiCall.confidence).toBeLessThanOrEqual(1.0);
         expect(apiCall.method).toMatch(/^(GET|POST|PUT|DELETE|PATCH)$/);
         expect(apiCall.url_pattern).toMatch(/^\/api\//);
       }

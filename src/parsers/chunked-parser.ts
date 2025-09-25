@@ -84,8 +84,6 @@ export abstract class ChunkedParser extends BaseParser {
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
 
-        // Removed verbose per-chunk logging to reduce noise
-
         try {
           const chunkResult = await this.parseChunk(chunk, filePath, options);
           chunkResults.push(chunkResult);
@@ -252,7 +250,6 @@ export abstract class ChunkedParser extends BaseParser {
     originalFilePath: string,
     options?: ChunkedParseOptions
   ): Promise<ParseResult> {
-    // Create a clean temporary file name for the chunk (avoid path pollution)
     const cleanFilePath = originalFilePath.split('#chunk')[0]; // Remove any existing chunk markers
     const chunkFilePath = `${cleanFilePath}#chunk${chunk.chunkIndex}`;
 
