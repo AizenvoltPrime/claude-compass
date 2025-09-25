@@ -66,15 +66,15 @@ export async function up(knex: Knex): Promise<void> {
   await knex.schema.createTable('symbols', (table) => {
     table.increments('id').primary();
     table.integer('file_id').notNullable().references('id').inTable('files').onDelete('CASCADE');
-    table.string('name').notNullable();
-    table.string('symbol_type').notNullable();
+    table.string('name', 1000).notNullable();
+    table.string('symbol_type', 500).notNullable();
     table.text('signature');
     table.text('description'); // Added from start to avoid later migration
     table.integer('start_line');
     table.integer('end_line');
     table.boolean('is_exported').defaultTo(false);
-    table.string('visibility');
-    table.string('namespace');
+    table.string('visibility', 500);
+    table.string('namespace', 1000);
     table.jsonb('metadata').defaultTo('{}');
     table.text('raw_source');
     table.timestamps(true, true);

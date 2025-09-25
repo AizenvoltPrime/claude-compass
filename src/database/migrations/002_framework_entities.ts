@@ -21,6 +21,25 @@ import type { Knex } from 'knex';
 export async function up(knex: Knex): Promise<void> {
   console.log('🚀 Creating consolidated framework entities...');
 
+  // Generic routes table (framework-agnostic)
+  await knex.schema.createTable('routes', (table) => {
+    table.increments('id').primary();
+    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
+    table.string('path').notNullable();
+    table.string('method');
+    table.integer('handler_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
+    table.string('framework_type');
+    table.jsonb('middleware').defaultTo('[]');
+    table.jsonb('dynamic_segments').defaultTo('[]');
+    table.boolean('auth_required').defaultTo(false);
+    table.timestamps(true, true);
+
+    // Indexes
+    table.index(['repo_id', 'method', 'path'], 'routes_repo_method_path_idx');
+    table.index(['handler_symbol_id']);
+    table.index(['framework_type']);
+  });
+
   // Laravel routes table
   await knex.schema.createTable('laravel_routes', (table) => {
     table.increments('id').primary();
@@ -236,6 +255,7 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('laravel_controllers');
   await knex.schema.dropTableIfExists('laravel_models');
   await knex.schema.dropTableIfExists('laravel_routes');
+  await knex.schema.dropTableIfExists('routes');
 
   // Remove vector column from symbols
   await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS embedding');
