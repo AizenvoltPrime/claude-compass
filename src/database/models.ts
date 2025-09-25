@@ -532,13 +532,13 @@ export interface ComposableDependency {
 export interface ApiCall {
   id: number;
   repo_id: number;
-  frontend_symbol_id: number;
-  backend_route_id: number;
-  method: string;
-  url_pattern: string;
-  request_schema: any;
-  response_schema: any;
+  caller_symbol_id: number;
+  endpoint_symbol_id?: number | null;
+  http_method: string;
+  endpoint_path: string;
+  call_type: string;
   created_at: Date;
+  updated_at: Date;
 }
 
 export interface DataContract {
@@ -895,12 +895,11 @@ export interface CreateWorkspaceProject {
 
 export interface CreateApiCall {
   repo_id: number;
-  frontend_symbol_id: number;
-  backend_route_id: number;
-  method: string;
-  url_pattern: string;
-  request_schema?: any;
-  response_schema?: any;
+  caller_symbol_id: number;
+  endpoint_symbol_id?: number | null;
+  http_method: string;
+  endpoint_path: string;
+  call_type: string;
 }
 
 export interface CreateDataContract {

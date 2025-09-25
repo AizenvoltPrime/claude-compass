@@ -925,26 +925,65 @@ export class McpTools {
       }
     }
 
-    // Phase 4: Simple dependency list format
     const result = {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({
-            dependencies: callers.map(caller => ({
-              from: caller.from_symbol?.name || 'unknown',
-              to: symbol.name,
-              type: caller.dependency_type,
-              line_number: caller.line_number,
-              file_path: caller.from_symbol?.file?.path
-            })),
-            total_count: callers.length,
-            query_info: {
-              symbol: symbol.name,
-              analysis_type: 'callers',
-              timestamp: new Date().toISOString()
-            }
-          }, null, 2),
+          text: JSON.stringify(
+            {
+              symbol: {
+                id: symbol.id,
+                name: symbol.name,
+                type: symbol.symbol_type,
+              },
+              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              callers: groupDependenciesByCallSite(callers.map(caller => ({
+                id: caller.id,
+                type: caller.dependency_type,
+                dependency_type: caller.dependency_type,
+                line_number: caller.line_number,
+                confidence: caller.confidence,
+                to_symbol: caller.from_symbol
+                  ? {
+                      id: caller.from_symbol.id,
+                      name: caller.from_symbol.name,
+                      type: caller.from_symbol.symbol_type,
+                      file_path: caller.from_symbol.file?.path,
+                    }
+                  : null,
+                calling_object: caller.calling_object,
+                resolved_class: caller.resolved_class,
+                qualified_context: caller.qualified_context,
+                method_signature: caller.method_signature,
+                file_context: caller.file_context,
+                namespace_context: caller.namespace_context,
+                call_chain: caller.call_chain,
+                path: caller.path,
+                depth: caller.depth,
+                call_pattern: this.analyzeCallPattern(caller),
+                cross_file: this.isCrossFileCall(caller, symbol),
+              }))),
+              // Always show call chains (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+              transitive_analysis: {
+                total_paths: transitiveResults.length,
+                call_chains: transitiveResults.map(result => ({
+                  symbol_id: result.symbolId,
+                  call_chain: result.call_chain,
+                  depth: result.depth,
+                  confidence: result.totalConfidence,
+                }))
+              },
+              parameter_analysis: callers.length < 50 ? await this.getParameterContextAnalysis(validatedArgs.symbol_id) : undefined,
+              total_callers: callers.length,
+              filters: {
+                dependency_type: validatedArgs.dependency_type,
+                include_cross_stack: validatedArgs.include_cross_stack,
+                // include_indirect and show_call_chains parameters removed per PARAMETER_REDUNDANCY_ANALYSIS (always enabled)
+              },
+            },
+            null,
+            2
+          ),
         },
       ],
     };

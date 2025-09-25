@@ -3,7 +3,7 @@ import {
   CrossStackNode,
   CrossStackEdge,
   CrossStackGraphData,
-  FullStackFeatureGraph
+  FullStackFeatureGraph,
 } from '../../src/graph/cross-stack-builder';
 import { DatabaseService } from '../../src/database/services';
 import {
@@ -14,7 +14,7 @@ import {
   DependencyType,
   CreateApiCall,
   CreateDataContract,
-  Repository
+  Repository,
 } from '../../src/database/models';
 import { FrameworkEntity, FrameworkEntityType } from '../../src/parsers/base';
 import { jest } from '@jest/globals';
@@ -56,84 +56,91 @@ describe('CrossStackGraphBuilder', () => {
     jest.clearAllMocks();
 
     // Setup default mock implementations
-    (mockDatabaseService.getSymbol as jest.MockedFunction<any>).mockImplementation((symbolId: number) => {
-      // Return mock symbols for test data - Match original test expectations
-      const mockSymbols = {
-        1: {
-          id: 1,
-          name: 'UserList',
-          symbol_type: 'component',
-          file_id: 1,
-          start_line: 1,
-          end_line: 10,
-          is_exported: true,
-          signature: 'export default UserList',
-          created_at: new Date(),
-          updated_at: new Date()
-        },
-        2: {
-          id: 2,
-          name: 'UserProfile',
-          symbol_type: 'component',
-          file_id: 2,
-          start_line: 1,
-          end_line: 20,
-          is_exported: true,
-          signature: 'export default UserProfile',
-          created_at: new Date(),
-          updated_at: new Date()
-        },
-        3: {
-          id: 3,
-          name: 'User',
-          symbol_type: 'class',
-          file_id: 3,
-          start_line: 5,
-          end_line: 25,
-          is_exported: true,
-          signature: 'class User extends Model',
-          created_at: new Date(),
-          updated_at: new Date()
-        }
-      };
-      return Promise.resolve(mockSymbols[symbolId] || null);
-    });
-
-    (mockDatabaseService.getFrameworkEntityById as jest.MockedFunction<any>).mockImplementation((entityId: number) => {
-      // Return mock framework entities - Match original test expectations
-      const mockEntities = {
-        1: {
-          id: 1,
-          name: 'users.index',
-          type: 'route',
-          filePath: '/backend/routes/api.php',
-          metadata: {
+    (mockDatabaseService.getSymbol as jest.MockedFunction<any>).mockImplementation(
+      (symbolId: number) => {
+        // Return mock symbols for test data - Match original test expectations
+        const mockSymbols = {
+          1: {
             id: 1,
-            path: '/api/users',
-            method: 'GET',
-            controller: 'UserController@index'
-          }
-        },
-        2: {
-          id: 2,
-          name: 'users.show',
-          type: 'route',
-          filePath: '/backend/routes/api.php',
-          metadata: {
+            name: 'UserList',
+            symbol_type: 'component',
+            file_id: 1,
+            start_line: 1,
+            end_line: 10,
+            is_exported: true,
+            signature: 'export default UserList',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+          2: {
             id: 2,
-            path: '/api/users/{id}',
-            method: 'GET',
-            controller: 'UserController@show'
-          }
-        }
-      };
-      return Promise.resolve(mockEntities[entityId] || null);
-    });
+            name: 'UserProfile',
+            symbol_type: 'component',
+            file_id: 2,
+            start_line: 1,
+            end_line: 20,
+            is_exported: true,
+            signature: 'export default UserProfile',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+          3: {
+            id: 3,
+            name: 'User',
+            symbol_type: 'class',
+            file_id: 3,
+            start_line: 5,
+            end_line: 25,
+            is_exported: true,
+            signature: 'class User extends Model',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        };
+        return Promise.resolve(mockSymbols[symbolId] || null);
+      }
+    );
+
+    (mockDatabaseService.getFrameworkEntityById as jest.MockedFunction<any>).mockImplementation(
+      (entityId: number) => {
+        // Return mock framework entities - Match original test expectations
+        const mockEntities = {
+          1: {
+            id: 1,
+            name: 'users.index',
+            type: 'route',
+            filePath: '/backend/routes/api.php',
+            metadata: {
+              id: 1,
+              path: '/api/users',
+              method: 'GET',
+              controller: 'UserController@index',
+            },
+          },
+          2: {
+            id: 2,
+            name: 'users.show',
+            type: 'route',
+            filePath: '/backend/routes/api.php',
+            metadata: {
+              id: 2,
+              path: '/api/users/{id}',
+              method: 'GET',
+              controller: 'UserController@show',
+            },
+          },
+        };
+        return Promise.resolve(mockEntities[entityId] || null);
+      }
+    );
 
     // Mock other commonly called methods with empty defaults
     (mockDatabaseService.getFilesByRepository as jest.MockedFunction<any>).mockResolvedValue([]);
     (mockDatabaseService.searchSymbols as jest.MockedFunction<any>).mockResolvedValue([]);
-    (mockDatabaseService.getRepositoryFrameworks as jest.MockedFunction<any>).mockResolvedValue(['vue', 'laravel']);
+    (mockDatabaseService.getRepositoryFrameworks as jest.MockedFunction<any>).mockResolvedValue([
+      'vue',
+      'laravel',
+    ]);
     (mockDatabaseService.createApiCalls as jest.MockedFunction<any>).mockResolvedValue([]);
     (mockDatabaseService.createDataContracts as jest.MockedFunction<any>).mockResolvedValue([]);
 
@@ -157,10 +164,10 @@ describe('CrossStackGraphBuilder', () => {
               {
                 url: '/api/users',
                 method: 'GET',
-                responseType: 'User[]'
-              }
-            ]
-          }
+                responseType: 'User[]',
+              },
+            ],
+          },
         },
         {
           type: FrameworkEntityType.VUE_COMPONENT,
@@ -171,11 +178,11 @@ describe('CrossStackGraphBuilder', () => {
               {
                 url: '/api/users/{id}',
                 method: 'GET',
-                responseType: 'User'
-              }
-            ]
-          }
-        }
+                responseType: 'User',
+              },
+            ],
+          },
+        },
       ];
 
       const laravelRoutes: FrameworkEntity[] = [
@@ -186,8 +193,8 @@ describe('CrossStackGraphBuilder', () => {
           properties: {
             path: '/api/users',
             method: 'GET',
-            controller: 'UserController@index'
-          }
+            controller: 'UserController@index',
+          },
         },
         {
           type: FrameworkEntityType.LARAVEL_ROUTE,
@@ -196,34 +203,34 @@ describe('CrossStackGraphBuilder', () => {
           properties: {
             path: '/api/users/{id}',
             method: 'GET',
-            controller: 'UserController@show'
-          }
-        }
+            controller: 'UserController@show',
+          },
+        },
       ];
 
       const apiCalls: ApiCall[] = [
         {
           id: 1,
           repo_id: 1,
-          frontend_symbol_id: 1,
-          backend_route_id: 1,
-          method: 'GET',
-          url_pattern: '/api/users',
-          request_schema: null,
-          response_schema: { type: 'array', items: { $ref: '#/definitions/User' } },
-          created_at: new Date()
+          caller_symbol_id: 1,
+          endpoint_symbol_id: 1,
+          http_method: 'GET',
+          endpoint_path: '/api/users',
+          call_type: 'axios',
+          created_at: new Date(),
+          updated_at: new Date(),
         },
         {
           id: 2,
           repo_id: 1,
-          frontend_symbol_id: 2,
-          backend_route_id: 2,
-          method: 'GET',
-          url_pattern: '/api/users/{id}',
-          request_schema: null,
-          response_schema: { $ref: '#/definitions/User' },
-          created_at: new Date()
-        }
+          caller_symbol_id: 2,
+          endpoint_symbol_id: 2,
+          http_method: 'GET',
+          endpoint_path: '/api/users/{id}',
+          call_type: 'axios',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
       ];
 
       const result = await builder.buildAPICallGraph(vueComponents, laravelRoutes, apiCalls);
@@ -258,10 +265,10 @@ describe('CrossStackGraphBuilder', () => {
             {
               url: `/api/data/${i}`,
               method: 'GET',
-              responseType: 'Data'
-            }
-          ]
-        }
+              responseType: 'Data',
+            },
+          ],
+        },
       }));
 
       const largeLaravelRoutes: FrameworkEntity[] = Array.from({ length: 50 }, (_, i) => ({
@@ -271,24 +278,28 @@ describe('CrossStackGraphBuilder', () => {
         properties: {
           path: `/api/data/${i}`,
           method: 'GET',
-          controller: `DataController@method${i}`
-        }
+          controller: `DataController@method${i}`,
+        },
       }));
 
       const largeApiCalls: ApiCall[] = Array.from({ length: 50 }, (_, i) => ({
         id: i + 1,
         repo_id: 1,
-        frontend_symbol_id: i + 1,
-        backend_route_id: i + 1,
-        method: 'GET',
-        url_pattern: `/api/data/${i}`,
-        request_schema: null,
-        response_schema: { $ref: '#/definitions/Data' },
-        created_at: new Date()
+        caller_symbol_id: i + 1,
+        endpoint_symbol_id: i + 1,
+        http_method: 'GET',
+        endpoint_path: `/api/data/${i}`,
+        call_type: 'axios',
+        created_at: new Date(),
+        updated_at: new Date(),
       }));
 
       const startTime = Date.now();
-      const result = await builder.buildAPICallGraph(largeVueComponents, largeLaravelRoutes, largeApiCalls);
+      const result = await builder.buildAPICallGraph(
+        largeVueComponents,
+        largeLaravelRoutes,
+        largeApiCalls
+      );
       const executionTime = Date.now() - startTime;
 
       expect(result).toBeDefined();
@@ -313,11 +324,11 @@ describe('CrossStackGraphBuilder', () => {
                 url: '/api/test',
                 method: 'POST',
                 requestType: 'TestRequest',
-                responseType: 'TestResponse'
-              }
-            ]
-          }
-        }
+                responseType: 'TestResponse',
+              },
+            ],
+          },
+        },
       ];
 
       const laravelRoutes: FrameworkEntity[] = [
@@ -328,9 +339,9 @@ describe('CrossStackGraphBuilder', () => {
           properties: {
             path: '/api/test',
             method: 'POST',
-            controller: 'TestController@store'
-          }
-        }
+            controller: 'TestController@store',
+          },
+        },
       ];
 
       const apiCalls: ApiCall[] = []; // Empty API calls to test basic node creation
@@ -356,7 +367,7 @@ describe('CrossStackGraphBuilder', () => {
           is_exported: true,
           signature: 'interface User { id: number; name: string; email: string; }',
           created_at: new Date(),
-          updated_at: new Date()
+          updated_at: new Date(),
         },
         {
           id: 2,
@@ -368,8 +379,8 @@ describe('CrossStackGraphBuilder', () => {
           is_exported: true,
           signature: 'interface CreateUserRequest { name: string; email: string; }',
           created_at: new Date(),
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       ];
 
       const phpDtos: Symbol[] = [
@@ -383,8 +394,8 @@ describe('CrossStackGraphBuilder', () => {
           is_exported: true,
           signature: 'class User extends Model',
           created_at: new Date(),
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       ];
 
       const dataContracts: DataContract[] = [
@@ -398,15 +409,19 @@ describe('CrossStackGraphBuilder', () => {
             fields: [
               { name: 'id', frontendType: 'number', backendType: 'int', compatible: true },
               { name: 'name', frontendType: 'string', backendType: 'string', compatible: true },
-              { name: 'email', frontendType: 'string', backendType: 'string', compatible: true }
-            ]
+              { name: 'email', frontendType: 'string', backendType: 'string', compatible: true },
+            ],
           },
           drift_detected: false,
-          last_verified: new Date()
-        }
+          last_verified: new Date(),
+        },
       ];
 
-      const result = await builder.buildDataContractGraph(typescriptInterfaces, phpDtos, dataContracts);
+      const result = await builder.buildDataContractGraph(
+        typescriptInterfaces,
+        phpDtos,
+        dataContracts
+      );
 
       expect(result).toBeDefined();
       expect(result.nodes.length).toBeGreaterThan(0);
@@ -421,7 +436,9 @@ describe('CrossStackGraphBuilder', () => {
       expect(phpDtoNodes).toHaveLength(1);
 
       // Check data contract edges
-      const dataContractEdges = result.edges.filter(edge => edge.relationshipType === 'shares_schema');
+      const dataContractEdges = result.edges.filter(
+        edge => edge.relationshipType === 'shares_schema'
+      );
       expect(dataContractEdges).toHaveLength(1);
     });
   });
@@ -431,49 +448,55 @@ describe('CrossStackGraphBuilder', () => {
       const mockRepository = {
         id: 1,
         name: 'test-full-stack-app',
-        path: '/test/app'
+        path: '/test/app',
       };
 
-      (mockDatabaseService.getRepository as jest.MockedFunction<any>).mockResolvedValue(mockRepository as Repository);
-      (mockDatabaseService.getCrossStackDependencies as jest.MockedFunction<any>).mockResolvedValue({
-        apiCalls: [
-          {
-            id: 1,
-            repo_id: 1,
-            frontend_symbol_id: 1,
-            backend_route_id: 1,
-            method: 'GET',
-            url_pattern: '/api/users',
-              created_at: new Date()
-          }
-        ] as ApiCall[],
-        dataContracts: [
-          {
-            id: 1,
-            repo_id: 1,
-            name: 'User',
-            frontend_type_id: 1,
-            backend_type_id: 2,
-            drift_detected: false,
-            last_verified: new Date()
-          }
-        ] as DataContract[]
-      });
+      (mockDatabaseService.getRepository as jest.MockedFunction<any>).mockResolvedValue(
+        mockRepository as Repository
+      );
+      (mockDatabaseService.getCrossStackDependencies as jest.MockedFunction<any>).mockResolvedValue(
+        {
+          apiCalls: [
+            {
+              id: 1,
+              repo_id: 1,
+              caller_symbol_id: 1,
+              endpoint_symbol_id: 1,
+              http_method: 'GET',
+              endpoint_path: '/api/users',
+              call_type: 'axios',
+              created_at: new Date(),
+              updated_at: new Date(),
+            },
+          ] as ApiCall[],
+          dataContracts: [
+            {
+              id: 1,
+              repo_id: 1,
+              name: 'User',
+              frontend_type_id: 1,
+              backend_type_id: 2,
+              drift_detected: false,
+              last_verified: new Date(),
+            },
+          ] as DataContract[],
+        }
+      );
 
       (mockDatabaseService.getFrameworkEntitiesByType as jest.MockedFunction<any>)
         .mockResolvedValueOnce([
           {
             type: FrameworkEntityType.VUE_COMPONENT,
             name: 'UserList',
-            filePath: '/frontend/components/UserList.vue'
-          }
+            filePath: '/frontend/components/UserList.vue',
+          },
         ] as FrameworkEntity[])
         .mockResolvedValueOnce([
           {
             type: FrameworkEntityType.LARAVEL_ROUTE,
             name: 'users.index',
-            filePath: '/backend/routes/api.php'
-          }
+            filePath: '/backend/routes/api.php',
+          },
         ] as FrameworkEntity[]);
 
       (mockDatabaseService.getSymbolsByType as jest.MockedFunction<any>)
@@ -483,8 +506,8 @@ describe('CrossStackGraphBuilder', () => {
             name: 'User',
             symbol_type: SymbolType.INTERFACE,
             file_id: 1,
-            is_exported: true
-          }
+            is_exported: true,
+          },
         ] as Symbol[])
         .mockResolvedValueOnce([
           {
@@ -492,8 +515,8 @@ describe('CrossStackGraphBuilder', () => {
             name: 'User',
             symbol_type: SymbolType.CLASS,
             file_id: 2,
-            is_exported: true
-          }
+            is_exported: true,
+          },
         ] as Symbol[]);
 
       (mockDatabaseService.getSymbolsByRepository as jest.MockedFunction<any>).mockResolvedValue([
@@ -502,22 +525,22 @@ describe('CrossStackGraphBuilder', () => {
           name: 'User',
           symbol_type: SymbolType.INTERFACE,
           file_id: 1,
-          is_exported: true
+          is_exported: true,
         },
         {
           id: 2,
           name: 'User',
           symbol_type: SymbolType.CLASS,
           file_id: 2,
-          is_exported: true
+          is_exported: true,
         },
         {
           id: 3,
           name: 'UserList',
           symbol_type: SymbolType.COMPONENT,
           file_id: 3,
-          is_exported: true
-        }
+          is_exported: true,
+        },
       ] as Symbol[]);
 
       const result = await builder.buildFullStackFeatureGraph(1);
@@ -545,9 +568,13 @@ describe('CrossStackGraphBuilder', () => {
     });
 
     it('should handle database errors gracefully', async () => {
-      (mockDatabaseService.getCrossStackDependencies as jest.MockedFunction<any>).mockRejectedValue(new Error('Database connection failed'));
+      (mockDatabaseService.getCrossStackDependencies as jest.MockedFunction<any>).mockRejectedValue(
+        new Error('Database connection failed')
+      );
 
-      await expect(builder.buildFullStackFeatureGraph(999)).rejects.toThrow('Database connection failed');
+      await expect(builder.buildFullStackFeatureGraph(999)).rejects.toThrow(
+        'Database connection failed'
+      );
     });
 
     it('should handle malformed framework entities', async () => {
@@ -556,8 +583,8 @@ describe('CrossStackGraphBuilder', () => {
           type: FrameworkEntityType.VUE_COMPONENT,
           name: 'MalformedComponent',
           filePath: '/frontend/components/Malformed.vue',
-          properties: {} // Missing apiCalls property
-        }
+          properties: {}, // Missing apiCalls property
+        },
       ];
 
       const validLaravelRoutes: FrameworkEntity[] = [
@@ -567,9 +594,9 @@ describe('CrossStackGraphBuilder', () => {
           filePath: '/backend/routes/api.php',
           properties: {
             path: '/api/test',
-            method: 'GET'
-          }
-        }
+            method: 'GET',
+          },
+        },
       ];
 
       expect(async () => {
@@ -589,8 +616,8 @@ describe('CrossStackGraphBuilder', () => {
           is_exported: true,
           signature: 'interface EmptyInterface {}',
           created_at: new Date(),
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       ];
 
       const dtosWithoutProperties: Symbol[] = [
@@ -604,12 +631,16 @@ describe('CrossStackGraphBuilder', () => {
           is_exported: true,
           signature: 'class EmptyDto {}',
           created_at: new Date(),
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       ];
 
       expect(async () => {
-        await builder.buildDataContractGraph(interfacesWithoutProperties, dtosWithoutProperties, []);
+        await builder.buildDataContractGraph(
+          interfacesWithoutProperties,
+          dtosWithoutProperties,
+          []
+        );
       }).not.toThrow();
     });
 
@@ -618,14 +649,14 @@ describe('CrossStackGraphBuilder', () => {
         {
           id: 1,
           repo_id: 1,
-          frontend_symbol_id: 999, // Non-existent symbol
-          backend_route_id: 999,   // Non-existent route
-          method: 'GET',
-          url_pattern: '/api/test',
-          request_schema: null,
-          response_schema: null,
-          created_at: new Date()
-        }
+          caller_symbol_id: 999, // Non-existent symbol
+          endpoint_symbol_id: 999, // Non-existent route
+          http_method: 'GET',
+          endpoint_path: '/api/test',
+          call_type: 'axios',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
       ];
 
       const result = await builder.buildAPICallGraph([], [], apiCallsWithoutMapping);
@@ -642,14 +673,14 @@ describe('CrossStackGraphBuilder', () => {
           type: FrameworkEntityType.VUE_COMPONENT,
           name: 'UserList',
           filePath: '/frontend/components/UserList.vue',
-          properties: { apiCalls: [{ url: '/api/users', method: 'GET' }] }
+          properties: { apiCalls: [{ url: '/api/users', method: 'GET' }] },
         },
         {
           type: FrameworkEntityType.VUE_COMPONENT,
           name: 'UserProfile',
           filePath: '/frontend/components/UserProfile.vue',
-          properties: { apiCalls: [{ url: '/api/users/{id}', method: 'GET' }] }
-        }
+          properties: { apiCalls: [{ url: '/api/users/{id}', method: 'GET' }] },
+        },
       ];
 
       const laravelRoutes: FrameworkEntity[] = [
@@ -657,27 +688,39 @@ describe('CrossStackGraphBuilder', () => {
           type: FrameworkEntityType.LARAVEL_ROUTE,
           name: 'users.index',
           filePath: '/backend/routes/api.php',
-          properties: { path: '/api/users', method: 'GET' }
+          properties: { path: '/api/users', method: 'GET' },
         },
         {
           type: FrameworkEntityType.LARAVEL_ROUTE,
           name: 'users.show',
           filePath: '/backend/routes/api.php',
-          properties: { path: '/api/users/{id}', method: 'GET' }
-        }
+          properties: { path: '/api/users/{id}', method: 'GET' },
+        },
       ];
 
       const apiCalls: ApiCall[] = [
         {
-          id: 1, repo_id: 1, frontend_symbol_id: 1, backend_route_id: 1,
-          method: 'GET', url_pattern: '/api/users', request_schema: null, response_schema: null,
-          created_at: new Date()
+          id: 1,
+          repo_id: 1,
+          caller_symbol_id: 1,
+          endpoint_symbol_id: 1,
+          http_method: 'GET',
+          endpoint_path: '/api/users',
+          call_type: 'axios',
+          created_at: new Date(),
+          updated_at: new Date(),
         },
         {
-          id: 2, repo_id: 1, frontend_symbol_id: 2, backend_route_id: 2,
-          method: 'GET', url_pattern: '/api/users/{id}', request_schema: null, response_schema: null,
-          created_at: new Date()
-        }
+          id: 2,
+          repo_id: 1,
+          caller_symbol_id: 2,
+          endpoint_symbol_id: 2,
+          http_method: 'GET',
+          endpoint_path: '/api/users/{id}',
+          call_type: 'axios',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
       ];
 
       const result = await builder.buildAPICallGraph(vueComponents, laravelRoutes, apiCalls);
