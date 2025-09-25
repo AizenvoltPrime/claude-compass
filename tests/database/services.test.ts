@@ -292,15 +292,18 @@ describe('DatabaseService', () => {
       ];
 
       // Enhanced mock to handle both fulltext search (with raw SQL) and lexical search fallback
-      mockDb.mockImplementation(() => ({
-        leftJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        whereIn: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        orderByRaw: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockResolvedValue(mockSymbols),
-      }));
+      mockDb.mockImplementation(() => {
+        const queryBuilder = {
+          leftJoin: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          whereIn: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          orderByRaw: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockResolvedValue(mockSymbols),
+        };
+        return queryBuilder;
+      });
 
       // Mock the raw method to simulate PostgreSQL fulltext search failure
       // This will trigger the fallback to lexical search
@@ -498,6 +501,8 @@ describe('DatabaseService', () => {
       mockDb.mockImplementation((tableName: string) => {
         if (tableName === 'components') {
           return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
             where: jest.fn().mockReturnValue({
               orderBy: jest.fn().mockResolvedValue(mockComponents),
             }),

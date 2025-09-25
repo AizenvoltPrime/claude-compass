@@ -792,7 +792,7 @@ return [
       expect(controllerPattern!.description).toBe('Laravel controller classes extending base Controller');
 
       const modelPattern = patterns.find(p => p.name === 'laravel-model');
-      expect(modelPattern!.description).toBe('Eloquent model classes extending Model');
+      expect(modelPattern!.description).toBe('Eloquent model classes extending Model, Authenticatable, or Pivot');
     });
   });
 
