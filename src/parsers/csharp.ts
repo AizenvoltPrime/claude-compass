@@ -1444,7 +1444,9 @@ export class CSharpParser extends ChunkedParser {
         expressionText,
         callerName,
         node.startPosition.row + 1,
-        fieldTypeMap
+        fieldTypeMap,
+        node,
+        content
       );
 
       if (chainedCalls.length > 0) {
@@ -1552,7 +1554,9 @@ export class CSharpParser extends ChunkedParser {
     expressionText: string,
     callerName: string,
     lineNumber: number,
-    fieldTypeMap?: Map<string, string>
+    fieldTypeMap?: Map<string, string>,
+    rootNode?: Parser.SyntaxNode,
+    content?: string
   ): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
@@ -1625,12 +1629,71 @@ export class CSharpParser extends ChunkedParser {
             if (fieldType) {
               // Create qualified dependency with field type context
               foundMethods.push(methodName);
+
+              // Extract parameter context for conditional access calls
+              let parameterContext: string | undefined;
+              let callInstanceId: string | undefined;
+              let parameterTypes: string[] | undefined;
+
+              try {
+                // Find the conditional access node that contains this method call
+                if (rootNode && content) {
+                  logger.debug('C# conditional access parameter extraction attempting', {
+                    methodName,
+                    fieldName,
+                    lineNumber
+                  });
+
+                  const conditionalAccessNode = this.findConditionalAccessNodeForMethod(rootNode, content, methodName, lineNumber);
+                  if (conditionalAccessNode) {
+                    const parameters = this.extractMethodParameters(conditionalAccessNode, content);
+                    if (parameters.length > 0) {
+                      parameterContext = parameters.join(', ');
+                      callInstanceId = randomUUID();
+                      parameterTypes = this.extractParameterTypes(conditionalAccessNode, content, parameters);
+
+                      logger.debug('C# conditional access parameters extracted', {
+                        methodName,
+                        fieldName,
+                        parameterContext,
+                        parameterCount: parameters.length
+                      });
+                    } else {
+                      logger.debug('C# conditional access no parameters found', {
+                        methodName,
+                        fieldName,
+                        nodeText: this.getNodeText(conditionalAccessNode, content)
+                      });
+                    }
+                  } else {
+                    logger.debug('C# conditional access node not found', {
+                      methodName,
+                      fieldName,
+                      lineNumber
+                    });
+                  }
+                } else {
+                  logger.debug('C# conditional access parameter extraction skipped - missing rootNode or content');
+                }
+              } catch (error) {
+                logger.warn('C# conditional access parameter extraction failed', {
+                  methodName,
+                  fieldName,
+                  error: error instanceof Error ? error.message : 'Unknown error'
+                });
+              }
+
               const fieldBasedDependency: ParsedDependency = {
                 from_symbol: callerName,
                 to_symbol: `${fieldType}.${methodName}`, // Include class context
                 dependency_type: DependencyType.CALLS,
                 line_number: lineNumber,
-                qualified_context: `field_call_${fieldName}`
+                qualified_context: `field_call_${fieldName}`,
+                // Add parameter context fields
+                parameter_context: parameterContext,
+                call_instance_id: callInstanceId,
+                parameter_types: parameterTypes,
+                calling_object: fieldName
               };
               dependencies.push(fieldBasedDependency);
 
@@ -1639,6 +1702,8 @@ export class CSharpParser extends ChunkedParser {
                 to: fieldBasedDependency.to_symbol,
                 fieldName: fieldName,
                 fieldType: fieldType,
+                parameterContext: parameterContext,
+                callInstanceId: callInstanceId
               });
               continue; // Skip the fallback logic
             }
@@ -3632,6 +3697,35 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Enhanced helper methods for Phase 3 functionality
    */
+
+  /**
+   * Find the conditional access node that contains a method call at a specific line
+   */
+  private findConditionalAccessNodeForMethod(rootNode: Parser.SyntaxNode, content: string, methodName: string, lineNumber: number): Parser.SyntaxNode | null {
+    // Look for conditional access expressions that contain invocation expressions
+    const conditionalAccessNodes = this.getNodesOfType(rootNode, 'conditional_access_expression');
+
+    for (const caNode of conditionalAccessNodes) {
+      // Check if this conditional access is on the correct line
+      const caLineNumber = caNode.startPosition.row + 1;
+      if (caLineNumber === lineNumber) {
+        // Look for invocation expressions within this conditional access
+        const invocationNodes = this.getNodesOfType(caNode, 'invocation_expression');
+        for (const invNode of invocationNodes) {
+          // Check if this invocation calls the expected method
+          const memberAccessNode = invNode.childForFieldName('function');
+          if (memberAccessNode && memberAccessNode.type === 'member_binding_expression') {
+            const nameNode = memberAccessNode.childForFieldName('name');
+            if (nameNode && this.getNodeText(nameNode, content) === methodName) {
+              return invNode; // Return the invocation node for parameter extraction
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
 
   /**
    * Extract method signature parameters for enhanced context

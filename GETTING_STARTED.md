@@ -36,7 +36,7 @@ Claude Compass provides:
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 18+ (as specified in package.json engines)
 - PostgreSQL 15+ (or Docker)
 - Git repository to analyze
 
@@ -153,35 +153,78 @@ npm run start search "User" --type class --exported-only
 /
 ├── src/
 │   ├── database/          # Database models, services, migrations
-│   │   ├── migrations/    # SQL migration files
+│   │   ├── migrations/    # Database migration files
+│   │   │   ├── 001_create_core_infrastructure.ts
+│   │   │   ├── 002_framework_entities.ts
+│   │   │   └── 003_performance_optimization.ts
 │   │   ├── models.ts      # TypeScript interfaces
 │   │   ├── services.ts    # Database operations
-│   │   └── connection.ts  # Database connection
+│   │   ├── connection.ts  # Database connection
+│   │   ├── cache.ts       # Database caching layer
+│   │   ├── pagination.ts  # Pagination utilities
+│   │   └── query-optimizer.ts # Query optimization
 │   ├── parsers/           # Tree-sitter language and framework parsers
 │   │   ├── base.ts        # Abstract parser interface
 │   │   ├── base-framework.ts # Framework parser base class
 │   │   ├── framework-detector.ts # Framework detection logic
 │   │   ├── multi-parser.ts # Multi-parser coordination
+│   │   ├── chunked-parser.ts # Chunked parsing for large files
+│   │   ├── cross-stack.ts # Cross-stack parsing
 │   │   ├── javascript.ts  # JavaScript parser
 │   │   ├── typescript.ts  # TypeScript parser
+│   │   ├── php.ts         # PHP parser
+│   │   ├── csharp.ts      # C# parser
 │   │   ├── vue.ts         # Vue.js framework parser
 │   │   ├── nextjs.ts      # Next.js framework parser
 │   │   ├── react.ts       # React framework parser
-│   │   └── nodejs.ts      # Node.js framework parser
+│   │   ├── nodejs.ts      # Node.js framework parser
+│   │   ├── laravel.ts     # Laravel framework parser
+│   │   ├── godot.ts       # Godot game engine parser
+│   │   ├── background-job.ts # Background job parser
+│   │   ├── test-framework.ts # Test framework parser
+│   │   ├── orm.ts         # ORM parser
+│   │   ├── package-manager.ts # Package manager parser
+│   │   └── utils/         # Parser utilities
+│   │       └── url-patterns.ts
 │   ├── graph/             # Graph building algorithms
+│   │   ├── builder.ts     # Main analysis orchestrator
 │   │   ├── file-graph.ts  # Import/export relationships
 │   │   ├── symbol-graph.ts # Function calls and references
-│   │   └── builder.ts     # Main analysis orchestrator
+│   │   ├── symbol-resolver.ts # Symbol resolution
+│   │   ├── cross-stack-builder.ts # Cross-stack graph building
+│   │   ├── cross-stack-simple.ts # Simplified cross-stack analysis
+│   │   ├── cross-stack-error-handler.ts # Cross-stack error handling
+│   │   ├── transitive-analyzer.ts # Transitive dependency analysis
+│   │   └── godot-relationship-builder.ts # Godot relationships
 │   ├── mcp/               # Model Context Protocol server
 │   │   ├── server.ts      # MCP server implementation
 │   │   ├── tools.ts       # MCP tool implementations
-│   │   └── resources.ts   # MCP resource exposures
+│   │   ├── resources.ts   # MCP resource exposures
+│   │   └── examples/      # MCP examples
+│   │       └── http-server.ts
 │   ├── cli/               # Command-line interface
 │   │   └── index.ts       # CLI commands and options
+│   ├── services/          # Additional services
+│   │   └── embedding-service.ts # Embedding service for vector search
+│   ├── config/            # Configuration
+│   │   └── file-size-policy.ts # File size policies
 │   └── utils/             # Shared utilities
 │       ├── config.ts      # Configuration management
-│       └── logger.ts      # Logging setup
+│       ├── logger.ts      # Logging setup
+│       ├── compassignore.ts # .compassignore file parsing
+│       ├── encoding-converter.ts # Encoding conversion
+│       ├── response-compression.ts # Response compression
+│       └── index.ts       # Utility exports
+├── scripts/               # Build and utility scripts
+│   └── clear-database.js  # Database clearing script
 ├── tests/                 # Comprehensive test suite
+│   ├── setup.ts          # Test setup
+│   ├── parsers/          # Parser tests
+│   ├── graph/            # Graph tests
+│   ├── database/         # Database tests
+│   ├── mcp/              # MCP tests
+│   ├── integration/      # Integration tests
+│   └── fixtures/         # Test fixtures
 ├── docker-compose.yml     # Database setup
 └── package.json           # Dependencies and scripts
 ```
@@ -337,6 +380,9 @@ npm run dev
 
 # Build project
 npm run build
+
+# Clean build artifacts
+npm run clean
 
 # Lint code
 npm run lint
@@ -497,7 +543,7 @@ The codebase follows these principles:
 
 ## License
 
-[License information to be added]
+MIT
 
 ---
 
