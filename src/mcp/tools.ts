@@ -2334,54 +2334,26 @@ export class McpTools {
    * Consolidate symbols that represent the same logical entity (interface + implementations)
    */
   private consolidateRelatedSymbols(relationships: any[]): any[] {
-    const symbolGroups = new Map<string, any[]>();
+    // For who_calls analysis, we want to preserve ALL unique callers
+    // Group by unique caller characteristics: (from_symbol_id, line_number, dependency_type)
+    const uniqueRelationships = new Map<string, any>();
 
-    // Group relationships by method name and signature
     for (const rel of relationships) {
-      const symbolName = rel.to_symbol?.name || rel.from_symbol?.name;
-      if (!symbolName) continue;
+      // Create a unique key that identifies distinct calling relationships
+      const fromSymbolId = rel.from_symbol_id || rel.from_symbol?.id;
+      const lineNumber = rel.line_number || 0;
+      const depType = rel.dependency_type || rel.type;
+      const toSymbolId = rel.to_symbol_id || rel.to_symbol?.id;
 
-      const key = symbolName; // Could be enhanced to include signature matching
-      if (!symbolGroups.has(key)) {
-        symbolGroups.set(key, []);
+      // Key should uniquely identify each distinct call
+      const key = `${fromSymbolId}->${toSymbolId}:${depType}:${lineNumber}`;
+
+      if (!uniqueRelationships.has(key)) {
+        uniqueRelationships.set(key, rel);
       }
-      symbolGroups.get(key)!.push(rel);
     }
 
-    const consolidated: any[] = [];
-
-    // For each group, keep the most representative relationship
-    for (const [methodName, group] of symbolGroups) {
-      if (group.length === 1) {
-        consolidated.push(group[0]);
-        continue;
-      }
-
-      // Prefer implementation over interface, public over private
-      const representative = group.reduce((best, current) => {
-        const currentSymbol = current.to_symbol || current.from_symbol;
-        const bestSymbol = best.to_symbol || best.from_symbol;
-
-        // Prefer public visibility
-        if (currentSymbol?.visibility === 'public' && bestSymbol?.visibility !== 'public') {
-          return current;
-        }
-
-        // Prefer implementation over interface (heuristic: non-interface file paths)
-        const currentPath = currentSymbol?.file?.path || '';
-        const bestPath = bestSymbol?.file?.path || '';
-
-        if (!currentPath.includes('interface') && bestPath.includes('interface')) {
-          return current;
-        }
-
-        return best;
-      });
-
-      consolidated.push(representative);
-    }
-
-    return consolidated;
+    return Array.from(uniqueRelationships.values());
   }
 
   /**

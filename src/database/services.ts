@@ -3293,7 +3293,13 @@ export class DatabaseService {
         'from_files.path as from_file_path'
       )
       .where('dependencies.to_symbol_id', symbolId)
-      .distinct('dependencies.id');
+      .whereRaw('dependencies.from_symbol_id != dependencies.to_symbol_id')
+      .distinct(
+        'dependencies.from_symbol_id',
+        'dependencies.to_symbol_id',
+        'dependencies.dependency_type',
+        'dependencies.line_number'
+      );
 
     return results.map(result => ({
       ...result,
@@ -3571,7 +3577,25 @@ export class DatabaseService {
     symbolId: number,
     paginationParams: PaginationParams = {}
   ): Promise<PaginatedResponse<EnhancedDependencyWithSymbols>> {
+    // Use a subquery to get distinct dependencies first, then join with additional info
+    const distinctSubquery = this.db('dependencies')
+      .select(
+        this.db.raw('MIN(id) as id'),
+        'from_symbol_id',
+        'to_symbol_id',
+        'dependency_type',
+        'line_number'
+      )
+      .where('to_symbol_id', symbolId)
+      .whereRaw('from_symbol_id != to_symbol_id')
+      .groupBy('from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number');
+
     const baseQuery = this.db('dependencies')
+      .join(
+        this.db.raw(`(${distinctSubquery.toString()}) as distinct_deps`),
+        'dependencies.id',
+        'distinct_deps.id'
+      )
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .select(
@@ -3580,13 +3604,13 @@ export class DatabaseService {
         'from_symbols.symbol_type as from_symbol_type',
         'from_files.path as from_file_path'
       )
-      .where('dependencies.to_symbol_id', symbolId)
       .orderBy('dependencies.id', 'asc');
 
-    // Count query for total results
+    // Count query for total results (using distinct count)
     const countQuery = this.db('dependencies')
-      .count('* as count')
-      .where('dependencies.to_symbol_id', symbolId);
+      .countDistinct(['from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number'])
+      .where('dependencies.to_symbol_id', symbolId)
+      .whereRaw('dependencies.from_symbol_id != dependencies.to_symbol_id');
 
     const result = await createPaginatedQuery<any>(
       baseQuery,
