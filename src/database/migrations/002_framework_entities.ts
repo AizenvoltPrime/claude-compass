@@ -81,6 +81,12 @@ export async function up(knex: Knex): Promise<void> {
   await knex.schema.createTable('api_calls', table => {
     table.increments('id').primary();
     table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table
       .integer('caller_symbol_id')
       .notNullable()
       .references('id')
@@ -95,6 +101,7 @@ export async function up(knex: Knex): Promise<void> {
     table.timestamps(true, true);
 
     // Optimized indexes for cross-stack analysis
+    table.index(['repo_id']);
     table.index(['http_method', 'endpoint_path'], 'api_calls_method_pattern_idx');
     table.index(['caller_symbol_id', 'endpoint_symbol_id'], 'api_calls_symbol_idx');
     table.index(['caller_symbol_id']);
@@ -104,6 +111,12 @@ export async function up(knex: Knex): Promise<void> {
   // Data contracts table - CLEAN SCHEMA WITH CORRECT COLUMN NAMES
   await knex.schema.createTable('data_contracts', table => {
     table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
     table
       .integer('frontend_type_id')
       .notNullable()
@@ -121,6 +134,7 @@ export async function up(knex: Knex): Promise<void> {
     table.timestamps(true, true);
 
     // Indexes and constraints
+    table.index(['repo_id']);
     table.index(['frontend_type_id']);
     table.index(['backend_type_id']);
     table.index(['drift_detected']);
@@ -234,6 +248,65 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['framework_type']);
   });
 
+  // Components table - Vue/React component metadata
+  await knex.schema.createTable('components', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table
+      .integer('symbol_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
+    table.string('component_type').notNullable();
+    table.jsonb('props').defaultTo('[]');
+    table.jsonb('emits').defaultTo('[]');
+    table.jsonb('slots').defaultTo('[]');
+    table.jsonb('hooks').defaultTo('[]');
+    table.integer('parent_component_id').references('id').inTable('components').onDelete('SET NULL');
+    table.jsonb('template_dependencies').defaultTo('[]');
+    table.timestamps(true, true);
+
+    // Indexes for performance
+    table.index(['repo_id', 'component_type']);
+    table.index(['symbol_id']);
+    table.index(['component_type']);
+    table.index(['parent_component_id']);
+  });
+
+  // Composables table - Vue/React composable metadata
+  await knex.schema.createTable('composables', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table
+      .integer('symbol_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
+    table.string('composable_type').notNullable();
+    table.jsonb('returns').defaultTo('[]');
+    table.jsonb('dependencies').defaultTo('[]');
+    table.jsonb('reactive_refs').defaultTo('[]');
+    table.jsonb('dependency_array').defaultTo('[]');
+    table.timestamps(true, true);
+
+    // Indexes for performance
+    table.index(['repo_id', 'composable_type']);
+    table.index(['symbol_id']);
+    table.index(['composable_type']);
+  });
+
   // Add vector extension support for symbols table
   await knex.raw('ALTER TABLE symbols ADD COLUMN embedding vector(1536)');
 
@@ -251,6 +324,8 @@ export async function down(knex: Knex): Promise<void> {
   console.log('🗑️  Dropping consolidated framework entities...');
 
   // Drop in reverse order to respect foreign key constraints
+  await knex.schema.dropTableIfExists('composables');
+  await knex.schema.dropTableIfExists('components');
   await knex.schema.dropTableIfExists('godot_relationships');
   await knex.schema.dropTableIfExists('package_dependencies');
   await knex.schema.dropTableIfExists('test_coverage');

@@ -913,7 +913,7 @@ export class CrossStackGraphBuilder {
   /**
    * Store cross-stack relationships in database
    */
-  async storeCrossStackRelationships(graph: FullStackFeatureGraph): Promise<void> {
+  async storeCrossStackRelationships(graph: FullStackFeatureGraph, repoId: number): Promise<void> {
     this.logger.info('Storing cross-stack relationships', {
       apiCalls: graph.apiCallGraph.edges.length,
       dataContracts: graph.dataContractGraph.edges.length,
@@ -930,7 +930,7 @@ export class CrossStackGraphBuilder {
 
           if (fromNode && toNode && fromNode.metadata.symbolId && toNode.metadata.entityId) {
             apiCallsToCreate.push({
-              repo_id: 0, // Will be set by caller
+              repo_id: repoId,
               caller_symbol_id: fromNode.metadata.symbolId,
               endpoint_symbol_id: parseInt(toNode.metadata.entityId),
               http_method: edge.metadata.httpMethod || 'GET',
@@ -950,7 +950,7 @@ export class CrossStackGraphBuilder {
 
           if (fromNode && toNode && fromNode.metadata.symbolId && toNode.metadata.symbolId) {
             dataContractsToCreate.push({
-              repo_id: 0, // Will be set by caller
+              repo_id: repoId,
               name: `${fromNode.name}_${toNode.name}`,
               frontend_type_id: fromNode.metadata.symbolId,
               backend_type_id: toNode.metadata.symbolId,

@@ -357,7 +357,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       expect(result.content).toBeDefined();
       const response = JSON.parse(result.content[0].text);
-      expect(response.symbol.name).toBe('testMethod');
+      expect(response.query_info.symbol).toBe('testMethod');
     });
 
     test('should accept analysis_type parameter in listDependencies', async () => {

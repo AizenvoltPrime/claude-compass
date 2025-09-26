@@ -41,10 +41,11 @@ export async function up(knex: Knex): Promise<void> {
 
   // === COMPOSITE INDEXES FOR COMPLEX QUERIES ===
 
-  // Repository analysis indexes
-  await knex.schema.table('repositories', (table) => {
-    table.index(['language_primary', 'last_indexed']);
-  });
+  // Repository analysis indexes (skip if already exists from migration 001)
+  await knex.raw(`
+    CREATE INDEX IF NOT EXISTS repositories_language_primary_last_indexed_index
+    ON repositories (language_primary, last_indexed)
+  `);
 
   // Multi-column indexes for common query patterns
   await knex.raw(`
