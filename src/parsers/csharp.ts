@@ -17,7 +17,7 @@ import {
   ChunkResult
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 
 const logger = createComponentLogger('csharp-parser');
 
@@ -790,13 +790,19 @@ export class CSharpParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node, content);
     const visibility = this.getVisibilityFromModifiers(modifiers);
 
+    // Check if this method is within an interface declaration
+    const isInInterface = this.isNodeWithinInterface(node);
+
+    // Interface methods are implicitly public in C#
+    const finalVisibility = isInInterface ? Visibility.PUBLIC : (visibility || Visibility.PRIVATE);
+
     return {
       name,
       symbol_type: SymbolType.METHOD,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility: visibility || Visibility.PRIVATE,
+      is_exported: isInInterface || modifiers.includes('public'),
+      visibility: finalVisibility,
       signature: this.extractMethodSignature(node, content)
     };
   }
@@ -1293,8 +1299,8 @@ export class CSharpParser extends ChunkedParser {
         // Store raw parameter expressions (e.g., "_handPosition, null")
         parameterContext = parameters.join(', ');
 
-        // Generate unique call instance ID to distinguish multiple calls to same method
-        callInstanceId = randomUUID();
+        // Generate deterministic call instance ID to distinguish multiple calls to same method
+        callInstanceId = this.generateCallInstanceId(methodName, node.startPosition.row + 1, parameterContext, this.currentFilePath);
 
         // Try to resolve parameter types when possible
         parameterTypes = this.extractParameterTypes(node, content, parameters);
@@ -1649,7 +1655,7 @@ export class CSharpParser extends ChunkedParser {
                     const parameters = this.extractMethodParameters(conditionalAccessNode, content);
                     if (parameters.length > 0) {
                       parameterContext = parameters.join(', ');
-                      callInstanceId = randomUUID();
+                      callInstanceId = this.generateCallInstanceId(methodName, conditionalAccessNode.startPosition.row + 1, parameterContext, this.currentFilePath);
                       parameterTypes = this.extractParameterTypes(conditionalAccessNode, content, parameters);
 
                       logger.debug('C# conditional access parameters extracted', {
@@ -1827,6 +1833,52 @@ export class CSharpParser extends ChunkedParser {
     }
 
     return null;
+  }
+
+  /**
+   * Check if a node is within an interface declaration
+   * Interface methods are implicitly public in C#
+   */
+  private isNodeWithinInterface(node: Parser.SyntaxNode): boolean {
+    let parent = node.parent;
+
+    while (parent) {
+      if (parent.type === 'interface_declaration') {
+        return true;
+      }
+      // Stop searching if we hit a class or struct declaration
+      if (parent.type === 'class_declaration' || parent.type === 'struct_declaration') {
+        return false;
+      }
+      parent = parent.parent;
+    }
+
+    return false;
+  }
+
+  /**
+   * Generate a deterministic call instance ID based on call context
+   * This ensures the same call gets the same ID across different analysis runs
+   */
+  private generateCallInstanceId(
+    methodName: string,
+    lineNumber: number,
+    parameterContext: string,
+    filePath?: string
+  ): string {
+    const contextData = [
+      filePath || 'unknown',
+      lineNumber.toString(),
+      methodName,
+      parameterContext || 'no-params'
+    ].join('|');
+
+    // Create a hash of the context data to ensure deterministic IDs
+    const hash = createHash('sha256').update(contextData).digest('hex');
+
+    // Use first 32 characters to create a UUID-like format for consistency
+    const hex = hash.substring(0, 32);
+    return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
   }
 
   /**

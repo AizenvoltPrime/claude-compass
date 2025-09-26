@@ -24,16 +24,11 @@ export interface ParsedSymbol {
   file_id?: number;
 }
 
-// ===== PHASE 3: SIMPLIFIED PARSED DEPENDENCY =====
-// Confidence field removed - parser focuses on dependency extraction without scoring
-
 export interface ParsedDependency {
   from_symbol: string;
   to_symbol: string;
   dependency_type: DependencyType;
   line_number: number;
-  // REMOVED: confidence: number; // Phase 3 - Let AI decide relevance instead of parser confidence
-  // Optional fields for database compatibility
   from_symbol_id?: number;
   to_symbol_id?: number;
   calling_object?: string;
@@ -42,7 +37,6 @@ export interface ParsedDependency {
   method_signature?: string;
   file_context?: string;
   namespace_context?: string;
-  // Parameter context fields (Enhancement 2)
   parameter_context?: string;
   call_instance_id?: string;
   parameter_types?: string[];

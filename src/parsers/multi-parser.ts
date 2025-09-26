@@ -57,7 +57,7 @@ export class MultiParser {
           detectionResult = await this.detector.detectFrameworks(projectRoot);
           if (detectionResult && detectionResult.frameworks) {
             logger.debug(`Detected frameworks for ${filePath}`, {
-              frameworks: detectionResult.frameworks.map(f => f.name)
+              frameworks: detectionResult.frameworks.map(f => f.name),
             });
           } else {
             logger.debug(`No frameworks detected for ${filePath}`);
@@ -66,7 +66,12 @@ export class MultiParser {
           logger.warn(`Framework detection failed for ${filePath}`, { error: error.message });
           detectionResult = {
             frameworks: [],
-            metadata: { hasPackageJson: false, hasComposerJson: false, hasConfigFiles: false, directoryStructure: [] }
+            metadata: {
+              hasPackageJson: false,
+              hasComposerJson: false,
+              hasConfigFiles: false,
+              directoryStructure: [],
+            },
           };
         }
       }
@@ -89,7 +94,10 @@ export class MultiParser {
             applicableParsers = this.getDefaultParsers(filePath);
           }
         } catch (error) {
-          logger.warn(`getApplicableFrameworks failed for ${filePath}, falling back to default parsers`, { error: error.message });
+          logger.warn(
+            `getApplicableFrameworks failed for ${filePath}, falling back to default parsers`,
+            { error: error.message }
+          );
           applicableParsers = this.getDefaultParsers(filePath);
         }
       } else {
@@ -119,7 +127,7 @@ export class MultiParser {
               message: `Parser not found: ${parserName}`,
               line: 0,
               column: 0,
-              severity: 'error'
+              severity: 'error',
             });
             continue;
           }
@@ -137,7 +145,7 @@ export class MultiParser {
               metadata: {
                 framework: parserName,
                 isFrameworkSpecific: false,
-              }
+              },
             };
           } else {
             logger.warn(`Unsupported parser type: ${parserName}`);
@@ -145,7 +153,7 @@ export class MultiParser {
               message: `Unsupported parser type: ${parserName}`,
               line: 0,
               column: 0,
-              severity: 'warning'
+              severity: 'warning',
             });
             continue;
           }
@@ -153,11 +161,13 @@ export class MultiParser {
           parseResults.push({ parser: parserName, result });
 
           // Set primary result (first framework parser or most comprehensive)
-          if (!primaryResult || this.shouldBePrimary(parserName, result, primaryParser, primaryResult)) {
+          if (
+            !primaryResult ||
+            this.shouldBePrimary(parserName, result, primaryParser, primaryResult)
+          ) {
             primaryResult = result;
             primaryParser = parserName;
           }
-
         } catch (error) {
           const errorMessage = `Parser ${parserName} failed: ${error.message}`;
           logger.error(errorMessage, { filePath, error });
@@ -165,7 +175,7 @@ export class MultiParser {
             message: errorMessage,
             line: 0,
             column: 0,
-            severity: 'error'
+            severity: 'error',
           });
         }
       }
@@ -177,11 +187,15 @@ export class MultiParser {
         // Add collected errors to the empty result
         if (collectedErrors.length > 0) {
           // If we have specific parser errors, filter them and use only those
-          const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(collectedErrors));
+          const filteredErrors = this.deduplicateErrors(
+            this.filterFalsePositiveErrors(collectedErrors)
+          );
           emptyResult.errors = filteredErrors;
         } else {
           // If no specific errors, keep the generic "All parsers failed" error
-          const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(collectedErrors));
+          const filteredErrors = this.deduplicateErrors(
+            this.filterFalsePositiveErrors(collectedErrors)
+          );
           emptyResult.errors.push(...filteredErrors);
         }
 
@@ -194,20 +208,22 @@ export class MultiParser {
 
       // Add any collected errors from failed parsers
       if (collectedErrors.length > 0) {
-        const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(collectedErrors));
+        const filteredErrors = this.deduplicateErrors(
+          this.filterFalsePositiveErrors(collectedErrors)
+        );
         mergedResult.errors.push(...filteredErrors);
       }
 
       return {
         ...mergedResult,
         parsers: applicableParsers,
-        primaryParser
+        primaryParser,
       };
-
     } catch (error) {
       logger.error(`Multi-parsing failed for file ${filePath}`, { error });
       // Use the parsers that were determined, or fall back to default parsers
-      const fallbackParsers = applicableParsers.length > 0 ? applicableParsers : this.getDefaultParsers(filePath);
+      const fallbackParsers =
+        applicableParsers.length > 0 ? applicableParsers : this.getDefaultParsers(filePath);
       return this.createEmptyResult(filePath, fallbackParsers);
     }
   }
@@ -226,7 +242,7 @@ export class MultiParser {
       detectionResult = await this.detector.detectFrameworks(projectPath);
       logger.info(`Project framework detection completed`, {
         projectPath,
-        frameworks: detectionResult.frameworks.map(f => `${f.name}@${f.version || 'unknown'}`)
+        frameworks: detectionResult.frameworks.map(f => `${f.name}@${f.version || 'unknown'}`),
       });
     }
 
@@ -238,8 +254,8 @@ export class MultiParser {
         ...file.options,
         frameworkContext: {
           ...file.options?.frameworkContext,
-          projectRoot: projectPath || file.options?.frameworkContext?.projectRoot
-        }
+          projectRoot: projectPath || file.options?.frameworkContext?.projectRoot,
+        },
       };
 
       const result = await this.parseFile(file.content, file.filePath, options, detectionResult);
@@ -301,7 +317,11 @@ export class MultiParser {
     }
 
     // Check for ORM/model files based on naming patterns
-    if (fileName.includes('.model.') || fileName.includes('.entity.') || fileName.includes('.schema.')) {
+    if (
+      fileName.includes('.model.') ||
+      fileName.includes('.entity.') ||
+      fileName.includes('.schema.')
+    ) {
       parsers.push('orm');
     }
 
@@ -396,7 +416,18 @@ export class MultiParser {
    * Check if parser is a framework parser
    */
   private isFrameworkParser(parserName: string): boolean {
-    return ['vue', 'nextjs', 'react', 'nodejs', 'laravel', 'godot', 'test-framework', 'package-manager', 'background-job', 'orm'].includes(parserName);
+    return [
+      'vue',
+      'nextjs',
+      'react',
+      'nodejs',
+      'laravel',
+      'godot',
+      'test-framework',
+      'package-manager',
+      'background-job',
+      'orm',
+    ].includes(parserName);
   }
 
   /**
@@ -414,7 +445,9 @@ export class MultiParser {
     const allDependencies = [...primaryResult.dependencies];
     const allImports = [...primaryResult.imports];
     const allExports = [...primaryResult.exports];
-    const allErrors = [...this.deduplicateErrors(this.filterFalsePositiveErrors(primaryResult.errors))];
+    const allErrors = [
+      ...this.deduplicateErrors(this.filterFalsePositiveErrors(primaryResult.errors)),
+    ];
     const allFrameworkEntities = [...(primaryResult.frameworkEntities || [])];
 
     for (const { result } of allResults) {
@@ -474,7 +507,9 @@ export class MultiParser {
 
       // Add cross-stack metadata to frameworkEntities
       for (const relationship of crossStackRelationships) {
-        if (!allFrameworkEntities.some(e => this.frameworkEntitiesEqual(e, relationship.metadata))) {
+        if (
+          !allFrameworkEntities.some(e => this.frameworkEntitiesEqual(e, relationship.metadata))
+        ) {
           allFrameworkEntities.push(relationship.metadata);
         }
       }
@@ -490,8 +525,10 @@ export class MultiParser {
       frameworkEntities: allFrameworkEntities,
       metadata: {
         ...primaryResult.metadata,
-        ...(crossStackRelationships.length > 0 && { crossStackRelationships: crossStackRelationships.length })
-      }
+        ...(crossStackRelationships.length > 0 && {
+          crossStackRelationships: crossStackRelationships.length,
+        }),
+      },
     };
   }
 
@@ -504,13 +541,11 @@ export class MultiParser {
     try {
       // Filter results by framework type
       const vueResults = allResults
-        .filter(r => r.parser === 'vue' ||
-                (r.result.metadata?.framework === 'vue'))
+        .filter(r => r.parser === 'vue' || r.result.metadata?.framework === 'vue')
         .map(r => r.result);
 
       const laravelResults = allResults
-        .filter(r => r.parser === 'laravel' ||
-                (r.result.metadata?.framework === 'laravel'))
+        .filter(r => r.parser === 'laravel' || r.result.metadata?.framework === 'laravel')
         .map(r => r.result);
 
       // Only proceed if we have both Vue and Laravel results
@@ -520,12 +555,15 @@ export class MultiParser {
 
       logger.debug('Attempting cross-stack relationship detection', {
         vueResults: vueResults.length,
-        laravelResults: laravelResults.length
+        laravelResults: laravelResults.length,
       });
 
       // Use CrossStackParser to detect relationships
-      const crossStackParser = new CrossStackParser(); // No confidence threshold needed
-      const relationships = await crossStackParser.detectApiCallRelationships(vueResults, laravelResults);
+      const crossStackParser = new CrossStackParser();
+      const relationships = await crossStackParser.detectApiCallRelationships(
+        vueResults,
+        laravelResults
+      );
 
       if (relationships.length > 0) {
         logger.info(`Successfully detected ${relationships.length} cross-stack relationships`);
@@ -548,19 +586,21 @@ export class MultiParser {
       dependencies: [],
       imports: [],
       exports: [],
-      errors: [{
-        message: 'All parsers failed',
-        line: 0,
-        column: 0,
-        severity: 'error'
-      }],
+      errors: [
+        {
+          message: 'All parsers failed',
+          line: 0,
+          column: 0,
+          severity: 'error',
+        },
+      ],
       frameworkEntities: [],
       metadata: {
         framework: 'unknown',
         isFrameworkSpecific: false,
       },
       parsers,
-      primaryParser: parsers[0] || 'unknown'
+      primaryParser: parsers[0] || 'unknown',
     };
   }
 
@@ -582,38 +622,44 @@ export class MultiParser {
    * Efficient comparison methods for deduplication
    */
   private symbolsEqual(a: any, b: any): boolean {
-    return a.name === b.name &&
-           a.symbol_type === b.symbol_type &&
-           a.start_line === b.start_line &&
-           a.end_line === b.end_line;
+    return (
+      a.name === b.name &&
+      a.symbol_type === b.symbol_type &&
+      a.start_line === b.start_line &&
+      a.end_line === b.end_line
+    );
   }
 
   private dependenciesEqual(a: any, b: any): boolean {
-    return a.from_symbol === b.from_symbol &&
-           a.to_symbol === b.to_symbol &&
-           a.dependency_type === b.dependency_type &&
-           a.line_number === b.line_number;
+    return (
+      a.from_symbol === b.from_symbol &&
+      a.to_symbol === b.to_symbol &&
+      a.dependency_type === b.dependency_type &&
+      a.line_number === b.line_number
+    );
   }
 
   private importsEqual(a: any, b: any): boolean {
-    return a.source === b.source &&
-           a.import_type === b.import_type &&
-           a.line_number === b.line_number &&
-           a.is_dynamic === b.is_dynamic &&
-           JSON.stringify(a.imported_names?.sort()) === JSON.stringify(b.imported_names?.sort());
+    return (
+      a.source === b.source &&
+      a.import_type === b.import_type &&
+      a.line_number === b.line_number &&
+      a.is_dynamic === b.is_dynamic &&
+      JSON.stringify(a.imported_names?.sort()) === JSON.stringify(b.imported_names?.sort())
+    );
   }
 
   private exportsEqual(a: any, b: any): boolean {
-    return a.export_type === b.export_type &&
-           a.source === b.source &&
-           a.line_number === b.line_number &&
-           JSON.stringify(a.exported_names?.sort()) === JSON.stringify(b.exported_names?.sort());
+    return (
+      a.export_type === b.export_type &&
+      a.source === b.source &&
+      a.line_number === b.line_number &&
+      JSON.stringify(a.exported_names?.sort()) === JSON.stringify(b.exported_names?.sort())
+    );
   }
 
   private frameworkEntitiesEqual(a: any, b: any): boolean {
-    return a.type === b.type &&
-           a.name === b.name &&
-           a.filePath === b.filePath;
+    return a.type === b.type && a.name === b.name && a.filePath === b.filePath;
   }
 
   /**
@@ -732,15 +778,13 @@ export class MultiParser {
       ];
 
       // Check if error message contains any false positive pattern
-      const isFalsePositive = falsePositivePatterns.some(pattern =>
-        message.includes(pattern)
-      );
+      const isFalsePositive = falsePositivePatterns.some(pattern => message.includes(pattern));
 
       if (isFalsePositive) {
         logger.debug('Filtering out false positive parsing error', {
           message: error.message,
           line: error.line,
-          severity: error.severity
+          severity: error.severity,
         });
         return false;
       }

@@ -65,7 +65,7 @@ export class FrameworkDetector {
         files: ['vue.config.js', 'vite.config.js', 'nuxt.config.js'],
         directories: ['src/components', 'src/views', 'pages', 'components'],
         configs: ['vue.config.js', 'vite.config.js'],
-        features: ['sfc', 'composition-api', 'vue-router', 'pinia', 'vuex']
+        features: ['sfc', 'composition-api', 'vue-router', 'pinia', 'vuex'],
       },
     },
 
@@ -78,7 +78,7 @@ export class FrameworkDetector {
         files: ['next.config.js', 'next.config.mjs', 'next.config.ts'],
         directories: ['pages', 'app', 'src/pages', 'src/app', 'public'],
         configs: ['next.config.js', 'next.config.mjs'],
-        features: ['pages-router', 'app-router', 'api-routes', 'middleware', 'ssr']
+        features: ['pages-router', 'app-router', 'api-routes', 'middleware', 'ssr'],
       },
     },
 
@@ -91,7 +91,7 @@ export class FrameworkDetector {
         files: ['package.json'],
         directories: ['src/components', 'components'],
         configs: ['craco.config.js', 'react-app-env.d.ts'],
-        features: ['hooks', 'jsx', 'tsx', 'context']
+        features: ['hooks', 'jsx', 'tsx', 'context'],
       },
     },
 
@@ -104,7 +104,7 @@ export class FrameworkDetector {
         files: ['server.js', 'app.js', 'index.js'],
         directories: ['routes', 'api', 'controllers', 'middleware'],
         configs: ['nodemon.json', 'pm2.config.js'],
-        features: ['express-routes', 'middleware', 'rest-api']
+        features: ['express-routes', 'middleware', 'rest-api'],
       },
     },
 
@@ -112,12 +112,28 @@ export class FrameworkDetector {
     {
       name: 'test-framework',
       patterns: {
-        dependencies: ['jest', 'vitest', 'cypress', 'playwright', 'mocha', 'jasmine', '@testing-library/react'],
-        devDependencies: ['jest', 'vitest', 'cypress', 'playwright', 'mocha', 'jasmine', '@types/jest'],
+        dependencies: [
+          'jest',
+          'vitest',
+          'cypress',
+          'playwright',
+          'mocha',
+          'jasmine',
+          '@testing-library/react',
+        ],
+        devDependencies: [
+          'jest',
+          'vitest',
+          'cypress',
+          'playwright',
+          'mocha',
+          'jasmine',
+          '@types/jest',
+        ],
         files: ['jest.config.js', 'vitest.config.js', 'cypress.json', 'playwright.config.js'],
         directories: ['tests', 'test', '__tests__', 'cypress', 'e2e'],
         configs: ['jest.config.js', 'vitest.config.js', 'cypress.json', 'playwright.config.js'],
-        features: ['unit-tests', 'integration-tests', 'e2e-tests', 'test-coverage']
+        features: ['unit-tests', 'integration-tests', 'e2e-tests', 'test-coverage'],
       },
     },
 
@@ -127,10 +143,18 @@ export class FrameworkDetector {
       patterns: {
         dependencies: [],
         devDependencies: [],
-        files: ['package.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'lerna.json', 'nx.json', 'turbo.json'],
+        files: [
+          'package.json',
+          'yarn.lock',
+          'pnpm-lock.yaml',
+          'bun.lockb',
+          'lerna.json',
+          'nx.json',
+          'turbo.json',
+        ],
         directories: ['packages', 'apps', 'libs', 'workspace'],
         configs: ['lerna.json', 'nx.json', 'turbo.json', 'pnpm-workspace.yaml'],
-        features: ['workspaces', 'monorepo', 'package-management']
+        features: ['workspaces', 'monorepo', 'package-management'],
       },
     },
 
@@ -143,7 +167,7 @@ export class FrameworkDetector {
         files: ['worker.js', 'jobs.js', 'queue.js'],
         directories: ['jobs', 'workers', 'queues', 'background'],
         configs: ['bull.config.js', 'agenda.config.js'],
-        features: ['job-queues', 'worker-threads', 'job-scheduling', 'background-processing']
+        features: ['job-queues', 'worker-threads', 'job-scheduling', 'background-processing'],
       },
     },
 
@@ -151,12 +175,20 @@ export class FrameworkDetector {
     {
       name: 'orm',
       patterns: {
-        dependencies: ['prisma', 'typeorm', 'sequelize', 'mongoose', 'objection', 'mikro-orm', 'bookshelf'],
+        dependencies: [
+          'prisma',
+          'typeorm',
+          'sequelize',
+          'mongoose',
+          'objection',
+          'mikro-orm',
+          'bookshelf',
+        ],
         devDependencies: ['@types/sequelize', '@types/mongoose', 'prisma'],
         files: ['schema.prisma', 'ormconfig.json', 'mikro-orm.config.js'],
         directories: ['models', 'entities', 'schemas', 'prisma', 'migrations'],
         configs: ['ormconfig.json', 'mikro-orm.config.js', 'sequelize.config.js'],
-        features: ['database-models', 'migrations', 'relationships', 'orm-mapping']
+        features: ['database-models', 'migrations', 'relationships', 'orm-mapping'],
       },
     },
 
@@ -167,14 +199,23 @@ export class FrameworkDetector {
         dependencies: ['laravel/framework', 'illuminate/support', 'illuminate/database'],
         devDependencies: ['phpunit/phpunit', 'mockery/mockery', 'laravel/pint', 'laravel/sail'],
         files: ['artisan', 'composer.json', '.env.example', 'server.php'],
-        directories: ['app', 'routes', 'config', 'database', 'resources', 'storage', 'public', 'bootstrap'],
+        directories: [
+          'app',
+          'routes',
+          'config',
+          'database',
+          'resources',
+          'storage',
+          'public',
+          'bootstrap',
+        ],
         configs: [
           'config/app.php',
           'config/database.php',
           'config/services.php',
           'config/auth.php',
           'routes/web.php',
-          'routes/api.php'
+          'routes/api.php',
         ],
         features: [
           'eloquent-orm',
@@ -183,8 +224,8 @@ export class FrameworkDetector {
           'middleware',
           'service-providers',
           'route-model-binding',
-          'dependency-injection'
-        ]
+          'dependency-injection',
+        ],
       },
     },
 
@@ -204,10 +245,10 @@ export class FrameworkDetector {
           'nodes',
           'signals',
           'autoload',
-          'scene-tree'
-        ]
+          'scene-tree',
+        ],
       },
-    }
+    },
   ];
 
   /**
@@ -236,8 +277,8 @@ export class FrameworkDetector {
 
         // Only include frameworks that have strong evidence (dependencies, configs)
         // to avoid false positives from shared directory structures
-        const hasStrongEvidence = detection.evidence.some(e =>
-          e.type === 'dependency' || e.type === 'devDependency' || e.type === 'config'
+        const hasStrongEvidence = detection.evidence.some(
+          e => e.type === 'dependency' || e.type === 'devDependency' || e.type === 'config'
         );
         if (hasStrongEvidence) {
           detectedFrameworks.push(detection);
@@ -250,10 +291,9 @@ export class FrameworkDetector {
           hasPackageJson: packageJson !== null,
           hasComposerJson: composerJson !== null,
           hasConfigFiles: configFiles.length > 0,
-          directoryStructure
-        }
+          directoryStructure,
+        },
       };
-
     } catch (error) {
       logger.error(`Framework detection failed for ${projectPath}`, { error });
       return {
@@ -262,8 +302,8 @@ export class FrameworkDetector {
           hasPackageJson: false,
           hasComposerJson: false,
           hasConfigFiles: false,
-          directoryStructure: []
-        }
+          directoryStructure: [],
+        },
       };
     }
   }
@@ -289,7 +329,7 @@ export class FrameworkDetector {
           evidence.push({
             type: 'dependency',
             source: 'package.json',
-            value: `${dep}@${packageJson.dependencies[dep]}`
+            value: `${dep}@${packageJson.dependencies[dep]}`,
           });
         }
       }
@@ -302,7 +342,7 @@ export class FrameworkDetector {
           evidence.push({
             type: 'devDependency',
             source: 'package.json',
-            value: `${dep}@${packageJson.devDependencies[dep]}`
+            value: `${dep}@${packageJson.devDependencies[dep]}`,
           });
         }
       }
@@ -315,7 +355,7 @@ export class FrameworkDetector {
           evidence.push({
             type: 'dependency',
             source: 'composer.json',
-            value: `${dep}@${composerJson.require[dep]}`
+            value: `${dep}@${composerJson.require[dep]}`,
           });
         }
       }
@@ -328,7 +368,7 @@ export class FrameworkDetector {
           evidence.push({
             type: 'devDependency',
             source: 'composer.json',
-            value: `${dep}@${composerJson['require-dev'][dep]}`
+            value: `${dep}@${composerJson['require-dev'][dep]}`,
           });
         }
       }
@@ -341,7 +381,7 @@ export class FrameworkDetector {
           evidence.push({
             type: 'config',
             source: 'filesystem',
-            value: configFile
+            value: configFile,
           });
         }
       }
@@ -354,7 +394,7 @@ export class FrameworkDetector {
           evidence.push({
             type: 'directory',
             source: 'filesystem',
-            value: dir
+            value: dir,
           });
         }
       }
@@ -362,20 +402,20 @@ export class FrameworkDetector {
 
     // Detect framework-specific features
     if (pattern.name === 'vue') {
-      features.push(...await this.detectVueFeatures(projectPath, packageJson));
+      features.push(...(await this.detectVueFeatures(projectPath, packageJson)));
     } else if (pattern.name === 'nextjs') {
-      features.push(...await this.detectNextJSFeatures(projectPath, directoryStructure));
+      features.push(...(await this.detectNextJSFeatures(projectPath, directoryStructure)));
     } else if (pattern.name === 'react') {
-      features.push(...await this.detectReactFeatures(projectPath, packageJson));
+      features.push(...(await this.detectReactFeatures(projectPath, packageJson)));
     } else if (pattern.name === 'nodejs') {
-      features.push(...await this.detectNodeJSFeatures(projectPath, packageJson));
+      features.push(...(await this.detectNodeJSFeatures(projectPath, packageJson)));
     }
 
     return {
       name: pattern.name,
       version: this.extractFrameworkVersion(pattern.name, packageJson),
       evidence,
-      features
+      features,
     };
   }
 
@@ -410,12 +450,20 @@ export class FrameworkDetector {
    */
   private async findConfigFiles(projectPath: string): Promise<string[]> {
     const configPatterns = [
-      'vue.config.js', 'vite.config.js', 'vite.config.ts',
-      'next.config.js', 'next.config.mjs', 'next.config.ts',
-      'nuxt.config.js', 'nuxt.config.ts',
-      'react-app-env.d.ts', 'craco.config.js',
-      'nodemon.json', 'pm2.config.js',
-      'tailwind.config.js', 'webpack.config.js'
+      'vue.config.js',
+      'vite.config.js',
+      'vite.config.ts',
+      'next.config.js',
+      'next.config.mjs',
+      'next.config.ts',
+      'nuxt.config.js',
+      'nuxt.config.ts',
+      'react-app-env.d.ts',
+      'craco.config.js',
+      'nodemon.json',
+      'pm2.config.js',
+      'tailwind.config.js',
+      'webpack.config.js',
     ];
 
     const foundFiles: string[] = [];
@@ -436,7 +484,10 @@ export class FrameworkDetector {
   /**
    * Analyze directory structure
    */
-  private async analyzeDirectoryStructure(projectPath: string, maxDepth: number = 3): Promise<string[]> {
+  private async analyzeDirectoryStructure(
+    projectPath: string,
+    maxDepth: number = 3
+  ): Promise<string[]> {
     const directories: string[] = [];
 
     const scanDirectory = async (dirPath: string, currentDepth: number = 0): Promise<void> => {
@@ -498,7 +549,10 @@ export class FrameworkDetector {
   /**
    * Detect Next.js specific features
    */
-  private async detectNextJSFeatures(projectPath: string, directoryStructure: string[]): Promise<string[]> {
+  private async detectNextJSFeatures(
+    projectPath: string,
+    directoryStructure: string[]
+  ): Promise<string[]> {
     const features: string[] = [];
 
     // Check for app router vs pages router
@@ -577,7 +631,10 @@ export class FrameworkDetector {
 
     // Check for API patterns
     try {
-      const hasRoutes = await this.hasCodePattern(projectPath, /router\.|app\.(get|post|put|delete)/);
+      const hasRoutes = await this.hasCodePattern(
+        projectPath,
+        /router\.|app\.(get|post|put|delete)/
+      );
       if (hasRoutes) {
         features.push('rest-api');
       }
@@ -667,17 +724,17 @@ export class FrameworkDetector {
     if (!packageJson) return undefined;
 
     const dependencyMappings: Record<string, string> = {
-      'vue': 'vue',
-      'nextjs': 'next',
-      'react': 'react',
-      'nodejs': 'express'
+      vue: 'vue',
+      nextjs: 'next',
+      react: 'react',
+      nodejs: 'express',
     };
 
     const packageName = dependencyMappings[frameworkName];
     if (!packageName) return undefined;
 
-    const version = packageJson.dependencies?.[packageName] ||
-                   packageJson.devDependencies?.[packageName];
+    const version =
+      packageJson.dependencies?.[packageName] || packageJson.devDependencies?.[packageName];
 
     if (version) {
       // Clean version string (remove ^, ~, etc.)
@@ -709,37 +766,47 @@ export class FrameworkDetector {
 
     // Add framework-specific parsers based on detection and file type
     for (const framework of detectionResult.frameworks) {
-      // Process all frameworks (removed confidence filtering)
-
       switch (framework.name) {
         case 'vue':
-          if (ext === '.vue' ||
-              (ext === '.js' || ext === '.ts') &&
-              (filePath.includes('/composables/') || filePath.includes('/stores/'))) {
+          if (
+            ext === '.vue' ||
+            ((ext === '.js' || ext === '.ts') &&
+              (filePath.includes('/composables/') || filePath.includes('/stores/')))
+          ) {
             frameworks.push('vue');
           }
           break;
 
         case 'nextjs':
-          if ((ext === '.js' || ext === '.jsx' || ext === '.ts' || ext === '.tsx') &&
-              (filePath.includes('/pages/') || filePath.includes('/app/') ||
-               filePath.includes('/api/'))) {
+          if (
+            (ext === '.js' || ext === '.jsx' || ext === '.ts' || ext === '.tsx') &&
+            (filePath.includes('/pages/') ||
+              filePath.includes('/app/') ||
+              filePath.includes('/api/'))
+          ) {
             frameworks.push('nextjs');
           }
           break;
 
         case 'react':
-          if ((ext === '.jsx' || ext === '.tsx') ||
-              (ext === '.js' || ext === '.ts') &&
-              (filePath.includes('/components/') || filePath.includes('/hooks/'))) {
+          if (
+            ext === '.jsx' ||
+            ext === '.tsx' ||
+            ((ext === '.js' || ext === '.ts') &&
+              (filePath.includes('/components/') || filePath.includes('/hooks/')))
+          ) {
             frameworks.push('react');
           }
           break;
 
         case 'nodejs':
-          if ((ext === '.js' || ext === '.ts') &&
-              (filePath.includes('/routes/') || filePath.includes('/api/') ||
-               filePath.includes('/controllers/') || filePath.includes('/middleware/'))) {
+          if (
+            (ext === '.js' || ext === '.ts') &&
+            (filePath.includes('/routes/') ||
+              filePath.includes('/api/') ||
+              filePath.includes('/controllers/') ||
+              filePath.includes('/middleware/'))
+          ) {
             frameworks.push('nodejs');
           }
           break;
@@ -749,12 +816,18 @@ export class FrameworkDetector {
           const relativeToProject = this.getProjectRelativePath(filePath, detectionResult);
 
           // Check filename patterns for test files
-          const hasTestFilename = fileName.includes('.test.') || fileName.includes('.spec.') || fileName.includes('.e2e.');
+          const hasTestFilename =
+            fileName.includes('.test.') ||
+            fileName.includes('.spec.') ||
+            fileName.includes('.e2e.');
 
           // Check if file is in a test directory relative to the project root (not absolute path)
-          const isInTestDirectory = relativeToProject.includes('/tests/') || relativeToProject.includes('/test/') ||
-                                   relativeToProject.includes('/__tests__/') || relativeToProject.includes('/cypress/') ||
-                                   relativeToProject.includes('/e2e/');
+          const isInTestDirectory =
+            relativeToProject.includes('/tests/') ||
+            relativeToProject.includes('/test/') ||
+            relativeToProject.includes('/__tests__/') ||
+            relativeToProject.includes('/cypress/') ||
+            relativeToProject.includes('/e2e/');
 
           if (hasTestFilename || isInTestDirectory) {
             frameworks.push('test-framework');
@@ -762,26 +835,43 @@ export class FrameworkDetector {
           break;
 
         case 'package-manager':
-          if (path.basename(filePath) === 'package.json' ||
-              filePath.includes('lerna.json') || filePath.includes('nx.json') || filePath.includes('turbo.json') ||
-              filePath.includes('pnpm-workspace.yaml')) {
+          if (
+            path.basename(filePath) === 'package.json' ||
+            filePath.includes('lerna.json') ||
+            filePath.includes('nx.json') ||
+            filePath.includes('turbo.json') ||
+            filePath.includes('pnpm-workspace.yaml')
+          ) {
             frameworks.push('package-manager');
           }
           break;
 
         case 'background-job':
-          if ((ext === '.js' || ext === '.ts') &&
-              (filePath.includes('worker') || filePath.includes('job') || filePath.includes('queue') ||
-               filePath.includes('/workers/') || filePath.includes('/jobs/') || filePath.includes('/queues/'))) {
+          if (
+            (ext === '.js' || ext === '.ts') &&
+            (filePath.includes('worker') ||
+              filePath.includes('job') ||
+              filePath.includes('queue') ||
+              filePath.includes('/workers/') ||
+              filePath.includes('/jobs/') ||
+              filePath.includes('/queues/'))
+          ) {
             frameworks.push('background-job');
           }
           break;
 
         case 'orm':
-          if (ext === '.prisma' ||
-              filePath.includes('.model.') || filePath.includes('.entity.') || filePath.includes('.schema.') ||
-              filePath.includes('/models/') || filePath.includes('/entities/') || filePath.includes('/schemas/') ||
-              filePath.includes('/prisma/') || filePath.includes('ormconfig.json')) {
+          if (
+            ext === '.prisma' ||
+            filePath.includes('.model.') ||
+            filePath.includes('.entity.') ||
+            filePath.includes('.schema.') ||
+            filePath.includes('/models/') ||
+            filePath.includes('/entities/') ||
+            filePath.includes('/schemas/') ||
+            filePath.includes('/prisma/') ||
+            filePath.includes('ormconfig.json')
+          ) {
             frameworks.push('orm');
           }
           break;
@@ -791,30 +881,40 @@ export class FrameworkDetector {
             let isLaravelFile = false;
 
             // Controller files
-            if (filePath.includes('/app/Http/Controllers/') ||
-                path.basename(filePath).endsWith('Controller.php')) {
+            if (
+              filePath.includes('/app/Http/Controllers/') ||
+              path.basename(filePath).endsWith('Controller.php')
+            ) {
               isLaravelFile = true;
             }
             // Model files
-            if (filePath.includes('/app/Models/') ||
-                (filePath.includes('/app/') && this.hasLaravelModelPattern(filePath))) {
+            if (
+              filePath.includes('/app/Models/') ||
+              (filePath.includes('/app/') && this.hasLaravelModelPattern(filePath))
+            ) {
               isLaravelFile = true;
             }
             // Route files
-            if (filePath.includes('/routes/') &&
-                (path.basename(filePath) === 'web.php' ||
-                 path.basename(filePath) === 'api.php' ||
-                 path.basename(filePath) === 'console.php')) {
+            if (
+              filePath.includes('/routes/') &&
+              (path.basename(filePath) === 'web.php' ||
+                path.basename(filePath) === 'api.php' ||
+                path.basename(filePath) === 'console.php')
+            ) {
               isLaravelFile = true;
             }
             // Middleware files
-            if (filePath.includes('/app/Http/Middleware/') ||
-                path.basename(filePath).endsWith('Middleware.php')) {
+            if (
+              filePath.includes('/app/Http/Middleware/') ||
+              path.basename(filePath).endsWith('Middleware.php')
+            ) {
               isLaravelFile = true;
             }
             // Service provider files
-            if (filePath.includes('/app/Providers/') ||
-                path.basename(filePath).endsWith('ServiceProvider.php')) {
+            if (
+              filePath.includes('/app/Providers/') ||
+              path.basename(filePath).endsWith('ServiceProvider.php')
+            ) {
               isLaravelFile = true;
             }
             // Migration files
@@ -822,19 +922,22 @@ export class FrameworkDetector {
               isLaravelFile = true;
             }
             // Seeder files
-            if (filePath.includes('/database/seeders/') ||
-                path.basename(filePath).endsWith('Seeder.php')) {
+            if (
+              filePath.includes('/database/seeders/') ||
+              path.basename(filePath).endsWith('Seeder.php')
+            ) {
               isLaravelFile = true;
             }
             // Artisan command files
-            if (filePath.includes('/app/Console/Commands/') ||
-                path.basename(filePath).endsWith('Command.php')) {
+            if (
+              filePath.includes('/app/Console/Commands/') ||
+              path.basename(filePath).endsWith('Command.php')
+            ) {
               isLaravelFile = true;
             }
 
             // Job files
-            if (filePath.includes('/app/Jobs/') ||
-                path.basename(filePath).endsWith('Job.php')) {
+            if (filePath.includes('/app/Jobs/') || path.basename(filePath).endsWith('Job.php')) {
               isLaravelFile = true;
             }
 
@@ -860,24 +963,40 @@ export class FrameworkDetector {
   private hasLaravelModelPattern(filePath: string): boolean {
     // This is a simplified check that can be enhanced with actual file content analysis
     // For now, check if it's in app/ directory and ends with .php (suggesting it might be a model)
-    return filePath.includes('/app/') && !filePath.includes('Controller') &&
-           !filePath.includes('Middleware') && !filePath.includes('Provider') &&
-           !filePath.includes('Job') && !filePath.includes('Command');
+    return (
+      filePath.includes('/app/') &&
+      !filePath.includes('Controller') &&
+      !filePath.includes('Middleware') &&
+      !filePath.includes('Provider') &&
+      !filePath.includes('Job') &&
+      !filePath.includes('Command')
+    );
   }
 
   /**
    * Get the path relative to the detected project root to avoid false positives
    * when files are in test fixture directories
    */
-  private getProjectRelativePath(filePath: string, detectionResult: FrameworkDetectionResult): string {
+  private getProjectRelativePath(
+    filePath: string,
+    detectionResult: FrameworkDetectionResult
+  ): string {
     // Try to find the project root by looking for key files that indicate a project boundary
     let projectRoot = filePath;
     let currentDir = path.dirname(filePath);
 
     // Walk up the directory tree to find project markers
-    while (currentDir !== path.dirname(currentDir)) { // Stop at filesystem root
+    while (currentDir !== path.dirname(currentDir)) {
+      // Stop at filesystem root
       // Check for common project markers
-      const markers = ['package.json', 'composer.json', '.git', 'artisan', 'next.config.js', 'vue.config.js'];
+      const markers = [
+        'package.json',
+        'composer.json',
+        '.git',
+        'artisan',
+        'next.config.js',
+        'vue.config.js',
+      ];
       let foundMarker = false;
 
       for (const marker of markers) {

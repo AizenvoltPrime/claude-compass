@@ -16,11 +16,16 @@ import {
   Route,
   Component,
   Composable,
-  ORMEntity
+  ORMEntity,
 } from '../database/models';
 import { FrameworkEntity } from '../parsers/base';
 import { DatabaseService } from '../database/services';
-import { CrossStackParser, CrossStackRelationship, ApiCallInfo, LaravelRoute_CrossStack } from '../parsers/cross-stack';
+import {
+  CrossStackParser,
+  CrossStackRelationship,
+  ApiCallInfo,
+  LaravelRoute_CrossStack,
+} from '../parsers/cross-stack';
 import { VueApiCall, VueTypeInterface } from '../parsers/vue';
 import { LaravelRoute, LaravelApiSchema, ValidationRule } from '../parsers/laravel';
 import { createComponentLogger } from '../utils/logger';
@@ -32,7 +37,13 @@ const logger = createComponentLogger('cross-stack-builder');
  */
 export interface CrossStackNode {
   id: string;
-  type: 'vue_component' | 'laravel_route' | 'typescript_interface' | 'php_dto' | 'api_call' | 'data_contract';
+  type:
+    | 'vue_component'
+    | 'laravel_route'
+    | 'typescript_interface'
+    | 'php_dto'
+    | 'api_call'
+    | 'data_contract';
   name: string;
   filePath: string;
   framework: 'vue' | 'laravel' | 'cross-stack';
@@ -112,7 +123,7 @@ export class CrossStackGraphBuilder {
 
   constructor(database: DatabaseService) {
     this.database = database;
-    this.crossStackParser = new CrossStackParser(database); // No confidence threshold needed
+    this.crossStackParser = new CrossStackParser(database);
     this.logger = logger;
   }
 
@@ -132,7 +143,7 @@ export class CrossStackGraphBuilder {
     this.logger.info('Building API call graph', {
       vueComponents: safeVueComponents.length,
       laravelRoutes: safeLaravelRoutes.length,
-      apiCalls: safeApiCalls.length
+      apiCalls: safeApiCalls.length,
     });
 
     const nodes: CrossStackNode[] = [];
@@ -148,8 +159,8 @@ export class CrossStackGraphBuilder {
         framework: 'vue',
         metadata: {
           entityId: component.name,
-          ...component.metadata
-        }
+          ...component.metadata,
+        },
       });
     }
 
@@ -163,14 +174,16 @@ export class CrossStackGraphBuilder {
         framework: 'laravel',
         metadata: {
           entityId: route.name,
-          ...route.metadata
-        }
+          ...route.metadata,
+        },
       });
     }
 
     // Batch fetch all required symbols and routes to avoid N+1 queries
     const symbolIds = Array.from(new Set(safeApiCalls.map(call => call.caller_symbol_id)));
-    const routeIds = Array.from(new Set(safeApiCalls.map(call => call.endpoint_symbol_id).filter(id => id !== undefined)));
+    const routeIds = Array.from(
+      new Set(safeApiCalls.map(call => call.endpoint_symbol_id).filter(id => id !== undefined))
+    );
 
     // Create lookup maps for performance
     const symbolsMap = new Map();
@@ -200,11 +213,11 @@ export class CrossStackGraphBuilder {
             metadata: {
               id: symbol.id,
               symbolId: symbol.id,
-              symbolType: symbol.symbol_type
+              symbolType: symbol.symbol_type,
             },
             properties: {
-              symbolType: symbol.symbol_type
-            }
+              symbolType: symbol.symbol_type,
+            },
           };
         }
       }
@@ -235,8 +248,8 @@ export class CrossStackGraphBuilder {
             framework: 'vue',
             metadata: {
               symbolId: frontendSymbol.id,
-              entityId: frontendSymbol.name
-            }
+              entityId: frontendSymbol.name,
+            },
           });
         }
 
@@ -245,7 +258,8 @@ export class CrossStackGraphBuilder {
         if (!existingToNode) {
           // Ensure entityId is a valid integer or string
           const entityId = backendRoute.metadata?.id;
-          const validEntityId = (entityId && !isNaN(Number(entityId))) ? entityId : apiCall.endpoint_symbol_id;
+          const validEntityId =
+            entityId && !isNaN(Number(entityId)) ? entityId : apiCall.endpoint_symbol_id;
 
           nodes.push({
             id: toId,
@@ -255,8 +269,8 @@ export class CrossStackGraphBuilder {
             framework: 'laravel',
             metadata: {
               entityId: validEntityId,
-              ...backendRoute.metadata
-            }
+              ...backendRoute.metadata,
+            },
           });
         }
 
@@ -270,13 +284,11 @@ export class CrossStackGraphBuilder {
           metadata: {
             urlPattern: apiCall.endpoint_path,
             httpMethod: apiCall.http_method,
-            callType: apiCall.call_type
-          }
+            callType: apiCall.call_type,
+          },
         });
-
       }
     }
-
 
     return {
       nodes,
@@ -286,7 +298,7 @@ export class CrossStackGraphBuilder {
         laravelRoutes: safeLaravelRoutes.length,
         apiCalls: safeApiCalls.length,
         dataContracts: 0,
-      }
+      },
     };
   }
 
@@ -306,7 +318,7 @@ export class CrossStackGraphBuilder {
     this.logger.info('Building data contract graph', {
       typescriptInterfaces: safeTypescriptInterfaces.length,
       phpDtos: safePhpDtos.length,
-      dataContracts: safeDataContracts.length
+      dataContracts: safeDataContracts.length,
     });
 
     const nodes: CrossStackNode[] = [];
@@ -323,8 +335,8 @@ export class CrossStackGraphBuilder {
         metadata: {
           symbolId: tsInterface.id,
           symbolType: tsInterface.symbol_type,
-          fileId: tsInterface.file_id
-        }
+          fileId: tsInterface.file_id,
+        },
       });
     }
 
@@ -339,8 +351,8 @@ export class CrossStackGraphBuilder {
         metadata: {
           symbolId: phpDto.id,
           symbolType: phpDto.symbol_type,
-          fileId: phpDto.file_id
-        }
+          fileId: phpDto.file_id,
+        },
       });
     }
 
@@ -354,7 +366,6 @@ export class CrossStackGraphBuilder {
         const fromId = `ts_interface_${frontendType.id}`;
         const toId = `php_dto_${backendType.id}`;
 
-
         edges.push({
           id: edgeId,
           from: fromId,
@@ -364,13 +375,11 @@ export class CrossStackGraphBuilder {
           evidence: ['schema_structure_match'],
           metadata: {
             driftDetected: contract.drift_detected,
-            lastVerified: contract.last_verified
-          }
+            lastVerified: contract.last_verified,
+          },
         });
-
       }
     }
-
 
     return {
       nodes,
@@ -380,7 +389,7 @@ export class CrossStackGraphBuilder {
         laravelRoutes: 0,
         apiCalls: 0,
         dataContracts: safeDataContracts.length,
-      }
+      },
     };
   }
 
@@ -400,13 +409,13 @@ export class CrossStackGraphBuilder {
         handlerSymbolId: route.handler_symbol_id,
         middleware: route.middleware || [],
         dynamicSegments: route.dynamic_segments || [],
-        authRequired: route.auth_required || false
+        authRequired: route.auth_required || false,
       },
       properties: {
         path: route.path,
         method: route.method,
-        authRequired: route.auth_required
-      }
+        authRequired: route.auth_required,
+      },
     }));
   }
 
@@ -419,7 +428,6 @@ export class CrossStackGraphBuilder {
       const filePath = (component as any).file_path;
       const extractedName = this.extractComponentNameFromFilePath(filePath);
       const finalName = symbolName || extractedName || `Component_${component.id}`;
-
 
       return {
         type: 'component',
@@ -435,13 +443,13 @@ export class CrossStackGraphBuilder {
           slots: component.slots || [],
           hooks: component.hooks || [],
           parentComponentId: component.parent_component_id,
-          templateDependencies: component.template_dependencies || []
+          templateDependencies: component.template_dependencies || [],
         },
         properties: {
           componentType: component.component_type,
           props: component.props,
-          emits: component.emits
-        }
+          emits: component.emits,
+        },
       };
     });
   }
@@ -479,13 +487,13 @@ export class CrossStackGraphBuilder {
         returns: composable.returns || [],
         dependencies: composable.dependencies || [],
         reactiveRefs: composable.reactive_refs || [],
-        dependencyArray: composable.dependency_array || []
+        dependencyArray: composable.dependency_array || [],
       },
       properties: {
         composableType: composable.composable_type,
         returns: composable.returns,
-        dependencies: composable.dependencies
-      }
+        dependencies: composable.dependencies,
+      },
     }));
   }
 
@@ -506,13 +514,13 @@ export class CrossStackGraphBuilder {
         ormType: entity.orm_type,
         schemaFileId: entity.schema_file_id,
         fields: entity.fields || {},
-        indexes: entity.indexes || []
+        indexes: entity.indexes || [],
       },
       properties: {
         entityName: entity.entity_name,
         tableName: entity.table_name,
-        ormType: entity.orm_type
-      }
+        ormType: entity.orm_type,
+      },
     }));
   }
 
@@ -528,12 +536,12 @@ export class CrossStackGraphBuilder {
       this.logger.debug('Repository verification for cross-stack analysis', {
         repoId,
         exists: !!repoExists,
-        repoName: repoExists?.name || 'NOT_FOUND'
+        repoName: repoExists?.name || 'NOT_FOUND',
       });
     } catch (error) {
       this.logger.error('Failed to verify repository for cross-stack analysis', {
         repoId,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     }
 
@@ -554,7 +562,7 @@ export class CrossStackGraphBuilder {
       if (useStreaming) {
         this.logger.info('Using streaming mode for large dataset', {
           apiCallsCount: apiCalls.length,
-          dataContractsCount: dataContracts.length
+          dataContractsCount: dataContracts.length,
         });
         return this.buildFullStackFeatureGraphStreaming(repoId);
       }
@@ -568,14 +576,14 @@ export class CrossStackGraphBuilder {
       this.logger.info('Retrieved framework entities', {
         vueComponents: vueComponents.length,
         laravelRoutesFromTable: laravelRoutesRaw.length,
-        laravelRoutesConverted: laravelRoutes.length
+        laravelRoutesConverted: laravelRoutes.length,
       });
 
       // MISSING LOGIC: Detect new cross-stack relationships
       if (vueComponents.length > 0 && laravelRoutes.length > 0) {
         this.logger.info('Detecting cross-stack relationships', {
           vueComponents: vueComponents.length,
-          laravelRoutes: laravelRoutes.length
+          laravelRoutes: laravelRoutes.length,
         });
 
         try {
@@ -583,22 +591,21 @@ export class CrossStackGraphBuilder {
           const vueApiCalls = await this.extractApiCallsFromComponents(repoId, vueComponents);
           this.logger.info('Vue API calls extracted', {
             vueApiCalls: vueApiCalls.length,
-            calls: vueApiCalls.map(call => ({ url: call.url, method: call.method }))
+            calls: vueApiCalls.map(call => ({ url: call.url, method: call.method })),
           });
 
           // Extract route information from Laravel routes
           const laravelRouteInfo = await this.extractRouteInfoFromRoutes(repoId, laravelRoutes);
           this.logger.info('Laravel routes extracted', {
             laravelRoutes: laravelRouteInfo.length,
-            routes: laravelRouteInfo.map(route => ({ path: route.path, method: route.method }))
+            routes: laravelRouteInfo.map(route => ({ path: route.path, method: route.method })),
           });
 
           // Use simple URL pattern matching to detect relationships
           const relationships = this.matchApiCallsToRoutes(vueApiCalls, laravelRouteInfo);
           this.logger.info('Relationships matched', {
-            relationships: relationships.length
+            relationships: relationships.length,
           });
-
 
           // Store new relationships in database
           await this.storeDetectedRelationships(repoId, relationships);
@@ -611,7 +618,7 @@ export class CrossStackGraphBuilder {
           this.logger.info('Cross-stack relationship detection completed', {
             relationshipsFound: relationships.length,
             apiCallsTotal: apiCalls.length,
-            dataContractsTotal: dataContracts.length
+            dataContractsTotal: dataContracts.length,
           });
         } catch (error) {
           this.logger.error('Cross-stack relationship detection failed', { error: error.message });
@@ -623,13 +630,13 @@ export class CrossStackGraphBuilder {
 
       this.logger.info('Total symbols check before data contract detection', {
         repoId,
-        totalSymbolsInRepo: allSymbols.length
+        totalSymbolsInRepo: allSymbols.length,
       });
 
       // Get TypeScript interfaces and PHP DTOs
       const typescriptInterfaces = [
         ...(await this.database.getSymbolsByType(repoId, 'interface')),
-        ...(await this.database.getSymbolsByType(repoId, 'type_alias'))
+        ...(await this.database.getSymbolsByType(repoId, 'type_alias')),
       ];
       const phpClasses = await this.database.getSymbolsByType(repoId, 'class');
       const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
@@ -640,18 +647,17 @@ export class CrossStackGraphBuilder {
         tsCount: typescriptInterfaces.length,
         phpCount: phpDtos.length,
         tsSymbolIds: typescriptInterfaces.map(s => s.id),
-        phpSymbolIds: phpDtos.map(s => s.id)
+        phpSymbolIds: phpDtos.map(s => s.id),
       });
 
       // Detect data contract relationships between TypeScript interfaces and PHP DTOs
       if (typescriptInterfaces.length > 0 && phpDtos.length > 0) {
         this.logger.info('Detecting data contract relationships', {
           typescriptInterfaces: typescriptInterfaces.length,
-          phpDtos: phpDtos.length
+          phpDtos: phpDtos.length,
         });
 
         try {
-
           // Detect schema matches between TypeScript and PHP types
           const dataContractMatches = this.detectDataContractMatches(typescriptInterfaces, phpDtos);
           this.logger.info('Data contract matches found', {
@@ -659,16 +665,18 @@ export class CrossStackGraphBuilder {
             contracts: dataContractMatches.map(match => ({
               tsType: match.typescriptInterface.name,
               phpType: match.phpDto.name,
-            }))
+            })),
           });
 
           // Store new data contracts in database
           if (dataContractMatches.length > 0) {
             // Verify symbol IDs exist before creating data contracts
-            const allSymbolIds = [...new Set([
-              ...dataContractMatches.map(m => m.typescriptInterface.id),
-              ...dataContractMatches.map(m => m.phpDto.id)
-            ])];
+            const allSymbolIds = [
+              ...new Set([
+                ...dataContractMatches.map(m => m.typescriptInterface.id),
+                ...dataContractMatches.map(m => m.phpDto.id),
+              ]),
+            ];
 
             const existingSymbols = await this.database.getSymbolsByRepository(repoId);
             const existingSymbolIds = new Set(existingSymbols.map(s => s.id));
@@ -678,7 +686,7 @@ export class CrossStackGraphBuilder {
               this.logger.warn('Skipping data contract creation due to missing symbol IDs', {
                 repoId,
                 missingSymbolIds,
-                totalMatches: dataContractMatches.length
+                totalMatches: dataContractMatches.length,
               });
             } else {
               const dataContractsToCreate = dataContractMatches.map(match => ({
@@ -688,14 +696,14 @@ export class CrossStackGraphBuilder {
                 backend_type_id: match.phpDto.id,
                 schema_definition: JSON.stringify({
                   tsType: match.typescriptInterface.name,
-                  phpType: match.phpDto.name
+                  phpType: match.phpDto.name,
                 }),
-                drift_detected: false // No confidence-based drift detection
+                drift_detected: false,
               }));
 
               await this.database.createDataContracts(dataContractsToCreate);
               this.logger.info('Successfully stored data contract relationships', {
-                stored: dataContractsToCreate.length
+                stored: dataContractsToCreate.length,
               });
             }
 
@@ -706,14 +714,14 @@ export class CrossStackGraphBuilder {
 
           this.logger.info('Data contract detection completed', {
             contractsFound: dataContractMatches.length,
-            dataContractsTotal: dataContracts.length
+            dataContractsTotal: dataContracts.length,
           });
         } catch (error) {
           this.logger.error('Data contract detection failed', {
             error: error instanceof Error ? error.message : String(error),
             errorType: typeof error,
             typescriptInterfaces: typescriptInterfaces.length,
-            phpDtos: phpDtos.length
+            phpDtos: phpDtos.length,
           });
           // Continue with existing data even if detection fails
         }
@@ -721,7 +729,11 @@ export class CrossStackGraphBuilder {
 
       // Build individual graphs
       const apiCallGraph = await this.buildAPICallGraph(vueComponents, laravelRoutes, apiCalls);
-      const dataContractGraph = await this.buildDataContractGraph(typescriptInterfaces, phpDtos, dataContracts);
+      const dataContractGraph = await this.buildDataContractGraph(
+        typescriptInterfaces,
+        phpDtos,
+        dataContracts
+      );
 
       // Identify feature clusters
       const features = this.identifyFeatureClusters(apiCallGraph, dataContractGraph);
@@ -751,7 +763,7 @@ export class CrossStackGraphBuilder {
         metadata: {
           totalFeatures: features.length,
           crossStackRelationships: totalRelationships,
-          }
+        },
       };
     } catch (error) {
       this.logger.error('Failed to build full-stack feature graph', { error, repoId });
@@ -763,7 +775,9 @@ export class CrossStackGraphBuilder {
    * Build full-stack feature graph using streaming for large datasets
    * Memory-efficient processing for repositories with >10k relationships
    */
-  private async buildFullStackFeatureGraphStreaming(repoId: number): Promise<FullStackFeatureGraph> {
+  private async buildFullStackFeatureGraphStreaming(
+    repoId: number
+  ): Promise<FullStackFeatureGraph> {
     this.logger.info('Building full-stack feature graph in streaming mode', { repoId });
 
     const startTime = process.hrtime.bigint();
@@ -776,13 +790,13 @@ export class CrossStackGraphBuilder {
     let apiCallGraph: CrossStackGraphData = {
       nodes: [],
       edges: [],
-      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 }
+      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 },
     };
 
     let dataContractGraph: CrossStackGraphData = {
       nodes: [],
       edges: [],
-      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 }
+      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 },
     };
 
     try {
@@ -796,7 +810,7 @@ export class CrossStackGraphBuilder {
 
       this.logger.debug('Processing cross-stack data', {
         apiCallsBatch: batch.apiCalls.length,
-        dataContractsBatch: batch.dataContracts.length
+        dataContractsBatch: batch.dataContracts.length,
       });
 
       // Process API calls batch
@@ -807,12 +821,18 @@ export class CrossStackGraphBuilder {
         const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
         const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
 
-        const batchApiCallGraph = await this.buildAPICallGraph(vueComponents, laravelRoutes, batch.apiCalls);
+        const batchApiCallGraph = await this.buildAPICallGraph(
+          vueComponents,
+          laravelRoutes,
+          batch.apiCalls
+        );
 
         // Merge with accumulated graph
-        apiCallGraph.nodes.push(...batchApiCallGraph.nodes.filter(node =>
-          !apiCallGraph.nodes.some(existing => existing.id === node.id)
-        ));
+        apiCallGraph.nodes.push(
+          ...batchApiCallGraph.nodes.filter(
+            node => !apiCallGraph.nodes.some(existing => existing.id === node.id)
+          )
+        );
         apiCallGraph.edges.push(...batchApiCallGraph.edges);
 
         totalApiCalls += batch.apiCalls.length;
@@ -821,12 +841,18 @@ export class CrossStackGraphBuilder {
       // Process data contracts batch (skip heavy symbol fetching in streaming mode)
       if (batch.dataContracts.length > 0) {
         // For performance, use empty arrays to avoid repeated database queries
-        const batchDataContractGraph = await this.buildDataContractGraph([], [], batch.dataContracts);
+        const batchDataContractGraph = await this.buildDataContractGraph(
+          [],
+          [],
+          batch.dataContracts
+        );
 
         // Merge with accumulated graph
-        dataContractGraph.nodes.push(...batchDataContractGraph.nodes.filter(node =>
-          !dataContractGraph.nodes.some(existing => existing.id === node.id)
-        ));
+        dataContractGraph.nodes.push(
+          ...batchDataContractGraph.nodes.filter(
+            node => !dataContractGraph.nodes.some(existing => existing.id === node.id)
+          )
+        );
         dataContractGraph.edges.push(...batchDataContractGraph.edges);
 
         totalDataContracts += batch.dataContracts.length;
@@ -876,7 +902,7 @@ export class CrossStackGraphBuilder {
         metadata: {
           totalFeatures: identifiedFeatures.length,
           crossStackRelationships: totalRelationships,
-        }
+        },
       };
     } catch (error) {
       this.logger.error('Failed to build streaming full-stack feature graph', { error, repoId });
@@ -890,7 +916,7 @@ export class CrossStackGraphBuilder {
   async storeCrossStackRelationships(graph: FullStackFeatureGraph): Promise<void> {
     this.logger.info('Storing cross-stack relationships', {
       apiCalls: graph.apiCallGraph.edges.length,
-      dataContracts: graph.dataContractGraph.edges.length
+      dataContracts: graph.dataContractGraph.edges.length,
     });
 
     try {
@@ -929,14 +955,13 @@ export class CrossStackGraphBuilder {
               frontend_type_id: fromNode.metadata.symbolId,
               backend_type_id: toNode.metadata.symbolId,
               schema_definition: JSON.stringify({
-                compatibility: edge.metadata.schemaCompatibility
+                compatibility: edge.metadata.schemaCompatibility,
               }),
-              drift_detected: edge.metadata.driftDetected || false
+              drift_detected: edge.metadata.driftDetected || false,
             });
           }
         }
       }
-
 
       // Store in database
       if (apiCallsToCreate.length > 0) {
@@ -949,7 +974,7 @@ export class CrossStackGraphBuilder {
 
       this.logger.info('Cross-stack relationships stored successfully', {
         apiCallsStored: apiCallsToCreate.length,
-        dataContractsStored: dataContractsToCreate.length
+        dataContractsStored: dataContractsToCreate.length,
       });
     } catch (error) {
       this.logger.error('Failed to store cross-stack relationships', { error });
@@ -986,11 +1011,12 @@ export class CrossStackGraphBuilder {
     for (const [featureName, nodes] of nodeGroups) {
       if (nodes.length > 0) {
         const vueComponents = nodes.filter(n => n.framework === 'vue');
-        const laravelRoutes = apiCallGraph.nodes.filter(n =>
-          n.framework === 'laravel' &&
-          apiCallGraph.edges.some(e =>
-            vueComponents.some(vc => vc.id === e.from) && n.id === e.to
-          )
+        const laravelRoutes = apiCallGraph.nodes.filter(
+          n =>
+            n.framework === 'laravel' &&
+            apiCallGraph.edges.some(
+              e => vueComponents.some(vc => vc.id === e.from) && n.id === e.to
+            )
         );
 
         // Find related schemas
@@ -999,15 +1025,14 @@ export class CrossStackGraphBuilder {
         );
 
         const relatedEdges = [
-          ...apiCallGraph.edges.filter(e =>
-            vueComponents.some(vc => vc.id === e.from) ||
-            laravelRoutes.some(lr => lr.id === e.to)
+          ...apiCallGraph.edges.filter(
+            e =>
+              vueComponents.some(vc => vc.id === e.from) || laravelRoutes.some(lr => lr.id === e.to)
           ),
           ...dataContractGraph.edges.filter(e =>
             sharedSchemas.some(s => s.id === e.from || s.id === e.to)
-          )
+          ),
         ];
-
 
         if (vueComponents.length > 0 || laravelRoutes.length > 0) {
           features.push({
@@ -1016,10 +1041,10 @@ export class CrossStackGraphBuilder {
             vueComponents,
             laravelRoutes,
             sharedSchemas,
-              metadata: {
+            metadata: {
               apiCallCount: relatedEdges.filter(e => e.relationshipType === 'api_call').length,
-              schemaCount: relatedEdges.filter(e => e.relationshipType === 'shares_schema').length
-            }
+              schemaCount: relatedEdges.filter(e => e.relationshipType === 'shares_schema').length,
+            },
           });
         }
       }
@@ -1037,11 +1062,13 @@ export class CrossStackGraphBuilder {
     return match ? match[1] : name;
   }
 
-
   /**
    * Extract API calls from Vue components by reading their source files
    */
-  private async extractApiCallsFromComponents(repoId: number, vueComponents: any[]): Promise<any[]> {
+  private async extractApiCallsFromComponents(
+    repoId: number,
+    vueComponents: any[]
+  ): Promise<any[]> {
     const apiCalls: any[] = [];
 
     // Import Vue parser to use proper API call extraction
@@ -1062,16 +1089,14 @@ export class CrossStackGraphBuilder {
         if (!componentFile) {
           this.logger.warn('Component file not found', {
             componentName: component.name,
-            filePath: component.filePath
+            filePath: component.filePath,
           });
           continue;
         }
 
-
         // Read the file content
         const fs = await import('fs/promises');
         const fileContent = await fs.readFile(component.filePath, 'utf-8');
-
 
         // Use Vue parser to properly extract API calls
         try {
@@ -1084,10 +1109,8 @@ export class CrossStackGraphBuilder {
             // Ensure API calls have the componentName field
             const apiCallsWithComponentName = vueApiCalls.map(call => ({
               ...call,
-              componentName: component.name
+              componentName: component.name,
             }));
-
-
 
             apiCalls.push(...apiCallsWithComponentName);
           }
@@ -1095,25 +1118,27 @@ export class CrossStackGraphBuilder {
           // Fallback to regex extraction if Vue parser fails
           this.logger.warn('Vue parser failed, falling back to regex extraction', {
             componentName: component.name,
-            error: parseError.message
+            error: parseError.message,
           });
-          const fetchCalls = this.extractFetchCallsFromContent(fileContent, component.filePath, component.name);
+          const fetchCalls = this.extractFetchCallsFromContent(
+            fileContent,
+            component.filePath,
+            component.name
+          );
           apiCalls.push(...fetchCalls);
         }
-
       } catch (error) {
         this.logger.warn('Failed to extract API calls from component', {
           componentName: component.name,
-          error: error.message
+          error: error.message,
         });
       }
     }
 
     this.logger.info('Extracted API calls from Vue components', {
       componentsProcessed: vueComponents.length,
-      apiCallsFound: apiCalls.length
+      apiCallsFound: apiCalls.length,
     });
-
 
     return apiCalls;
   }
@@ -1121,7 +1146,11 @@ export class CrossStackGraphBuilder {
   /**
    * Extract fetch calls from file content
    */
-  private extractFetchCallsFromContent(content: string, filePath: string, componentName: string): any[] {
+  private extractFetchCallsFromContent(
+    content: string,
+    filePath: string,
+    componentName: string
+  ): any[] {
     const apiCalls: any[] = [];
     const uniqueCalls = new Set<string>(); // Track unique URL+method combinations
 
@@ -1136,7 +1165,7 @@ export class CrossStackGraphBuilder {
       // Fetch calls with template literals and method (flexible - allows other properties before method)
       /(?:await\s+)?fetch\s*\(\s*`([^`]+)`\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
       // Axios calls
-      /axios\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g
+      /axios\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
     ];
 
     for (const pattern of fetchPatterns) {
@@ -1181,10 +1210,10 @@ export class CrossStackGraphBuilder {
             method,
             location: {
               line: content.substring(0, match.index).split('\n').length,
-              column: match.index - content.lastIndexOf('\n', match.index) - 1
+              column: match.index - content.lastIndexOf('\n', match.index) - 1,
             },
             filePath,
-            componentName
+            componentName,
           });
         }
       }
@@ -1195,7 +1224,7 @@ export class CrossStackGraphBuilder {
       contentLength: content.length,
       totalMatchesFound: uniqueCalls.size,
       apiCallsFound: apiCalls.length,
-      extractedCalls: apiCalls.map(call => ({ url: call.url, method: call.method }))
+      extractedCalls: apiCalls.map(call => ({ url: call.url, method: call.method })),
     });
 
     return apiCalls;
@@ -1210,7 +1239,7 @@ export class CrossStackGraphBuilder {
 
     this.logger.info('Starting Laravel route extraction', {
       totalRoutesProvided: laravelRoutes.length,
-      routeNames: laravelRoutes.map(r => r.name || 'unnamed')
+      routeNames: laravelRoutes.map(r => r.name || 'unnamed'),
     });
 
     for (const route of laravelRoutes) {
@@ -1221,7 +1250,7 @@ export class CrossStackGraphBuilder {
         if (!path) {
           this.logger.warn('Skipping route with no path', {
             routeName: route.name,
-            routeMetadata: route.metadata
+            routeMetadata: route.metadata,
           });
           continue;
         }
@@ -1234,7 +1263,7 @@ export class CrossStackGraphBuilder {
           this.logger.debug('Skipping duplicate route', {
             path,
             method,
-            routeName: route.name
+            routeName: route.name,
           });
           continue;
         }
@@ -1244,7 +1273,7 @@ export class CrossStackGraphBuilder {
         this.logger.info('Processing Laravel route', {
           routeName: route.name,
           routeMetadata: route.metadata,
-          filePath: route.filePath
+          filePath: route.filePath,
         });
 
         routeInfo.push({
@@ -1252,13 +1281,13 @@ export class CrossStackGraphBuilder {
           method,
           normalizedPath: path,
           controller: route.metadata.handlerSymbolId,
-          filePath: route.filePath
+          filePath: route.filePath,
         });
       } catch (error) {
         this.logger.warn('Failed to extract route info', {
           routeName: route.name,
           routeMetadata: route.metadata,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -1267,9 +1296,8 @@ export class CrossStackGraphBuilder {
       routesProcessed: laravelRoutes.length,
       uniqueRoutesFound: uniqueRoutes.size,
       routeInfoExtracted: routeInfo.length,
-      routes: routeInfo.map(route => ({ path: route.path, method: route.method }))
+      routes: routeInfo.map(route => ({ path: route.path, method: route.method })),
     });
-
 
     return routeInfo;
   }
@@ -1287,11 +1315,14 @@ export class CrossStackGraphBuilder {
     const PERFORMANCE_WARNING_THRESHOLD = 100;
 
     // Log potential performance issues
-    if (vueApiCalls.length > PERFORMANCE_WARNING_THRESHOLD || laravelRoutes.length > PERFORMANCE_WARNING_THRESHOLD) {
+    if (
+      vueApiCalls.length > PERFORMANCE_WARNING_THRESHOLD ||
+      laravelRoutes.length > PERFORMANCE_WARNING_THRESHOLD
+    ) {
       this.logger.warn('Large dataset detected in API call matching', {
         vueApiCalls: vueApiCalls.length,
         laravelRoutes: laravelRoutes.length,
-        potentialCombinations: vueApiCalls.length * laravelRoutes.length
+        potentialCombinations: vueApiCalls.length * laravelRoutes.length,
       });
     }
 
@@ -1302,14 +1333,14 @@ export class CrossStackGraphBuilder {
     if (vueApiCalls.length > MAX_API_CALLS) {
       this.logger.warn('Truncating Vue API calls for performance', {
         original: vueApiCalls.length,
-        limited: limitedApiCalls.length
+        limited: limitedApiCalls.length,
       });
     }
 
     if (laravelRoutes.length > MAX_ROUTES) {
       this.logger.warn('Truncating Laravel routes for performance', {
         original: laravelRoutes.length,
-        limited: limitedRoutes.length
+        limited: limitedRoutes.length,
       });
     }
 
@@ -1322,7 +1353,7 @@ export class CrossStackGraphBuilder {
           this.logger.warn('Maximum relationships limit reached, stopping matching', {
             maxRelationships: MAX_RELATIONSHIPS,
             processedApiCalls: limitedApiCalls.indexOf(apiCall) + 1,
-            totalApiCalls: limitedApiCalls.length
+            totalApiCalls: limitedApiCalls.length,
           });
           break;
         }
@@ -1331,12 +1362,11 @@ export class CrossStackGraphBuilder {
         const urlMatch = this.urlsMatch(apiCall.url, route.path);
         const methodMatch = this.methodsMatch(apiCall.method, route.method);
 
-
         if (urlMatch && methodMatch) {
           relationships.push({
             vueApiCall: apiCall,
             laravelRoute: route,
-            evidenceTypes: ['url_pattern_match', 'http_method_match']
+            evidenceTypes: ['url_pattern_match', 'http_method_match'],
           });
         }
       }
@@ -1357,7 +1387,7 @@ export class CrossStackGraphBuilder {
       matchesFound: relationships.length,
       processingTimeMs: processingTime,
       truncated: vueApiCalls.length > MAX_API_CALLS || laravelRoutes.length > MAX_ROUTES,
-      limitReached: relationships.length >= MAX_RELATIONSHIPS
+      limitReached: relationships.length >= MAX_RELATIONSHIPS,
     });
 
     return relationships;
@@ -1419,8 +1449,6 @@ export class CrossStackGraphBuilder {
     return vueMethod.toUpperCase() === laravelMethod.toUpperCase();
   }
 
-
-
   /**
    * Detect and store new data contracts for a repository
    */
@@ -1431,7 +1459,7 @@ export class CrossStackGraphBuilder {
       // Get TypeScript interfaces and PHP DTOs
       const typescriptInterfaces = [
         ...(await this.database.getSymbolsByType(repoId, 'interface')),
-        ...(await this.database.getSymbolsByType(repoId, 'type_alias'))
+        ...(await this.database.getSymbolsByType(repoId, 'type_alias')),
       ];
       const phpClasses = await this.database.getSymbolsByType(repoId, 'class');
       const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
@@ -1439,14 +1467,14 @@ export class CrossStackGraphBuilder {
 
       this.logger.info('Retrieved symbols for data contract detection', {
         typescriptInterfacesCount: typescriptInterfaces.length,
-        phpDtosCount: phpDtos.length
+        phpDtosCount: phpDtos.length,
       });
 
       // Detect data contract relationships between TypeScript interfaces and PHP DTOs
       if (typescriptInterfaces.length > 0 && phpDtos.length > 0) {
         this.logger.info('Detecting data contract relationships', {
           typescriptInterfaces: typescriptInterfaces.length,
-          phpDtos: phpDtos.length
+          phpDtos: phpDtos.length,
         });
 
         // Detect schema matches between TypeScript and PHP types
@@ -1456,7 +1484,7 @@ export class CrossStackGraphBuilder {
           contracts: dataContractMatches.map(match => ({
             tsType: match.typescriptInterface.name,
             phpType: match.phpDto.name,
-              }))
+          })),
         });
 
         // Create data contracts in database
@@ -1467,26 +1495,26 @@ export class CrossStackGraphBuilder {
             frontend_type_id: match.typescriptInterface.id,
             backend_type_id: match.phpDto.id,
             schema_definition: JSON.stringify({
-              compatibility: 'compatible' // Simplified compatibility
+              compatibility: 'compatible', // Simplified compatibility
             }),
-            drift_detected: false
+            drift_detected: false,
           }));
 
           await this.database.createDataContracts(dataContractsToCreate);
           this.logger.info('Data contracts created successfully', {
-            count: dataContractsToCreate.length
+            count: dataContractsToCreate.length,
           });
         }
       } else {
         this.logger.info('Skipping data contract detection - insufficient symbols', {
           typescriptInterfaces: typescriptInterfaces.length,
-          phpDtos: phpDtos.length
+          phpDtos: phpDtos.length,
         });
       }
     } catch (error) {
       this.logger.error('Failed to detect and store data contracts', {
         repoId,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       // Continue execution even if data contract detection fails
     }
@@ -1495,7 +1523,10 @@ export class CrossStackGraphBuilder {
   /**
    * Detect data contract matches between TypeScript interfaces and PHP DTOs
    */
-  private detectDataContractMatches(typescriptInterfaces: Symbol[], phpDtos: Symbol[]): Array<{
+  private detectDataContractMatches(
+    typescriptInterfaces: Symbol[],
+    phpDtos: Symbol[]
+  ): Array<{
     typescriptInterface: Symbol;
     phpDto: Symbol;
   }> {
@@ -1504,7 +1535,6 @@ export class CrossStackGraphBuilder {
     const MAX_PHP_DTOS = 50;
     const MAX_DATA_CONTRACTS = 100;
 
-
     // Apply limits to prevent cartesian product explosion
     const limitedTsInterfaces = typescriptInterfaces.slice(0, MAX_TS_INTERFACES);
     const limitedPhpDtos = phpDtos.slice(0, MAX_PHP_DTOS);
@@ -1512,17 +1542,16 @@ export class CrossStackGraphBuilder {
     if (typescriptInterfaces.length > MAX_TS_INTERFACES) {
       this.logger.warn('Truncating TypeScript interfaces for performance', {
         original: typescriptInterfaces.length,
-        limited: limitedTsInterfaces.length
+        limited: limitedTsInterfaces.length,
       });
     }
 
     if (phpDtos.length > MAX_PHP_DTOS) {
       this.logger.warn('Truncating PHP DTOs for performance', {
         original: phpDtos.length,
-        limited: limitedPhpDtos.length
+        limited: limitedPhpDtos.length,
       });
     }
-
 
     const matches: Array<{
       typescriptInterface: Symbol;
@@ -1538,17 +1567,16 @@ export class CrossStackGraphBuilder {
         if (matches.length >= MAX_DATA_CONTRACTS) {
           this.logger.warn('Maximum data contracts limit reached, stopping matching', {
             maxDataContracts: MAX_DATA_CONTRACTS,
-            currentTsInterface: tsInterface.name
+            currentTsInterface: tsInterface.name,
           });
           break;
         }
-
 
         // Exact name match only
         if (tsInterface.name === phpDto.name) {
           matches.push({
             typescriptInterface: tsInterface,
-            phpDto: phpDto
+            phpDto: phpDto,
           });
         }
       }
@@ -1562,7 +1590,7 @@ export class CrossStackGraphBuilder {
     const processingTime = Date.now() - startTime;
 
     // Remove duplicate matches
-    const uniqueMatches = new Map<string, typeof matches[0]>();
+    const uniqueMatches = new Map<string, (typeof matches)[0]>();
     for (const match of matches) {
       const key = `${match.typescriptInterface.id}-${match.phpDto.id}`;
       if (!uniqueMatches.has(key)) {
@@ -1580,12 +1608,12 @@ export class CrossStackGraphBuilder {
       if (userTsInterfaces.length > 0 && userPhpSymbols.length > 0) {
         this.logger.info('Creating explicit User interface match', {
           userTsCount: userTsInterfaces.length,
-          userPhpCount: userPhpSymbols.length
+          userPhpCount: userPhpSymbols.length,
         });
 
         finalMatches.push({
           typescriptInterface: userTsInterfaces[0],
-          phpDto: userPhpSymbols[0]
+          phpDto: userPhpSymbols[0],
         });
       }
     }
@@ -1603,7 +1631,7 @@ export class CrossStackGraphBuilder {
       matchDetails: finalMatches.map(match => ({
         ts: match.typescriptInterface.name,
         php: match.phpDto.name,
-      }))
+      })),
     });
 
     return finalMatches;
@@ -1619,7 +1647,7 @@ export class CrossStackGraphBuilder {
   private async storeDetectedRelationships(repoId: number, relationships: any[]): Promise<void> {
     this.logger.info('Storing detected cross-stack relationships', {
       repoId,
-      relationshipsCount: relationships.length
+      relationshipsCount: relationships.length,
     });
 
     if (relationships.length === 0) {
@@ -1634,10 +1662,9 @@ export class CrossStackGraphBuilder {
       // OPTIMIZATION: Batch fetch all required data to avoid N+1 queries
 
       // Get unique component names for batch lookup
-      const componentNames = Array.from(new Set(
-        relationships.map(r => r.vueApiCall.componentName).filter(Boolean)
-      ));
-
+      const componentNames = Array.from(
+        new Set(relationships.map(r => r.vueApiCall.componentName).filter(Boolean))
+      );
 
       // Batch fetch all component symbols
       const allComponentSymbols = [];
@@ -1652,7 +1679,6 @@ export class CrossStackGraphBuilder {
         componentMap.set(symbol.name, symbol);
       });
 
-
       // Batch fetch all Laravel routes once
       const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
       const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
@@ -1663,7 +1689,6 @@ export class CrossStackGraphBuilder {
         const key = `${route.metadata.path}|${route.metadata.method}`;
         routeMap.set(key, route);
       });
-
 
       let processed = 0;
       let skipped = 0;
@@ -1684,7 +1709,9 @@ export class CrossStackGraphBuilder {
 
             // First, try to use the handler symbol ID (controller method)
             if (matchingRoute.metadata.handlerSymbolId) {
-              const handlerSymbol = await this.database.getSymbol(matchingRoute.metadata.handlerSymbolId);
+              const handlerSymbol = await this.database.getSymbol(
+                matchingRoute.metadata.handlerSymbolId
+              );
               if (handlerSymbol) {
                 endpointSymbolId = matchingRoute.metadata.handlerSymbolId;
               }
@@ -1712,14 +1739,14 @@ export class CrossStackGraphBuilder {
               routeKey,
               routeFound: !!matchingRoute,
               vueUrl: relationship.vueApiCall.url,
-              laravelPath: relationship.laravelRoute.path
+              laravelPath: relationship.laravelRoute.path,
             });
             skipped++;
           }
         } catch (error) {
           this.logger.warn('Failed to process relationship', {
             error: error.message,
-            relationship: relationship.vueApiCall?.url
+            relationship: relationship.vueApiCall?.url,
           });
           skipped++;
         }
@@ -1732,17 +1759,15 @@ export class CrossStackGraphBuilder {
         processed,
         skipped,
         processingTimeMs: processingTime,
-        apiCallsToCreate: apiCallsToCreate.length
+        apiCallsToCreate: apiCallsToCreate.length,
       });
-
     } catch (error) {
       this.logger.error('Failed to batch process relationships', {
         error: error.message,
-        relationshipsCount: relationships.length
+        relationshipsCount: relationships.length,
       });
       throw error;
     }
-
 
     // Create API calls in database
     if (apiCallsToCreate.length > 0) {
@@ -1750,11 +1775,14 @@ export class CrossStackGraphBuilder {
         this.logger.debug('Creating API calls in database', { count: apiCallsToCreate.length });
 
         // Validate all symbol IDs exist before insertion
-        const allSymbolIds = Array.from(new Set([
-          ...apiCallsToCreate.map(call => call.caller_symbol_id),
-          ...apiCallsToCreate.map(call => call.endpoint_symbol_id).filter(id => id !== null && id !== undefined)
-        ]));
-
+        const allSymbolIds = Array.from(
+          new Set([
+            ...apiCallsToCreate.map(call => call.caller_symbol_id),
+            ...apiCallsToCreate
+              .map(call => call.endpoint_symbol_id)
+              .filter(id => id !== null && id !== undefined),
+          ])
+        );
 
         // Check that all symbols exist in the database
         const validSymbolIds = new Set();
@@ -1769,18 +1797,19 @@ export class CrossStackGraphBuilder {
           }
         }
 
-
         // Filter out API calls with invalid symbol references
         const validApiCalls = apiCallsToCreate.filter(call => {
           const callerValid = validSymbolIds.has(call.caller_symbol_id);
-          const endpointValid = call.endpoint_symbol_id === null || call.endpoint_symbol_id === undefined || validSymbolIds.has(call.endpoint_symbol_id);
+          const endpointValid =
+            call.endpoint_symbol_id === null ||
+            call.endpoint_symbol_id === undefined ||
+            validSymbolIds.has(call.endpoint_symbol_id);
 
           if (!callerValid || !endpointValid) {
             return false;
           }
           return true;
         });
-
 
         if (validApiCalls.length === 0) {
           this.logger.warn('No valid API calls to create after symbol validation');
@@ -1799,17 +1828,21 @@ export class CrossStackGraphBuilder {
           }
         }
 
-
         // Now check for existing API calls to avoid unique constraint violations
         const uniqueApiCalls = [];
         for (const apiCall of batchDeduplicatedApiCalls) {
           try {
             // Check if this API call already exists
-            const existingApiCalls = await this.database.getApiCallsByEndpoint(repoId, apiCall.endpoint_path, apiCall.http_method);
-            const duplicate = existingApiCalls.find(existing =>
-              existing.caller_symbol_id === apiCall.caller_symbol_id &&
-              existing.endpoint_path === apiCall.endpoint_path &&
-              existing.http_method === apiCall.http_method
+            const existingApiCalls = await this.database.getApiCallsByEndpoint(
+              repoId,
+              apiCall.endpoint_path,
+              apiCall.http_method
+            );
+            const duplicate = existingApiCalls.find(
+              existing =>
+                existing.caller_symbol_id === apiCall.caller_symbol_id &&
+                existing.endpoint_path === apiCall.endpoint_path &&
+                existing.http_method === apiCall.http_method
             );
 
             if (!duplicate) {
@@ -1821,7 +1854,6 @@ export class CrossStackGraphBuilder {
           }
         }
 
-
         if (uniqueApiCalls.length === 0) {
           this.logger.info('No new API calls to create - all are duplicates');
           return;
@@ -1831,14 +1863,13 @@ export class CrossStackGraphBuilder {
         await this.database.createApiCalls(uniqueApiCalls);
 
         this.logger.info('Successfully stored API call relationships', {
-          stored: uniqueApiCalls.length
+          stored: uniqueApiCalls.length,
         });
-
       } catch (error) {
         // Log comprehensive error information
         this.logger.error('Failed to create API calls in database', {
           error: error.message,
-          count: apiCallsToCreate.length
+          count: apiCallsToCreate.length,
         });
 
         // Continue execution instead of throwing to avoid breaking the entire process
@@ -1854,9 +1885,7 @@ export class CrossStackGraphBuilder {
   async isMultiFrameworkProject(repoId: number, frameworks: string[]): Promise<boolean> {
     try {
       const detectedFrameworks = await this.database.getRepositoryFrameworks(repoId);
-      return frameworks.every(framework =>
-        detectedFrameworks.includes(framework)
-      );
+      return frameworks.every(framework => detectedFrameworks.includes(framework));
     } catch (error) {
       this.logger.warn('Failed to check multi-framework project', { error, repoId });
       return false;

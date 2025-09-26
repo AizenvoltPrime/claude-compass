@@ -1,10 +1,3 @@
-/**
- * Phase 3: Simple cross-stack relationship detection
- *
- * Replaces the complex 580-line confidence calculator (cross-stack-confidence.ts)
- * with simple URL/method matching for Vue ↔ Laravel analysis
- */
-
 import { createComponentLogger } from '../utils/logger';
 import { SimpleCrossStackRelationship, SimpleApiCall } from '../database/models';
 
@@ -56,7 +49,7 @@ export class SimpleCrossStackAnalyzer {
         vueComponent: vueCall.component,
         laravelController: laravelRoute.controller_method,
         method: vueCall.method,
-        urlPattern: laravelRoute.pattern
+        urlPattern: laravelRoute.pattern,
       });
 
       return {
@@ -65,7 +58,7 @@ export class SimpleCrossStackAnalyzer {
         relationship_type: 'api_call',
         method: vueCall.method,
         url_pattern: laravelRoute.pattern,
-        line_number: vueCall.line_number
+        line_number: vueCall.line_number,
       };
     }
 
@@ -96,13 +89,15 @@ export class SimpleCrossStackAnalyzer {
    * Replace dynamic segments with parameter placeholders
    */
   private normalizeVueUrl(url: string): string {
-    return url
-      // Replace numeric IDs with {id} placeholder
-      .replace(/\/\d+/g, '/{id}')
-      // Replace UUID patterns with {uuid} placeholder
-      .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/{uuid}')
-      // Replace other dynamic segments (heuristic approach)
-      .replace(/\/[a-zA-Z0-9_-]{8,}/g, '/{param}');
+    return (
+      url
+        // Replace numeric IDs with {id} placeholder
+        .replace(/\/\d+/g, '/{id}')
+        // Replace UUID patterns with {uuid} placeholder
+        .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/{uuid}')
+        // Replace other dynamic segments (heuristic approach)
+        .replace(/\/[a-zA-Z0-9_-]{8,}/g, '/{param}')
+    );
   }
 
   /**
@@ -110,10 +105,12 @@ export class SimpleCrossStackAnalyzer {
    * Standardize parameter format
    */
   private normalizeLaravelPattern(pattern: string): string {
-    return pattern
-      // Standardize parameter format
-      .replace(/\{[^}]+\}/g, '{id}') // Simplify all parameters to {id} for basic matching
-      .replace(/\?\}$/, '}'); // Remove optional parameter markers
+    return (
+      pattern
+        // Standardize parameter format
+        .replace(/\{[^}]+\}/g, '{id}') // Simplify all parameters to {id} for basic matching
+        .replace(/\?\}$/, '}')
+    ); // Remove optional parameter markers
   }
 
   /**
@@ -140,7 +137,7 @@ export class SimpleCrossStackAnalyzer {
     this.logger.debug('Cross-stack analysis complete', {
       vueCallsProcessed: vueCalls.length,
       laravelRoutesProcessed: laravelRoutes.length,
-      relationshipsFound: relationships.length
+      relationshipsFound: relationships.length,
     });
 
     return relationships;
@@ -163,7 +160,7 @@ export class SimpleCrossStackAnalyzer {
           bindings.push({
             from_component: component,
             to_endpoint: model,
-            relationship_type: 'data_binding'
+            relationship_type: 'data_binding',
           });
         }
       }
@@ -189,10 +186,12 @@ export class SimpleCrossStackAnalyzer {
     const pluralModel = modelLower + 's';
     const singularModel = modelLower.endsWith('s') ? modelLower.slice(0, -1) : modelLower;
 
-    return componentLower.includes(pluralModel) ||
-           componentLower.includes(singularModel) ||
-           pluralModel.includes(componentLower) ||
-           singularModel.includes(componentLower);
+    return (
+      componentLower.includes(pluralModel) ||
+      componentLower.includes(singularModel) ||
+      pluralModel.includes(componentLower) ||
+      singularModel.includes(componentLower)
+    );
   }
 
   /**
@@ -205,9 +204,10 @@ export class SimpleCrossStackAnalyzer {
       by_type: {
         api_call: relationships.filter(r => r.relationship_type === 'api_call').length,
         data_binding: relationships.filter(r => r.relationship_type === 'data_binding').length,
-        route_reference: relationships.filter(r => r.relationship_type === 'route_reference').length,
+        route_reference: relationships.filter(r => r.relationship_type === 'route_reference')
+          .length,
       },
-      http_methods: {} as Record<string, number>
+      http_methods: {} as Record<string, number>,
     };
 
     // Count HTTP methods
@@ -243,7 +243,7 @@ export function createSimpleApiCall(
     component,
     method: method.toUpperCase(),
     url,
-    line_number: lineNumber
+    line_number: lineNumber,
   };
 }
 

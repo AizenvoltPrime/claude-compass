@@ -22,12 +22,9 @@ export interface SymbolEdge {
   to: number;
   type: DependencyType;
   lineNumber: number;
-  // confidence: number; // Removed in Phase 3
-  // Parameter context fields for C# method calls
   parameter_context?: string;
   call_instance_id?: string;
   parameter_types?: string[];
-  // Additional context fields
   calling_object?: string;
   qualified_context?: string;
 }
@@ -63,7 +60,7 @@ export class SymbolGraphBuilder {
   ): Promise<SymbolGraphData> {
     this.logger.info('Building symbol graph', {
       symbolCount: symbols.length,
-      fileCount: files.length
+      fileCount: files.length,
     });
 
     const nodes = this.createSymbolNodes(symbols);
@@ -79,7 +76,7 @@ export class SymbolGraphBuilder {
 
     this.logger.info('Symbol graph built', {
       nodeCount: nodes.length,
-      edgeCount: edges.length
+      edgeCount: edges.length,
     });
 
     return { nodes, edges };
@@ -100,7 +97,7 @@ export class SymbolGraphBuilder {
           this.logger.warn('Filtering out dependency with invalid symbol reference', {
             from: edge.from,
             to: edge.to,
-            type: edge.type
+            type: edge.type,
           });
         }
         return isValid;
@@ -116,7 +113,7 @@ export class SymbolGraphBuilder {
         call_instance_id: edge.call_instance_id,
         parameter_types: edge.parameter_types,
         calling_object: edge.calling_object,
-        qualified_context: edge.qualified_context
+        qualified_context: edge.qualified_context,
       }));
   }
 
@@ -147,9 +144,10 @@ export class SymbolGraphBuilder {
    */
   getImplementations(symbolId: number, symbolGraph: SymbolGraphData): SymbolNode[] {
     const implementationIds = symbolGraph.edges
-      .filter(edge =>
-        edge.to === symbolId &&
-        (edge.type === DependencyType.INHERITS || edge.type === DependencyType.IMPLEMENTS)
+      .filter(
+        edge =>
+          edge.to === symbolId &&
+          (edge.type === DependencyType.INHERITS || edge.type === DependencyType.IMPLEMENTS)
       )
       .map(edge => edge.from);
 
@@ -161,9 +159,10 @@ export class SymbolGraphBuilder {
    */
   getParents(symbolId: number, symbolGraph: SymbolGraphData): SymbolNode[] {
     const parentIds = symbolGraph.edges
-      .filter(edge =>
-        edge.from === symbolId &&
-        (edge.type === DependencyType.INHERITS || edge.type === DependencyType.IMPLEMENTS)
+      .filter(
+        edge =>
+          edge.from === symbolId &&
+          (edge.type === DependencyType.INHERITS || edge.type === DependencyType.IMPLEMENTS)
       )
       .map(edge => edge.to);
 
@@ -221,7 +220,7 @@ export class SymbolGraphBuilder {
         // End of chain
         chains.push({
           symbols: newChain,
-          depth: depth
+          depth: depth,
         });
       } else {
         for (const call of calls) {
@@ -303,15 +302,14 @@ export class SymbolGraphBuilder {
    */
   findUnusedSymbols(symbolGraph: SymbolGraphData): SymbolNode[] {
     const calledSymbolIds = new Set(
-      symbolGraph.edges
-        .filter(edge => edge.type === DependencyType.CALLS)
-        .map(edge => edge.to)
+      symbolGraph.edges.filter(edge => edge.type === DependencyType.CALLS).map(edge => edge.to)
     );
 
-    return symbolGraph.nodes.filter(node =>
-      !calledSymbolIds.has(node.id) &&
-      !node.isExported && // Exported symbols might be used externally
-      node.type === SymbolType.FUNCTION
+    return symbolGraph.nodes.filter(
+      node =>
+        !calledSymbolIds.has(node.id) &&
+        !node.isExported && // Exported symbols might be used externally
+        node.type === SymbolType.FUNCTION
     );
   }
 
@@ -349,7 +347,7 @@ export class SymbolGraphBuilder {
       endLine: symbol.end_line || 0,
       isExported: symbol.is_exported,
       visibility: symbol.visibility,
-      signature: symbol.signature
+      signature: symbol.signature,
     }));
   }
 
@@ -366,7 +364,10 @@ export class SymbolGraphBuilder {
       this.logger.info('Using file-aware symbol resolution');
 
       // Group dependencies by file to resolve them with proper context
-      const dependenciesByFile = new Map<number, { symbol: Symbol; dependencies: ParsedDependency[] }[]>();
+      const dependenciesByFile = new Map<
+        number,
+        { symbol: Symbol; dependencies: ParsedDependency[] }[]
+      >();
 
       for (const symbol of symbols) {
         const dependencies = dependenciesMap.get(symbol.id) || [];
@@ -390,8 +391,10 @@ export class SymbolGraphBuilder {
 
         for (const resolution of resolved) {
           // Skip self-references for non-call dependencies
-          if (resolution.fromSymbol.id === resolution.toSymbol.id &&
-              resolution.originalDependency.dependency_type !== DependencyType.CALLS) {
+          if (
+            resolution.fromSymbol.id === resolution.toSymbol.id &&
+            resolution.originalDependency.dependency_type !== DependencyType.CALLS
+          ) {
             continue;
           }
 
@@ -406,7 +409,7 @@ export class SymbolGraphBuilder {
             call_instance_id: resolution.originalDependency.call_instance_id,
             parameter_types: resolution.originalDependency.parameter_types,
             calling_object: resolution.originalDependency.calling_object,
-            qualified_context: resolution.originalDependency.qualified_context
+            qualified_context: resolution.originalDependency.qualified_context,
           });
 
           // Mark this dependency as resolved (include line number to handle multiple calls on different lines)
@@ -445,7 +448,7 @@ export class SymbolGraphBuilder {
                   call_instance_id: dep.call_instance_id,
                   parameter_types: dep.parameter_types,
                   calling_object: dep.calling_object,
-                  qualified_context: dep.qualified_context
+                  qualified_context: dep.qualified_context,
                 });
               }
             } else {
@@ -456,7 +459,7 @@ export class SymbolGraphBuilder {
                   from: symbol.name,
                   to: dep.to_symbol,
                   line: dep.line_number,
-                  fileId: symbol.file_id
+                  fileId: symbol.file_id,
                 });
                 // These unresolved calls will be handled as file dependencies in the GraphBuilder
               }
@@ -467,11 +470,13 @@ export class SymbolGraphBuilder {
 
       this.logger.info('File-aware resolution completed', {
         filesProcessed: dependenciesByFile.size,
-        edgesCreated: edges.length
+        edgesCreated: edges.length,
       });
     } else {
       // Fallback to legacy name-based resolution (with warnings)
-      this.logger.warn('Using legacy name-based symbol resolution - may produce false dependencies');
+      this.logger.warn(
+        'Using legacy name-based symbol resolution - may produce false dependencies'
+      );
 
       const nameToSymbolMap = this.createNameToSymbolMap(nodes);
 
@@ -486,7 +491,7 @@ export class SymbolGraphBuilder {
             this.logger.warn('Multiple symbols found for dependency - potential false positive', {
               symbolName: dep.to_symbol,
               matchCount: targetSymbols.length,
-              sourceFile: symbol.file_id
+              sourceFile: symbol.file_id,
             });
           }
 
@@ -506,7 +511,7 @@ export class SymbolGraphBuilder {
               call_instance_id: dep.call_instance_id,
               parameter_types: dep.parameter_types,
               calling_object: dep.calling_object,
-              qualified_context: dep.qualified_context
+              qualified_context: dep.qualified_context,
             });
           }
         }
