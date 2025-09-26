@@ -246,6 +246,9 @@ claude-compass migrate
 # Rollback migrations
 claude-compass migrate:rollback
 
+# Check migration status
+npm run migrate:status
+
 # Show statistics
 claude-compass stats
 
@@ -254,6 +257,12 @@ claude-compass clear <repository-name> [--yes]
 
 # Clear all repositories
 claude-compass clear --all [--yes]
+
+# Clear database completely (SQL method)
+npm run db:clear
+
+# Clear database with Docker reset
+npm run db:clear:docker
 ```
 
 ## MCP Integration
@@ -450,7 +459,14 @@ npm run analyze . --force-full              # Bypass incremental mode
 
 ### Database Issues
 ```bash
-# Reset database
+# Reset database (recommended approach)
+npm run db:clear                            # Clear database with SQL
+npm run migrate:latest                      # Re-run migrations
+
+# Alternative: Complete Docker reset
+npm run db:clear:docker                     # Full Docker volume reset
+
+# Manual approach
 npm run docker:down
 npm run docker:up
 npm run migrate:latest
