@@ -30,6 +30,9 @@ npm run docker:down       # Stop Docker containers
 npm run migrate:latest    # Run database migrations
 npm run migrate:rollback  # Rollback last migration
 npm run migrate:make <name> # Create new migration
+npm run migrate:status    # Check migration status
+npm run db:clear          # Clear database completely (SQL method)
+npm run db:clear:docker   # Clear database with Docker reset
 ```
 
 ### Core Application Commands
@@ -102,8 +105,9 @@ The system uses PostgreSQL with these core tables:
 - `repositories`: Project metadata and framework detection
 - `symbols`: All parsed code symbols with embeddings
 - `dependencies`: Symbol relationships and calls
+- `routes`: Framework-agnostic routes with Laravel-specific fields
 - `cross_stack_calls`: Frontend-backend connections
-- `laravel_routes`, `laravel_models`: Framework-specific data
+- `framework_metadata`: Consolidated framework-specific data storage
 
 ### Parser Flow
 

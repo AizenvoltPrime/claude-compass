@@ -328,6 +328,15 @@ export interface Route {
   middleware: string[];
   dynamic_segments: string[];
   auth_required: boolean;
+
+  // Laravel-specific fields (nullable for other frameworks)
+  name?: string; // Laravel route name
+  controller_class?: string; // Laravel controller class
+  controller_method?: string; // Laravel controller method
+  action?: string; // Laravel route action
+  file_path?: string; // Source file path
+  line_number?: number; // Line number in source file
+
   created_at: Date;
   updated_at: Date;
 }
@@ -463,6 +472,14 @@ export interface CreateRoute {
   middleware?: string[];
   dynamic_segments?: string[];
   auth_required?: boolean;
+
+  // Laravel-specific fields (optional for other frameworks)
+  name?: string; // Laravel route name
+  controller_class?: string; // Laravel controller class
+  controller_method?: string; // Laravel controller method
+  action?: string; // Laravel route action
+  file_path?: string; // Source file path
+  line_number?: number; // Line number in source file
 }
 
 export interface CreateComponent {

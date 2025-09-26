@@ -106,6 +106,11 @@ npm run analyze /path/to/your/project          # Analyze specific path
 npm run analyze /path/to/your/godot-project    # Analyze Godot game project
 npm run analyze . --force-full                 # Force full analysis (clears existing data)
 
+# Database management
+npm run migrate:status                         # Check migration status
+npm run db:clear                              # Clear database completely (SQL method)
+npm run db:clear:docker                       # Clear database with Docker reset
+
 # Clear existing repository analysis
 ./dist/src/cli/index.js clear <repository-name> --yes
 

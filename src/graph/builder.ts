@@ -1011,7 +1011,15 @@ export class GraphBuilder {
               framework_type: 'laravel',
               middleware: laravelRoute.middleware || [],
               dynamic_segments: [], // Laravel dynamic segments would need parsing
-              auth_required: false // Could be enhanced to check middleware for auth
+              auth_required: false, // Could be enhanced to check middleware for auth
+
+              // Laravel-specific fields
+              name: laravelRoute.routeName,
+              controller_class: laravelRoute.controller,
+              controller_method: this.extractControllerMethod(laravelRoute.action),
+              action: laravelRoute.action,
+              file_path: laravelRoute.filePath,
+              line_number: laravelRoute.metadata?.line || 1
             });
           } else if (this.isLaravelController(entity)) {
             // Laravel controllers don't map directly to our component table
@@ -1389,6 +1397,20 @@ export class GraphBuilder {
 
   private isEloquentModel(entity: any): entity is EloquentModel {
     return entity.type === 'model' && entity.framework === 'laravel';
+  }
+
+  /**
+   * Extract controller method from Laravel action string
+   * Examples: "App\\Http\\Controllers\\UserController@index" -> "index"
+   *           "UserController@show" -> "show"
+   */
+  private extractControllerMethod(action?: string): string | undefined {
+    if (!action) return undefined;
+
+    const atIndex = action.lastIndexOf('@');
+    if (atIndex === -1) return undefined;
+
+    return action.substring(atIndex + 1);
   }
 
   // Phase 3 entity type guards
