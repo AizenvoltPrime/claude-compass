@@ -1,6 +1,7 @@
 import { Symbol, File, SymbolType } from '../database/models';
 import { ParsedDependency, ParsedImport, ParsedExport } from '../parsers/base';
 import { createComponentLogger } from '../utils/logger';
+import { frameworkSymbolRegistry } from '../parsers/framework-symbols';
 
 const logger = createComponentLogger('symbol-resolver');
 
@@ -40,7 +41,7 @@ export class SymbolResolver {
     this.fieldTypeMap = fieldTypeMap;
     this.logger.debug('Field type mappings set for symbol resolution', {
       fieldCount: fieldTypeMap.size,
-      fields: Array.from(fieldTypeMap.entries())
+      fields: Array.from(fieldTypeMap.entries()),
     });
   }
 
@@ -66,7 +67,9 @@ export class SymbolResolver {
       if (classSymbols.length > 0) {
         // For C# files, we need to extract field declarations from the class symbols
         // This is a simplified approach that looks for property symbols (C# fields are often stored as properties)
-        const fieldSymbols = sourceContext.symbols.filter(s => s.symbol_type === SymbolType.PROPERTY || s.symbol_type === SymbolType.VARIABLE);
+        const fieldSymbols = sourceContext.symbols.filter(
+          s => s.symbol_type === SymbolType.PROPERTY || s.symbol_type === SymbolType.VARIABLE
+        );
 
         for (const fieldSymbol of fieldSymbols) {
           // Extract field type from signature if available
@@ -87,7 +90,7 @@ export class SymbolResolver {
               this.logger.debug('Field type extracted from signature', {
                 fieldName,
                 fieldType,
-                signature: fieldSymbol.signature
+                signature: fieldSymbol.signature,
               });
             }
           }
@@ -97,11 +100,11 @@ export class SymbolResolver {
       this.logger.debug('Field type context set for C# file', {
         filePath: sourceContext.filePath,
         fieldCount: this.fieldTypeMap.size,
-        fields: Array.from(this.fieldTypeMap.entries())
+        fields: Array.from(this.fieldTypeMap.entries()),
       });
     } catch (error) {
       this.logger.warn(`Failed to set field context for ${sourceContext.filePath}`, {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
   }
@@ -117,7 +120,7 @@ export class SymbolResolver {
   ): void {
     this.logger.info('Initializing symbol resolver', {
       fileCount: files.length,
-      symbolCount: allSymbols.length
+      symbolCount: allSymbols.length,
     });
 
     // Clear existing data
@@ -136,7 +139,7 @@ export class SymbolResolver {
         filePath: file.path,
         symbols: fileSymbols,
         imports: fileImports,
-        exports: fileExports
+        exports: fileExports,
       });
 
       // Index symbols by name
@@ -157,7 +160,7 @@ export class SymbolResolver {
     this.logger.info('Symbol resolver initialized', {
       fileContextsCreated: this.fileContexts.size,
       uniqueSymbolNames: this.symbolsByName.size,
-      exportedSymbolNames: this.exportedSymbols.size
+      exportedSymbolNames: this.exportedSymbols.size,
     });
   }
 
@@ -191,7 +194,7 @@ export class SymbolResolver {
         this.logger.error('Failed to resolve dependency', {
           dependency,
           sourceFile: sourceContext.filePath,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }
@@ -227,7 +230,7 @@ export class SymbolResolver {
       // Only log if we couldn't resolve even with the fallback
       this.logger.debug('Source symbol not found in file context', {
         symbolName: dependency.from_symbol,
-        filePath: sourceContext.filePath
+        filePath: sourceContext.filePath,
       });
       return null;
     }
@@ -237,7 +240,7 @@ export class SymbolResolver {
     if (!toSymbol) {
       this.logger.debug('Target symbol could not be resolved', {
         symbolName: dependency.to_symbol,
-        filePath: sourceContext.filePath
+        filePath: sourceContext.filePath,
       });
       return null;
     }
@@ -245,7 +248,7 @@ export class SymbolResolver {
     return {
       fromSymbol,
       toSymbol,
-      originalDependency: dependency
+      originalDependency: dependency,
     };
   }
 
@@ -272,7 +275,7 @@ export class SymbolResolver {
               fieldName,
               fieldType,
               targetSymbolName,
-              filePath: sourceContext.filePath
+              filePath: sourceContext.filePath,
             });
             return memberResult;
           }
@@ -286,7 +289,7 @@ export class SymbolResolver {
       if (memberExpressionSymbol) {
         this.logger.debug('Resolved member expression symbol', {
           symbolName: targetSymbolName,
-          filePath: sourceContext.filePath
+          filePath: sourceContext.filePath,
         });
         return memberExpressionSymbol;
       }
@@ -297,7 +300,7 @@ export class SymbolResolver {
     if (localSymbol) {
       this.logger.debug('Resolved symbol in local scope', {
         symbolName: targetSymbolName,
-        filePath: sourceContext.filePath
+        filePath: sourceContext.filePath,
       });
       return localSymbol;
     }
@@ -307,7 +310,7 @@ export class SymbolResolver {
     if (importedSymbol) {
       this.logger.debug('Resolved imported symbol', {
         symbolName: targetSymbolName,
-        filePath: sourceContext.filePath
+        filePath: sourceContext.filePath,
       });
       return importedSymbol;
     }
@@ -317,7 +320,7 @@ export class SymbolResolver {
     if (storeMethodSymbol) {
       this.logger.debug('Resolved store method symbol', {
         symbolName: targetSymbolName,
-        filePath: sourceContext.filePath
+        filePath: sourceContext.filePath,
       });
       return storeMethodSymbol;
     }
@@ -329,7 +332,7 @@ export class SymbolResolver {
       this.logger.debug('Resolved globally exported symbol', {
         symbolName: targetSymbolName,
         filePath: sourceContext.filePath,
-        exportedFrom: exportedOptions[0].fromFile
+        exportedFrom: exportedOptions[0].fromFile,
       });
       return exportedOptions[0].symbol;
     }
@@ -339,8 +342,23 @@ export class SymbolResolver {
       this.logger.debug('Ambiguous symbol resolution - multiple exports found', {
         symbolName: targetSymbolName,
         filePath: sourceContext.filePath,
-        exportCount: exportedOptions.length
+        exportCount: exportedOptions.length,
       });
+    }
+
+    // 6. As a final fallback, check framework-provided symbols (PHPUnit, Laravel, etc.)
+    const frameworkSymbol = this.resolveFrameworkSymbol(
+      sourceContext,
+      targetSymbolName,
+      dependency
+    );
+    if (frameworkSymbol) {
+      this.logger.debug('Resolved framework symbol', {
+        symbolName: targetSymbolName,
+        filePath: sourceContext.filePath,
+        framework: frameworkSymbol.framework,
+      });
+      return frameworkSymbol;
     }
 
     return null;
@@ -363,7 +381,7 @@ export class SymbolResolver {
       fullExpression: memberExpression,
       objectName,
       methodName,
-      filePath: sourceContext.filePath
+      filePath: sourceContext.filePath,
     });
 
     // Strategy 1: Check if objectName is directly imported
@@ -375,7 +393,7 @@ export class SymbolResolver {
           this.logger.debug('Resolved member expression via direct import', {
             objectName,
             methodName,
-            targetFile: targetSymbol.file_id
+            targetFile: targetSymbol.file_id,
           });
           return targetSymbol;
         }
@@ -383,12 +401,16 @@ export class SymbolResolver {
     }
 
     // Strategy 2: Check for store patterns (useAreasStore -> areasStore.getAreas)
-    const storeMethodSymbol = this.resolveStoreMethodFromExpression(sourceContext, objectName, methodName);
+    const storeMethodSymbol = this.resolveStoreMethodFromExpression(
+      sourceContext,
+      objectName,
+      methodName
+    );
     if (storeMethodSymbol) {
       this.logger.debug('Resolved member expression via store pattern', {
         objectName,
         methodName,
-        targetFile: storeMethodSymbol.file_id
+        targetFile: storeMethodSymbol.file_id,
       });
       return storeMethodSymbol;
     }
@@ -397,14 +419,13 @@ export class SymbolResolver {
     const localObject = sourceContext.symbols.find(s => s.name === objectName);
     if (localObject) {
       // Check if there's a method with the target name in the same file
-      const localMethod = sourceContext.symbols.find(s =>
-        s.name === methodName &&
-        (s.symbol_type === 'method' || s.symbol_type === 'function')
+      const localMethod = sourceContext.symbols.find(
+        s => s.name === methodName && (s.symbol_type === 'method' || s.symbol_type === 'function')
       );
       if (localMethod) {
         this.logger.debug('Resolved member expression in local scope', {
           objectName,
-          methodName
+          methodName,
         });
         return localMethod;
       }
@@ -423,7 +444,7 @@ export class SymbolResolver {
               fieldName: objectName,
               fieldType,
               methodName,
-              targetFile: classMethodResult.file_id
+              targetFile: classMethodResult.file_id,
             });
             return classMethodResult;
           }
@@ -447,7 +468,6 @@ export class SymbolResolver {
   }
 
   private resolveCSharpClassMethod(className: string, methodName: string): Symbol | null {
-
     // Find all methods with the target name across all files
     const candidateMethods = this.symbolsByName.get(methodName) || [];
 
@@ -457,15 +477,14 @@ export class SymbolResolver {
       if (!fileContext) continue;
 
       // Look for a class symbol with the matching name in the same file
-      const classSymbol = fileContext.symbols.find(s =>
-        s.name === className &&
-        (s.symbol_type === 'class' || s.symbol_type === 'interface')
+      const classSymbol = fileContext.symbols.find(
+        s => s.name === className && (s.symbol_type === 'class' || s.symbol_type === 'interface')
       );
 
       if (classSymbol) {
         // Verify the method is within the class boundaries
-        const isMethodInClass = method.start_line >= classSymbol.start_line &&
-                               method.end_line <= classSymbol.end_line;
+        const isMethodInClass =
+          method.start_line >= classSymbol.start_line && method.end_line <= classSymbol.end_line;
 
         if (isMethodInClass) {
           return method;
@@ -483,7 +502,6 @@ export class SymbolResolver {
         return interfaceMethod;
       }
     }
-
 
     return null;
   }
@@ -504,9 +522,8 @@ export class SymbolResolver {
       if (fileContext) {
         // Check if this file could be the source of the import
         // This is a simplified check - in a full implementation we'd resolve the import path
-        const hasObjectWithMethod = fileContext.symbols.some(s =>
-          s.name === methodName &&
-          (s.symbol_type === 'method' || s.symbol_type === 'function')
+        const hasObjectWithMethod = fileContext.symbols.some(
+          s => s.name === methodName && (s.symbol_type === 'method' || s.symbol_type === 'function')
         );
 
         if (hasObjectWithMethod) {
@@ -566,15 +583,96 @@ export class SymbolResolver {
     for (const importDecl of sourceContext.imports) {
       // Check if this import includes the target symbol
       if (this.importIncludesSymbol(importDecl, targetSymbolName)) {
-        // Find the exported symbol from the source file
+        // First, try to find the exported symbol from internal codebase
         const targetSymbol = this.findExportedSymbolByImport(importDecl, targetSymbolName);
         if (targetSymbol) {
           return targetSymbol;
+        }
+
+        // If not found in internal codebase, check if it's from an external library
+        const externalSymbol = this.resolveExternalLibrarySymbol(importDecl, targetSymbolName);
+        if (externalSymbol) {
+          return externalSymbol;
         }
       }
     }
 
     return null;
+  }
+
+  /**
+   * Resolve symbols from external libraries (node_modules)
+   */
+  private resolveExternalLibrarySymbol(
+    importDecl: ParsedImport,
+    targetSymbolName: string
+  ): Symbol | null {
+    // Check if this is an import from an external library
+    if (!this.isExternalLibraryImport(importDecl.source)) {
+      return null;
+    }
+
+    // Use framework symbol registry to find the external symbol
+    const frameworkSymbol = frameworkSymbolRegistry.isFrameworkSymbolAvailable(
+      targetSymbolName,
+      this.getExternalLibraryContext(importDecl.source),
+      importDecl.source
+    );
+
+    if (!frameworkSymbol) {
+      return null;
+    }
+
+    // Create a virtual Symbol object for the external library symbol
+    // Use negative file_id to indicate external library symbol
+    const virtualSymbol: Symbol = {
+      id: -Math.abs(this.generateSymbolId(targetSymbolName, frameworkSymbol.framework)),
+      file_id: -2, // Indicates external library symbol (different from framework-provided -1)
+      name: targetSymbolName,
+      symbol_type: frameworkSymbol.symbol_type,
+      start_line: 1,
+      end_line: 1,
+      is_exported: true,
+      visibility: frameworkSymbol.visibility,
+      signature: frameworkSymbol.signature || `${frameworkSymbol.framework}::${targetSymbolName}`,
+      description: frameworkSymbol.description,
+      framework: frameworkSymbol.framework,
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+
+    this.logger.debug('Created virtual external library symbol', {
+      symbolName: targetSymbolName,
+      framework: frameworkSymbol.framework,
+      importSource: importDecl.source,
+    });
+
+    return virtualSymbol;
+  }
+
+  /**
+   * Check if an import is from an external library (node_modules)
+   */
+  private isExternalLibraryImport(source: string): boolean {
+    // External libraries typically don't start with './' or '../' (relative paths)
+    // and don't start with '/' (absolute paths within project)
+    return !source.startsWith('./') && !source.startsWith('../') && !source.startsWith('/');
+  }
+
+  /**
+   * Get the appropriate context for external library symbol resolution
+   */
+  private getExternalLibraryContext(source: string): string {
+    switch (source) {
+      case 'vue':
+        return 'vue';
+      case 'react':
+        return 'react';
+      default:
+        // For built-in browser APIs accessed without imports (like setTimeout, document.querySelector)
+        // this won't be called, but we need a default
+        return 'javascript';
+    }
   }
 
   /**
@@ -604,10 +702,7 @@ export class SymbolResolver {
   /**
    * Find exported symbol based on import declaration
    */
-  private findExportedSymbolByImport(
-    importDecl: ParsedImport,
-    symbolName: string
-  ): Symbol | null {
+  private findExportedSymbolByImport(importDecl: ParsedImport, symbolName: string): Symbol | null {
     // This would require resolving the import source path to a file ID
     // For now, we'll use a simplified approach based on exported symbols
     const exportedOptions = this.exportedSymbols.get(symbolName) || [];
@@ -647,7 +742,7 @@ export class SymbolResolver {
             factoryName: storeFactoryName,
             storeName,
             methodName: targetSymbolName,
-            filePath: sourceContext.filePath
+            filePath: sourceContext.filePath,
           });
           return storeMethodSymbol;
         }
@@ -696,9 +791,10 @@ export class SymbolResolver {
           const fileContext = this.fileContexts.get(exported.fromFile);
           if (fileContext && this.isStoreFile(fileContext.filePath, storeName)) {
             // Look for the method in this store file
-            const method = fileContext.symbols.find(s =>
-              s.name === methodName &&
-              (s.symbol_type === 'method' || s.symbol_type === 'function')
+            const method = fileContext.symbols.find(
+              s =>
+                s.name === methodName &&
+                (s.symbol_type === 'method' || s.symbol_type === 'function')
             );
             if (method) {
               return method;
@@ -711,9 +807,8 @@ export class SymbolResolver {
     // Also check by scanning all store files directly
     for (const [fileId, context] of this.fileContexts) {
       if (this.isStoreFile(context.filePath, storeName)) {
-        const method = context.symbols.find(s =>
-          s.name === methodName &&
-          (s.symbol_type === 'method' || s.symbol_type === 'function')
+        const method = context.symbols.find(
+          s => s.name === methodName && (s.symbol_type === 'method' || s.symbol_type === 'function')
         );
         if (method) {
           return method;
@@ -749,18 +844,23 @@ export class SymbolResolver {
     return false;
   }
 
-
   /**
    * Check if a symbol is explicitly imported in the file
    */
-  private isExplicitlyImported(sourceContext: SymbolResolutionContext, symbolName: string): boolean {
+  private isExplicitlyImported(
+    sourceContext: SymbolResolutionContext,
+    symbolName: string
+  ): boolean {
     return sourceContext.imports.some(imp => this.importIncludesSymbol(imp, symbolName));
   }
 
   /**
    * Check if this is a store method resolution
    */
-  private isStoreMethodResolution(sourceContext: SymbolResolutionContext, targetSymbol: Symbol): boolean {
+  private isStoreMethodResolution(
+    sourceContext: SymbolResolutionContext,
+    targetSymbol: Symbol
+  ): boolean {
     // Check if target symbol is a method in a store file
     if (targetSymbol.symbol_type !== 'method' && targetSymbol.symbol_type !== 'function') {
       return false;
@@ -779,6 +879,139 @@ export class SymbolResolver {
     }
 
     return false;
+  }
+
+  /**
+   * Resolve framework-provided symbols (PHPUnit assertions, Laravel methods, etc.)
+   */
+  private resolveFrameworkSymbol(
+    sourceContext: SymbolResolutionContext,
+    targetSymbolName: string,
+    dependency?: ParsedDependency
+  ): Symbol | null {
+    // Determine context based on file path and usage
+    let context = 'general';
+
+    // PHP-specific contexts
+    if (sourceContext.filePath.endsWith('.php')) {
+      if (this.isTestFile(sourceContext.filePath)) {
+        context = 'test';
+      } else if (this.isValidationContext(dependency, sourceContext)) {
+        context = 'validation';
+      } else if (this.isRequestContext(dependency, sourceContext)) {
+        context = 'request';
+      }
+    }
+    // JavaScript/TypeScript contexts for built-in symbols (not imported)
+    else if (sourceContext.filePath.endsWith('.vue') || sourceContext.filePath.endsWith('.ts') || sourceContext.filePath.endsWith('.js')) {
+      // These are for built-in browser/JavaScript APIs that don't need imports
+      context = 'javascript';
+    }
+
+    // Try to find a framework symbol
+    const frameworkSymbol = frameworkSymbolRegistry.isFrameworkSymbolAvailable(
+      targetSymbolName,
+      context,
+      sourceContext.filePath
+    );
+
+    if (!frameworkSymbol) {
+      return null;
+    }
+
+    // Create a virtual Symbol object for the framework symbol
+    // We use a negative file_id to indicate this is a framework-provided symbol
+    const virtualSymbol: Symbol = {
+      id: -Math.abs(this.generateSymbolId(targetSymbolName, frameworkSymbol.framework)),
+      file_id: -1, // Indicates framework-provided symbol
+      name: targetSymbolName,
+      symbol_type: frameworkSymbol.symbol_type,
+      start_line: 1,
+      end_line: 1,
+      is_exported: true,
+      visibility: frameworkSymbol.visibility,
+      signature: frameworkSymbol.signature || `${frameworkSymbol.framework}::${targetSymbolName}`,
+      description: frameworkSymbol.description,
+      framework: frameworkSymbol.framework,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    this.logger.debug('Created virtual framework symbol', {
+      symbolName: targetSymbolName,
+      framework: frameworkSymbol.framework,
+      context,
+      filePath: sourceContext.filePath,
+    });
+
+    return virtualSymbol;
+  }
+
+  /**
+   * Check if this is a test file
+   */
+  private isTestFile(filePath: string): boolean {
+    return (
+      filePath.includes('/tests/') ||
+      filePath.includes('/test/') ||
+      filePath.toLowerCase().includes('test.php') ||
+      filePath.toLowerCase().includes('spec.php')
+    );
+  }
+
+  /**
+   * Check if this is a validation context (e.g., using validator->errors())
+   */
+  private isValidationContext(
+    dependency?: ParsedDependency,
+    sourceContext?: SymbolResolutionContext
+  ): boolean {
+    if (!dependency || !sourceContext) return false;
+
+    // Check if the dependency involves validation-related objects
+    const validationPatterns = ['validator', 'errors', 'rules', 'messages', 'MessageBag'];
+    return validationPatterns.some(
+      pattern =>
+        dependency.to_symbol.toLowerCase().includes(pattern.toLowerCase()) ||
+        dependency.from_symbol.toLowerCase().includes(pattern.toLowerCase()) ||
+        (dependency.qualified_context &&
+          dependency.qualified_context.toLowerCase().includes(pattern.toLowerCase()))
+    );
+  }
+
+  /**
+   * Check if this is a request context
+   */
+  private isRequestContext(
+    dependency?: ParsedDependency,
+    sourceContext?: SymbolResolutionContext
+  ): boolean {
+    if (!dependency || !sourceContext) return false;
+
+    // Check if the dependency involves request-related objects
+    const requestPatterns = ['request', 'input', 'validate'];
+    return requestPatterns.some(
+      pattern =>
+        dependency.to_symbol.toLowerCase().includes(pattern.toLowerCase()) ||
+        dependency.from_symbol.toLowerCase().includes(pattern.toLowerCase()) ||
+        (dependency.qualified_context &&
+          dependency.qualified_context.toLowerCase().includes(pattern.toLowerCase()))
+    );
+  }
+
+  /**
+   * Generate a consistent ID for framework symbols
+   */
+  private generateSymbolId(symbolName: string, framework: string): number {
+    // Simple hash function to generate consistent IDs
+    let hash = 0;
+    const str = `${framework}:${symbolName}`;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash);
   }
 
   /**
@@ -801,7 +1034,7 @@ export class SymbolResolver {
       totalFiles: this.fileContexts.size,
       totalSymbols: Array.from(this.symbolsByName.values()).flat().length,
       exportedSymbols: this.exportedSymbols.size,
-      ambiguousExports: ambiguousCount
+      ambiguousExports: ambiguousCount,
     };
   }
 }

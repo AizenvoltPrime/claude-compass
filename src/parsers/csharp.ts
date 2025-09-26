@@ -495,6 +495,13 @@ export class CSharpParser extends ChunkedParser {
       if (symbol) symbols.push(symbol);
     }
 
+    // Extract local function declarations (C# 7.0+, including top-level statements)
+    const localFunctionNodes = this.getNodesOfType(rootNode, 'local_function_statement');
+    for (const node of localFunctionNodes) {
+      const symbol = this.extractLocalFunctionSymbol(node, content);
+      if (symbol) symbols.push(symbol);
+    }
+
     return symbols;
   }
 
@@ -786,22 +793,91 @@ export class CSharpParser extends ChunkedParser {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
-    const name = this.getNodeText(nameNode, content);
+    // Handle explicit interface implementations
+    let name: string;
+    let isExplicitInterfaceImplementation = false;
+
+    if (nameNode.type === 'qualified_name') {
+      // Explicit interface implementation: IInterface.Method
+      name = this.getNodeText(nameNode, content);
+      isExplicitInterfaceImplementation = true;
+    } else {
+      // Regular method name
+      name = this.getNodeText(nameNode, content);
+
+      // Check if this is an explicit interface implementation by examining the entire method declaration
+      const methodText = this.getNodeText(node, content);
+
+      // More comprehensive regex patterns for explicit interface implementations
+      const explicitInterfacePatterns = [
+        // Pattern 1: ReturnType IInterface.Method(params)
+        /\b([A-Z][a-zA-Z0-9]*)\s+([I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/,
+        // Pattern 2: IInterface.Method(params) - when return type is implicit/void
+        /\b([I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/,
+        // Pattern 3: Any interface pattern with dot notation
+        /\b([A-Z][a-zA-Z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/
+      ];
+
+      for (const pattern of explicitInterfacePatterns) {
+        const match = methodText.match(pattern);
+        if (match) {
+          // Find the qualified name (may be in different capture groups)
+          let qualifiedName = '';
+          for (let i = 1; i < match.length; i++) {
+            if (match[i] && match[i].includes('.')) {
+              qualifiedName = match[i];
+              break;
+            }
+          }
+
+          if (qualifiedName) {
+            const dotIndex = qualifiedName.lastIndexOf('.');
+            if (dotIndex > 0) {
+              name = qualifiedName.substring(dotIndex + 1); // Just the method name
+              isExplicitInterfaceImplementation = true;
+
+              // Log for debugging
+              this.logger?.debug('Detected explicit interface implementation', {
+                methodText: methodText.substring(0, 100),
+                qualifiedName,
+                extractedMethodName: name,
+                filePath: 'current-file'
+              });
+              break;
+            }
+          }
+        }
+      }
+    }
+
     const modifiers = this.extractModifiers(node, content);
     const visibility = this.getVisibilityFromModifiers(modifiers);
 
     // Check if this method is within an interface declaration
     const isInInterface = this.isNodeWithinInterface(node);
 
-    // Interface methods are implicitly public in C#
-    const finalVisibility = isInInterface ? Visibility.PUBLIC : (visibility || Visibility.PRIVATE);
+    // Explicit interface implementations are implicitly private (only accessible through interface)
+    // Interface methods are implicitly public
+    let finalVisibility: Visibility;
+    if (isExplicitInterfaceImplementation) {
+      finalVisibility = Visibility.PRIVATE; // Explicit implementations are private to the class
+    } else if (isInInterface) {
+      finalVisibility = Visibility.PUBLIC; // Interface methods are public
+    } else {
+      finalVisibility = visibility || Visibility.PRIVATE;
+    }
+
+    // Explicit interface implementations are exported (accessible through interface)
+    const isExported = isInInterface ||
+                      modifiers.includes('public') ||
+                      isExplicitInterfaceImplementation;
 
     return {
       name,
       symbol_type: SymbolType.METHOD,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: isInInterface || modifiers.includes('public'),
+      is_exported: isExported,
       visibility: finalVisibility,
       signature: this.extractMethodSignature(node, content)
     };
@@ -929,6 +1005,45 @@ export class CSharpParser extends ChunkedParser {
       visibility: visibility || Visibility.PRIVATE,
       signature: this.extractConstructorSignature(node, content)
     };
+  }
+
+  private extractLocalFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    const name = this.getNodeText(nameNode, content);
+    const modifiers = this.extractModifiers(node, content);
+    const visibility = Visibility.PRIVATE; // Local functions are always private
+
+    // Try to find the containing context (global or method)
+    const containingFunction = this.findContainingFunction(node, content);
+    const contextName = containingFunction || '<global>';
+
+    return {
+      name,
+      symbol_type: SymbolType.FUNCTION,
+      start_line: node.startPosition.row + 1,
+      end_line: node.endPosition.row + 1,
+      is_exported: false, // Local functions are never exported
+      visibility,
+      signature: this.extractLocalFunctionSignature(node, content, contextName)
+    };
+  }
+
+  private extractLocalFunctionSignature(node: Parser.SyntaxNode, content: string, contextName: string): string {
+    const nameNode = node.childForFieldName('name');
+    const name = nameNode ? this.getNodeText(nameNode, content) : '';
+
+    // Extract parameters
+    const parameterListNode = node.childForFieldName('parameters');
+    const parameters = parameterListNode ? this.getNodeText(parameterListNode, content) : '()';
+
+    // Extract return type
+    const returnTypeNode = node.childForFieldName('type');
+    const returnType = returnTypeNode ? this.getNodeText(returnTypeNode, content) : 'void';
+
+    // Include context in signature to distinguish top-level local functions
+    return `${returnType} ${name}${parameters} in ${contextName}`;
   }
 
   // Dependency extraction helper methods
@@ -2067,10 +2182,13 @@ export class CSharpParser extends ChunkedParser {
                                 this.getNodesOfType(rootNode, 'interface_declaration').length > 0 ||
                                 this.getNodesOfType(rootNode, 'struct_declaration').length > 0;
 
-    if (!hasNamespaceOrClass) {
+    // Check for top-level statements (C# 9+ feature)
+    const hasTopLevelStatements = this.getNodesOfType(rootNode, 'global_statement').length > 0;
+
+    if (!hasNamespaceOrClass && !hasTopLevelStatements) {
       // This might be okay for some C# files (like global using files), so make it a warning
       errors.push({
-        message: 'No namespace, class, interface, or struct declarations found - verify C# file structure',
+        message: 'No namespace, class, interface, struct declarations or top-level statements found - verify C# file structure',
         line: 1,
         column: 1,
         severity: 'warning'
@@ -2126,6 +2244,10 @@ export class CSharpParser extends ChunkedParser {
       /virtual\s+[\w\s<>]*\s+\w+\s*\(/g,  // Virtual method definitions
       /abstract\s+[\w\s<>]*\s+\w+\s*\(/g, // Abstract method definitions
       /static\s+[\w\s<>]*\s+\w+\s*\(/g,   // Static method definitions
+      // Explicit interface implementations - these are method declarations, not calls
+      /\b[\w\s<>]*\s+[I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g,
+      /\b[I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g,
+      /\b[A-Z][a-zA-Z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g  // Broader pattern for explicit implementations
     ];
 
     // First, identify exclusion ranges
