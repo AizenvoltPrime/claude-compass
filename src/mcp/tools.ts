@@ -196,7 +196,8 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
         method_call: methodName,
         calls: [],
         references: [],
-        relationship_count: 0
+        relationship_count: 0,
+        seenRelationships: new Set<string>() // Track unique relationships
       });
     }
 
@@ -213,6 +214,15 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
         methodName,
       file_path: dep.to_symbol.file_path
     };
+
+    // Create unique key for deduplication based on semantic equivalence
+    const relationshipKey = `${relationshipInfo.id}:${relationType}:${relationshipInfo.target}:${relationshipInfo.file_path}`;
+
+    // Skip if we've already seen this relationship
+    if (group.seenRelationships.has(relationshipKey)) {
+      continue;
+    }
+    group.seenRelationships.add(relationshipKey);
 
     // Group by dependency type
     if (dep.type === 'calls' || dep.dependency_type === 'calls') {
@@ -234,6 +244,7 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
 
     // Remove internal tracking fields
     delete group.relationship_count;
+    delete group.seenRelationships;
 
     result[lineKey] = group;
   }
@@ -915,7 +926,9 @@ export class McpTools {
             })
             .filter(Boolean);
 
-          callers = [...callers, ...transitiveDependencies];
+          // Deduplicate before merging to prevent duplicate relationships
+        const deduplicatedTransitive = this.deduplicateRelationships(transitiveDependencies, callers);
+        callers = [...callers, ...deduplicatedTransitive];
         }
       } catch (error) {
         this.logger.error('Enhanced transitive caller analysis failed', {
@@ -924,6 +937,9 @@ export class McpTools {
         });
       }
     }
+
+    // Apply symbol consolidation to handle interface/implementation relationships
+    callers = this.consolidateRelatedSymbols(callers);
 
     const result = {
       content: [
@@ -966,12 +982,12 @@ export class McpTools {
               // Always show call chains (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
               transitive_analysis: {
                 total_paths: transitiveResults.length,
-                call_chains: transitiveResults.map(result => ({
+                call_chains: this.deduplicateCallChains(transitiveResults.map(result => ({
                   symbol_id: result.symbolId,
                   call_chain: result.call_chain,
                   depth: result.depth,
                   confidence: result.totalConfidence,
-                }))
+                })))
               },
               parameter_analysis: callers.length < 50 ? await this.getParameterContextAnalysis(validatedArgs.symbol_id) : undefined,
               total_callers: callers.length,
@@ -1102,7 +1118,9 @@ export class McpTools {
             })
             .filter(Boolean);
 
-          dependencies = [...dependencies, ...transitiveDependencies];
+          // Deduplicate before merging to prevent duplicate relationships
+          const deduplicatedTransitive = this.deduplicateRelationships(transitiveDependencies, dependencies);
+          dependencies = [...dependencies, ...deduplicatedTransitive];
         }
       } catch (error) {
         this.logger.error('Enhanced transitive dependency analysis failed', {
@@ -1111,6 +1129,9 @@ export class McpTools {
         });
       }
     }
+
+    // Apply symbol consolidation to handle interface/implementation relationships
+    dependencies = this.consolidateRelatedSymbols(dependencies);
 
     // Phase 4: Simple dependency list format
     const result = {
@@ -2250,6 +2271,121 @@ export class McpTools {
     if (totalImpact > 10) return 'high';
     if (totalImpact > 5) return 'medium';
     return 'low';
+  }
+
+  /**
+   * Deduplicate relationships to prevent duplicate entries in analysis results
+   * Compares relationships based on semantic equivalence rather than just ID
+   */
+  private deduplicateRelationships(newRelationships: any[], existingRelationships: any[]): any[] {
+    const existingKeys = new Set<string>();
+
+    // Create keys for existing relationships
+    for (const existing of existingRelationships) {
+      const key = this.createRelationshipKey(existing);
+      if (key) existingKeys.add(key);
+    }
+
+    // Filter out duplicates from new relationships
+    return newRelationships.filter(newRel => {
+      const key = this.createRelationshipKey(newRel);
+      return key && !existingKeys.has(key);
+    });
+  }
+
+  /**
+   * Create a unique key for a relationship based on semantic equivalence
+   */
+  private createRelationshipKey(relationship: any): string | null {
+    // Handle different relationship formats (from different tools)
+    const fromSymbolId = relationship.from_symbol_id || relationship.from_symbol?.id;
+    const toSymbolId = relationship.to_symbol_id || relationship.to_symbol?.id;
+    const depType = relationship.dependency_type || relationship.type;
+    const lineNum = relationship.line_number || 0;
+
+    if (!fromSymbolId || !toSymbolId || !depType) {
+      return null;
+    }
+
+    return `${fromSymbolId}->${toSymbolId}:${depType}:${lineNum}`;
+  }
+
+  /**
+   * Deduplicate call chains to prevent identical entries in transitive analysis
+   */
+  private deduplicateCallChains(callChains: any[]): any[] {
+    const uniqueChains = new Map<string, any>();
+
+    for (const chain of callChains) {
+      // Create key based on symbol_id and call_chain content
+      const key = `${chain.symbol_id}:${chain.call_chain}:${chain.depth}`;
+
+      if (!uniqueChains.has(key)) {
+        uniqueChains.set(key, chain);
+      } else {
+        // If we have a duplicate, keep the one with higher confidence
+        const existing = uniqueChains.get(key)!;
+        if (chain.confidence && chain.confidence > (existing.confidence || 0)) {
+          uniqueChains.set(key, chain);
+        }
+      }
+    }
+
+    return Array.from(uniqueChains.values());
+  }
+
+  /**
+   * Consolidate symbols that represent the same logical entity (interface + implementations)
+   */
+  private consolidateRelatedSymbols(relationships: any[]): any[] {
+    const symbolGroups = new Map<string, any[]>();
+
+    // Group relationships by method name and signature
+    for (const rel of relationships) {
+      const symbolName = rel.to_symbol?.name || rel.from_symbol?.name;
+      if (!symbolName) continue;
+
+      const key = symbolName; // Could be enhanced to include signature matching
+      if (!symbolGroups.has(key)) {
+        symbolGroups.set(key, []);
+      }
+      symbolGroups.get(key)!.push(rel);
+    }
+
+    const consolidated: any[] = [];
+
+    // For each group, keep the most representative relationship
+    for (const [methodName, group] of symbolGroups) {
+      if (group.length === 1) {
+        consolidated.push(group[0]);
+        continue;
+      }
+
+      // Prefer implementation over interface, public over private
+      const representative = group.reduce((best, current) => {
+        const currentSymbol = current.to_symbol || current.from_symbol;
+        const bestSymbol = best.to_symbol || best.from_symbol;
+
+        // Prefer public visibility
+        if (currentSymbol?.visibility === 'public' && bestSymbol?.visibility !== 'public') {
+          return current;
+        }
+
+        // Prefer implementation over interface (heuristic: non-interface file paths)
+        const currentPath = currentSymbol?.file?.path || '';
+        const bestPath = bestSymbol?.file?.path || '';
+
+        if (!currentPath.includes('interface') && bestPath.includes('interface')) {
+          return current;
+        }
+
+        return best;
+      });
+
+      consolidated.push(representative);
+    }
+
+    return consolidated;
   }
 
   /**

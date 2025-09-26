@@ -233,12 +233,14 @@ export class TransitiveAnalyzer {
         });
 
         // Recurse to find callers of this caller
+        // Create new visited set copy for each recursive path to avoid cross-contamination
+        const newVisited = new Set(visited);
         await this.traverseCallersWithCrossStackSupport(
           fromSymbolId,
           newPath,
           currentDepth + 1,
           maxDepth,
-          visited, // Use shared visited set instead of creating new one
+          newVisited,
           cycles,
           results,
           options,

@@ -1332,7 +1332,8 @@ export class DatabaseService {
         'to_symbols.symbol_type as to_symbol_type',
         'to_files.path as to_file_path'
       )
-      .where('dependencies.from_symbol_id', symbolId);
+      .where('dependencies.from_symbol_id', symbolId)
+      .distinct('dependencies.id');
 
     return results.map(result => ({
       ...result,
@@ -1358,7 +1359,8 @@ export class DatabaseService {
         'from_symbols.symbol_type as from_symbol_type',
         'from_files.path as from_file_path'
       )
-      .where('dependencies.to_symbol_id', symbolId);
+      .where('dependencies.to_symbol_id', symbolId)
+      .distinct('dependencies.id');
 
     return results.map(result => ({
       ...result,
@@ -3327,7 +3329,8 @@ export class DatabaseService {
         'to_symbols.symbol_type as to_symbol_type',
         'to_files.path as to_file_path'
       )
-      .where('dependencies.from_symbol_id', symbolId);
+      .where('dependencies.from_symbol_id', symbolId)
+      .distinct('dependencies.id');
 
     return results.map(result => ({
       ...result,
@@ -3367,7 +3370,8 @@ export class DatabaseService {
         'from_symbols.symbol_type as from_symbol_type',
         'from_files.path as from_file_path'
       )
-      .where('dependencies.to_symbol_id', symbolId);
+      .where('dependencies.to_symbol_id', symbolId)
+      .distinct('dependencies.id');
 
     return results.map(result => ({
       ...result,
