@@ -1,7 +1,17 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { execSync } from 'child_process';
-import { Repository, File, Symbol, CreateFile, CreateSymbol, CreateFileDependency, DependencyType, ApiCall, DataContract } from '../database/models';
+import {
+  Repository,
+  File,
+  Symbol,
+  CreateFile,
+  CreateSymbol,
+  CreateFileDependency,
+  DependencyType,
+  ApiCall,
+  DataContract,
+} from '../database/models';
 import { DatabaseService } from '../database/services';
 import { getParserForFile, ParseResult, MultiParser } from '../parsers';
 import {
@@ -13,7 +23,7 @@ import {
   ExpressRoute,
   FastifyRoute,
   VueRoute,
-  ParsedDependency
+  ParsedDependency,
 } from '../parsers/base';
 import { LaravelRoute, LaravelController, EloquentModel } from '../parsers/laravel';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
@@ -87,7 +97,13 @@ export interface CrossStackGraphData {
 
 export interface CrossStackGraphNode {
   id: string;
-  type: 'vue_component' | 'laravel_route' | 'typescript_interface' | 'php_dto' | 'api_call' | 'data_contract';
+  type:
+    | 'vue_component'
+    | 'laravel_route'
+    | 'typescript_interface'
+    | 'php_dto'
+    | 'api_call'
+    | 'data_contract';
   name: string;
   filePath: string;
   framework: 'vue' | 'laravel' | 'cross-stack';
@@ -138,7 +154,7 @@ export class GraphBuilder {
     const startTime = Date.now();
 
     this.logger.info('Starting repository analysis', {
-      path: repositoryPath
+      path: repositoryPath,
     });
 
     const validatedOptions = this.validateOptions(options);
@@ -161,7 +177,7 @@ export class GraphBuilder {
 
       // Full analysis path - clean up existing data for fresh analysis
       this.logger.info('Performing full analysis, cleaning up existing data', {
-        repositoryId: repository.id
+        repositoryId: repository.id,
       });
       await this.dbService.cleanupRepositoryData(repository.id);
 
@@ -171,10 +187,12 @@ export class GraphBuilder {
 
       // Parse files and extract symbols
       const parseResults = await this.parseFiles(files, validatedOptions);
-      const errors = parseResults.flatMap(r => r.errors.map(e => ({
-        filePath: r.filePath,
-        message: e.message
-      })));
+      const errors = parseResults.flatMap(r =>
+        r.errors.map(e => ({
+          filePath: r.filePath,
+          message: e.message,
+        }))
+      );
 
       // Store files and symbols in database
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
@@ -208,22 +226,33 @@ export class GraphBuilder {
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
 
       // Create cross-file dependencies from symbol dependencies
-      this.logger.debug('Processing cross-file dependencies', {
-        symbolDependenciesCount: symbolDependencies.length,
-        symbolsCount: symbols.length,
-        filesCount: dbFiles.length
-      });
 
-      const crossFileFileDependencies = this.createCrossFileFileDependencies(symbolDependencies, symbols, dbFiles);
+      const crossFileFileDependencies = this.createCrossFileFileDependencies(
+        symbolDependencies,
+        symbols,
+        dbFiles
+      );
 
       // Create file dependencies for unresolved external calls (e.g., Laravel model calls)
-      const externalCallFileDependencies = this.createExternalCallFileDependencies(parseResults, dbFiles, symbols);
+      const externalCallFileDependencies = this.createExternalCallFileDependencies(
+        parseResults,
+        dbFiles,
+        symbols
+      );
 
       // Create file dependencies for external imports (e.g., Laravel facades)
-      const externalImportFileDependencies = this.createExternalImportFileDependencies(parseResults, dbFiles);
+      const externalImportFileDependencies = this.createExternalImportFileDependencies(
+        parseResults,
+        dbFiles
+      );
 
       // Combine file dependencies
-      const allFileDependencies = [...fileDependencies, ...crossFileFileDependencies, ...externalCallFileDependencies, ...externalImportFileDependencies];
+      const allFileDependencies = [
+        ...fileDependencies,
+        ...crossFileFileDependencies,
+        ...externalCallFileDependencies,
+        ...externalImportFileDependencies,
+      ];
 
       // Store file dependencies in separate table
       if (allFileDependencies.length > 0) {
@@ -238,24 +267,31 @@ export class GraphBuilder {
       // Update repository with analysis results
       await this.dbService.updateRepository(repository.id, {
         last_indexed: new Date(),
-        git_hash: await this.getGitHash(repositoryPath)
+        git_hash: await this.getGitHash(repositoryPath),
       });
 
       const duration = Date.now() - startTime;
       this.logger.info('Repository analysis completed', {
         duration,
         filesProcessed: files.length,
-        symbolsExtracted: symbols.length
+        symbolsExtracted: symbols.length,
       });
 
       // Phase 5 - Cross-stack analysis
       let crossStackGraph: CrossStackGraphData | undefined;
       if (validatedOptions.enableCrossStackAnalysis) {
         this.logger.info('Starting cross-stack analysis', {
-          repositoryId: repository.id
+          repositoryId: repository.id,
         });
         try {
-          const fullStackGraph = await this.crossStackGraphBuilder.buildFullStackFeatureGraph(repository.id);
+          const fullStackGraph = await this.crossStackGraphBuilder.buildFullStackFeatureGraph(
+            repository.id
+          );
+
+          await this.crossStackGraphBuilder.storeCrossStackRelationships(
+            fullStackGraph,
+            repository.id
+          );
 
           // Convert CrossStackGraphBuilder types to GraphBuilder types
           const convertGraph = (graph: any) => ({
@@ -265,16 +301,20 @@ export class GraphBuilder {
               name: node.name,
               filePath: node.filePath,
               framework: node.framework,
-              symbolId: node.metadata?.symbolId
+              symbolId: node.metadata?.symbolId,
             })),
             edges: graph.edges.map((edge: any) => ({
               id: edge.id,
               from: edge.from,
               to: edge.to,
-              type: edge.relationshipType === 'api_call' ? 'api_call' :
-                    edge.relationshipType === 'shares_schema' ? 'shares_schema' : 'frontend_backend',
-              metadata: edge.metadata
-            }))
+              type:
+                edge.relationshipType === 'api_call'
+                  ? 'api_call'
+                  : edge.relationshipType === 'shares_schema'
+                    ? 'shares_schema'
+                    : 'frontend_backend',
+              metadata: edge.metadata,
+            })),
           });
 
           crossStackGraph = {
@@ -291,7 +331,7 @@ export class GraphBuilder {
                   name: c.name,
                   filePath: c.filePath,
                   framework: c.framework,
-                  symbolId: c.metadata?.symbolId
+                  symbolId: c.metadata?.symbolId,
                 })),
                 ...feature.laravelRoutes.map((r: any) => ({
                   id: r.id,
@@ -299,8 +339,8 @@ export class GraphBuilder {
                   name: r.name,
                   filePath: r.filePath,
                   framework: r.framework,
-                  symbolId: r.metadata?.symbolId
-                }))
+                  symbolId: r.metadata?.symbolId,
+                })),
               ],
               apiCalls: [], // Will be populated from database if needed
               dataContracts: [], // Will be populated from database if needed
@@ -308,12 +348,12 @@ export class GraphBuilder {
             metadata: {
               totalApiCalls: fullStackGraph.apiCallGraph.edges.length,
               totalDataContracts: fullStackGraph.dataContractGraph.edges.length,
-              analysisTimestamp: new Date()
-            }
+              analysisTimestamp: new Date(),
+            },
           };
           this.logger.info('Cross-stack analysis completed', {
             apiCalls: crossStackGraph.metadata.totalApiCalls,
-            dataContracts: crossStackGraph.metadata.totalDataContracts
+            dataContracts: crossStackGraph.metadata.totalDataContracts,
           });
         } catch (error) {
           this.logger.error('Cross-stack analysis failed', { error });
@@ -331,9 +371,8 @@ export class GraphBuilder {
         errors,
         totalFiles: files.length,
         totalSymbols: symbols.length,
-        crossStackGraph
+        crossStackGraph,
       };
-
     } catch (error) {
       this.logger.error('Repository analysis failed', { error });
       throw error;
@@ -361,7 +400,7 @@ export class GraphBuilder {
       }
 
       this.logger.info('Detecting changes since last analysis', {
-        lastIndexed: lastIndexed.toISOString()
+        lastIndexed: lastIndexed.toISOString(),
       });
 
       // Discover all current files
@@ -376,28 +415,27 @@ export class GraphBuilder {
             this.logger.debug('File changed since last analysis', {
               file: fileInfo.relativePath,
               lastModified: stats.mtime.toISOString(),
-              lastAnalyzed: lastIndexed.toISOString()
+              lastAnalyzed: lastIndexed.toISOString(),
             });
           }
         } catch (error) {
           // File might have been deleted, skip it
           this.logger.warn('Error checking file modification time', {
             file: fileInfo.path,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
           });
         }
       }
 
       this.logger.info('Change detection completed', {
         totalFiles: currentFiles.length,
-        changedFiles: changedFiles.length
+        changedFiles: changedFiles.length,
       });
 
       return changedFiles;
-
     } catch (error) {
       this.logger.error('Error during change detection, falling back to full analysis', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       // Fallback: return all files for full analysis
       const allFiles = await this.discoverFiles(repositoryPath, options);
@@ -415,7 +453,7 @@ export class GraphBuilder {
   ): Promise<BuildResult> {
     this.logger.info('Starting incremental analysis', {
       repositoryId: repository.id,
-      repositoryPath
+      repositoryPath,
     });
 
     // Detect changed files
@@ -456,7 +494,7 @@ export class GraphBuilder {
         symbolGraph,
         errors: [],
         totalFiles: dbFiles.length,
-        totalSymbols: symbols.length
+        totalSymbols: symbols.length,
       };
     }
 
@@ -490,13 +528,13 @@ export class GraphBuilder {
 
     // Update repository timestamp
     await this.dbService.updateRepository(repository.id, {
-      last_indexed: new Date()
+      last_indexed: new Date(),
     });
 
     this.logger.info('Incremental analysis completed', {
       filesProcessed: partialResult.filesProcessed || 0,
       symbolsExtracted: partialResult.symbolsExtracted || 0,
-      errors: partialResult.errors?.length || 0
+      errors: partialResult.errors?.length || 0,
     });
 
     return {
@@ -508,7 +546,7 @@ export class GraphBuilder {
       symbolGraph,
       errors: partialResult.errors || [],
       totalFiles: dbFiles.length,
-      totalSymbols: symbols.length
+      totalSymbols: symbols.length,
     };
   }
 
@@ -522,7 +560,7 @@ export class GraphBuilder {
   ): Promise<Partial<BuildResult>> {
     this.logger.info('Re-analyzing files', {
       repositoryId,
-      fileCount: filePaths.length
+      fileCount: filePaths.length,
     });
 
     const validatedOptions = this.validateOptions(options);
@@ -545,10 +583,12 @@ export class GraphBuilder {
     return {
       filesProcessed: files.length,
       symbolsExtracted: symbols.length,
-      errors: parseResults.flatMap(r => r.errors.map(e => ({
-        filePath: r.filePath,
-        message: e.message
-      })))
+      errors: parseResults.flatMap(r =>
+        r.errors.map(e => ({
+          filePath: r.filePath,
+          message: e.message,
+        }))
+      ),
     };
   }
 
@@ -590,13 +630,13 @@ export class GraphBuilder {
         name,
         path: absolutePath,
         language_primary: primaryLanguage,
-        framework_stack: frameworkStack
+        framework_stack: frameworkStack,
       });
 
       this.logger.info('Created new repository', {
         name,
         path: absolutePath,
-        id: repository.id
+        id: repository.id,
       });
     }
 
@@ -610,55 +650,61 @@ export class GraphBuilder {
     const files: Array<{ path: string; relativePath: string }> = [];
     const compassIgnore = await this.loadCompassIgnore(repositoryPath, options);
 
-    this.logger.info('Starting file discovery', { repositoryPath, allowedExtensions: options.fileExtensions });
+    this.logger.info('Starting file discovery', {
+      repositoryPath,
+      allowedExtensions: options.fileExtensions,
+    });
 
     const traverse = async (currentPath: string): Promise<void> => {
       try {
         const stats = await fs.stat(currentPath);
-        this.logger.info('Traversing path', { path: currentPath, isDirectory: stats.isDirectory() });
+        this.logger.info('Traversing path', {
+          path: currentPath,
+          isDirectory: stats.isDirectory(),
+        });
 
         if (stats.isDirectory()) {
-        const dirName = path.basename(currentPath);
-        const relativePath = path.relative(repositoryPath, currentPath);
+          const dirName = path.basename(currentPath);
+          const relativePath = path.relative(repositoryPath, currentPath);
 
-        // Check .compassignore patterns first
-        if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
-          this.logger.debug('Directory ignored by .compassignore', { path: relativePath });
-          return;
+          // Check .compassignore patterns first
+          if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
+            return;
+          }
+
+          // Then check built-in skip logic
+          if (this.shouldSkipDirectory(dirName, options)) {
+            return;
+          }
+
+          const entries = await fs.readdir(currentPath);
+
+          for (const entry of entries) {
+            const entryPath = path.join(currentPath, entry);
+            await traverse(entryPath);
+          }
+        } else if (stats.isFile()) {
+          const relativePath = path.relative(repositoryPath, currentPath);
+
+          // Check .compassignore patterns first
+          if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
+            return;
+          }
+
+          // Then check built-in include logic
+          if (this.shouldIncludeFile(currentPath, relativePath, options)) {
+            this.logger.info('Including file', { path: relativePath });
+            files.push({
+              path: currentPath,
+              relativePath: relativePath,
+            });
+          } else {
+            this.logger.info('File excluded', {
+              path: relativePath,
+              reason: 'shouldIncludeFile returned false',
+            });
+          }
         }
-
-        // Then check built-in skip logic
-        if (this.shouldSkipDirectory(dirName, options)) {
-          return;
-        }
-
-        const entries = await fs.readdir(currentPath);
-
-        for (const entry of entries) {
-          const entryPath = path.join(currentPath, entry);
-          await traverse(entryPath);
-        }
-
-      } else if (stats.isFile()) {
-        const relativePath = path.relative(repositoryPath, currentPath);
-
-        // Check .compassignore patterns first
-        if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
-          this.logger.debug('File ignored by .compassignore', { path: relativePath });
-          return;
-        }
-
-        // Then check built-in include logic
-        if (this.shouldIncludeFile(currentPath, relativePath, options)) {
-          this.logger.info('Including file', { path: relativePath });
-          files.push({
-            path: currentPath,
-            relativePath: relativePath
-          });
-        } else {
-          this.logger.info('File excluded', { path: relativePath, reason: 'shouldIncludeFile returned false' });
-        }
-      }
       } catch (error) {
         this.logger.error('Error traversing path', { path: currentPath, error: error.message });
       }
@@ -677,7 +723,7 @@ export class GraphBuilder {
       totalFiles: files.length,
       extensionStats,
       allowedExtensions: options.fileExtensions,
-      patternsUsed: compassIgnore.getPatterns()
+      patternsUsed: compassIgnore.getPatterns(),
     });
 
     // Limit the number of files if specified
@@ -692,7 +738,10 @@ export class GraphBuilder {
   /**
    * Load CompassIgnore configuration from repository directory
    */
-  private async loadCompassIgnore(repositoryPath: string, options: BuildOptions): Promise<CompassIgnore> {
+  private async loadCompassIgnore(
+    repositoryPath: string,
+    options: BuildOptions
+  ): Promise<CompassIgnore> {
     if (options.compassignorePath) {
       // Use custom path if provided
       const customPath = path.isAbsolute(options.compassignorePath)
@@ -701,7 +750,7 @@ export class GraphBuilder {
       const compassIgnore = await CompassIgnore.fromFile(customPath);
 
       // Add default patterns if no custom .compassignore file exists
-      if (!await this.fileExists(customPath)) {
+      if (!(await this.fileExists(customPath))) {
         compassIgnore.addPatterns(require('../utils/compassignore').DEFAULT_IGNORE_PATTERNS);
       }
 
@@ -713,7 +762,7 @@ export class GraphBuilder {
     const compassIgnorePath = path.join(repositoryPath, '.compassignore');
 
     // If no .compassignore file exists, add default patterns
-    if (!await this.fileExists(compassIgnorePath)) {
+    if (!(await this.fileExists(compassIgnorePath))) {
       compassIgnore.addPatterns(require('../utils/compassignore').DEFAULT_IGNORE_PATTERNS);
     }
 
@@ -746,20 +795,24 @@ export class GraphBuilder {
           continue; // File was rejected due to encoding issues
         }
 
-        const parseResult = await this.processFileWithSizePolicyMultiParser(file, content, multiParser, options);
+        const parseResult = await this.processFileWithSizePolicyMultiParser(
+          file,
+          content,
+          multiParser,
+          options
+        );
         if (!parseResult) {
           continue; // File was rejected by size policy
         }
 
         results.push({
           ...parseResult,
-          filePath: file.path
+          filePath: file.path,
         });
-
       } catch (error) {
         this.logger.error('Failed to parse file', {
           path: file.path,
-          error: (error as Error).message
+          error: (error as Error).message,
         });
 
         results.push({
@@ -768,13 +821,15 @@ export class GraphBuilder {
           dependencies: [],
           imports: [],
           exports: [],
-          errors: [{
-            message: (error as Error).message,
-            line: 0,
-            column: 0,
-            severity: 'error'
-          }],
-          success: false
+          errors: [
+            {
+              message: (error as Error).message,
+              line: 0,
+              column: 0,
+              severity: 'error',
+            },
+          ],
+          success: false,
         });
       }
     }
@@ -786,7 +841,7 @@ export class GraphBuilder {
       failedParses: results.filter(r => r.success === false || r.errors.length > 0).length,
       totalSymbols: results.reduce((sum, r) => sum + r.symbols.length, 0),
       totalDependencies: results.reduce((sum, r) => sum + r.dependencies.length, 0),
-      byExtension: {} as Record<string, { files: number; symbols: number; errors: number }>
+      byExtension: {} as Record<string, { files: number; symbols: number; errors: number }>,
     };
 
     // Calculate per-extension statistics
@@ -810,7 +865,7 @@ export class GraphBuilder {
 
       this.logger.warn('Parsing failures detected', {
         failedCount: parseStats.failedParses,
-        failedFiles: failedFiles.slice(0, 10) // Limit to first 10 for readability
+        failedFiles: failedFiles.slice(0, 10), // Limit to first 10 for readability
       });
     }
 
@@ -845,16 +900,15 @@ export class GraphBuilder {
           size: stats.size,
           last_modified: stats.mtime,
           is_generated: this.isGeneratedFile(file.path),
-          is_test: this.isTestFile(file.path)
+          is_test: this.isTestFile(file.path),
         };
 
         const dbFile = await this.dbService.createFile(createFile);
         dbFiles.push(dbFile);
-
       } catch (error) {
         this.logger.error('Failed to store file', {
           path: file.path,
-          error: (error as Error).message
+          error: (error as Error).message,
         });
       }
     }
@@ -883,7 +937,7 @@ export class GraphBuilder {
           end_line: symbol.end_line,
           is_exported: symbol.is_exported,
           visibility: symbol.visibility as any,
-          signature: symbol.signature
+          signature: symbol.signature,
         });
       }
     }
@@ -898,11 +952,10 @@ export class GraphBuilder {
   ): Promise<void> {
     this.logger.info('Storing framework entities', {
       repositoryId,
-      parseResultsCount: parseResults.length
+      parseResultsCount: parseResults.length,
     });
 
     for (const parseResult of parseResults) {
-
       // Skip if no framework entities
       if (!parseResult.frameworkEntities || parseResult.frameworkEntities.length === 0) {
         continue;
@@ -913,19 +966,18 @@ export class GraphBuilder {
       const fileSymbols = symbols.filter(s => {
         // We need to find the file record that matches this symbol's file_id and see if its path matches parseResult.filePath
         // Since we don't have direct access to files here, let's match by parse result symbols instead
-        return parseResult.symbols.some(ps => ps.name === s.name && ps.symbol_type === s.symbol_type);
+        return parseResult.symbols.some(
+          ps => ps.name === s.name && ps.symbol_type === s.symbol_type
+        );
       });
-
 
       for (const entity of parseResult.frameworkEntities) {
         let matchingSymbol: Symbol | undefined;
         try {
-
           // Find matching symbol for this entity
-          matchingSymbol = fileSymbols.find(s =>
-            s.name === entity.name ||
-            entity.name.includes(s.name) ||
-            s.name.includes(entity.name)
+          matchingSymbol = fileSymbols.find(
+            s =>
+              s.name === entity.name || entity.name.includes(s.name) || s.name.includes(entity.name)
           );
 
           if (!matchingSymbol) {
@@ -954,8 +1006,11 @@ export class GraphBuilder {
                   const parseResultDir = path.dirname(parseResult.filePath);
                   const dbPathDir = path.dirname(f.path);
                   // Check if the directory structures match (considering both might be partial paths)
-                  return parseResultDir.endsWith(dbPathDir) || dbPathDir.endsWith(parseResultDir) ||
-                         path.basename(parseResultDir) === path.basename(dbPathDir);
+                  return (
+                    parseResultDir.endsWith(dbPathDir) ||
+                    dbPathDir.endsWith(parseResultDir) ||
+                    path.basename(parseResultDir) === path.basename(dbPathDir)
+                  );
                 }
                 return false;
               });
@@ -968,12 +1023,14 @@ export class GraphBuilder {
                 entityName: entity.name,
                 entityType: entity.type,
                 availableFilesCount: files.length,
-                sampleAvailableFiles: files.map(f => ({
-                  path: f.path,
-                  normalized: path.normalize(f.path)
-                })).slice(0, 5),
+                sampleAvailableFiles: files
+                  .map(f => ({
+                    path: f.path,
+                    normalized: path.normalize(f.path),
+                  }))
+                  .slice(0, 5),
                 parseResultDirectory: path.dirname(parseResult.filePath),
-                parseResultBasename: path.basename(parseResult.filePath)
+                parseResultBasename: path.basename(parseResult.filePath),
               });
               continue;
             }
@@ -986,12 +1043,11 @@ export class GraphBuilder {
               start_line: 1, // Default to start of file
               end_line: 1,
               is_exported: true, // Framework entities are typically exported
-              signature: `${entity.type} ${entity.name}`
+              signature: `${entity.type} ${entity.name}`,
             });
 
             matchingSymbol = syntheticSymbol;
           }
-
 
           // Store different types of framework entities based on specific interfaces
           // Handle Laravel entities first
@@ -1019,7 +1075,7 @@ export class GraphBuilder {
               controller_method: this.extractControllerMethod(laravelRoute.action),
               action: laravelRoute.action,
               file_path: laravelRoute.filePath,
-              line_number: laravelRoute.metadata?.line || 1
+              line_number: laravelRoute.metadata?.line || 1,
             });
           } else if (this.isLaravelController(entity)) {
             // Laravel controllers don't map directly to our component table
@@ -1032,8 +1088,8 @@ export class GraphBuilder {
                 name: entity.name,
                 actions: (entity as LaravelController).actions,
                 middleware: (entity as LaravelController).middleware,
-                resourceController: (entity as LaravelController).resourceController
-              }
+                resourceController: (entity as LaravelController).resourceController,
+              },
             });
           } else if (this.isEloquentModel(entity)) {
             // Eloquent models could be stored as metadata
@@ -1045,8 +1101,8 @@ export class GraphBuilder {
                 name: entity.name,
                 tableName: (entity as EloquentModel).tableName,
                 fillable: (entity as EloquentModel).fillable,
-                relationships: (entity as EloquentModel).relationships
-              }
+                relationships: (entity as EloquentModel).relationships,
+              },
             });
           } else if (this.isRouteEntity(entity)) {
             const routeEntity = entity as NextJSRoute | ExpressRoute | FastifyRoute | VueRoute;
@@ -1058,7 +1114,7 @@ export class GraphBuilder {
               framework_type: (routeEntity as any).framework || 'unknown',
               middleware: (routeEntity as any).middleware || [],
               dynamic_segments: (routeEntity as any).dynamicSegments || [],
-              auth_required: false // Not available in current interfaces
+              auth_required: false, // Not available in current interfaces
             });
           } else if (this.isVueComponent(entity)) {
             const vueEntity = entity as VueComponent;
@@ -1070,7 +1126,7 @@ export class GraphBuilder {
               emits: vueEntity.emits || [],
               slots: vueEntity.slots || [],
               hooks: [],
-              template_dependencies: vueEntity.template_dependencies || []
+              template_dependencies: vueEntity.template_dependencies || [],
             });
           } else if (this.isReactComponent(entity)) {
             const reactEntity = entity as ReactComponent;
@@ -1082,7 +1138,7 @@ export class GraphBuilder {
               emits: [],
               slots: [],
               hooks: reactEntity.hooks || [],
-              template_dependencies: reactEntity.jsxDependencies || []
+              template_dependencies: reactEntity.jsxDependencies || [],
             });
           } else if (this.isVueComposable(entity)) {
             const composableEntity = entity as VueComposable;
@@ -1093,7 +1149,7 @@ export class GraphBuilder {
               returns: composableEntity.returns || [],
               dependencies: composableEntity.dependencies || [],
               reactive_refs: composableEntity.reactive_refs || [],
-              dependency_array: []
+              dependency_array: [],
             });
           } else if (this.isReactHook(entity)) {
             const hookEntity = entity as ReactHook;
@@ -1104,7 +1160,7 @@ export class GraphBuilder {
               returns: hookEntity.returns || [],
               dependencies: hookEntity.dependencies || [],
               reactive_refs: [],
-              dependency_array: []
+              dependency_array: [],
             });
           } else if (this.isJobSystemEntity(entity)) {
             // Handle background job system entities
@@ -1114,7 +1170,7 @@ export class GraphBuilder {
               name: jobSystemEntity.name,
               queue_type: jobSystemEntity.jobSystems?.[0] || 'bull', // Use first detected system
               symbol_id: matchingSymbol.id,
-              config_data: jobSystemEntity.config || {}
+              config_data: jobSystemEntity.config || {},
             });
           } else if (this.isORMSystemEntity(entity)) {
             // Handle ORM system entities
@@ -1123,14 +1179,14 @@ export class GraphBuilder {
               entityName: ormSystemEntity.name,
               ormType: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
               symbolId: matchingSymbol.id,
-              entity: ormSystemEntity
+              entity: ormSystemEntity,
             });
             await this.dbService.createORMEntity({
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
               entity_name: ormSystemEntity.name,
               orm_type: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
-              fields: ormSystemEntity.metadata?.fields || {}
+              fields: ormSystemEntity.metadata?.fields || {},
             });
           } else if (this.isTestSystemEntity(entity)) {
             // Handle test framework system entities
@@ -1145,7 +1201,7 @@ export class GraphBuilder {
                 repo_id: repositoryId,
                 file_id: matchingFile.id,
                 suite_name: testSystemEntity.name,
-                framework_type: testSystemEntity.testFrameworks?.[0] || 'jest'
+                framework_type: testSystemEntity.testFrameworks?.[0] || 'jest',
               });
             }
           } else if (this.isPackageSystemEntity(entity)) {
@@ -1156,7 +1212,7 @@ export class GraphBuilder {
               package_name: packageSystemEntity.name,
               version_spec: packageSystemEntity.version || '1.0.0',
               dependency_type: 'dependencies' as any,
-              package_manager: packageSystemEntity.packageManagers?.[0] || 'npm'
+              package_manager: packageSystemEntity.packageManagers?.[0] || 'npm',
             });
           } else if (this.isGodotScene(entity)) {
             // Handle Godot scene entities - Core of Solution 1
@@ -1164,7 +1220,7 @@ export class GraphBuilder {
             this.logger.debug('Creating Godot scene', {
               sceneName: sceneEntity.name,
               scenePath: sceneEntity.scenePath || parseResult.filePath,
-              nodeCount: sceneEntity.nodes?.length || 0
+              nodeCount: sceneEntity.nodes?.length || 0,
             });
 
             const storedScene = await this.dbService.storeGodotScene({
@@ -1176,8 +1232,8 @@ export class GraphBuilder {
               metadata: {
                 rootNodeType: sceneEntity.rootNode?.nodeType,
                 connections: sceneEntity.connections?.length || 0,
-                resources: sceneEntity.resources?.length || 0
-              }
+                resources: sceneEntity.resources?.length || 0,
+              },
             });
 
             // Store nodes for this scene
@@ -1189,13 +1245,16 @@ export class GraphBuilder {
                   node_name: node.nodeName || node.name,
                   node_type: node.nodeType || node.type || 'Node',
                   script_path: node.script,
-                  properties: node.properties || {}
+                  properties: node.properties || {},
                 });
 
                 // Create scene-script relationship if node has script
                 if (node.script) {
                   // Find the script entity and create relationship
-                  const scriptEntity = await this.dbService.findGodotScriptByPath(repositoryId, node.script);
+                  const scriptEntity = await this.dbService.findGodotScriptByPath(
+                    repositoryId,
+                    node.script
+                  );
                   if (scriptEntity) {
                     await this.dbService.createGodotRelationship({
                       repo_id: repositoryId,
@@ -1203,7 +1262,7 @@ export class GraphBuilder {
                       from_entity_type: 'scene' as any,
                       from_entity_id: storedScene.id,
                       to_entity_type: 'script' as any,
-                      to_entity_id: scriptEntity.id
+                      to_entity_id: scriptEntity.id,
                     });
                   }
                 }
@@ -1211,9 +1270,10 @@ export class GraphBuilder {
 
               // Update scene with root node reference
               if (sceneEntity.rootNode) {
-                const rootNode = sceneEntity.nodes.find((n: any) =>
-                  n.nodeName === sceneEntity.rootNode.nodeName ||
-                  n.name === sceneEntity.rootNode.name
+                const rootNode = sceneEntity.nodes.find(
+                  (n: any) =>
+                    n.nodeName === sceneEntity.rootNode.nodeName ||
+                    n.name === sceneEntity.rootNode.name
                 );
                 if (rootNode) {
                   // The root node would have been stored above, but we'd need its ID
@@ -1228,7 +1288,7 @@ export class GraphBuilder {
               className: scriptEntity.className,
               scriptPath: parseResult.filePath,
               isAutoload: scriptEntity.isAutoload,
-              signalCount: scriptEntity.signals?.length || 0
+              signalCount: scriptEntity.signals?.length || 0,
             });
 
             await this.dbService.storeGodotScript({
@@ -1240,19 +1300,22 @@ export class GraphBuilder {
               signals: scriptEntity.signals || [],
               exports: scriptEntity.exports || [],
               metadata: {
-                attachedScenes: scriptEntity.attachedScenes || []
-              }
+                attachedScenes: scriptEntity.attachedScenes || [],
+              },
             });
           } else if (this.isGodotAutoload(entity)) {
             // Handle Godot autoload entities
             const autoloadEntity = entity as any;
             this.logger.debug('Creating Godot autoload', {
               autoloadName: autoloadEntity.autoloadName,
-              scriptPath: autoloadEntity.scriptPath
+              scriptPath: autoloadEntity.scriptPath,
             });
 
             // Find the script entity first
-            const scriptEntity = await this.dbService.findGodotScriptByPath(repositoryId, autoloadEntity.scriptPath);
+            const scriptEntity = await this.dbService.findGodotScriptByPath(
+              repositoryId,
+              autoloadEntity.scriptPath
+            );
 
             await this.dbService.storeGodotAutoload({
               repo_id: repositoryId,
@@ -1260,8 +1323,8 @@ export class GraphBuilder {
               script_path: autoloadEntity.scriptPath,
               script_id: scriptEntity?.id,
               metadata: {
-                className: autoloadEntity.className
-              }
+                className: autoloadEntity.className,
+              },
             });
 
             // Create autoload-script relationship if script exists
@@ -1272,7 +1335,7 @@ export class GraphBuilder {
                 from_entity_type: 'autoload' as any,
                 from_entity_id: scriptEntity.id, // We'd need the autoload ID here
                 to_entity_type: 'script' as any,
-                to_entity_id: scriptEntity.id
+                to_entity_id: scriptEntity.id,
               });
             }
           } else if (entity.type === 'api_call') {
@@ -1282,17 +1345,20 @@ export class GraphBuilder {
             this.logger.debug('Unknown framework entity type', {
               type: entity.type,
               name: entity.name,
-              filePath: parseResult.filePath
+              filePath: parseResult.filePath,
             });
           }
         } catch (error) {
-          this.logger.error(`Failed to store ${entity.type} entity '${entity.name}': ${error instanceof Error ? error.message : String(error)}`, {
-            entityType: entity.type,
-            entityName: entity.name,
-            filePath: parseResult.filePath,
-            symbolId: matchingSymbol?.id,
-            repositoryId: repositoryId
-          });
+          this.logger.error(
+            `Failed to store ${entity.type} entity '${entity.name}': ${error instanceof Error ? error.message : String(error)}`,
+            {
+              entityType: entity.type,
+              entityName: entity.name,
+              filePath: parseResult.filePath,
+              symbolId: matchingSymbol?.id,
+              repositoryId: repositoryId,
+            }
+          );
         }
       }
     }
@@ -1314,12 +1380,13 @@ export class GraphBuilder {
 
       for (const parseResult of parseResults) {
         if (parseResult.frameworkEntities) {
-          const godotFrameworkEntities = parseResult.frameworkEntities.filter(entity =>
-            (entity as any).framework === 'godot' ||
-            this.isGodotScene(entity) ||
-            this.isGodotNode(entity) ||
-            this.isGodotScript(entity) ||
-            this.isGodotAutoload(entity)
+          const godotFrameworkEntities = parseResult.frameworkEntities.filter(
+            entity =>
+              (entity as any).framework === 'godot' ||
+              this.isGodotScene(entity) ||
+              this.isGodotNode(entity) ||
+              this.isGodotScript(entity) ||
+              this.isGodotAutoload(entity)
           );
           godotEntities.push(...godotFrameworkEntities);
         }
@@ -1333,7 +1400,7 @@ export class GraphBuilder {
       this.logger.info('Building Godot framework relationships', {
         repositoryId,
         totalGodotEntities: godotEntities.length,
-        entityTypes: [...new Set(godotEntities.map(e => e.type))]
+        entityTypes: [...new Set(godotEntities.map(e => e.type))],
       });
 
       // Use the GodotRelationshipBuilder to create relationships
@@ -1345,37 +1412,43 @@ export class GraphBuilder {
       this.logger.info('Godot framework relationships built successfully', {
         repositoryId,
         relationshipsCreated: relationships.length,
-        relationshipTypes: [...new Set(relationships.map(r => r.relationship_type))]
+        relationshipTypes: [...new Set(relationships.map(r => r.relationship_type))],
       });
-
     } catch (error) {
       this.logger.error('Failed to build Godot relationships', {
         repositoryId,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       // Don't throw - relationship building is optional for overall analysis success
     }
   }
 
   // Type guards for framework entities
-  private isRouteEntity(entity: any): entity is NextJSRoute | ExpressRoute | FastifyRoute | VueRoute {
-    return entity.type === 'route' ||
-           entity.type === 'nextjs-page-route' ||
-           entity.type === 'nextjs-api-route' ||
-           entity.type === 'express-route' ||
-           entity.type === 'fastify-route' ||
-           'path' in entity;
+  private isRouteEntity(
+    entity: any
+  ): entity is NextJSRoute | ExpressRoute | FastifyRoute | VueRoute {
+    return (
+      entity.type === 'route' ||
+      entity.type === 'nextjs-page-route' ||
+      entity.type === 'nextjs-api-route' ||
+      entity.type === 'express-route' ||
+      entity.type === 'fastify-route' ||
+      'path' in entity
+    );
   }
 
   private isVueComponent(entity: any): entity is VueComponent {
     // Vue components are identified by type 'component' and being in a .vue file
-    return entity.type === 'component' &&
-           entity.filePath &&
-           entity.filePath.endsWith('.vue');
+    return entity.type === 'component' && entity.filePath && entity.filePath.endsWith('.vue');
   }
 
   private isReactComponent(entity: any): entity is ReactComponent {
-    return entity.type === 'component' && 'componentType' in entity && 'hooks' in entity && 'jsxDependencies' in entity;
+    return (
+      entity.type === 'component' &&
+      'componentType' in entity &&
+      'hooks' in entity &&
+      'jsxDependencies' in entity
+    );
   }
 
   private isVueComposable(entity: any): entity is VueComposable {
@@ -1477,7 +1550,11 @@ export class GraphBuilder {
     return map;
   }
 
-  private createDependenciesMap(symbols: Symbol[], parseResults: Array<ParseResult & { filePath: string }>, dbFiles: File[]) {
+  private createDependenciesMap(
+    symbols: Symbol[],
+    parseResults: Array<ParseResult & { filePath: string }>,
+    dbFiles: File[]
+  ) {
     const map = new Map();
 
     // Create a file-to-symbols map for efficient lookup
@@ -1504,8 +1581,10 @@ export class GraphBuilder {
       const filePath = parseResult.filePath;
       const fileSymbols = fileToSymbolsMap.get(filePath) || [];
 
-      const dependencies = parseResult.dependencies
-        .filter(d => d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== '');
+      const dependencies = parseResult.dependencies.filter(
+        d =>
+          d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== ''
+      );
 
       for (const dependency of dependencies) {
         // Extract the method/function name from qualified names (e.g., "Class.Method" -> "Method")
@@ -1527,14 +1606,18 @@ export class GraphBuilder {
         const containingSymbol = fileSymbols.find(symbol => {
           // Direct match (for non-qualified names)
           if (symbol.name === dependency.from_symbol) {
-            return dependency.line_number >= symbol.start_line &&
-                   dependency.line_number <= symbol.end_line;
+            return (
+              dependency.line_number >= symbol.start_line &&
+              dependency.line_number <= symbol.end_line
+            );
           }
 
           // Qualified name match (for C# and similar languages)
           if (symbol.name === fromMethodName) {
-            return dependency.line_number >= symbol.start_line &&
-                   dependency.line_number <= symbol.end_line;
+            return (
+              dependency.line_number >= symbol.start_line &&
+              dependency.line_number <= symbol.end_line
+            );
           }
 
           return false;
@@ -1553,8 +1636,8 @@ export class GraphBuilder {
             filePath: filePath,
             availableSymbols: fileSymbols.map(s => ({
               name: s.name,
-              lines: `${s.start_line}-${s.end_line}`
-            }))
+              lines: `${s.start_line}-${s.end_line}`,
+            })),
           });
         }
       }
@@ -1564,7 +1647,16 @@ export class GraphBuilder {
   }
 
   private shouldSkipDirectory(dirName: string, options: BuildOptions): boolean {
-    const skipDirs = ['node_modules', '.git', '.svn', '.hg', 'dist', 'build', 'coverage', '.nyc_output'];
+    const skipDirs = [
+      'node_modules',
+      '.git',
+      '.svn',
+      '.hg',
+      'dist',
+      'build',
+      'coverage',
+      '.nyc_output',
+    ];
 
     if (skipDirs.includes(dirName)) {
       if (dirName === 'node_modules' && options.includeNodeModules) {
@@ -1576,27 +1668,48 @@ export class GraphBuilder {
     return dirName.startsWith('.');
   }
 
-  private shouldIncludeFile(filePath: string, relativePath: string, options: BuildOptions): boolean {
+  private shouldIncludeFile(
+    filePath: string,
+    relativePath: string,
+    options: BuildOptions
+  ): boolean {
     const ext = path.extname(filePath);
 
     // Use provided extensions if specified, otherwise fall back to defaults
-    const allowedExtensions = options.fileExtensions || ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php', '.cs'];
+    const allowedExtensions = options.fileExtensions || [
+      '.js',
+      '.jsx',
+      '.ts',
+      '.tsx',
+      '.mjs',
+      '.cjs',
+      '.vue',
+      '.php',
+      '.cs',
+    ];
 
     this.logger.info('Checking file inclusion', {
       filePath,
       ext,
       allowedExtensions,
       includeTestFiles: options.includeTestFiles,
-      isTestFile: this.isTestFile(relativePath)
+      isTestFile: this.isTestFile(relativePath),
     });
 
     if (!allowedExtensions.includes(ext)) {
-      this.logger.info('File excluded: extension not allowed', { filePath, ext, allowedExtensions });
+      this.logger.info('File excluded: extension not allowed', {
+        filePath,
+        ext,
+        allowedExtensions,
+      });
       return false;
     }
 
     if (!options.includeTestFiles && this.isTestFile(relativePath)) {
-      this.logger.info('File excluded: test file and includeTestFiles is false', { filePath, relativePath });
+      this.logger.info('File excluded: test file and includeTestFiles is false', {
+        filePath,
+        relativePath,
+      });
       return false;
     }
 
@@ -1608,10 +1721,12 @@ export class GraphBuilder {
     const fileName = path.basename(relativePath).toLowerCase();
 
     // Check filename patterns first
-    if (fileName.includes('.test.') ||
-        fileName.includes('.spec.') ||
-        fileName.endsWith('.test') ||
-        fileName.endsWith('.spec')) {
+    if (
+      fileName.includes('.test.') ||
+      fileName.includes('.spec.') ||
+      fileName.endsWith('.test') ||
+      fileName.endsWith('.spec')
+    ) {
       return true;
     }
 
@@ -1620,23 +1735,26 @@ export class GraphBuilder {
     const pathSegments = normalizedPath.split('/');
 
     // Look for test directories in the project structure
-    return pathSegments.some(segment =>
-      segment === '__tests__' ||
-      segment === 'test' ||
-      segment === 'tests' ||
-      segment === 'spec' ||
-      segment === 'specs'
+    return pathSegments.some(
+      segment =>
+        segment === '__tests__' ||
+        segment === 'test' ||
+        segment === 'tests' ||
+        segment === 'spec' ||
+        segment === 'specs'
     );
   }
 
   private isGeneratedFile(filePath: string): boolean {
     const fileName = path.basename(filePath).toLowerCase();
-    return fileName.includes('.generated.') ||
-           fileName.includes('.gen.') ||
-           filePath.includes('/generated/') ||
-           filePath.includes('/.next/') ||
-           filePath.includes('/dist/') ||
-           filePath.includes('/build/');
+    return (
+      fileName.includes('.generated.') ||
+      fileName.includes('.gen.') ||
+      filePath.includes('/generated/') ||
+      filePath.includes('/.next/') ||
+      filePath.includes('/dist/') ||
+      filePath.includes('/build/')
+    );
   }
 
   private detectLanguageFromPath(filePath: string): string {
@@ -1693,7 +1811,6 @@ export class GraphBuilder {
       if (deps.nuxt) frameworks.push('nuxt');
       if (deps.express) frameworks.push('express');
       if (deps.fastify) frameworks.push('fastify');
-
     } catch {
       // Ignore errors
     }
@@ -1708,7 +1825,6 @@ export class GraphBuilder {
       if (deps['laravel/framework']) frameworks.push('laravel');
       if (deps['symfony/framework-bundle']) frameworks.push('symfony');
       if (deps['codeigniter4/framework']) frameworks.push('codeigniter');
-
     } catch {
       // Ignore errors - composer.json might not exist for non-PHP projects
     }
@@ -1720,7 +1836,7 @@ export class GraphBuilder {
     try {
       const hash = execSync('git rev-parse HEAD', {
         cwd: repositoryPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       }).trim();
       return hash;
     } catch {
@@ -1773,14 +1889,14 @@ export class GraphBuilder {
       case 'reject':
         this.logger.warn('File rejected due to size policy', {
           path: file.path,
-          size: content.length
+          size: content.length,
         });
         return null;
 
       case 'skip':
         this.logger.info('File skipped due to size policy', {
           path: file.path,
-          size: content.length
+          size: content.length,
         });
         return null;
 
@@ -1792,7 +1908,7 @@ export class GraphBuilder {
           enableChunking: true,
           enableEncodingRecovery: true,
           chunkSize: fileSizePolicy.chunkingThreshold,
-          chunkOverlapLines: options.chunkOverlapLines || 100
+          chunkOverlapLines: options.chunkOverlapLines || 100,
         };
         return await parser.parseFile(file.path, content, parseOptions);
 
@@ -1800,7 +1916,7 @@ export class GraphBuilder {
         // This case should no longer occur since truncation is replaced with chunking
         this.logger.warn('Truncate action requested but using chunking instead', {
           path: file.path,
-          size: content.length
+          size: content.length,
         });
         // Fall through to chunked parsing
         const fallbackParseOptions = {
@@ -1809,16 +1925,16 @@ export class GraphBuilder {
           enableChunking: true,
           enableEncodingRecovery: true,
           chunkSize: fileSizePolicy.truncationFallback,
-          chunkOverlapLines: options.chunkOverlapLines || 100
+          chunkOverlapLines: options.chunkOverlapLines || 100,
         };
         return await parser.parseFile(file.path, content, fallbackParseOptions);
 
       case 'warn':
         this.logger.warn('Processing large file', {
           path: file.path,
-          size: content.length
+          size: content.length,
         });
-        // Fall through to normal processing
+      // Fall through to normal processing
 
       case 'process':
       default:
@@ -1828,7 +1944,7 @@ export class GraphBuilder {
           includeTestFiles: options.includeTestFiles,
           enableChunking: true,
           enableEncodingRecovery: true,
-          chunkOverlapLines: options.chunkOverlapLines || 100
+          chunkOverlapLines: options.chunkOverlapLines || 100,
         });
     }
   }
@@ -1851,14 +1967,14 @@ export class GraphBuilder {
       case 'reject':
         this.logger.warn('File rejected due to size policy', {
           path: file.path,
-          size: content.length
+          size: content.length,
         });
         return null;
 
       case 'skip':
         this.logger.info('File skipped due to size policy', {
           path: file.path,
-          size: content.length
+          size: content.length,
         });
         return null;
 
@@ -1874,7 +1990,7 @@ export class GraphBuilder {
           enableChunking: action === 'chunk',
           enableEncodingRecovery: true,
           chunkSize: action === 'chunk' ? fileSizePolicy.chunkingThreshold : undefined,
-          chunkOverlapLines: options.chunkOverlapLines || 100
+          chunkOverlapLines: options.chunkOverlapLines || 100,
         };
 
         const multiResult = await multiParser.parseFile(content, file.path, parseOptions);
@@ -1887,7 +2003,7 @@ export class GraphBuilder {
           exports: multiResult.exports,
           errors: multiResult.errors,
           frameworkEntities: multiResult.frameworkEntities || [],
-          success: multiResult.errors.length === 0
+          success: multiResult.errors.length === 0,
         };
     }
   }
@@ -1904,7 +2020,17 @@ export class GraphBuilder {
       includeTestFiles: options.includeTestFiles ?? true,
       includeNodeModules: options.includeNodeModules ?? false,
       maxFiles: options.maxFiles ?? 10000,
-      fileExtensions: options.fileExtensions ?? ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.php', '.cs'],
+      fileExtensions: options.fileExtensions ?? [
+        '.js',
+        '.jsx',
+        '.ts',
+        '.tsx',
+        '.mjs',
+        '.cjs',
+        '.vue',
+        '.php',
+        '.cs',
+      ],
 
       fileSizePolicy: options.fileSizePolicy || this.createDefaultFileSizePolicy(options),
       chunkOverlapLines: options.chunkOverlapLines ?? 100,
@@ -1916,7 +2042,7 @@ export class GraphBuilder {
       // Phase 5 - Cross-stack analysis options
       enableCrossStackAnalysis: options.enableCrossStackAnalysis ?? false,
       detectFrameworks: options.detectFrameworks ?? false,
-      verbose: options.verbose ?? false
+      verbose: options.verbose ?? false,
     };
   }
 
@@ -1962,15 +2088,15 @@ export class GraphBuilder {
         // Check if this is likely an external call
         // For calls: contains :: for static methods (User::all, User::create)
         // For imports: Laravel facades and framework calls
-        const isExternalCall = dependency.to_symbol.includes('::') ||
-                               dependency.dependency_type === 'imports';
+        const isExternalCall =
+          dependency.to_symbol.includes('::') || dependency.dependency_type === 'imports';
 
         if (isExternalCall) {
           this.logger.debug('Creating file dependency for external call', {
             from: dependency.from_symbol,
             to: dependency.to_symbol,
             sourceFile: parseResult.filePath,
-            line: dependency.line_number
+            line: dependency.line_number,
           });
 
           // Create a file dependency representing this external call
@@ -1979,14 +2105,14 @@ export class GraphBuilder {
             from_file_id: sourceFileId,
             to_file_id: sourceFileId, // External calls don't have a target file in our codebase
             dependency_type: dependency.dependency_type,
-            line_number: dependency.line_number
+            line_number: dependency.line_number,
           });
         }
       }
     }
 
     this.logger.info('Created external call file dependencies', {
-      count: fileDependencies.length
+      count: fileDependencies.length,
     });
 
     return fileDependencies;
@@ -2014,18 +2140,19 @@ export class GraphBuilder {
       // Process imports to identify external packages
       for (const importInfo of parseResult.imports) {
         // Check if this is an external import (not relative/absolute path to local file)
-        const isExternalImport = !importInfo.source.startsWith('./') &&
-                                !importInfo.source.startsWith('../') &&
-                                !importInfo.source.startsWith('/') &&
-                                !importInfo.source.startsWith('src/') &&
-                                !importInfo.source.startsWith('@/');
+        const isExternalImport =
+          !importInfo.source.startsWith('./') &&
+          !importInfo.source.startsWith('../') &&
+          !importInfo.source.startsWith('/') &&
+          !importInfo.source.startsWith('src/') &&
+          !importInfo.source.startsWith('@/');
 
         if (isExternalImport) {
           this.logger.debug('Creating file dependency for external import', {
             source: importInfo.source,
             importedNames: importInfo.imported_names,
             sourceFile: parseResult.filePath,
-            line: importInfo.line_number
+            line: importInfo.line_number,
           });
 
           // Create a file dependency representing this external import
@@ -2035,14 +2162,14 @@ export class GraphBuilder {
             from_file_id: sourceFileId,
             to_file_id: sourceFileId, // Self-reference to indicate external import
             dependency_type: DependencyType.IMPORTS,
-            line_number: importInfo.line_number || 1
+            line_number: importInfo.line_number || 1,
           });
         }
       }
     }
 
     this.logger.info('Created external import file dependencies', {
-      count: fileDependencies.length
+      count: fileDependencies.length,
     });
 
     return fileDependencies;
@@ -2077,7 +2204,7 @@ export class GraphBuilder {
     if (symbolDependencies.length > 0) {
       this.logger.debug('Sample symbol dependency structure', {
         firstDependency: symbolDependencies[0],
-        dependencyKeys: Object.keys(symbolDependencies[0] || {})
+        dependencyKeys: Object.keys(symbolDependencies[0] || {}),
       });
     }
 
@@ -2090,9 +2217,10 @@ export class GraphBuilder {
       if (fromFileId && toFileId && fromFileId !== toFileId) {
         // Check if this file dependency already exists in our list
         const existingDep = fileDependencies.find(
-          fd => fd.from_file_id === fromFileId &&
-                fd.to_file_id === toFileId &&
-                fd.dependency_type === symbolDep.dependency_type
+          fd =>
+            fd.from_file_id === fromFileId &&
+            fd.to_file_id === toFileId &&
+            fd.dependency_type === symbolDep.dependency_type
         );
 
         if (!existingDep) {
@@ -2100,7 +2228,7 @@ export class GraphBuilder {
             from_file_id: fromFileId,
             to_file_id: toFileId,
             dependency_type: symbolDep.dependency_type,
-            line_number: symbolDep.line_number
+            line_number: symbolDep.line_number,
           });
         }
       }
@@ -2108,7 +2236,7 @@ export class GraphBuilder {
 
     this.logger.debug('Created cross-file dependencies from symbol dependencies', {
       symbolDependencies: symbolDependencies.length,
-      crossFileFileDependencies: fileDependencies.length
+      crossFileFileDependencies: fileDependencies.length,
     });
 
     return fileDependencies;

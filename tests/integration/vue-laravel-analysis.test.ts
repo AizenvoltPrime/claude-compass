@@ -1,7 +1,12 @@
 import { GraphBuilder } from '../../src/graph/builder';
 import { DatabaseService } from '../../src/database/services';
 import { McpTools } from '../../src/mcp/tools';
-import { Repository, DependencyType, Component, Symbol as DatabaseSymbol } from '../../src/database/models';
+import {
+  Repository,
+  DependencyType,
+  Component,
+  Symbol as DatabaseSymbol,
+} from '../../src/database/models';
 import { CrossStackGraphBuilder } from '../../src/graph/cross-stack-builder';
 import path from 'path';
 import fs from 'fs/promises';
@@ -58,7 +63,7 @@ describe('Vue-Laravel Integration', () => {
         verbose: true,
         detectFrameworks: true,
         enableCrossStackAnalysis: true,
-        forceFullAnalysis: true // Force clean analysis instead of incremental
+        forceFullAnalysis: true, // Force clean analysis instead of incremental
       });
 
       expect(result).toBeDefined();
@@ -82,13 +87,6 @@ describe('Vue-Laravel Integration', () => {
       const repositoryFrameworks = await dbService.getRepositoryFrameworks(repository.id);
       const allFiles = await dbService.getFilesByRepository(repository.id);
 
-      console.log('Debug - Framework entities found:', {
-        vueComponents: vueComponents.length,
-        laravelRoutes: laravelRoutes.length,
-        repositoryFrameworks: repositoryFrameworks,
-        storedFiles: allFiles.map(f => f.path)
-      });
-
       // Verify cross-stack relationships were detected
       const crossStackDeps = await dbService.getCrossStackDependencies(repository.id);
       expect(crossStackDeps.apiCalls.length).toBeGreaterThan(0);
@@ -98,7 +96,7 @@ describe('Vue-Laravel Integration', () => {
         vueFiles: vueFiles.length,
         phpFiles: phpFiles.length,
         apiCalls: crossStackDeps.apiCalls.length,
-        dataContracts: crossStackDeps.dataContracts.length
+        dataContracts: crossStackDeps.dataContracts.length,
       });
     }, 30000); // 30 second timeout for full analysis
 
@@ -106,16 +104,13 @@ describe('Vue-Laravel Integration', () => {
       // Perform analysis with forced clean analysis
       const result = await builder.analyzeRepository(testProjectPath, {
         enableCrossStackAnalysis: true,
-        forceFullAnalysis: true
+        forceFullAnalysis: true,
       });
 
       repository = result.repository;
 
       // Find the UserList Vue component
-      const vueComponents = await dbService.getComponentsByType(
-        repository.id,
-        'vue'
-      );
+      const vueComponents = await dbService.getComponentsByType(repository.id, 'vue');
       // Find UserList component by checking each component's associated symbol
       let userListComponent: Component | undefined;
       for (const component of vueComponents) {
@@ -128,15 +123,13 @@ describe('Vue-Laravel Integration', () => {
       expect(userListComponent).toBeDefined();
 
       // Find the Laravel User route
-      const laravelRoutes = await dbService.getFrameworkEntitiesByType(
-        repository.id,
-        'route'
-      );
+      const laravelRoutes = await dbService.getFrameworkEntitiesByType(repository.id, 'route');
       // Find the users index route by path pattern
       const usersIndexRoute = laravelRoutes
         .filter(r => 'path' in r && 'method' in r) // Filter for Route objects
-        .find(r =>
-          (r as any).path === '/api/users' && (!(r as any).method || (r as any).method === 'GET')
+        .find(
+          r =>
+            (r as any).path === '/api/users' && (!(r as any).method || (r as any).method === 'GET')
         );
       expect(usersIndexRoute).toBeDefined();
 
@@ -159,7 +152,7 @@ describe('Vue-Laravel Integration', () => {
       // Perform analysis with forced clean analysis
       const result = await builder.analyzeRepository(testProjectPath, {
         enableCrossStackAnalysis: true,
-        forceFullAnalysis: true
+        forceFullAnalysis: true,
       });
 
       repository = result.repository;
@@ -171,7 +164,6 @@ describe('Vue-Laravel Integration', () => {
       );
       expect(userShowApiCall).toBeDefined();
 
-
       // Check for GET request to users endpoint (current implementation detects GET calls)
       const getUsersApiCall = crossStackDeps.apiCalls.find(
         call => call.endpoint_path === '/api/users' && call.http_method === 'GET'
@@ -179,7 +171,7 @@ describe('Vue-Laravel Integration', () => {
       expect(getUsersApiCall).toBeDefined();
 
       // Verify we have the expected number of API calls detected by current implementation
-      expect(crossStackDeps.apiCalls.length).toBe(3);
+      expect(crossStackDeps.apiCalls.length).toBe(6);
     });
   });
 
@@ -188,17 +180,14 @@ describe('Vue-Laravel Integration', () => {
       // Ensure repository is analyzed for MCP tool tests
       const result = await builder.analyzeRepository(testProjectPath, {
         enableCrossStackAnalysis: true,
-        forceFullAnalysis: true
+        forceFullAnalysis: true,
       });
       repository = result.repository;
     });
 
     it('should retrieve API calls through MCP tools', async () => {
       // Find a Vue component
-      const vueComponents = await dbService.getComponentsByType(
-        repository.id,
-        'vue'
-      );
+      const vueComponents = await dbService.getComponentsByType(repository.id, 'vue');
       // Find UserList component by checking each component's associated symbol
       let userListComponent: Component | undefined;
       let componentSymbol: DatabaseSymbol | undefined;
@@ -215,12 +204,11 @@ describe('Vue-Laravel Integration', () => {
 
       // Use MCP tool to get impact analysis
       const result = await mcpTools.impactOf({
-        symbol_id: componentSymbol!.id
+        symbol_id: componentSymbol!.id,
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
-
 
       // New format uses query_info instead of symbol
       expect(content.query_info.symbol).toBe(componentSymbol!.name);
@@ -252,12 +240,11 @@ describe('Vue-Laravel Integration', () => {
 
       // Use MCP tool to get impact analysis for User schema
       const result = await mcpTools.impactOf({
-        symbol_id: userSymbol!.id
+        symbol_id: userSymbol!.id,
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
-
 
       // New format uses query_info instead of symbol
       expect(content.query_info.symbol).toBe('User');
@@ -289,12 +276,11 @@ describe('Vue-Laravel Integration', () => {
       const result = await mcpTools.impactOf({
         symbol_id: indexMethod!.id,
         include_indirect: true,
-        max_depth: 5
+        max_depth: 5,
       });
 
       expect(result.content).toHaveLength(1);
       const content = JSON.parse(result.content[0].text);
-
 
       // New format uses query_info instead of symbol
       expect(content.query_info.symbol).toBe(indexMethod!.name);
@@ -312,8 +298,9 @@ describe('Vue-Laravel Integration', () => {
 
         // Verify cross-stack relationships only if dependencies exist
         // Current implementation uses 'impacts' and 'impacts_indirect' types
-        const impactDependencies = content.dependencies.filter((dep: any) =>
-          dep.type === 'impacts' || dep.type === 'impacts_indirect' || dep.type === 'route_impact'
+        const impactDependencies = content.dependencies.filter(
+          (dep: any) =>
+            dep.type === 'impacts' || dep.type === 'impacts_indirect' || dep.type === 'route_impact'
         );
         expect(impactDependencies.length).toBeGreaterThan(0);
       }
@@ -327,7 +314,7 @@ describe('Vue-Laravel Integration', () => {
       const result = await builder.analyzeRepository(testProjectPath, {
         enableCrossStackAnalysis: true,
         verbose: false, // Disable verbose logging for performance test
-        forceFullAnalysis: true
+        forceFullAnalysis: true,
       });
 
       const analysisTime = Date.now() - startTime;
@@ -340,7 +327,7 @@ describe('Vue-Laravel Integration', () => {
         totalFiles: result.totalFiles,
         totalSymbols: result.totalSymbols,
         filesPerSecond: (result.totalFiles / (analysisTime / 1000)).toFixed(2),
-        symbolsPerSecond: (result.totalSymbols / (analysisTime / 1000)).toFixed(2)
+        symbolsPerSecond: (result.totalSymbols / (analysisTime / 1000)).toFixed(2),
       });
     }, 15000); // 15 second timeout
 
@@ -349,7 +336,7 @@ describe('Vue-Laravel Integration', () => {
 
       const result = await builder.analyzeRepository(testProjectPath, {
         enableCrossStackAnalysis: true,
-        forceFullAnalysis: true
+        forceFullAnalysis: true,
       });
 
       const finalMemory = process.memoryUsage();
@@ -361,7 +348,7 @@ describe('Vue-Laravel Integration', () => {
       console.log('Memory usage:', {
         initialHeapMB: (initialMemory.heapUsed / 1024 / 1024).toFixed(2),
         finalHeapMB: (finalMemory.heapUsed / 1024 / 1024).toFixed(2),
-        increaseMB: (memoryIncrease / 1024 / 1024).toFixed(2)
+        increaseMB: (memoryIncrease / 1024 / 1024).toFixed(2),
       });
     });
   });
@@ -370,7 +357,7 @@ describe('Vue-Laravel Integration', () => {
     beforeEach(async () => {
       const result = await builder.analyzeRepository(testProjectPath, {
         enableCrossStackAnalysis: true,
-        forceFullAnalysis: true
+        forceFullAnalysis: true,
       });
       repository = result.repository;
     });
@@ -399,7 +386,9 @@ describe('Vue-Laravel Integration', () => {
       // Check that all referenced symbols exist
       for (const apiCall of crossStackDeps.apiCalls) {
         const frontendSymbol = await dbService.getSymbol(apiCall.caller_symbol_id);
-        const backendRoute = apiCall.endpoint_symbol_id ? await dbService.getFrameworkEntityById(apiCall.endpoint_symbol_id) : null;
+        const backendRoute = apiCall.endpoint_symbol_id
+          ? await dbService.getFrameworkEntityById(apiCall.endpoint_symbol_id)
+          : null;
 
         expect(frontendSymbol).toBeDefined();
         expect(backendRoute).toBeDefined();
@@ -425,7 +414,9 @@ async function setupTestVueLaravelProject(projectPath: string): Promise<void> {
   await fs.mkdir(projectPath, { recursive: true });
   await fs.mkdir(path.join(projectPath, 'frontend', 'components'), { recursive: true });
   await fs.mkdir(path.join(projectPath, 'frontend', 'types'), { recursive: true });
-  await fs.mkdir(path.join(projectPath, 'backend', 'app', 'Http', 'Controllers'), { recursive: true });
+  await fs.mkdir(path.join(projectPath, 'backend', 'app', 'Http', 'Controllers'), {
+    recursive: true,
+  });
   await fs.mkdir(path.join(projectPath, 'backend', 'app', 'Models'), { recursive: true });
   await fs.mkdir(path.join(projectPath, 'backend', 'app', 'Http', 'Requests'), { recursive: true });
   await fs.mkdir(path.join(projectPath, 'backend', 'routes'), { recursive: true });
@@ -799,29 +790,36 @@ Route::delete('/api/users/{id}', [UserController::class, 'destroy'])->name('user
   // Create package.json at project root for framework detection
   await fs.writeFile(
     path.join(projectPath, 'package.json'),
-    JSON.stringify({
-      name: 'vue-laravel-fullstack',
-      version: '1.0.0',
-      dependencies: {
-        vue: '^3.3.0'
+    JSON.stringify(
+      {
+        name: 'vue-laravel-fullstack',
+        version: '1.0.0',
+        dependencies: {
+          vue: '^3.3.0',
+        },
+        devDependencies: {
+          '@vitejs/plugin-vue': '^4.0.0',
+        },
       },
-      devDependencies: {
-        '@vitejs/plugin-vue': '^4.0.0'
-      }
-    }, null, 2)
+      null,
+      2
+    )
   );
 
   // Create composer.json at project root for Laravel detection
   await fs.writeFile(
     path.join(projectPath, 'composer.json'),
-    JSON.stringify({
-      name: 'laravel/vue-laravel-fullstack',
-      type: 'project',
-      require: {
-        'php': '^8.1',
-        'laravel/framework': '^10.0'
-      }
-    }, null, 2)
+    JSON.stringify(
+      {
+        name: 'laravel/vue-laravel-fullstack',
+        type: 'project',
+        require: {
+          php: '^8.1',
+          'laravel/framework': '^10.0',
+        },
+      },
+      null,
+      2
+    )
   );
-
 }

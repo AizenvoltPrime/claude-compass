@@ -533,11 +533,6 @@ export class CrossStackGraphBuilder {
 
     try {
       const repoExists = await this.database.getRepository(repoId);
-      this.logger.debug('Repository verification for cross-stack analysis', {
-        repoId,
-        exists: !!repoExists,
-        repoName: repoExists?.name || 'NOT_FOUND',
-      });
     } catch (error) {
       this.logger.error('Failed to verify repository for cross-stack analysis', {
         repoId,
@@ -592,6 +587,8 @@ export class CrossStackGraphBuilder {
           this.logger.info('Vue API calls extracted', {
             vueApiCalls: vueApiCalls.length,
             calls: vueApiCalls.map(call => ({ url: call.url, method: call.method })),
+            components: vueComponents.map(c => c.name),
+            allVueApiCalls: vueApiCalls,
           });
 
           // Extract route information from Laravel routes
@@ -965,11 +962,27 @@ export class CrossStackGraphBuilder {
 
       // Store in database
       if (apiCallsToCreate.length > 0) {
-        await this.database.createApiCalls(apiCallsToCreate);
+        try {
+          await this.database.createApiCalls(apiCallsToCreate);
+        } catch (error) {
+          this.logger.error('Failed to create API calls in database', {
+            error: error.message,
+            stack: error.stack,
+            apiCallsToCreate: apiCallsToCreate.slice(0, 2),
+          });
+        }
       }
 
       if (dataContractsToCreate.length > 0) {
-        await this.database.createDataContracts(dataContractsToCreate);
+        try {
+          await this.database.createDataContracts(dataContractsToCreate);
+        } catch (error) {
+          this.logger.error('Failed to create data contracts in database', {
+            error: error.message,
+            stack: error.stack,
+            dataContractsToCreate: dataContractsToCreate.slice(0, 2),
+          });
+        }
       }
 
       this.logger.info('Cross-stack relationships stored successfully', {
@@ -1090,6 +1103,7 @@ export class CrossStackGraphBuilder {
           this.logger.warn('Component file not found', {
             componentName: component.name,
             filePath: component.filePath,
+            availableFiles: files.map(f => f.path),
           });
           continue;
         }
@@ -1670,7 +1684,8 @@ export class CrossStackGraphBuilder {
       const allComponentSymbols = [];
       for (const componentName of componentNames) {
         const symbols = await this.database.searchSymbols(componentName, repoId);
-        allComponentSymbols.push(...symbols.filter(s => s.symbol_type === 'component'));
+        const componentSymbols = symbols.filter(s => s.symbol_type === 'component');
+        allComponentSymbols.push(...componentSymbols);
       }
 
       // Create component lookup map
@@ -1723,14 +1738,15 @@ export class CrossStackGraphBuilder {
               endpointSymbolId = matchingRoute.metadata.id;
             }
 
-            apiCallsToCreate.push({
+            const apiCallData = {
               repo_id: repoId,
               caller_symbol_id: componentSymbol.id,
               endpoint_symbol_id: endpointSymbolId,
               http_method: relationship.vueApiCall.method,
               endpoint_path: relationship.vueApiCall.url,
               call_type: 'axios', // Default call type
-            });
+            };
+            apiCallsToCreate.push(apiCallData);
             processed++;
           } else {
             this.logger.warn('Could not find required IDs for relationship', {

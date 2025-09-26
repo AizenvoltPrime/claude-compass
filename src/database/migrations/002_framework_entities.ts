@@ -97,6 +97,7 @@ export async function up(knex: Knex): Promise<void> {
     table.text('endpoint_path');
     table.integer('line_number');
     table.text('raw_call');
+    table.string('call_type');
     table.jsonb('metadata').defaultTo('{}');
     table.timestamps(true, true);
 
@@ -130,6 +131,7 @@ export async function up(knex: Knex): Promise<void> {
       .inTable('symbols')
       .onDelete('CASCADE');
     table.string('name').notNullable();
+    table.jsonb('schema_definition'); // Schema compatibility information
     table.boolean('drift_detected').defaultTo(false);
     table.timestamps(true, true);
 
@@ -268,7 +270,11 @@ export async function up(knex: Knex): Promise<void> {
     table.jsonb('emits').defaultTo('[]');
     table.jsonb('slots').defaultTo('[]');
     table.jsonb('hooks').defaultTo('[]');
-    table.integer('parent_component_id').references('id').inTable('components').onDelete('SET NULL');
+    table
+      .integer('parent_component_id')
+      .references('id')
+      .inTable('components')
+      .onDelete('SET NULL');
     table.jsonb('template_dependencies').defaultTo('[]');
     table.timestamps(true, true);
 
