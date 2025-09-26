@@ -100,9 +100,9 @@ export async function up(knex: Knex): Promise<void> {
     table.string('dependency_type').notNullable();
     table.integer('line_number');
     table.text('parameter_context');
-    table.string('call_instance_id');
+    table.text('call_instance_id');
     table.jsonb('parameter_types');
-    table.string('calling_object');
+    table.text('calling_object');
     table.text('qualified_context');
     table.text('raw_text');
     table.jsonb('metadata').defaultTo('{}');

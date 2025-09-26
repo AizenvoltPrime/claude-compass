@@ -25,6 +25,7 @@ export class FrameworkSymbolRegistry {
   private vueSymbols: FrameworkSymbol[] = [];
   private jsBuiltinSymbols: FrameworkSymbol[] = [];
   private domSymbols: FrameworkSymbol[] = [];
+  private dotnetSymbols: FrameworkSymbol[] = [];
 
   constructor() {
     this.initializePHPUnitSymbols();
@@ -33,6 +34,7 @@ export class FrameworkSymbolRegistry {
     this.initializeVueSymbols();
     this.initializeJavaScriptBuiltins();
     this.initializeDOMSymbols();
+    this.initializeDotNetFrameworkSymbols();
     this.buildIndex();
   }
 
@@ -631,6 +633,105 @@ export class FrameworkSymbolRegistry {
   }
 
   /**
+   * Initialize .NET Framework symbols
+   */
+  private initializeDotNetFrameworkSymbols(): void {
+    // System.Threading namespace
+    const threadingTypes = [
+      'SemaphoreSlim', 'ReaderWriterLockSlim', 'Mutex', 'AutoResetEvent', 'ManualResetEvent',
+      'CountdownEvent', 'Barrier', 'Thread', 'Task', 'CancellationToken', 'CancellationTokenSource'
+    ];
+
+    for (const type of threadingTypes) {
+      this.dotnetSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'System.Threading',
+        signature: `class ${type}`,
+        description: `System.Threading.${type}`
+      });
+
+      // Add common methods for threading types
+      const commonMethods = ['WaitAsync', 'Release', 'EnterWriteLock', 'ExitWriteLock', 'EnterReadLock', 'ExitReadLock', 'Dispose'];
+      for (const method of commonMethods) {
+        this.dotnetSymbols.push({
+          name: `${type}.${method}`,
+          symbol_type: SymbolType.METHOD,
+          visibility: Visibility.PUBLIC,
+          framework: 'System.Threading',
+          signature: `${method}()`,
+          description: `${type}.${method} method`
+        });
+      }
+    }
+
+    // System namespace common types
+    const systemTypes = [
+      'Exception', 'ArgumentException', 'InvalidOperationException', 'NotSupportedException',
+      'IDisposable', 'IAsyncDisposable', 'DateTime', 'TimeSpan', 'Guid', 'Uri'
+    ];
+
+    for (const type of systemTypes) {
+      this.dotnetSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'System',
+        signature: `class ${type}`,
+        description: `System.${type}`
+      });
+    }
+
+    // System.Collections.Generic
+    const collectionTypes = ['List', 'Dictionary', 'HashSet', 'Queue', 'Stack', 'IEnumerable', 'ICollection'];
+    for (const type of collectionTypes) {
+      this.dotnetSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'System.Collections.Generic',
+        signature: `class ${type}<T>`,
+        description: `System.Collections.Generic.${type}`
+      });
+    }
+
+    // Common method names that might appear
+    const frameworkMethods = [
+      'WaitAsync', 'Release', 'EnterWriteLock', 'ExitWriteLock', 'EnterReadLock', 'ExitReadLock',
+      'Dispose', 'ToString', 'GetHashCode', 'Equals', 'GetType', 'nameof'
+    ];
+
+    for (const method of frameworkMethods) {
+      this.dotnetSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'System',
+        signature: `${method}()`,
+        description: `Framework method ${method}`
+      });
+    }
+
+    // Common enum values that might appear in code (like ServiceState)
+    const commonEnumValues = [
+      'Idle', 'StartingTurn', 'ExecutingPhase', 'TransitioningPhase', 'Stopped', 'Running', 'Paused',
+      'Success', 'Failed', 'Pending', 'Completed', 'InProgress'
+    ];
+
+    for (const enumValue of commonEnumValues) {
+      this.dotnetSymbols.push({
+        name: enumValue,
+        symbol_type: SymbolType.VARIABLE,
+        visibility: Visibility.PUBLIC,
+        framework: 'System',
+        signature: enumValue,
+        description: `Common enum value ${enumValue}`
+      });
+    }
+  }
+
+  /**
    * Build searchable index of all framework symbols
    */
   private buildIndex(): void {
@@ -675,6 +776,13 @@ export class FrameworkSymbolRegistry {
       existing.push(symbol);
       this.symbols.set(symbol.name, existing);
     }
+
+    // Index .NET symbols
+    for (const symbol of this.dotnetSymbols) {
+      const existing = this.symbols.get(symbol.name) || [];
+      existing.push(symbol);
+      this.symbols.set(symbol.name, existing);
+    }
   }
 
   /**
@@ -699,6 +807,16 @@ export class FrameworkSymbolRegistry {
       const vueSymbol = candidates.find(s => s.framework === 'Vue');
       if (vueSymbol) {
         return vueSymbol;
+      }
+    }
+
+    // For C# files, prioritize .NET symbols
+    if (this.isCSharpFile(filePath)) {
+      const dotnetSymbol = candidates.find(s =>
+        s.framework.startsWith('System') || s.framework === '.NET'
+      );
+      if (dotnetSymbol) {
+        return dotnetSymbol;
       }
     }
 
@@ -788,6 +906,14 @@ export class FrameworkSymbolRegistry {
   }
 
   /**
+   * Check if file is a C# file
+   */
+  private isCSharpFile(filePath?: string): boolean {
+    if (!filePath) return false;
+    return filePath.endsWith('.cs');
+  }
+
+  /**
    * Check if contexts are compatible (e.g., validation context can access message_bag methods)
    */
   private isCompatibleContext(requestedContext: string, symbolContext?: string): boolean {
@@ -818,6 +944,10 @@ export class FrameworkSymbolRegistry {
         return this.jsBuiltinSymbols;
       case 'dom':
         return this.domSymbols;
+      case 'dotnet':
+      case '.net':
+      case 'system':
+        return this.dotnetSymbols;
       default:
         return [];
     }
