@@ -288,7 +288,10 @@ interface MCPTools {
   get_file(file_id: string): FileDetails;
 
   // Dependency analysis with transitive support
-  who_calls(symbol_id: string, include_indirect?: boolean): {
+  who_calls(
+    symbol_id: string,
+    include_indirect?: boolean
+  ): {
     callers: {
       symbol_id: string;
       name: string;
@@ -299,7 +302,10 @@ interface MCPTools {
     }[];
   };
 
-  list_dependencies(symbol_id: string, include_indirect?: boolean): {
+  list_dependencies(
+    symbol_id: string,
+    include_indirect?: boolean
+  ): {
     dependencies: {
       symbol_id: string;
       name: string;
@@ -578,6 +584,7 @@ interface MCPTools {
 **Status**: ✅ **COMPLETED** - Infrastructure 100% ready, no repository data to populate
 
 **✅ Infrastructure Complete**:
+
 - Complete pgvector extension with 384-dimension embeddings schema
 - Hybrid search ranking functions implemented (`calculate_hybrid_rank()`)
 - Full-text search with automatic triggers configured
@@ -594,6 +601,7 @@ interface MCPTools {
 **Status**: ✅ **COMPLETED** - All legacy CLI commands removed
 
 **✅ Implementation Complete**:
+
 - Removed 4 legacy CLI commands: `cross-stack-impact`, `api-calls`, `data-contracts`, `cross-stack-stats`
 - CLI now shows only 7 core commands: analyze, clear, mcp-server, migrate, migrate:rollback, search, stats
 - MCP tools properly consolidated to 6 core tools with full functionality preservation
@@ -727,6 +735,7 @@ async impactOf(change: {
 - ✅ **Documentation**: Update MCP tool definitions and examples
 
 **Architecture Benefits Achieved:**
+
 - **Simplicity**: 6 focused tools vs 12 overlapping tools
 - **Performance**: Hybrid search with ranking vs basic lexical only
 - **Completeness**: Comprehensive impact analysis vs limited cross-stack only
@@ -1492,7 +1501,6 @@ Without structure (graphs, edges, summaries) and proper distribution (MCP), prom
 ### Developer Experience
 
 - Time to understand new codebase: < 2 hours (vs 2 days)
-- Developer confidence in refactoring: 90% of developers feel secure making changes
 - Bug introduction rate: 50% reduction in breaking changes
 - Documentation freshness: 90% of specs match implementation
 
@@ -1607,6 +1615,7 @@ npm run build
 6. **`impact_of`** ✅ - Comprehensive blast radius tool with full framework support
 
 **Removed Tools (Functionality absorbed into core tools):**
+
 - ✅ `get_laravel_routes`, `get_eloquent_models`, `get_laravel_controllers` → **Absorbed into enhanced `search_code`**
 - ✅ `search_laravel_entities` → **Absorbed into enhanced `search_code`**
 - ✅ `get_api_calls`, `get_data_contracts` → **Absorbed into comprehensive `impact_of`**
@@ -1638,8 +1647,7 @@ npm run build
 1. **`search_code`** - ✅ **Enhanced with hybrid vector+lexical search** with PostgreSQL full-text search and ranking
 2. **`impact_of`** - ✅ **Comprehensive blast radius tool** fully implemented replacing `get_cross_stack_impact`
 
-**Future Additions:**
-3. Additional tools as requirements emerge
+**Future Additions:** 3. Additional tools as requirements emerge
 
 ### Completed Phases (Verified)
 
@@ -1721,24 +1729,27 @@ npm run build
 4. **Enterprise Features**: Multi-tenant support, security audit trails, configuration management
 
 **Files to Create/Modify**:
+
 - Add `/src/services/cache-service.ts`
 - Add `/src/services/monitoring-service.ts`
 - Add `/src/services/incremental-analyzer.ts`
 - Enhance error handling across all components
 
-
 ## Implementation Dependencies and Sequence
 
 ### Critical Path Analysis
+
 1. **Phase 6B** → **Phase 7** (vector search foundation for game development)
 2. **Phase 7** → **Phase 8** (C# support before production hardening)
 
 ### Resource Requirements
+
 - **Phase 6B**: 1 developer, 1-2 weeks
 - **Phase 7**: 2 developers, 6-8 weeks
 - **Phase 8**: 1-2 developers, 3-4 weeks
 
 ### Risk Assessment
+
 - **Low Risk**: Phase 6B (infrastructure complete)
 - **High Risk**: Phase 7 (new language, complex domain)
 - **Low Risk**: Phase 8 (enhancement of existing features)
@@ -1746,18 +1757,21 @@ npm run build
 ## Success Metrics
 
 ### Phase 6B Success Metrics
+
 - Embedding generation speed: <1s per 1000 symbols
 - Vector search accuracy: >90% relevant results
 - Hybrid search improvement: >20% over lexical-only
 - Memory usage: <2GB for 100k symbol repositories
 
 ### Phase 7 Success Metrics
+
 - C# parsing coverage: >95% of language constructs
 - Godot scene relationship accuracy: >90%
 - Game development workflow support: Complete scene-to-script mapping
 - Performance: Analysis time <10min for medium game projects
 
 ### Phase 8 Success Metrics
+
 - Performance improvement: >20% faster analysis times
 - Memory optimization: <2GB for large repositories
 - Enterprise features: Multi-tenant support functional
@@ -1766,13 +1780,16 @@ npm run build
 ## Updated Priority Order
 
 ### ✅ COMPLETED
+
 1. **Phase 6C**: Tool consolidation and enhanced search - ✅ **COMPLETED**
 2. **Phase 7**: C#/Godot game development support - ✅ **COMPLETED**
 
 ### Immediate Priority (Next 1-2 weeks)
+
 1. **Phase 6B**: Vector embedding population - infrastructure ready, minimal effort, high value
 
 ### Medium Priority (Next 3-4 months)
+
 2. **Phase 8**: Production hardening & performance
 
 ## Critical Finding

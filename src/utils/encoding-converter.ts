@@ -24,11 +24,11 @@ export interface EncodingDetectionResult {
  * BOM (Byte Order Mark) definitions for different encodings
  */
 const BOM_SIGNATURES = {
-  'utf-8': Buffer.from([0xEF, 0xBB, 0xBF]),
-  'utf-16be': Buffer.from([0xFE, 0xFF]),
-  'utf-16le': Buffer.from([0xFF, 0xFE]),
-  'utf-32be': Buffer.from([0x00, 0x00, 0xFE, 0xFF]),
-  'utf-32le': Buffer.from([0xFF, 0xFE, 0x00, 0x00])
+  'utf-8': Buffer.from([0xef, 0xbb, 0xbf]),
+  'utf-16be': Buffer.from([0xfe, 0xff]),
+  'utf-16le': Buffer.from([0xff, 0xfe]),
+  'utf-32be': Buffer.from([0x00, 0x00, 0xfe, 0xff]),
+  'utf-32le': Buffer.from([0xff, 0xfe, 0x00, 0x00]),
 } as const;
 
 /**
@@ -37,14 +37,17 @@ const BOM_SIGNATURES = {
 const ENCODING_PATTERNS = {
   'windows-1252': {
     // Common Windows-1252 characters that differ from ISO-8859-1
-    characteristics: [0x80, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8E, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9E, 0x9F],
-    name: 'Windows-1252'
+    characteristics: [
+      0x80, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8e, 0x91, 0x92,
+      0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9e, 0x9f,
+    ],
+    name: 'Windows-1252',
   },
   'iso-8859-1': {
     // ISO-8859-1 (Latin-1) characteristics
     characteristics: [],
-    name: 'ISO-8859-1'
-  }
+    name: 'ISO-8859-1',
+  },
 } as const;
 
 /**
@@ -67,7 +70,7 @@ export class EncodingConverter {
           hasIssues: false,
           hasBOM: bomResult.hasBOM,
           bomBytes: bomResult.bomBytes,
-          metadata: bomResult.metadata
+          metadata: bomResult.metadata,
         };
       }
 
@@ -82,7 +85,7 @@ export class EncodingConverter {
           detectedEncoding: 'utf-8',
           hasIssues: stats.replacementChars > 0,
           hasBOM: false,
-          metadata: stats
+          metadata: stats,
         };
       }
 
@@ -94,7 +97,7 @@ export class EncodingConverter {
           detectedEncoding: utf16Result.encoding,
           hasIssues: false,
           hasBOM: false,
-          metadata: stats
+          metadata: stats,
         };
       }
 
@@ -102,16 +105,15 @@ export class EncodingConverter {
       const extendedResult = this.detectExtendedASCII(buffer, stats);
 
       logger.debug('Encoding detection completed', {
-        detectedEncoding: extendedResult.detectedEncoding
+        detectedEncoding: extendedResult.detectedEncoding,
       });
 
       return {
         ...extendedResult,
         hasIssues: stats.replacementChars > 0 || stats.nullBytes > 0,
         hasBOM: false,
-        metadata: stats
+        metadata: stats,
       };
-
     } catch (error) {
       logger.error('Encoding detection failed', { error: (error as Error).message });
 
@@ -125,8 +127,8 @@ export class EncodingConverter {
           controlChars: 0,
           highBitChars: 0,
           averageByteValue: 0,
-          suspiciousPatterns: ['detection-failed']
-        }
+          suspiciousPatterns: ['detection-failed'],
+        },
       };
     }
   }
@@ -146,7 +148,7 @@ export class EncodingConverter {
         encoding = detection.detectedEncoding;
 
         logger.debug('Auto-detected encoding', {
-          encoding
+          encoding,
         });
       }
 
@@ -198,15 +200,14 @@ export class EncodingConverter {
       logger.debug('Conversion completed', {
         originalLength: buffer.length,
         resultLength: result.length,
-        encoding
+        encoding,
       });
 
       return result;
-
     } catch (error) {
       logger.error('Encoding conversion failed', {
         error: (error as Error).message,
-        sourceEncoding
+        sourceEncoding,
       });
 
       // Fallback: try to salvage what we can
@@ -219,7 +220,7 @@ export class EncodingConverter {
    */
   static removeBOM(content: string): string {
     // UTF-8 BOM as string
-    if (content.charCodeAt(0) === 0xFEFF) {
+    if (content.charCodeAt(0) === 0xfeff) {
       return content.slice(1);
     }
 
@@ -249,14 +250,14 @@ export class EncodingConverter {
           return {
             detectedEncoding: encoding,
             hasBOM: true,
-            bomBytes: bomSignature
+            bomBytes: bomSignature,
           };
         }
       }
     }
 
     return {
-      hasBOM: false
+      hasBOM: false,
     };
   }
 
@@ -295,7 +296,7 @@ export class EncodingConverter {
 
       if (byte === 0) {
         nullBytes++;
-      } else if (byte === 0xFD || byte === 0xFF) {
+      } else if (byte === 0xfd || byte === 0xff) {
         replacementChars++;
       } else if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) {
         controlChars++;
@@ -322,7 +323,7 @@ export class EncodingConverter {
       controlChars,
       highBitChars,
       averageByteValue: totalByteValue / sampleSize,
-      suspiciousPatterns
+      suspiciousPatterns,
     };
   }
 
@@ -353,26 +354,30 @@ export class EncodingConverter {
           // ASCII character
           validSequences++;
           i++;
-        } else if ((byte & 0xE0) === 0xC0) {
+        } else if ((byte & 0xe0) === 0xc0) {
           // 2-byte sequence
-          if (i + 1 < buffer.length && (buffer[i + 1] & 0xC0) === 0x80) {
+          if (i + 1 < buffer.length && (buffer[i + 1] & 0xc0) === 0x80) {
             validSequences++;
           }
           i += 2;
-        } else if ((byte & 0xF0) === 0xE0) {
+        } else if ((byte & 0xf0) === 0xe0) {
           // 3-byte sequence
-          if (i + 2 < buffer.length &&
-              (buffer[i + 1] & 0xC0) === 0x80 &&
-              (buffer[i + 2] & 0xC0) === 0x80) {
+          if (
+            i + 2 < buffer.length &&
+            (buffer[i + 1] & 0xc0) === 0x80 &&
+            (buffer[i + 2] & 0xc0) === 0x80
+          ) {
             validSequences++;
           }
           i += 3;
-        } else if ((byte & 0xF8) === 0xF0) {
+        } else if ((byte & 0xf8) === 0xf0) {
           // 4-byte sequence
-          if (i + 3 < buffer.length &&
-              (buffer[i + 1] & 0xC0) === 0x80 &&
-              (buffer[i + 2] & 0xC0) === 0x80 &&
-              (buffer[i + 3] & 0xC0) === 0x80) {
+          if (
+            i + 3 < buffer.length &&
+            (buffer[i + 1] & 0xc0) === 0x80 &&
+            (buffer[i + 2] & 0xc0) === 0x80 &&
+            (buffer[i + 3] & 0xc0) === 0x80
+          ) {
             validSequences++;
           }
           i += 4;
@@ -385,18 +390,16 @@ export class EncodingConverter {
       const sequenceValidityRatio = totalSequences > 0 ? validSequences / totalSequences : 1;
       const replacementRatio = decoded.length > 0 ? replacementCount / decoded.length : 0;
 
-      // Simple threshold-based validation without confidence scoring
       const isValid = sequenceValidityRatio > 0.8 && replacementRatio < 0.1;
 
       return {
         isValid,
-        issues
+        issues,
       };
-
     } catch (error) {
       return {
         isValid: false,
-        issues: ['utf8-decode-error']
+        issues: ['utf8-decode-error'],
       };
     }
   }
@@ -481,13 +484,33 @@ export class EncodingConverter {
   private static convertWindows1252(buffer: Buffer): string {
     // Windows-1252 to Unicode mapping for the 0x80-0x9F range
     const cp1252Map: { [key: number]: string } = {
-      0x80: '\u20AC', 0x82: '\u201A', 0x83: '\u0192', 0x84: '\u201E',
-      0x85: '\u2026', 0x86: '\u2020', 0x87: '\u2021', 0x88: '\u02C6',
-      0x89: '\u2030', 0x8A: '\u0160', 0x8B: '\u2039', 0x8C: '\u0152',
-      0x8E: '\u017D', 0x91: '\u2018', 0x92: '\u2019', 0x93: '\u201C',
-      0x94: '\u201D', 0x95: '\u2022', 0x96: '\u2013', 0x97: '\u2014',
-      0x98: '\u02DC', 0x99: '\u2122', 0x9A: '\u0161', 0x9B: '\u203A',
-      0x9C: '\u0153', 0x9E: '\u017E', 0x9F: '\u0178'
+      0x80: '\u20AC',
+      0x82: '\u201A',
+      0x83: '\u0192',
+      0x84: '\u201E',
+      0x85: '\u2026',
+      0x86: '\u2020',
+      0x87: '\u2021',
+      0x88: '\u02C6',
+      0x89: '\u2030',
+      0x8a: '\u0160',
+      0x8b: '\u2039',
+      0x8c: '\u0152',
+      0x8e: '\u017D',
+      0x91: '\u2018',
+      0x92: '\u2019',
+      0x93: '\u201C',
+      0x94: '\u201D',
+      0x95: '\u2022',
+      0x96: '\u2013',
+      0x97: '\u2014',
+      0x98: '\u02DC',
+      0x99: '\u2122',
+      0x9a: '\u0161',
+      0x9b: '\u203A',
+      0x9c: '\u0153',
+      0x9e: '\u017E',
+      0x9f: '\u0178',
     };
 
     let result = '';
@@ -495,7 +518,7 @@ export class EncodingConverter {
       const byte = buffer[i];
       if (cp1252Map[byte]) {
         result += cp1252Map[byte];
-      } else if (byte < 0x80 || byte > 0x9F) {
+      } else if (byte < 0x80 || byte > 0x9f) {
         // Standard Latin-1 character
         result += String.fromCharCode(byte);
       } else {
@@ -533,7 +556,8 @@ export class EncodingConverter {
 
       // Ultimate fallback: binary conversion with character filtering
       let result = '';
-      for (let i = 0; i < Math.min(buffer.length, 50000); i++) { // Limit to first 50KB
+      for (let i = 0; i < Math.min(buffer.length, 50000); i++) {
+        // Limit to first 50KB
         const byte = buffer[i];
         if (byte >= 32 && byte <= 126) {
           // Printable ASCII

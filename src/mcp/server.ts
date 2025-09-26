@@ -12,7 +12,11 @@ import {
 
 import { DatabaseService, databaseService } from '../database';
 import { createComponentLogger } from '../utils/logger';
-import { compressResponsePayload, optimizeResponsePayload, DEFAULT_COMPRESSION_CONFIG } from '../utils/response-compression';
+import {
+  compressResponsePayload,
+  optimizeResponsePayload,
+  DEFAULT_COMPRESSION_CONFIG,
+} from '../utils/response-compression';
 import { McpTools } from './tools';
 import { McpResources } from './resources';
 
@@ -170,7 +174,8 @@ export class ClaudeCompassMCPServer {
                 search_mode: {
                   type: 'string',
                   enum: ['auto', 'exact', 'semantic', 'qualified'],
-                  description: 'Search mode: auto (hybrid), exact (lexical), semantic (vector), qualified (namespace-aware)',
+                  description:
+                    'Search mode: auto (hybrid), exact (lexical), semantic (vector), qualified (namespace-aware)',
                   default: 'auto',
                 },
               },
@@ -209,8 +214,6 @@ export class ClaudeCompassMCPServer {
                   description: 'Include cross-stack callers (Vue ↔ Laravel)',
                   default: false,
                 },
-                // REMOVED: cross_stack_confidence_threshold (Phase 4)
-                // REMOVED: analysis_type - no longer needed with simple dependency lists (Phase 4)
               },
               required: ['symbol_id'],
             },
@@ -276,7 +279,6 @@ export class ClaudeCompassMCPServer {
                   minimum: 1,
                   maximum: 20,
                 },
-                // REMOVED: confidence_threshold (Phase 4)
                 page_size: {
                   type: 'number',
                   description: 'Number of results per page (default: 1000, max: 5000)',
@@ -370,7 +372,7 @@ export class ClaudeCompassMCPServer {
         logger.debug('Tool call completed with optimizations', {
           name,
           compressed: response.metadata?.compressed,
-          compressionRatio: response.metadata?.compressionRatio
+          compressionRatio: response.metadata?.compressionRatio,
         });
 
         return response;

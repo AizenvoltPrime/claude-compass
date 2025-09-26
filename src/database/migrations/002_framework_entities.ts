@@ -16,15 +16,19 @@ import type { Knex } from 'knex';
  * - Package dependencies
  * - Vector search capabilities
  * - Enhanced dependency tracking
- * - Clean data_contracts schema (no confidence, correct column names)
  */
 export async function up(knex: Knex): Promise<void> {
   console.log('🚀 Creating consolidated framework entities...');
 
   // Generic routes table (framework-agnostic with Laravel-specific fields)
-  await knex.schema.createTable('routes', (table) => {
+  await knex.schema.createTable('routes', table => {
     table.increments('id').primary();
-    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
     table.string('path').notNullable();
     table.string('method');
     table.integer('handler_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
@@ -51,13 +55,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['name']);
   });
 
-
-
-
-  // Cross-stack calls table - NO CONFIDENCE COLUMN
-  await knex.schema.createTable('cross_stack_calls', (table) => {
+  await knex.schema.createTable('cross_stack_calls', table => {
     table.increments('id').primary();
-    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
     table.integer('frontend_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
     table.integer('backend_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
     table.string('call_type').notNullable();
@@ -73,10 +78,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['http_method', 'endpoint_path']);
   });
 
-  // API calls table - NO CONFIDENCE COLUMN
-  await knex.schema.createTable('api_calls', (table) => {
+  await knex.schema.createTable('api_calls', table => {
     table.increments('id').primary();
-    table.integer('caller_symbol_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
+    table
+      .integer('caller_symbol_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
     table.integer('endpoint_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
     table.string('http_method');
     table.text('endpoint_path');
@@ -93,10 +102,20 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Data contracts table - CLEAN SCHEMA WITH CORRECT COLUMN NAMES
-  await knex.schema.createTable('data_contracts', (table) => {
+  await knex.schema.createTable('data_contracts', table => {
     table.increments('id').primary();
-    table.integer('frontend_type_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
-    table.integer('backend_type_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
+    table
+      .integer('frontend_type_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
+    table
+      .integer('backend_type_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
     table.string('name').notNullable();
     table.boolean('drift_detected').defaultTo(false);
     table.timestamps(true, true);
@@ -108,12 +127,20 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(['frontend_type_id', 'backend_type_id', 'name']);
   });
 
-
-  // ORM relationships table - NO CONFIDENCE COLUMN
-  await knex.schema.createTable('orm_relationships', (table) => {
+  await knex.schema.createTable('orm_relationships', table => {
     table.increments('id').primary();
-    table.integer('from_model_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
-    table.integer('to_model_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
+    table
+      .integer('from_model_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
+    table
+      .integer('to_model_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
     table.string('relationship_type').notNullable();
     table.string('foreign_key');
     table.string('local_key');
@@ -124,11 +151,20 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['to_model_id', 'relationship_type']);
   });
 
-  // Test coverage table - NO CONFIDENCE COLUMN
-  await knex.schema.createTable('test_coverage', (table) => {
+  await knex.schema.createTable('test_coverage', table => {
     table.increments('id').primary();
-    table.integer('symbol_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
-    table.integer('test_symbol_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
+    table
+      .integer('symbol_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
+    table
+      .integer('test_symbol_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
     table.string('coverage_type').notNullable();
     table.text('test_description');
     table.timestamps(true, true);
@@ -138,10 +174,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['coverage_type']);
   });
 
-  // Package dependencies table - NO CONFIDENCE COLUMN
-  await knex.schema.createTable('package_dependencies', (table) => {
+  await knex.schema.createTable('package_dependencies', table => {
     table.increments('id').primary();
-    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
     table.string('package_name').notNullable();
     table.string('version');
     table.string('dependency_type').notNullable(); // 'dependencies', 'devDependencies', etc
@@ -153,10 +193,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['dependency_type']);
   });
 
-  // Godot relationships table - NO CONFIDENCE COLUMN
-  await knex.schema.createTable('godot_relationships', (table) => {
+  await knex.schema.createTable('godot_relationships', table => {
     table.increments('id').primary();
-    table.integer('from_symbol_id').notNullable().references('id').inTable('symbols').onDelete('CASCADE');
+    table
+      .integer('from_symbol_id')
+      .notNullable()
+      .references('id')
+      .inTable('symbols')
+      .onDelete('CASCADE');
     table.integer('to_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
     table.string('relationship_type').notNullable();
     table.text('scene_path');
@@ -171,9 +215,14 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Framework metadata table - stores framework-specific data as JSON
-  await knex.schema.createTable('framework_metadata', (table) => {
+  await knex.schema.createTable('framework_metadata', table => {
     table.increments('id').primary();
-    table.integer('repo_id').notNullable().references('id').inTable('repositories').onDelete('CASCADE');
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
     table.string('framework_type').notNullable();
     table.string('version');
     table.text('config_path');
