@@ -1596,13 +1596,24 @@ export class CSharpParser extends ChunkedParser {
         const isDuplicate = dependencies.some(d =>
           d.to_symbol === dependency.to_symbol &&
           d.from_symbol === dependency.from_symbol &&
-          d.line_number === dependency.line_number
+          d.line_number === dependency.line_number &&
+          d.dependency_type === dependency.dependency_type
         );
 
         if (!isDuplicate) {
           dependencies.push(dependency);
 
-          logger.debug('C# conditional access call extracted', {
+          // Also create a REFERENCES dependency for conditional access method calls
+          // to match the behavior of regular method calls
+          const referenceDependency: ParsedDependency = {
+            from_symbol: dependency.from_symbol,
+            to_symbol: dependency.to_symbol,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: dependency.line_number,
+          };
+          dependencies.push(referenceDependency);
+
+          logger.debug('C# conditional access call and reference extracted', {
             from: dependency.from_symbol,
             to: dependency.to_symbol,
             line: dependency.line_number,
@@ -1611,59 +1622,72 @@ export class CSharpParser extends ChunkedParser {
       }
     }
 
-    // If we found dependencies, we're done
-    if (dependencies.length > 0) {
-      logger.debug('C# conditional access dependencies extracted', {
-        count: dependencies.length,
-        methods: dependencies.map(d => d.to_symbol)
-      });
-      return dependencies;
-    }
-
-    // If no invocation found, check for member access within conditional access
-    const memberAccessNodes = this.getNodesOfType(node, 'member_access_expression');
-    logger.debug('C# conditional access member access nodes found', {
-      count: memberAccessNodes.length
+    // Always check for member binding within conditional access to create REFERENCES
+    // (Don't return early - we need both CALLS from invocations AND REFERENCES from member binding)
+    const memberBindingNodes = this.getNodesOfType(node, 'member_binding_expression');
+    logger.debug('C# conditional access member binding nodes found', {
+      count: memberBindingNodes.length
     });
 
-    for (const memberAccessNode of memberAccessNodes) {
-      const nameNode = memberAccessNode.childForFieldName('name');
-      if (!nameNode) continue;
+    for (const memberBindingNode of memberBindingNodes) {
+      const identifierNode = memberBindingNode.children.find(child => child.type === 'identifier');
+      if (!identifierNode) continue;
 
-      const memberName = this.getNodeText(nameNode, content);
+      const memberName = this.getNodeText(identifierNode, content);
       const callerName = this.findContainingFunction(node, content);
 
       // Check if this is a method call (has parentheses) or just property access
       const nodeText = this.getNodeText(node, content);
       const isMethodCall = nodeText.includes('(') && nodeText.includes(')');
 
-      const dependency: ParsedDependency = {
-        from_symbol: callerName,
-        to_symbol: memberName,
-        dependency_type: isMethodCall ? DependencyType.CALLS : DependencyType.REFERENCES,
-        line_number: node.startPosition.row + 1,
-      };
+      if (isMethodCall) {
+        // For method calls, create both CALLS and REFERENCES dependencies
+        const callDependency: ParsedDependency = {
+          from_symbol: callerName,
+          to_symbol: memberName,
+          dependency_type: DependencyType.CALLS,
+          line_number: node.startPosition.row + 1,
+        };
+        const referenceDependency: ParsedDependency = {
+          from_symbol: callerName,
+          to_symbol: memberName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: node.startPosition.row + 1,
+        };
 
-      dependencies.push(dependency);
+        dependencies.push(callDependency);
+        dependencies.push(referenceDependency);
 
-      logger.debug('C# conditional access member dependency extracted', {
-        from: dependency.from_symbol,
-        to: dependency.to_symbol,
-        type: dependency.dependency_type,
-        line: dependency.line_number
-      });
+        logger.debug('C# conditional access method call and reference extracted', {
+          from: callDependency.from_symbol,
+          to: callDependency.to_symbol,
+          line: callDependency.line_number
+        });
+      } else {
+        // For property access, create only REFERENCES dependency
+        const dependency: ParsedDependency = {
+          from_symbol: callerName,
+          to_symbol: memberName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: node.startPosition.row + 1,
+        };
+
+        dependencies.push(dependency);
+
+        logger.debug('C# conditional access property reference extracted', {
+          from: dependency.from_symbol,
+          to: dependency.to_symbol,
+          type: dependency.dependency_type,
+          line: dependency.line_number
+        });
+      }
     }
 
-    // If we found member access, we're done
-    if (dependencies.length > 0) {
-      logger.debug('C# conditional access dependencies extracted from member access', {
-        count: dependencies.length
-      });
-      return dependencies;
-    }
-
-    // Fallback: extract using regex pattern matching for complex expressions
-    // (Already handled above, so we can skip this duplicate code)
+    logger.debug('C# conditional access dependencies extraction completed', {
+      count: dependencies.length,
+      callsDependencies: dependencies.filter(d => d.dependency_type === DependencyType.CALLS).length,
+      referencesDependencies: dependencies.filter(d => d.dependency_type === DependencyType.REFERENCES).length
+    });
 
     return dependencies;
   }
@@ -1804,7 +1828,7 @@ export class CSharpParser extends ChunkedParser {
                 });
               }
 
-              const fieldBasedDependency: ParsedDependency = {
+              const fieldBasedCallDependency: ParsedDependency = {
                 from_symbol: callerName,
                 to_symbol: `${fieldType}.${methodName}`, // Include class context
                 dependency_type: DependencyType.CALLS,
@@ -1816,11 +1840,22 @@ export class CSharpParser extends ChunkedParser {
                 parameter_types: parameterTypes,
                 calling_object: fieldName
               };
-              dependencies.push(fieldBasedDependency);
 
-              logger.debug('C# field-based conditional access call extracted', {
-                from: fieldBasedDependency.from_symbol,
-                to: fieldBasedDependency.to_symbol,
+              const fieldBasedReferenceDependency: ParsedDependency = {
+                from_symbol: callerName,
+                to_symbol: `${fieldType}.${methodName}`,
+                dependency_type: DependencyType.REFERENCES,
+                line_number: lineNumber,
+                qualified_context: `field_call_${fieldName}`,
+                calling_object: fieldName
+              };
+
+              dependencies.push(fieldBasedCallDependency);
+              dependencies.push(fieldBasedReferenceDependency);
+
+              logger.debug('C# field-based conditional access call and reference extracted', {
+                from: fieldBasedCallDependency.from_symbol,
+                to: fieldBasedCallDependency.to_symbol,
                 fieldName: fieldName,
                 fieldType: fieldType,
                 parameterContext: parameterContext,
@@ -1833,18 +1868,26 @@ export class CSharpParser extends ChunkedParser {
 
         // EXISTING: Original logic for other cases (fallback)
         foundMethods.push(methodName);
-        const dependency: ParsedDependency = {
+        const callDependency: ParsedDependency = {
           from_symbol: callerName,
           to_symbol: methodName, // No class context - will need resolution
           dependency_type: DependencyType.CALLS,
           line_number: lineNumber,
         };
 
-        dependencies.push(dependency);
+        const referenceDependency: ParsedDependency = {
+          from_symbol: callerName,
+          to_symbol: methodName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: lineNumber,
+        };
 
-        logger.debug('C# chained conditional access call extracted via regex', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
+        dependencies.push(callDependency);
+        dependencies.push(referenceDependency);
+
+        logger.debug('C# chained conditional access call and reference extracted via regex', {
+          from: callDependency.from_symbol,
+          to: callDependency.to_symbol,
           pattern: match[0]
         });
       }
