@@ -40,6 +40,7 @@ export interface Symbol {
   visibility?: Visibility;
   signature?: string;
   description?: string;
+  framework?: string;
   created_at: Date;
   updated_at: Date;
 }
