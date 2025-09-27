@@ -972,13 +972,32 @@ export class McpTools {
             type: 'text',
             text: JSON.stringify(
               {
-                dependencies: callers.map(caller => ({
-                  from: caller.from_symbol?.name || 'unknown',
-                  to: symbol.name,
-                  type: caller.dependency_type,
-                  line_number: caller.line_number,
-                  file_path: caller.from_symbol?.file?.path,
-                })),
+                dependencies: callers.map(caller => {
+                  // Create qualified names for better clarity when symbols have same name
+                  const fromName = caller.from_symbol?.name || 'unknown';
+                  const toName = symbol.name;
+                  const fromFile = caller.from_symbol?.file?.path;
+                  const toFile = symbol.file?.path;
+
+                  // If symbols have same name but different files, show qualified names
+                  const shouldQualify = fromName === toName && fromFile !== toFile;
+
+                  const qualifiedFromName = shouldQualify && fromFile
+                    ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
+                    : fromName;
+
+                  const qualifiedToName = shouldQualify && toFile
+                    ? `${this.getClassNameFromPath(toFile)}.${toName}`
+                    : toName;
+
+                  return {
+                    from: qualifiedFromName,
+                    to: qualifiedToName,
+                    type: caller.dependency_type,
+                    line_number: caller.line_number,
+                    file_path: fromFile,
+                  };
+                }),
                 total_count: callers.length,
                 parameter_analysis: parameterAnalysis,
                 query_info: {
@@ -1144,13 +1163,32 @@ export class McpTools {
             type: 'text',
             text: JSON.stringify(
               {
-                dependencies: dependencies.map(dep => ({
-                  from: dep.from_symbol?.name || 'unknown',
-                  to: dep.to_symbol?.name || 'unknown',
-                  type: dep.dependency_type,
-                  line_number: dep.line_number,
-                  file_path: dep.from_symbol?.file?.path,
-                })),
+                dependencies: dependencies.map(dep => {
+                  // Create qualified names for better clarity when symbols have same name
+                  const fromName = dep.from_symbol?.name || 'unknown';
+                  const toName = dep.to_symbol?.name || 'unknown';
+                  const fromFile = dep.from_symbol?.file?.path;
+                  const toFile = dep.to_symbol?.file?.path;
+
+                  // If symbols have same name but different files, show qualified names
+                  const shouldQualify = fromName === toName && fromFile !== toFile;
+
+                  const qualifiedFromName = shouldQualify && fromFile
+                    ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
+                    : fromName;
+
+                  const qualifiedToName = shouldQualify && toFile
+                    ? `${this.getClassNameFromPath(toFile)}.${toName}`
+                    : toName;
+
+                  return {
+                    from: qualifiedFromName,
+                    to: qualifiedToName,
+                    type: dep.dependency_type,
+                    line_number: dep.line_number,
+                    file_path: fromFile,
+                  };
+                }),
                 total_count: dependencies.length,
                 query_info: {
                   symbol: symbol.name,
@@ -2614,5 +2652,13 @@ export class McpTools {
         relationship_context: item.relationship_context,
       };
     });
+  }
+
+  /**
+   * Extract class name from file path for qualified naming
+   */
+  private getClassNameFromPath(filePath: string): string {
+    const fileName = filePath.split('/').pop() || '';
+    return fileName.replace(/\.(cs|js|ts|php|vue)$/, '');
   }
 }
