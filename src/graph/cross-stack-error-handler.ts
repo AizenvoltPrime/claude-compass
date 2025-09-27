@@ -14,10 +14,10 @@ const logger = createComponentLogger('cross-stack-error-handler');
  * Error severity levels for cross-stack operations
  */
 export enum ErrorSeverity {
-  LOW = 'low',           // Minor issues that don't affect functionality
-  MEDIUM = 'medium',     // Issues that may affect accuracy but don't break functionality
-  HIGH = 'high',         // Significant issues that affect functionality
-  CRITICAL = 'critical'  // Critical failures that break core functionality
+  LOW = 'low', // Minor issues that don't affect functionality
+  MEDIUM = 'medium', // Issues that may affect accuracy but don't break functionality
+  HIGH = 'high', // Significant issues that affect functionality
+  CRITICAL = 'critical', // Critical failures that break core functionality
 }
 
 /**
@@ -31,7 +31,7 @@ export enum CrossStackErrorType {
   MEMORY_PRESSURE = 'memory_pressure',
   PERFORMANCE_DEGRADATION = 'performance_degradation',
   SCHEMA_DRIFT_DETECTED = 'schema_drift_detected',
-  RELATIONSHIP_ACCURACY_ALERT = 'relationship_accuracy_alert'
+  RELATIONSHIP_ACCURACY_ALERT = 'relationship_accuracy_alert',
 }
 
 /**
@@ -126,7 +126,7 @@ export class CrossStackErrorHandler extends EventEmitter {
       stackTrace: error?.stack,
       recoveryStrategy: this.getRecoveryStrategy(type, severity),
       fallbackApplied: false,
-      retryCount: 0
+      retryCount: 0,
     };
 
     // Store error
@@ -182,7 +182,7 @@ export class CrossStackErrorHandler extends EventEmitter {
       memoryUsedMB,
       cacheHitRate,
       errorCount,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     this.metrics.push(metrics);
@@ -206,7 +206,6 @@ export class CrossStackErrorHandler extends EventEmitter {
         { metrics }
       );
     }
-
 
     // Emit metrics event
     this.emit('metrics', metrics);
@@ -239,7 +238,7 @@ export class CrossStackErrorHandler extends EventEmitter {
           changes.push({
             type: 'removed',
             field: propName,
-            oldValue: propValue
+            oldValue: propValue,
           });
           driftSeverity = ErrorSeverity.MEDIUM;
         }
@@ -251,7 +250,7 @@ export class CrossStackErrorHandler extends EventEmitter {
           changes.push({
             type: 'added',
             field: propName,
-            newValue: propValue
+            newValue: propValue,
           });
           if (this.isRequiredProperty(propValue)) {
             driftSeverity = ErrorSeverity.HIGH;
@@ -268,7 +267,7 @@ export class CrossStackErrorHandler extends EventEmitter {
               type: 'modified',
               field: propName,
               oldValue: frontendValue,
-              newValue: backendValue
+              newValue: backendValue,
             });
             if (this.isTypeChange(frontendValue, backendValue)) {
               driftSeverity = ErrorSeverity.HIGH;
@@ -284,7 +283,7 @@ export class CrossStackErrorHandler extends EventEmitter {
         driftDetected: changes.length > 0,
         driftSeverity,
         changes,
-        recommendedAction: this.getRecommendedAction(changes, driftSeverity)
+        recommendedAction: this.getRecommendedAction(changes, driftSeverity),
       };
 
       // Log schema drift if detected
@@ -308,7 +307,7 @@ export class CrossStackErrorHandler extends EventEmitter {
         driftDetected: false,
         driftSeverity: ErrorSeverity.LOW,
         changes: [],
-        recommendedAction: 'Manual review required - drift detection failed'
+        recommendedAction: 'Manual review required - drift detection failed',
       };
     }
   }
@@ -321,7 +320,7 @@ export class CrossStackErrorHandler extends EventEmitter {
     fallback: () => Promise<T>,
     operationName: string
   ): Promise<T> {
-    return operation().catch(async (error) => {
+    return operation().catch(async error => {
       this.handleError(
         CrossStackErrorType.DATABASE_OPERATION_ERROR,
         ErrorSeverity.MEDIUM,
@@ -332,7 +331,6 @@ export class CrossStackErrorHandler extends EventEmitter {
 
       try {
         const result = await fallback();
-        logger.info(`Fallback successful for ${operationName}`);
         return result;
       } catch (fallbackError) {
         this.handleError(
@@ -351,12 +349,12 @@ export class CrossStackErrorHandler extends EventEmitter {
    * Get performance and error statistics
    */
   getStatistics(): any {
-    const recentMetrics = this.metrics.filter(m =>
-      Date.now() - m.timestamp.getTime() < 3600000 // Last hour
+    const recentMetrics = this.metrics.filter(
+      m => Date.now() - m.timestamp.getTime() < 3600000 // Last hour
     );
 
-    const recentErrors = Array.from(this.errors.values()).filter(e =>
-      Date.now() - e.timestamp.getTime() < 3600000 // Last hour
+    const recentErrors = Array.from(this.errors.values()).filter(
+      e => Date.now() - e.timestamp.getTime() < 3600000 // Last hour
     );
 
     return {
@@ -364,17 +362,23 @@ export class CrossStackErrorHandler extends EventEmitter {
         total: this.errors.size,
         recent: recentErrors.length,
         bySeverity: this.groupErrorsBySeverity(recentErrors),
-        byType: this.groupErrorsByType(recentErrors)
+        byType: this.groupErrorsByType(recentErrors),
       },
       performance: {
-        avgExecutionTime: recentMetrics.reduce((sum, m) => sum + m.executionTimeMs, 0) / Math.max(recentMetrics.length, 1),
-        avgMemoryUsage: recentMetrics.reduce((sum, m) => sum + m.memoryUsedMB, 0) / Math.max(recentMetrics.length, 1),
-        avgCacheHitRate: recentMetrics.reduce((sum, m) => sum + m.cacheHitRate, 0) / Math.max(recentMetrics.length, 1)
+        avgExecutionTime:
+          recentMetrics.reduce((sum, m) => sum + m.executionTimeMs, 0) /
+          Math.max(recentMetrics.length, 1),
+        avgMemoryUsage:
+          recentMetrics.reduce((sum, m) => sum + m.memoryUsedMB, 0) /
+          Math.max(recentMetrics.length, 1),
+        avgCacheHitRate:
+          recentMetrics.reduce((sum, m) => sum + m.cacheHitRate, 0) /
+          Math.max(recentMetrics.length, 1),
       },
       health: {
         overallStatus: this.calculateHealthStatus(recentErrors, recentMetrics),
-        lastUpdated: new Date()
-      }
+        lastUpdated: new Date(),
+      },
     };
   }
 
@@ -384,7 +388,6 @@ export class CrossStackErrorHandler extends EventEmitter {
   clear(): void {
     this.errors.clear();
     this.metrics.length = 0;
-    logger.info('Cross-stack error handler cleared');
   }
 
   // Private helper methods
@@ -398,7 +401,7 @@ export class CrossStackErrorHandler extends EventEmitter {
       [CrossStackErrorType.MEMORY_PRESSURE]: 'Enable streaming mode',
       [CrossStackErrorType.PERFORMANCE_DEGRADATION]: 'Increase batch size and caching',
       [CrossStackErrorType.SCHEMA_DRIFT_DETECTED]: 'Flag for manual review',
-      [CrossStackErrorType.RELATIONSHIP_ACCURACY_ALERT]: 'Review relationship detection rules'
+      [CrossStackErrorType.RELATIONSHIP_ACCURACY_ALERT]: 'Review relationship detection rules',
     };
 
     return strategies[type] || 'Manual intervention required';
@@ -455,7 +458,10 @@ export class CrossStackErrorHandler extends EventEmitter {
     return oldType !== newType;
   }
 
-  private getRecommendedAction(changes: SchemaDriftResult['changes'], severity: ErrorSeverity): string {
+  private getRecommendedAction(
+    changes: SchemaDriftResult['changes'],
+    severity: ErrorSeverity
+  ): string {
     if (changes.length === 0) {
       return 'No action required';
     }
@@ -472,17 +478,23 @@ export class CrossStackErrorHandler extends EventEmitter {
   }
 
   private groupErrorsBySeverity(errors: CrossStackError[]): Record<string, number> {
-    return errors.reduce((acc, error) => {
-      acc[error.severity] = (acc[error.severity] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    return errors.reduce(
+      (acc, error) => {
+        acc[error.severity] = (acc[error.severity] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
   }
 
   private groupErrorsByType(errors: CrossStackError[]): Record<string, number> {
-    return errors.reduce((acc, error) => {
-      acc[error.type] = (acc[error.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    return errors.reduce(
+      (acc, error) => {
+        acc[error.type] = (acc[error.type] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
   }
 
   private calculateHealthStatus(errors: CrossStackError[], metrics: CrossStackMetrics[]): string {
@@ -497,7 +509,8 @@ export class CrossStackErrorHandler extends EventEmitter {
       return 'degraded';
     }
 
-    const avgPerformance = metrics.reduce((sum, m) => sum + m.executionTimeMs, 0) / Math.max(metrics.length, 1);
+    const avgPerformance =
+      metrics.reduce((sum, m) => sum + m.executionTimeMs, 0) / Math.max(metrics.length, 1);
     if (avgPerformance > this.PERFORMANCE_THRESHOLD_MS * 2) {
       return 'degraded';
     }

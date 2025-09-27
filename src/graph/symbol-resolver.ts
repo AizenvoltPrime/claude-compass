@@ -81,12 +81,10 @@ export class SymbolResolver {
                 const className = fieldType.substring(1);
                 this.fieldTypeMap.set(fieldName, className);
               }
-
             }
           }
         }
       }
-
     } catch (error) {
       this.logger.warn(`Failed to set field context for ${sourceContext.filePath}`, {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -103,11 +101,6 @@ export class SymbolResolver {
     importsMap: Map<number, ParsedImport[]>,
     exportsMap: Map<number, ParsedExport[]>
   ): void {
-    this.logger.info('Initializing symbol resolver', {
-      fileCount: files.length,
-      symbolCount: allSymbols.length,
-    });
-
     // Clear existing data
     this.fileContexts.clear();
     this.symbolsByName.clear();
@@ -141,12 +134,6 @@ export class SymbolResolver {
         }
       }
     }
-
-    this.logger.info('Symbol resolver initialized', {
-      fileContextsCreated: this.fileContexts.size,
-      uniqueSymbolNames: this.symbolsByName.size,
-      exportedSymbolNames: this.exportedSymbols.size,
-    });
   }
 
   /**
@@ -313,7 +300,6 @@ export class SymbolResolver {
 
     const objectName = memberExpression.substring(0, dotIndex);
     const methodName = memberExpression.substring(dotIndex + 1);
-
 
     // Strategy 1: Check if objectName is directly imported
     for (const importDecl of sourceContext.imports) {
@@ -549,9 +535,8 @@ export class SymbolResolver {
       description: frameworkSymbol.description,
       framework: frameworkSymbol.framework,
       created_at: new Date(),
-      updated_at: new Date()
+      updated_at: new Date(),
     };
-
 
     return virtualSymbol;
   }
@@ -803,7 +788,11 @@ export class SymbolResolver {
       }
     }
     // JavaScript/TypeScript contexts for built-in symbols (not imported)
-    else if (sourceContext.filePath.endsWith('.vue') || sourceContext.filePath.endsWith('.ts') || sourceContext.filePath.endsWith('.js')) {
+    else if (
+      sourceContext.filePath.endsWith('.vue') ||
+      sourceContext.filePath.endsWith('.ts') ||
+      sourceContext.filePath.endsWith('.js')
+    ) {
       // These are for built-in browser/JavaScript APIs that don't need imports
       context = 'javascript';
     }
@@ -836,7 +825,6 @@ export class SymbolResolver {
       created_at: new Date(),
       updated_at: new Date(),
     };
-
 
     return virtualSymbol;
   }

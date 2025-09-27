@@ -1,5 +1,14 @@
 import Parser from 'tree-sitter';
-import { BaseParser, ParseResult, ParseOptions, ParsedSymbol, ParsedDependency, ParsedImport, ParsedExport, ParseError } from './base';
+import {
+  BaseParser,
+  ParseResult,
+  ParseOptions,
+  ParsedSymbol,
+  ParsedDependency,
+  ParsedImport,
+  ParsedExport,
+  ParseError,
+} from './base';
 import { createComponentLogger } from '../utils/logger';
 
 const logger = createComponentLogger('chunked-parser');
@@ -55,7 +64,7 @@ export interface ChunkedParseOptions extends ParseOptions {
 export abstract class ChunkedParser extends BaseParser {
   protected readonly DEFAULT_CHUNK_SIZE = 28000; // 28KB - safe buffer under Tree-sitter limit
   protected readonly DEFAULT_OVERLAP_LINES = 100;
-  protected declare readonly logger: any;
+  declare protected readonly logger: any;
 
   constructor(parser: Parser, language: string) {
     super(parser, language);
@@ -73,11 +82,9 @@ export abstract class ChunkedParser extends BaseParser {
     const chunkSize = options?.chunkSize || this.DEFAULT_CHUNK_SIZE;
     const overlapLines = options?.chunkOverlapLines || this.DEFAULT_OVERLAP_LINES;
 
-
     try {
       // Split content into chunks
       const chunks = this.splitIntoChunks(content, chunkSize, overlapLines);
-
 
       // Parse each chunk
       const chunkResults: ParseResult[] = [];
@@ -90,7 +97,7 @@ export abstract class ChunkedParser extends BaseParser {
         } catch (error) {
           this.logger.warn(`Failed to parse chunk ${i + 1}`, {
             error: (error as Error).message,
-            chunkIndex: i
+            chunkIndex: i,
           });
 
           // Add error to results but continue with other chunks
@@ -99,12 +106,14 @@ export abstract class ChunkedParser extends BaseParser {
             dependencies: [],
             imports: [],
             exports: [],
-            errors: [{
-              message: `Chunk parsing failed: ${(error as Error).message}`,
-              line: chunk.startLine,
-              column: 1,
-              severity: 'error'
-            }]
+            errors: [
+              {
+                message: `Chunk parsing failed: ${(error as Error).message}`,
+                line: chunk.startLine,
+                column: 1,
+                severity: 'error',
+              },
+            ],
           });
         }
       }
@@ -112,19 +121,11 @@ export abstract class ChunkedParser extends BaseParser {
       // Merge results from all chunks
       const mergedResult = this.mergeChunkResults(chunkResults, chunks);
 
-      this.logger.info('Chunked parsing completed', {
-        totalChunks: chunks.length,
-        symbolsFound: mergedResult.symbols.length,
-        dependenciesFound: mergedResult.dependencies.length,
-        errorsEncountered: mergedResult.errors.length
-      });
-
       return mergedResult;
-
     } catch (error) {
       this.logger.error('Chunked parsing failed', {
         filePath,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
 
       return {
@@ -132,13 +133,15 @@ export abstract class ChunkedParser extends BaseParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `Chunked parsing failed: ${(error as Error).message}`,
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }],
-        chunksProcessed: 0
+        errors: [
+          {
+            message: `Chunked parsing failed: ${(error as Error).message}`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
+        chunksProcessed: 0,
       };
     }
   }
@@ -165,10 +168,9 @@ export abstract class ChunkedParser extends BaseParser {
       if (chunkBoundaries.length > 0) {
         // Use the best boundary found
         const bestBoundary = chunkBoundaries[0];
-        chunkEndLine = currentPosition + this.getLineFromPosition(
-          lines.slice(currentPosition).join('\n'),
-          bestBoundary
-        );
+        chunkEndLine =
+          currentPosition +
+          this.getLineFromPosition(lines.slice(currentPosition).join('\n'), bestBoundary);
       } else {
         // Fallback to character-based splitting
         let estimatedLines = Math.floor(maxChunkSize / 80); // Rough estimate of lines per chunk
@@ -214,8 +216,8 @@ export abstract class ChunkedParser extends BaseParser {
           originalStartLine: currentPosition + 1,
           hasOverlapBefore: chunks.length > 0,
           hasOverlapAfter: actualChunkEndLine < lines.length,
-          totalChunks: 0 // Will be filled after all chunks are created
-        }
+          totalChunks: 0, // Will be filled after all chunks are created
+        },
       };
 
       chunks.push(chunk);
@@ -264,24 +266,24 @@ export abstract class ChunkedParser extends BaseParser {
       symbols: result.symbols.map(symbol => ({
         ...symbol,
         start_line: symbol.start_line + lineOffset,
-        end_line: symbol.end_line + lineOffset
+        end_line: symbol.end_line + lineOffset,
       })),
       dependencies: result.dependencies.map(dep => ({
         ...dep,
-        line_number: dep.line_number + lineOffset
+        line_number: dep.line_number + lineOffset,
       })),
       imports: result.imports.map(imp => ({
         ...imp,
-        line_number: imp.line_number + lineOffset
+        line_number: imp.line_number + lineOffset,
       })),
       exports: result.exports.map(exp => ({
         ...exp,
-        line_number: exp.line_number + lineOffset
+        line_number: exp.line_number + lineOffset,
       })),
       errors: result.errors.map(error => ({
         ...error,
-        line: error.line + lineOffset
-      }))
+        line: error.line + lineOffset,
+      })),
     };
   }
 
@@ -330,7 +332,10 @@ export abstract class ChunkedParser extends BaseParser {
   /**
    * Merge results from multiple chunks, handling duplicates and cross-chunk references
    */
-  protected abstract mergeChunkResults(chunks: ParseResult[], chunkMetadata: ChunkResult[]): MergedParseResult;
+  protected abstract mergeChunkResults(
+    chunks: ParseResult[],
+    chunkMetadata: ChunkResult[]
+  ): MergedParseResult;
 
   /**
    * Enhanced parseContent method that checks for chunking requirements

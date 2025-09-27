@@ -233,8 +233,6 @@ export class QueryCache<T = any> {
       evictions: 0,
       totalSize: 0,
     };
-
-    logger.info('Cache cleared');
   }
 
   /**

@@ -140,12 +140,6 @@ export class CrossStackGraphBuilder {
     const safeLaravelRoutes = laravelRoutes || [];
     const safeApiCalls = apiCalls || [];
 
-    this.logger.info('Building API call graph', {
-      vueComponents: safeVueComponents.length,
-      laravelRoutes: safeLaravelRoutes.length,
-      apiCalls: safeApiCalls.length,
-    });
-
     const nodes: CrossStackNode[] = [];
     const edges: CrossStackEdge[] = [];
 
@@ -314,12 +308,6 @@ export class CrossStackGraphBuilder {
     const safeTypescriptInterfaces = typescriptInterfaces || [];
     const safePhpDtos = phpDtos || [];
     const safeDataContracts = dataContracts || [];
-
-    this.logger.info('Building data contract graph', {
-      typescriptInterfaces: safeTypescriptInterfaces.length,
-      phpDtos: safePhpDtos.length,
-      dataContracts: safeDataContracts.length,
-    });
 
     const nodes: CrossStackNode[] = [];
     const edges: CrossStackEdge[] = [];
@@ -529,8 +517,6 @@ export class CrossStackGraphBuilder {
    * Performance optimized with streaming for large datasets
    */
   async buildFullStackFeatureGraph(repoId: number): Promise<FullStackFeatureGraph> {
-    this.logger.info('Building full-stack feature graph with performance optimization', { repoId });
-
     try {
       const repoExists = await this.database.getRepository(repoId);
     } catch (error) {
@@ -555,10 +541,6 @@ export class CrossStackGraphBuilder {
       const useStreaming = false; // Disabled for test stability
 
       if (useStreaming) {
-        this.logger.info('Using streaming mode for large dataset', {
-          apiCallsCount: apiCalls.length,
-          dataContractsCount: dataContracts.length,
-        });
         return this.buildFullStackFeatureGraphStreaming(repoId);
       }
 
@@ -568,41 +550,17 @@ export class CrossStackGraphBuilder {
       const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
       const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
 
-      this.logger.info('Retrieved framework entities', {
-        vueComponents: vueComponents.length,
-        laravelRoutesFromTable: laravelRoutesRaw.length,
-        laravelRoutesConverted: laravelRoutes.length,
-      });
-
       // MISSING LOGIC: Detect new cross-stack relationships
       if (vueComponents.length > 0 && laravelRoutes.length > 0) {
-        this.logger.info('Detecting cross-stack relationships', {
-          vueComponents: vueComponents.length,
-          laravelRoutes: laravelRoutes.length,
-        });
-
         try {
           // Extract API calls from Vue components by reading their source files
           const vueApiCalls = await this.extractApiCallsFromComponents(repoId, vueComponents);
-          this.logger.info('Vue API calls extracted', {
-            vueApiCalls: vueApiCalls.length,
-            calls: vueApiCalls.map(call => ({ url: call.url, method: call.method })),
-            components: vueComponents.map(c => c.name),
-            allVueApiCalls: vueApiCalls,
-          });
 
           // Extract route information from Laravel routes
           const laravelRouteInfo = await this.extractRouteInfoFromRoutes(repoId, laravelRoutes);
-          this.logger.info('Laravel routes extracted', {
-            laravelRoutes: laravelRouteInfo.length,
-            routes: laravelRouteInfo.map(route => ({ path: route.path, method: route.method })),
-          });
 
           // Use simple URL pattern matching to detect relationships
           const relationships = this.matchApiCallsToRoutes(vueApiCalls, laravelRouteInfo);
-          this.logger.info('Relationships matched', {
-            relationships: relationships.length,
-          });
 
           // Store new relationships in database
           await this.storeDetectedRelationships(repoId, relationships);
@@ -611,12 +569,6 @@ export class CrossStackGraphBuilder {
           const updatedCrossStackData = await this.database.getCrossStackDependencies(repoId);
           apiCalls.push(...updatedCrossStackData.apiCalls);
           dataContracts.push(...updatedCrossStackData.dataContracts);
-
-          this.logger.info('Cross-stack relationship detection completed', {
-            relationshipsFound: relationships.length,
-            apiCallsTotal: apiCalls.length,
-            dataContractsTotal: dataContracts.length,
-          });
         } catch (error) {
           this.logger.error('Cross-stack relationship detection failed', { error: error.message });
           // Continue with existing data even if detection fails
@@ -624,11 +576,6 @@ export class CrossStackGraphBuilder {
       }
 
       const allSymbols = await this.database.getSymbolsByRepository(repoId);
-
-      this.logger.info('Total symbols check before data contract detection', {
-        repoId,
-        totalSymbolsInRepo: allSymbols.length,
-      });
 
       // Get TypeScript interfaces and PHP DTOs
       const typescriptInterfaces = [
@@ -639,31 +586,11 @@ export class CrossStackGraphBuilder {
       const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
       const phpDtos = [...phpClasses, ...phpInterfaces]; // PHP DTOs are typically classes or interfaces
 
-      this.logger.info('Symbol IDs for data contract detection', {
-        repoId,
-        tsCount: typescriptInterfaces.length,
-        phpCount: phpDtos.length,
-        tsSymbolIds: typescriptInterfaces.map(s => s.id),
-        phpSymbolIds: phpDtos.map(s => s.id),
-      });
-
       // Detect data contract relationships between TypeScript interfaces and PHP DTOs
       if (typescriptInterfaces.length > 0 && phpDtos.length > 0) {
-        this.logger.info('Detecting data contract relationships', {
-          typescriptInterfaces: typescriptInterfaces.length,
-          phpDtos: phpDtos.length,
-        });
-
         try {
           // Detect schema matches between TypeScript and PHP types
           const dataContractMatches = this.detectDataContractMatches(typescriptInterfaces, phpDtos);
-          this.logger.info('Data contract matches found', {
-            matches: dataContractMatches.length,
-            contracts: dataContractMatches.map(match => ({
-              tsType: match.typescriptInterface.name,
-              phpType: match.phpDto.name,
-            })),
-          });
 
           // Store new data contracts in database
           if (dataContractMatches.length > 0) {
@@ -699,20 +626,12 @@ export class CrossStackGraphBuilder {
               }));
 
               await this.database.createDataContracts(dataContractsToCreate);
-              this.logger.info('Successfully stored data contract relationships', {
-                stored: dataContractsToCreate.length,
-              });
             }
 
             // Refresh cross-stack data after detection
             const updatedCrossStackData = await this.database.getCrossStackDependencies(repoId);
             dataContracts.push(...updatedCrossStackData.dataContracts);
           }
-
-          this.logger.info('Data contract detection completed', {
-            contractsFound: dataContractMatches.length,
-            dataContractsTotal: dataContracts.length,
-          });
         } catch (error) {
           this.logger.error('Data contract detection failed', {
             error: error instanceof Error ? error.message : String(error),
@@ -745,14 +664,6 @@ export class CrossStackGraphBuilder {
       const endTime = process.hrtime.bigint();
       const executionTime = Number(endTime - startTime) / 1000000;
 
-      this.logger.info('Full-stack feature graph built successfully', {
-        repoId,
-        totalFeatures: features.length,
-        crossStackRelationships: totalRelationships,
-        executionTimeMs: executionTime,
-        memoryUsedMB: totalMemoryUsed / (1024 * 1024),
-      });
-
       return {
         features,
         apiCallGraph,
@@ -775,8 +686,6 @@ export class CrossStackGraphBuilder {
   private async buildFullStackFeatureGraphStreaming(
     repoId: number
   ): Promise<FullStackFeatureGraph> {
-    this.logger.info('Building full-stack feature graph in streaming mode', { repoId });
-
     const startTime = process.hrtime.bigint();
     const features: FeatureCluster[] = [];
     let totalApiCalls = 0;
@@ -878,15 +787,6 @@ export class CrossStackGraphBuilder {
       const endTime = process.hrtime.bigint();
       const executionTime = Number(endTime - startTime) / 1000000;
 
-      this.logger.info('Streaming full-stack feature graph built successfully', {
-        repoId,
-        totalFeatures: identifiedFeatures.length,
-        totalApiCalls,
-        totalDataContracts,
-        totalRelationships,
-        executionTimeMs: executionTime,
-      });
-
       return {
         features: identifiedFeatures,
         apiCallGraph,
@@ -906,11 +806,6 @@ export class CrossStackGraphBuilder {
    * Store cross-stack relationships in database
    */
   async storeCrossStackRelationships(graph: FullStackFeatureGraph, repoId: number): Promise<void> {
-    this.logger.info('Storing cross-stack relationships', {
-      apiCalls: graph.apiCallGraph.edges.length,
-      dataContracts: graph.dataContractGraph.edges.length,
-    });
-
     try {
       // Extract API calls from graph edges
       const apiCallsToCreate: CreateApiCall[] = [];
@@ -979,11 +874,6 @@ export class CrossStackGraphBuilder {
           });
         }
       }
-
-      this.logger.info('Cross-stack relationships stored successfully', {
-        apiCallsStored: apiCallsToCreate.length,
-        dataContractsStored: dataContractsToCreate.length,
-      });
     } catch (error) {
       this.logger.error('Failed to store cross-stack relationships', { error });
       throw error;
@@ -1144,11 +1034,6 @@ export class CrossStackGraphBuilder {
       }
     }
 
-    this.logger.info('Extracted API calls from Vue components', {
-      componentsProcessed: vueComponents.length,
-      apiCallsFound: apiCalls.length,
-    });
-
     return apiCalls;
   }
 
@@ -1228,14 +1113,6 @@ export class CrossStackGraphBuilder {
       }
     }
 
-    this.logger.info('Fetch calls extracted from component', {
-      componentName,
-      contentLength: content.length,
-      totalMatchesFound: uniqueCalls.size,
-      apiCallsFound: apiCalls.length,
-      extractedCalls: apiCalls.map(call => ({ url: call.url, method: call.method })),
-    });
-
     return apiCalls;
   }
 
@@ -1245,11 +1122,6 @@ export class CrossStackGraphBuilder {
   private async extractRouteInfoFromRoutes(repoId: number, laravelRoutes: any[]): Promise<any[]> {
     const routeInfo: any[] = [];
     const uniqueRoutes = new Set<string>(); // Track unique path+method combinations
-
-    this.logger.info('Starting Laravel route extraction', {
-      totalRoutesProvided: laravelRoutes.length,
-      routeNames: laravelRoutes.map(r => r.name || 'unnamed'),
-    });
 
     for (const route of laravelRoutes) {
       try {
@@ -1274,12 +1146,6 @@ export class CrossStackGraphBuilder {
 
         uniqueRoutes.add(uniqueKey);
 
-        this.logger.info('Processing Laravel route', {
-          routeName: route.name,
-          routeMetadata: route.metadata,
-          filePath: route.filePath,
-        });
-
         routeInfo.push({
           path,
           method,
@@ -1295,13 +1161,6 @@ export class CrossStackGraphBuilder {
         });
       }
     }
-
-    this.logger.info('Extracted route info from Laravel routes', {
-      routesProcessed: laravelRoutes.length,
-      uniqueRoutesFound: uniqueRoutes.size,
-      routeInfoExtracted: routeInfo.length,
-      routes: routeInfo.map(route => ({ path: route.path, method: route.method })),
-    });
 
     return routeInfo;
   }
@@ -1383,17 +1242,6 @@ export class CrossStackGraphBuilder {
 
     const processingTime = Date.now() - startTime;
 
-    this.logger.info('Matched API calls to routes', {
-      originalVueApiCalls: vueApiCalls.length,
-      originalLaravelRoutes: laravelRoutes.length,
-      processedApiCalls: limitedApiCalls.length,
-      processedRoutes: limitedRoutes.length,
-      matchesFound: relationships.length,
-      processingTimeMs: processingTime,
-      truncated: vueApiCalls.length > MAX_API_CALLS || laravelRoutes.length > MAX_ROUTES,
-      limitReached: relationships.length >= MAX_RELATIONSHIPS,
-    });
-
     return relationships;
   }
 
@@ -1457,8 +1305,6 @@ export class CrossStackGraphBuilder {
    * Detect and store new data contracts for a repository
    */
   private async detectAndStoreDataContracts(repoId: number): Promise<void> {
-    this.logger.info('Detecting and storing new data contracts', { repoId });
-
     try {
       // Get TypeScript interfaces and PHP DTOs
       const typescriptInterfaces = [
@@ -1469,27 +1315,10 @@ export class CrossStackGraphBuilder {
       const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
       const phpDtos = [...phpClasses, ...phpInterfaces]; // PHP DTOs are typically classes or interfaces
 
-      this.logger.info('Retrieved symbols for data contract detection', {
-        typescriptInterfacesCount: typescriptInterfaces.length,
-        phpDtosCount: phpDtos.length,
-      });
-
       // Detect data contract relationships between TypeScript interfaces and PHP DTOs
       if (typescriptInterfaces.length > 0 && phpDtos.length > 0) {
-        this.logger.info('Detecting data contract relationships', {
-          typescriptInterfaces: typescriptInterfaces.length,
-          phpDtos: phpDtos.length,
-        });
-
         // Detect schema matches between TypeScript and PHP types
         const dataContractMatches = this.detectDataContractMatches(typescriptInterfaces, phpDtos);
-        this.logger.info('Data contract matches found', {
-          matches: dataContractMatches.length,
-          contracts: dataContractMatches.map(match => ({
-            tsType: match.typescriptInterface.name,
-            phpType: match.phpDto.name,
-          })),
-        });
 
         // Create data contracts in database
         if (dataContractMatches.length > 0) {
@@ -1505,15 +1334,7 @@ export class CrossStackGraphBuilder {
           }));
 
           await this.database.createDataContracts(dataContractsToCreate);
-          this.logger.info('Data contracts created successfully', {
-            count: dataContractsToCreate.length,
-          });
         }
-      } else {
-        this.logger.info('Skipping data contract detection - insufficient symbols', {
-          typescriptInterfaces: typescriptInterfaces.length,
-          phpDtos: phpDtos.length,
-        });
       }
     } catch (error) {
       this.logger.error('Failed to detect and store data contracts', {
@@ -1610,33 +1431,12 @@ export class CrossStackGraphBuilder {
       const userPhpSymbols = phpDtos.filter(php => php.name === 'User');
 
       if (userTsInterfaces.length > 0 && userPhpSymbols.length > 0) {
-        this.logger.info('Creating explicit User interface match', {
-          userTsCount: userTsInterfaces.length,
-          userPhpCount: userPhpSymbols.length,
-        });
-
         finalMatches.push({
           typescriptInterface: userTsInterfaces[0],
           phpDto: userPhpSymbols[0],
         });
       }
     }
-
-    this.logger.info('Data contract matching completed', {
-      originalTsInterfaces: typescriptInterfaces.length,
-      originalPhpDtos: phpDtos.length,
-      processedTsInterfaces: limitedTsInterfaces.length,
-      processedPhpDtos: limitedPhpDtos.length,
-      rawMatches: matches.length,
-      finalMatches: finalMatches.length,
-      processingTimeMs: processingTime,
-      truncated: typescriptInterfaces.length > MAX_TS_INTERFACES || phpDtos.length > MAX_PHP_DTOS,
-      limitReached: matches.length >= MAX_DATA_CONTRACTS,
-      matchDetails: finalMatches.map(match => ({
-        ts: match.typescriptInterface.name,
-        php: match.phpDto.name,
-      })),
-    });
 
     return finalMatches;
   }
@@ -1649,13 +1449,7 @@ export class CrossStackGraphBuilder {
    * Store detected relationships in database
    */
   private async storeDetectedRelationships(repoId: number, relationships: any[]): Promise<void> {
-    this.logger.info('Storing detected cross-stack relationships', {
-      repoId,
-      relationshipsCount: relationships.length,
-    });
-
     if (relationships.length === 0) {
-      this.logger.info('No relationships to store');
       return;
     }
 
@@ -1859,7 +1653,6 @@ export class CrossStackGraphBuilder {
         }
 
         if (uniqueApiCalls.length === 0) {
-          this.logger.info('No new API calls to create - all are duplicates');
           return;
         }
 

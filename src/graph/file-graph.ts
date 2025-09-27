@@ -44,18 +44,8 @@ export class FileGraphBuilder {
     importsMap: Map<number, ParsedImport[]>,
     exportsMap: Map<number, ParsedExport[]>
   ): Promise<FileGraphData> {
-    this.logger.info('Building file graph', {
-      repoName: repository.name,
-      fileCount: files.length
-    });
-
     const nodes = this.createFileNodes(files, repository.path);
     const edges = this.createFileEdges(files, importsMap, repository.path);
-
-    this.logger.info('File graph built', {
-      nodeCount: nodes.length,
-      edgeCount: edges.length
-    });
 
     return { nodes, edges };
   }
@@ -131,9 +121,7 @@ export class FileGraphBuilder {
    * Get all files that import a specific file
    */
   getImporters(fileId: number, fileGraph: FileGraphData): FileNode[] {
-    const importerIds = fileGraph.edges
-      .filter(edge => edge.to === fileId)
-      .map(edge => edge.from);
+    const importerIds = fileGraph.edges.filter(edge => edge.to === fileId).map(edge => edge.from);
 
     return fileGraph.nodes.filter(node => importerIds.includes(node.id));
   }
@@ -142,9 +130,7 @@ export class FileGraphBuilder {
    * Get all files that a specific file imports
    */
   getImports(fileId: number, fileGraph: FileGraphData): FileNode[] {
-    const importIds = fileGraph.edges
-      .filter(edge => edge.from === fileId)
-      .map(edge => edge.to);
+    const importIds = fileGraph.edges.filter(edge => edge.from === fileId).map(edge => edge.to);
 
     return fileGraph.nodes.filter(node => importIds.includes(node.id));
   }
@@ -223,7 +209,7 @@ export class FileGraphBuilder {
       relativePath: path.relative(repositoryPath, file.path),
       language: file.language,
       isTest: file.is_test,
-      isGenerated: file.is_generated
+      isGenerated: file.is_generated,
     }));
   }
 
@@ -239,11 +225,7 @@ export class FileGraphBuilder {
       const imports = importsMap.get(file.id) || [];
 
       for (const importInfo of imports) {
-        const resolvedPath = this.resolveModulePath(
-          importInfo.source,
-          file.path,
-          repositoryPath
-        );
+        const resolvedPath = this.resolveModulePath(importInfo.source, file.path, repositoryPath);
 
         if (!resolvedPath) continue;
 
@@ -256,7 +238,7 @@ export class FileGraphBuilder {
           importType: importInfo.import_type,
           importedSymbols: importInfo.imported_names,
           isDynamic: importInfo.is_dynamic,
-          lineNumber: importInfo.line_number
+          lineNumber: importInfo.line_number,
         });
       }
     }
@@ -304,9 +286,26 @@ export class FileGraphBuilder {
 
   private isBuiltinModule(moduleName: string): boolean {
     const builtinModules = [
-      'fs', 'path', 'os', 'crypto', 'http', 'https', 'url', 'util',
-      'events', 'stream', 'buffer', 'process', 'child_process',
-      'cluster', 'net', 'dns', 'tls', 'zlib', 'readline', 'repl'
+      'fs',
+      'path',
+      'os',
+      'crypto',
+      'http',
+      'https',
+      'url',
+      'util',
+      'events',
+      'stream',
+      'buffer',
+      'process',
+      'child_process',
+      'cluster',
+      'net',
+      'dns',
+      'tls',
+      'zlib',
+      'readline',
+      'repl',
     ];
 
     return builtinModules.includes(moduleName) || moduleName.startsWith('node:');

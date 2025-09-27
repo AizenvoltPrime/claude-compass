@@ -229,10 +229,6 @@ export class MultiParser {
 
     if (projectPath) {
       detectionResult = await this.detector.detectFrameworks(projectPath);
-      logger.info(`Project framework detection completed`, {
-        projectPath,
-        frameworks: detectionResult.frameworks.map(f => `${f.name}@${f.version || 'unknown'}`),
-      });
     }
 
     // Parse all files
@@ -546,10 +542,6 @@ export class MultiParser {
         vueResults,
         laravelResults
       );
-
-      if (relationships.length > 0) {
-        logger.info(`Successfully detected ${relationships.length} cross-stack relationships`);
-      }
 
       return relationships;
     } catch (error) {

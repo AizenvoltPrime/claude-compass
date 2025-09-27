@@ -6,7 +6,7 @@ import {
   GodotAutoload,
   GodotRelationship,
   GodotRelationshipType,
-  GodotEntityType
+  GodotEntityType,
 } from '../database/models';
 import { FrameworkEntity } from '../parsers/base';
 import { createComponentLogger } from '../utils/logger';
@@ -37,28 +37,26 @@ export class GodotRelationshipBuilder {
       const autoloads = entities.filter(e => e.type === 'godot_autoload') as any[];
 
       // Build scene-script attachment relationships
-      relationships.push(...await this.buildSceneScriptRelationships(repositoryId, scenes, scripts));
+      relationships.push(
+        ...(await this.buildSceneScriptRelationships(repositoryId, scenes, scripts))
+      );
 
       // Build node hierarchy relationships
-      relationships.push(...await this.buildNodeHierarchyRelationships(repositoryId, nodes));
+      relationships.push(...(await this.buildNodeHierarchyRelationships(repositoryId, nodes)));
 
       // Build scene-resource reference relationships
-      relationships.push(...await this.buildSceneResourceRelationships(repositoryId, scenes));
+      relationships.push(...(await this.buildSceneResourceRelationships(repositoryId, scenes)));
 
       // Build autoload reference relationships
-      relationships.push(...await this.buildAutoloadRelationships(repositoryId, autoloads, scripts));
-
-      logger.info('Godot relationships built successfully', {
-        repositoryId,
-        relationshipCount: relationships.length,
-        relationshipTypes: [...new Set(relationships.map(r => r.relationship_type))]
-      });
+      relationships.push(
+        ...(await this.buildAutoloadRelationships(repositoryId, autoloads, scripts))
+      );
 
       return relationships;
     } catch (error) {
       logger.error('Failed to build Godot relationships', {
         repositoryId,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       return [];
     }
@@ -80,9 +78,8 @@ export class GodotRelationshipBuilder {
         for (const node of scene.nodes) {
           if (node.script) {
             // Find matching script entity
-            const scriptEntity = scripts.find(s =>
-              s.filePath === node.script ||
-              s.filePath.endsWith(node.script)
+            const scriptEntity = scripts.find(
+              s => s.filePath === node.script || s.filePath.endsWith(node.script)
             );
 
             if (scriptEntity) {
@@ -97,8 +94,8 @@ export class GodotRelationshipBuilder {
                   metadata: {
                     nodeName: node.nodeName,
                     nodeType: node.nodeType,
-                    scriptPath: node.script
-                  }
+                    scriptPath: node.script,
+                  },
                 });
 
                 relationships.push(relationship);
@@ -106,7 +103,7 @@ export class GodotRelationshipBuilder {
                 logger.warn('Failed to create scene-script relationship', {
                   sceneId: scene.id,
                   scriptId: scriptEntity.id,
-                  error: (error as Error).message
+                  error: (error as Error).message,
                 });
               }
             }
@@ -145,8 +142,8 @@ export class GodotRelationshipBuilder {
                 parentName: parentNode.nodeName,
                 childName: node.nodeName,
                 parentType: parentNode.nodeType,
-                childType: node.nodeType
-              }
+                childType: node.nodeType,
+              },
             });
 
             relationships.push(relationship);
@@ -154,7 +151,7 @@ export class GodotRelationshipBuilder {
             logger.warn('Failed to create node hierarchy relationship', {
               parentId: parentNode.id,
               childId: node.id,
-              error: (error as Error).message
+              error: (error as Error).message,
             });
           }
         }
@@ -188,8 +185,8 @@ export class GodotRelationshipBuilder {
               metadata: {
                 resourcePath: resource.path,
                 resourceType: resource.type,
-                resourceId: resource.id
-              }
+                resourceId: resource.id,
+              },
             });
 
             relationships.push(relationship);
@@ -197,7 +194,7 @@ export class GodotRelationshipBuilder {
             logger.warn('Failed to create scene-resource relationship', {
               sceneId: scene.id,
               resourceId: resource.id,
-              error: (error as Error).message
+              error: (error as Error).message,
             });
           }
         }
@@ -219,9 +216,8 @@ export class GodotRelationshipBuilder {
 
     for (const autoload of autoloads) {
       // Find the script that this autoload references
-      const scriptEntity = scripts.find(s =>
-        s.filePath === autoload.scriptPath ||
-        s.filePath.endsWith(autoload.scriptPath)
+      const scriptEntity = scripts.find(
+        s => s.filePath === autoload.scriptPath || s.filePath.endsWith(autoload.scriptPath)
       );
 
       if (scriptEntity) {
@@ -236,8 +232,8 @@ export class GodotRelationshipBuilder {
             metadata: {
               autoloadName: autoload.autoloadName,
               scriptPath: autoload.scriptPath,
-              className: scriptEntity.className
-            }
+              className: scriptEntity.className,
+            },
           });
 
           relationships.push(relationship);
@@ -245,7 +241,7 @@ export class GodotRelationshipBuilder {
           logger.warn('Failed to create autoload-script relationship', {
             autoloadId: autoload.id,
             scriptId: scriptEntity.id,
-            error: (error as Error).message
+            error: (error as Error).message,
           });
         }
       }
@@ -284,7 +280,7 @@ export class GodotRelationshipBuilder {
         entityType,
         entityId,
         relationshipType,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       return [];
     }
@@ -302,10 +298,11 @@ export class GodotRelationshipBuilder {
       );
 
       const sceneIds = relationships
-        .filter(r =>
-          r.repo_id === repositoryId &&
-          r.relationship_type === GodotRelationshipType.SCENE_SCRIPT_ATTACHMENT &&
-          r.from_entity_type === GodotEntityType.SCENE
+        .filter(
+          r =>
+            r.repo_id === repositoryId &&
+            r.relationship_type === GodotRelationshipType.SCENE_SCRIPT_ATTACHMENT &&
+            r.from_entity_type === GodotEntityType.SCENE
         )
         .map(r => r.from_entity_id);
 
@@ -320,7 +317,7 @@ export class GodotRelationshipBuilder {
       logger.error('Failed to get scenes using script', {
         repositoryId,
         scriptId,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       return [];
     }
@@ -336,15 +333,15 @@ export class GodotRelationshipBuilder {
         GodotRelationshipType.NODE_HIERARCHY
       );
 
-      return relationships.filter(r =>
-        r.from_entity_type === GodotEntityType.NODE &&
-        r.to_entity_type === GodotEntityType.NODE
+      return relationships.filter(
+        r =>
+          r.from_entity_type === GodotEntityType.NODE && r.to_entity_type === GodotEntityType.NODE
       );
     } catch (error) {
       logger.error('Failed to get node hierarchy', {
         repositoryId,
         sceneId,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       return [];
     }
