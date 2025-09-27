@@ -805,11 +805,6 @@ export class CrossStackGraphBuilder {
       const crossStackData = await this.database.getCrossStackDependencies(repoId);
       const batch = crossStackData; // Structure: {apiCalls: ApiCall[], dataContracts: DataContract[]}
 
-      this.logger.debug('Processing cross-stack data', {
-        apiCallsBatch: batch.apiCalls.length,
-        dataContractsBatch: batch.dataContracts.length,
-      });
-
       // Process API calls batch
       if (batch.apiCalls.length > 0) {
         // Get required framework entities for this batch - Fixed: Get Laravel routes from dedicated routes table
@@ -1274,11 +1269,6 @@ export class CrossStackGraphBuilder {
 
         // Skip if we've already processed this exact path+method combination
         if (uniqueRoutes.has(uniqueKey)) {
-          this.logger.debug('Skipping duplicate route', {
-            path,
-            method,
-            routeName: route.name,
-          });
           continue;
         }
 
@@ -1788,8 +1778,6 @@ export class CrossStackGraphBuilder {
     // Create API calls in database
     if (apiCallsToCreate.length > 0) {
       try {
-        this.logger.debug('Creating API calls in database', { count: apiCallsToCreate.length });
-
         // Validate all symbol IDs exist before insertion
         const allSymbolIds = Array.from(
           new Set([

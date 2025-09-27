@@ -64,12 +64,6 @@ export class QueryCache<T = any> {
         Math.min(config.ttlMs / 4, 60000)
       ); // Cleanup every quarter TTL or 1 minute max
     }
-
-    logger.debug('Query cache initialized', {
-      maxEntries: config.maxEntries,
-      ttlMs: config.ttlMs,
-      maxSizeBytes: config.maxSizeBytes,
-    });
   }
 
   /**
@@ -125,11 +119,6 @@ export class QueryCache<T = any> {
           this.cache.delete(key);
         }
       }
-
-      logger.debug('Cleaned up expired cache entries', {
-        expiredCount: expiredKeys.length,
-        remainingCount: this.cache.size,
-      });
     }
   }
 
@@ -161,11 +150,6 @@ export class QueryCache<T = any> {
     }
 
     if (evictedCount > 0) {
-      logger.debug('Evicted LRU cache entries', {
-        evictedCount,
-        freedSpaceBytes: freedSpace,
-        remainingEntries: this.cache.size,
-      });
     }
   }
 
@@ -196,13 +180,6 @@ export class QueryCache<T = any> {
     entry.lastAccessed = now;
     this.stats.hits++;
 
-    logger.debug('Cache hit', {
-      method,
-      key: key.substring(0, 100),
-      hits: entry.hits,
-      age: now - entry.timestamp,
-    });
-
     return entry.data;
   }
 
@@ -216,11 +193,6 @@ export class QueryCache<T = any> {
 
     // Don't cache if data is too large
     if (size > this.config.maxSizeBytes / 4) {
-      logger.debug('Skipping cache - data too large', {
-        method,
-        sizeBytes: size,
-        maxAllowed: this.config.maxSizeBytes / 4,
-      });
       return;
     }
 
@@ -248,14 +220,6 @@ export class QueryCache<T = any> {
 
     this.cache.set(key, entry);
     this.stats.totalSize += size;
-
-    logger.debug('Cache set', {
-      method,
-      key: key.substring(0, 100),
-      sizeBytes: size,
-      totalEntries: this.cache.size,
-      totalSizeBytes: this.stats.totalSize,
-    });
   }
 
   /**
@@ -300,11 +264,6 @@ export class QueryCache<T = any> {
     if (entry) {
       this.cache.delete(key);
       this.stats.totalSize -= entry.size;
-
-      logger.debug('Cache invalidated', {
-        method,
-        key: key.substring(0, 100),
-      });
     }
   }
 
@@ -323,10 +282,6 @@ export class QueryCache<T = any> {
     }
 
     if (invalidatedCount > 0) {
-      logger.debug('Cache invalidated by pattern', {
-        pattern,
-        invalidatedCount,
-      });
     }
 
     return invalidatedCount;

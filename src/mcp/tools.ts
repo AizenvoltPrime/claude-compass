@@ -392,10 +392,6 @@ export class McpTools {
         const repo = await this.dbService.getRepositoryByName(this.defaultRepoName);
         this.defaultRepoId = repo?.id;
         if (this.defaultRepoId) {
-          this.logger.debug('Using default repository', {
-            name: this.defaultRepoName,
-            id: this.defaultRepoId,
-          });
         } else {
           this.logger.warn('Default repository not found', { name: this.defaultRepoName });
         }
@@ -599,7 +595,6 @@ export class McpTools {
    */
   async searchCode(args: any) {
     const validatedArgs = validateSearchCodeArgs(args);
-    this.logger.debug('Enhanced search with framework awareness', validatedArgs);
 
     // Use repo_ids or default repo (repo_id parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
     const defaultRepoId = await this.getDefaultRepoId();
@@ -862,7 +857,6 @@ export class McpTools {
    */
   async whoCalls(args: any) {
     const validatedArgs = validateWhoCallsArgs(args);
-    this.logger.debug('Finding who calls symbol with enhanced context', validatedArgs);
 
     const timeoutMs = 10000;
     const timeoutPromise = new Promise((_, reject) => {
@@ -1031,7 +1025,6 @@ export class McpTools {
    */
   async listDependencies(args: any) {
     const validatedArgs = validateListDependenciesArgs(args);
-    this.logger.debug('Listing dependencies for symbol', validatedArgs);
 
     const timeoutMs = 10000;
     const timeoutPromise = new Promise((_, reject) => {
@@ -1205,8 +1198,6 @@ export class McpTools {
    */
   async impactOf(args: any) {
     const validatedArgs = validateImpactOfArgs(args);
-    this.logger.debug('Performing comprehensive impact analysis', validatedArgs);
-
     try {
       const symbol = await this.dbService.getSymbolWithFile(validatedArgs.symbol_id);
       if (!symbol) {
@@ -2362,18 +2353,9 @@ export class McpTools {
    */
   private async getParameterContextAnalysis(symbolId: number): Promise<any> {
     try {
-      this.logger.debug('Getting parameter context analysis', { symbolId });
       const analysis = await this.dbService.groupCallsByParameterContext(symbolId);
 
-      this.logger.debug('Parameter context analysis result', {
-        symbolId,
-        totalCalls: analysis.totalCalls,
-        hasParameterVariations: analysis.parameterVariations?.length > 0,
-        methodName: analysis.methodName,
-      });
-
       if (analysis.totalCalls === 0) {
-        this.logger.debug('No parameter context data found', { symbolId });
         return undefined; // No parameter context data available
       }
 
@@ -2547,9 +2529,7 @@ export class McpTools {
           if (vectorResults.length > 0) {
             return vectorResults;
           }
-        } catch (error) {
-          this.logger.debug('Vector search not available, using fulltext:', error);
-        }
+        } catch (error) {}
 
         return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
     }
@@ -2573,12 +2553,6 @@ export class McpTools {
       }
     }
 
-    this.logger.debug('Advanced impact deduplication completed', {
-      originalCount: items.length,
-      deduplicatedCount: deduplicatedItems.length,
-      duplicatesRemoved: items.length - deduplicatedItems.length,
-    });
-
     return deduplicatedItems;
   }
 
@@ -2599,12 +2573,6 @@ export class McpTools {
         deduplicatedDependencies.push(dep);
       }
     }
-
-    this.logger.debug('Impact dependency deduplication completed', {
-      originalCount: dependencies.length,
-      deduplicatedCount: deduplicatedDependencies.length,
-      duplicatesRemoved: dependencies.length - deduplicatedDependencies.length,
-    });
 
     return deduplicatedDependencies;
   }

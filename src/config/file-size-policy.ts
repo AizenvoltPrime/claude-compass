@@ -79,10 +79,6 @@ export class FileSizeManager {
     };
 
     this.validatePolicy();
-
-    logger.debug('FileSizeManager initialized', {
-      policy: this.policy
-    });
   }
 
   /**
