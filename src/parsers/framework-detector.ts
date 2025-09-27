@@ -255,7 +255,6 @@ export class FrameworkDetector {
    * Detect frameworks in a project directory
    */
   async detectFrameworks(projectPath: string): Promise<FrameworkDetectionResult> {
-
     try {
       const packageJson = await this.readPackageJson(projectPath);
       const composerJson = await this.readComposerJson(projectPath);
@@ -276,10 +275,14 @@ export class FrameworkDetector {
 
         // Only include frameworks that have strong evidence (dependencies, configs)
         // to avoid false positives from shared directory structures
+        // Special case: Godot projects don't have dependencies but project.godot is strong evidence
         const hasStrongEvidence = detection.evidence.some(
           e => e.type === 'dependency' || e.type === 'devDependency' || e.type === 'config'
         );
-        if (hasStrongEvidence) {
+        const isGodotWithProjectFile =
+          pattern.name === 'godot' &&
+          detection.evidence.some(e => e.type === 'config' && e.value === 'project.godot');
+        if (hasStrongEvidence || isGodotWithProjectFile) {
           detectedFrameworks.push(detection);
         }
       }
@@ -463,6 +466,8 @@ export class FrameworkDetector {
       'pm2.config.js',
       'tailwind.config.js',
       'webpack.config.js',
+      'project.godot',
+      'export_presets.cfg',
     ];
 
     const foundFiles: string[] = [];
@@ -950,6 +955,22 @@ export class FrameworkDetector {
             }
           }
           break;
+
+        case 'godot':
+          if (ext === '.tscn') {
+            frameworks.push('godot');
+          } else if (ext === '.cs') {
+            const hasScriptsPath = filePath.includes('/scripts/') || filePath.includes('/Scripts/');
+            const hasCamelCase = path.basename(filePath, '.cs').match(/[A-Z][a-z]+/);
+            const shouldInclude = hasScriptsPath || hasCamelCase;
+
+            if (shouldInclude) {
+              frameworks.push('godot');
+            }
+          } else if (filePath.endsWith('project.godot')) {
+            frameworks.push('godot');
+          }
+          break;
       }
     }
 
@@ -999,7 +1020,6 @@ export class FrameworkDetector {
       let foundMarker = false;
 
       for (const marker of markers) {
-        const markerPath = path.join(currentDir, marker);
         try {
           // We can't use async fs.access here, so we'll do our best to infer from the directory structure
           if (detectionResult.metadata.hasPackageJson && marker === 'package.json') {

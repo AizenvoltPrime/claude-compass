@@ -1813,6 +1813,15 @@ export class GraphBuilder {
       // Ignore errors - composer.json might not exist for non-PHP projects
     }
 
+    // Check for Godot framework
+    try {
+      const projectGodotPath = path.join(repositoryPath, 'project.godot');
+      await fs.access(projectGodotPath);
+      frameworks.push('godot');
+    } catch {
+      // Ignore errors - project.godot might not exist for non-Godot projects
+    }
+
     return frameworks;
   }
 
