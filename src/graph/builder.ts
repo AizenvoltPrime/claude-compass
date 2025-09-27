@@ -413,11 +413,6 @@ export class GraphBuilder {
           const stats = await fs.stat(fileInfo.path);
           if (stats.mtime > lastIndexed) {
             changedFiles.push(fileInfo.path);
-            this.logger.debug('File changed since last analysis', {
-              file: fileInfo.relativePath,
-              lastModified: stats.mtime.toISOString(),
-              lastAnalyzed: lastIndexed.toISOString(),
-            });
           }
         } catch (error) {
           // File might have been deleted, skip it
@@ -1176,12 +1171,6 @@ export class GraphBuilder {
           } else if (this.isORMSystemEntity(entity)) {
             // Handle ORM system entities
             const ormSystemEntity = entity as any;
-            this.logger.debug('Creating ORM entity', {
-              entityName: ormSystemEntity.name,
-              ormType: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
-              symbolId: matchingSymbol.id,
-              entity: ormSystemEntity,
-            });
             await this.dbService.createORMEntity({
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
@@ -1218,11 +1207,6 @@ export class GraphBuilder {
           } else if (this.isGodotScene(entity)) {
             // Handle Godot scene entities - Core of Solution 1
             const sceneEntity = entity as any;
-            this.logger.debug('Creating Godot scene', {
-              sceneName: sceneEntity.name,
-              scenePath: sceneEntity.scenePath || parseResult.filePath,
-              nodeCount: sceneEntity.nodes?.length || 0,
-            });
 
             const storedScene = await this.dbService.storeGodotScene({
               repo_id: repositoryId,
@@ -1285,13 +1269,6 @@ export class GraphBuilder {
           } else if (this.isGodotScript(entity)) {
             // Handle Godot script entities
             const scriptEntity = entity as any;
-            this.logger.debug('Creating Godot script', {
-              className: scriptEntity.className,
-              scriptPath: parseResult.filePath,
-              isAutoload: scriptEntity.isAutoload,
-              signalCount: scriptEntity.signals?.length || 0,
-            });
-
             await this.dbService.storeGodotScript({
               repo_id: repositoryId,
               script_path: parseResult.filePath,
@@ -1307,10 +1284,6 @@ export class GraphBuilder {
           } else if (this.isGodotAutoload(entity)) {
             // Handle Godot autoload entities
             const autoloadEntity = entity as any;
-            this.logger.debug('Creating Godot autoload', {
-              autoloadName: autoloadEntity.autoloadName,
-              scriptPath: autoloadEntity.scriptPath,
-            });
 
             // Find the script entity first
             const scriptEntity = await this.dbService.findGodotScriptByPath(
@@ -1342,12 +1315,6 @@ export class GraphBuilder {
           } else if (entity.type === 'api_call') {
             // API calls from Vue components - these will be extracted later by cross-stack builder
             // API calls will be processed by cross-stack builder
-          } else {
-            this.logger.debug('Unknown framework entity type', {
-              type: entity.type,
-              name: entity.name,
-              filePath: parseResult.filePath,
-            });
           }
         } catch (error) {
           this.logger.error(
@@ -1394,7 +1361,6 @@ export class GraphBuilder {
       }
 
       if (godotEntities.length === 0) {
-        this.logger.debug('No Godot entities found, skipping relationship building');
         return;
       }
 
@@ -1661,18 +1627,6 @@ export class GraphBuilder {
           const existingDeps = map.get(containingSymbol.id) || [];
           existingDeps.push(dependency);
           map.set(containingSymbol.id, existingDeps);
-        } else {
-          this.logger.debug('Could not find containing symbol for dependency', {
-            from: dependency.from_symbol,
-            extractedName: fromMethodName,
-            to: dependency.to_symbol,
-            line: dependency.line_number,
-            filePath: filePath,
-            availableSymbols: fileSymbols.map(s => ({
-              name: s.name,
-              lines: `${s.start_line}-${s.end_line}`,
-            })),
-          });
         }
       }
     }
@@ -2126,13 +2080,6 @@ export class GraphBuilder {
           dependency.to_symbol.includes('::') || dependency.dependency_type === 'imports';
 
         if (isExternalCall) {
-          this.logger.debug('Creating file dependency for external call', {
-            from: dependency.from_symbol,
-            to: dependency.to_symbol,
-            sourceFile: parseResult.filePath,
-            line: dependency.line_number,
-          });
-
           // Create a file dependency representing this external call
           // The "target" will be the same file for now, representing the external call
           fileDependencies.push({
@@ -2182,13 +2129,6 @@ export class GraphBuilder {
           !importInfo.source.startsWith('@/');
 
         if (isExternalImport) {
-          this.logger.debug('Creating file dependency for external import', {
-            source: importInfo.source,
-            importedNames: importInfo.imported_names,
-            sourceFile: parseResult.filePath,
-            line: importInfo.line_number,
-          });
-
           // Create a file dependency representing this external import
           // Since we can't reference a real external file, we create a self-reference
           // The presence of this dependency with dependency_type 'imports' indicates external usage
@@ -2235,13 +2175,6 @@ export class GraphBuilder {
       pathToFileId.set(file.path, file.id);
     }
 
-    if (symbolDependencies.length > 0) {
-      this.logger.debug('Sample symbol dependency structure', {
-        firstDependency: symbolDependencies[0],
-        dependencyKeys: Object.keys(symbolDependencies[0] || {}),
-      });
-    }
-
     // Process each symbol dependency
     for (const symbolDep of symbolDependencies) {
       const fromFileId = symbolIdToFileId.get(symbolDep.from_symbol_id);
@@ -2267,11 +2200,6 @@ export class GraphBuilder {
         }
       }
     }
-
-    this.logger.debug('Created cross-file dependencies from symbol dependencies', {
-      symbolDependencies: symbolDependencies.length,
-      crossFileFileDependencies: fileDependencies.length,
-    });
 
     return fileDependencies;
   }
