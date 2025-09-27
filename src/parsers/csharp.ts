@@ -7,14 +7,14 @@ import {
   ParsedExport,
   ParseResult,
   ParseOptions,
-  ParseError
+  ParseError,
 } from './base';
 import { createComponentLogger } from '../utils/logger';
 import {
   ChunkedParser,
   MergedParseResult,
   ChunkedParseOptions,
-  ChunkResult
+  ChunkResult,
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
 import { randomUUID, createHash } from 'crypto';
@@ -108,7 +108,8 @@ interface TopLevelDeclaration {
 export class CSharpParser extends ChunkedParser {
   private currentFilePath?: string;
   // Use WeakMap to associate cache with specific tree root nodes
-  private nodeTypeCacheMap: WeakMap<Parser.SyntaxNode, Map<string, Parser.SyntaxNode[]>> = new WeakMap();
+  private nodeTypeCacheMap: WeakMap<Parser.SyntaxNode, Map<string, Parser.SyntaxNode[]>> =
+    new WeakMap();
   private typeResolutionCache: Map<string, EnhancedTypeInfo | null> = new Map();
 
   constructor() {
@@ -138,42 +139,41 @@ export class CSharpParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `File is too large (${content.length} bytes, limit: ${validatedOptions.maxFileSize} bytes)`,
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: `File is too large (${content.length} bytes, limit: ${validatedOptions.maxFileSize} bytes)`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
 
     // Check if chunking should be used and is enabled
-    if (chunkedOptions.enableChunking !== false &&
-        content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
+    if (
+      chunkedOptions.enableChunking !== false &&
+      content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)
+    ) {
       // Special case: Check if file contains a single large class that can't be chunked
       const declarations = this.findTopLevelDeclarations(content);
       const nonUsingDeclarations = declarations.filter(d => d.type !== 'using_block');
 
       // Check if we have classes that are too large to chunk
-      const largeDeclarations = nonUsingDeclarations.filter(d =>
-        (d.type === 'class_declaration' || d.type === 'namespace_declaration') &&
-        d.endPos - d.startPos + 1 > this.DEFAULT_CHUNK_SIZE
+      const largeDeclarations = nonUsingDeclarations.filter(
+        d =>
+          (d.type === 'class_declaration' || d.type === 'namespace_declaration') &&
+          d.endPos - d.startPos + 1 > this.DEFAULT_CHUNK_SIZE
       );
-
-      logger.debug('Checking for large declarations', {
-        totalDeclarations: nonUsingDeclarations.length,
-        largeDeclarations: largeDeclarations.map(d => ({
-          name: d.name,
-          type: d.type,
-          size: d.endPos - d.startPos + 1
-        }))
-      });
 
       // If file has large declarations that would be broken by chunking, parse as single oversized chunk
       // This happens when we have a very large class that can't be split
       if (largeDeclarations.length > 0) {
         // Check if the large declarations contain most of the file content
-        const totalLargeSize = largeDeclarations.reduce((sum, d) => sum + (d.endPos - d.startPos + 1), 0);
+        const totalLargeSize = largeDeclarations.reduce(
+          (sum, d) => sum + (d.endPos - d.startPos + 1),
+          0
+        );
         const fileSize = content.length;
 
         // If large declarations are more than 80% of file, parse as single chunk
@@ -182,7 +182,7 @@ export class CSharpParser extends ChunkedParser {
             declarationCount: nonUsingDeclarations.length,
             largeDeclarationSize: totalLargeSize,
             fileSize: fileSize,
-            percentage: Math.round(totalLargeSize * 100 / fileSize)
+            percentage: Math.round((totalLargeSize * 100) / fileSize),
           });
           // Bypass the size check by parsing directly
           const tree = this.parser.parse(content);
@@ -202,7 +202,12 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Extract symbols and dependencies directly from a parsed tree
    */
-  private extractFromTree(tree: Parser.Tree | null, content: string, filePath: string, options?: ChunkedParseOptions): ParseResult {
+  private extractFromTree(
+    tree: Parser.Tree | null,
+    content: string,
+    filePath: string,
+    options?: ChunkedParseOptions
+  ): ParseResult {
     const validatedOptions = this.validateOptions(options);
 
     if (!tree || !tree.rootNode) {
@@ -211,12 +216,14 @@ export class CSharpParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: 'Failed to parse syntax tree',
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: 'Failed to parse syntax tree',
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
 
@@ -230,7 +237,11 @@ export class CSharpParser extends ChunkedParser {
       const exports = this.extractExports(tree.rootNode, content);
 
       // Validate method call detection completeness
-      const methodCallValidationErrors = this.validateMethodCallDetection(content, dependencies, filePath);
+      const methodCallValidationErrors = this.validateMethodCallDetection(
+        content,
+        dependencies,
+        filePath
+      );
       validationErrors.push(...methodCallValidationErrors);
 
       logger.info('C# parsing completed for large file', {
@@ -240,20 +251,22 @@ export class CSharpParser extends ChunkedParser {
         importsFound: imports.length,
         exportsFound: exports.length,
         syntaxErrors: validationErrors.length,
-        hasErrors: tree.rootNode.hasError
+        hasErrors: tree.rootNode.hasError,
       });
 
       return {
-        symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== Visibility.PRIVATE),
+        symbols: validatedOptions.includePrivateSymbols
+          ? symbols
+          : symbols.filter(s => s.visibility !== Visibility.PRIVATE),
         dependencies,
         imports,
         exports,
-        errors: validationErrors
+        errors: validationErrors,
       };
     } catch (error) {
       logger.error('C# symbol extraction failed', {
         filePath,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
 
       return {
@@ -261,12 +274,14 @@ export class CSharpParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `Symbol extraction failed: ${(error as Error).message}`,
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: `Symbol extraction failed: ${(error as Error).message}`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
   }
@@ -288,12 +303,14 @@ export class CSharpParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: 'Failed to parse syntax tree',
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: 'Failed to parse syntax tree',
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
 
@@ -307,19 +324,12 @@ export class CSharpParser extends ChunkedParser {
       const exports = this.extractExports(tree.rootNode, content);
 
       // Validate method call detection completeness
-      const methodCallValidationErrors = this.validateMethodCallDetection(content, dependencies, filePath);
+      const methodCallValidationErrors = this.validateMethodCallDetection(
+        content,
+        dependencies,
+        filePath
+      );
       validationErrors.push(...methodCallValidationErrors);
-
-      // Log parsing statistics for C# files
-      logger.debug('C# parsing completed', {
-        filePath,
-        symbolsFound: symbols.length,
-        dependenciesFound: dependencies.length,
-        importsFound: imports.length,
-        exportsFound: exports.length,
-        syntaxErrors: validationErrors.length,
-        hasErrors: tree.rootNode.hasError
-      });
 
       // Warn if no symbols found in a substantial file (might indicate parsing issues)
       if (symbols.length === 0 && content.length > 1000) {
@@ -327,21 +337,23 @@ export class CSharpParser extends ChunkedParser {
           message: 'No symbols extracted from substantial C# file - possible parsing issue',
           line: 1,
           column: 1,
-          severity: 'warning'
+          severity: 'warning',
         });
       }
 
       return {
-        symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== Visibility.PRIVATE),
+        symbols: validatedOptions.includePrivateSymbols
+          ? symbols
+          : symbols.filter(s => s.visibility !== Visibility.PRIVATE),
         dependencies,
         imports,
         exports,
-        errors: validationErrors
+        errors: validationErrors,
       };
     } catch (error) {
       logger.error('C# symbol extraction failed', {
         filePath,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
 
       return {
@@ -349,12 +361,14 @@ export class CSharpParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `Symbol extraction failed: ${(error as Error).message}`,
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: `Symbol extraction failed: ${(error as Error).message}`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     } finally {
       // Tree-sitter trees are automatically garbage collected in Node.js
@@ -510,65 +524,33 @@ export class CSharpParser extends ChunkedParser {
 
     // ENHANCED: Extract field type mappings first for C# classes
     const fieldTypeMap = this.extractFieldDeclarations(rootNode);
-    logger.debug('C# field type mappings extracted for dependency resolution', {
-      fieldCount: fieldTypeMap.size,
-      fields: Array.from(fieldTypeMap.entries())
-    });
 
     // Extract method calls
     const callNodes = this.getNodesOfType(rootNode, 'invocation_expression');
-    logger.debug('C# dependency extraction: method calls', {
-      invocationExpressionCount: callNodes.length
-    });
 
     for (const node of callNodes) {
       const dependency = this.extractCallDependency(node, content);
       if (dependency) {
         dependencies.push(dependency);
-        logger.debug('C# method call detected', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
-          line: dependency.line_number,
-          type: dependency.dependency_type
-        });
-      } else {
-        logger.debug('C# method call extraction failed', {
-          line: node.startPosition.row + 1,
-          nodeType: node.type,
-          nodeText: this.getNodeText(node, content).substring(0, 100)
-        });
       }
     }
 
     // Extract conditional access expressions (null-conditional operator ?.)
     const conditionalAccessNodes = this.getNodesOfType(rootNode, 'conditional_access_expression');
-    logger.debug('C# dependency extraction: conditional access expressions', {
-      conditionalAccessCount: conditionalAccessNodes.length
-    });
 
     for (const node of conditionalAccessNodes) {
-      const extractedDependencies = this.extractConditionalAccessDependencies(node, content, fieldTypeMap);
+      const extractedDependencies = this.extractConditionalAccessDependencies(
+        node,
+        content,
+        fieldTypeMap
+      );
       if (extractedDependencies.length > 0) {
         dependencies.push(...extractedDependencies);
-        logger.debug('C# conditional access dependencies detected', {
-          count: extractedDependencies.length,
-          line: node.startPosition.row + 1,
-          nodeText: this.getNodeText(node, content).substring(0, 100),
-          dependencies: extractedDependencies.map(d => `${d.from_symbol} -> ${d.to_symbol}`)
-        });
-      } else {
-        logger.debug('C# conditional access extraction failed', {
-          line: node.startPosition.row + 1,
-          nodeText: this.getNodeText(node, content).substring(0, 100)
-        });
       }
     }
 
     // Extract constructor calls (object creation expressions)
     const constructorNodes = this.getNodesOfType(rootNode, 'object_creation_expression');
-    logger.debug('C# dependency extraction: constructor calls', {
-      objectCreationCount: constructorNodes.length
-    });
 
     let constructorDependencies = 0;
     for (const node of constructorNodes) {
@@ -576,19 +558,11 @@ export class CSharpParser extends ChunkedParser {
       if (dependency) {
         dependencies.push(dependency);
         constructorDependencies++;
-        logger.debug('C# constructor call detected', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
-          line: dependency.line_number
-        });
       }
     }
 
     // Extract member access expressions
     const memberAccessNodes = this.getNodesOfType(rootNode, 'member_access_expression');
-    logger.debug('C# dependency extraction: member access expressions', {
-      memberAccessCount: memberAccessNodes.length
-    });
 
     let memberAccessDependencies = 0;
     for (const node of memberAccessNodes) {
@@ -596,27 +570,15 @@ export class CSharpParser extends ChunkedParser {
       if (dependency) {
         dependencies.push(dependency);
         memberAccessDependencies++;
-        logger.debug('C# member access detected', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
-          line: dependency.line_number
-        });
       }
     }
 
     // Extract inheritance relationships
     const baseListNodes = this.getNodesOfType(rootNode, 'base_list');
-    logger.debug('C# dependency extraction: inheritance relationships', {
-      baseListCount: baseListNodes.length
-    });
 
     for (const node of baseListNodes) {
       const inheritanceDeps = this.extractInheritanceDependencies(node, content);
       dependencies.push(...inheritanceDeps);
-      logger.debug('C# inheritance relationships detected', {
-        count: inheritanceDeps.length,
-        line: node.startPosition.row + 1
-      });
     }
 
     // Extract generic type constraints
@@ -642,7 +604,9 @@ export class CSharpParser extends ChunkedParser {
       inheritanceRelationships: baseListNodes.length,
       methodCalls: dedupedDependencies.filter(d => d.dependency_type === 'calls').length,
       references: dedupedDependencies.filter(d => d.dependency_type === 'references').length,
-      inheritance: dedupedDependencies.filter(d => d.dependency_type === 'inherits' || d.dependency_type === 'implements').length
+      inheritance: dedupedDependencies.filter(
+        d => d.dependency_type === 'inherits' || d.dependency_type === 'implements'
+      ).length,
     });
 
     return dedupedDependencies;
@@ -710,7 +674,7 @@ export class CSharpParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: true, // Namespaces are always accessible
-      visibility: Visibility.PUBLIC
+      visibility: Visibility.PUBLIC,
     };
   }
 
@@ -729,7 +693,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility: visibility || Visibility.PUBLIC,
-      signature: this.extractClassSignature(node, content)
+      signature: this.extractClassSignature(node, content),
     };
   }
 
@@ -748,7 +712,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility: visibility || Visibility.PUBLIC,
-      signature: this.extractInterfaceSignature(node, content)
+      signature: this.extractInterfaceSignature(node, content),
     };
   }
 
@@ -767,7 +731,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility: visibility || Visibility.PUBLIC,
-      signature: `struct ${name}`
+      signature: `struct ${name}`,
     };
   }
 
@@ -785,7 +749,7 @@ export class CSharpParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
-      visibility: visibility || Visibility.PUBLIC
+      visibility: visibility || Visibility.PUBLIC,
     };
   }
 
@@ -815,7 +779,7 @@ export class CSharpParser extends ChunkedParser {
         // Pattern 2: IInterface.Method(params) - when return type is implicit/void
         /\b([I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/,
         // Pattern 3: Any interface pattern with dot notation
-        /\b([A-Z][a-zA-Z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/
+        /\b([A-Z][a-zA-Z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/,
       ];
 
       for (const pattern of explicitInterfacePatterns) {
@@ -841,7 +805,7 @@ export class CSharpParser extends ChunkedParser {
                 methodText: methodText.substring(0, 100),
                 qualifiedName,
                 extractedMethodName: name,
-                filePath: 'current-file'
+                filePath: 'current-file',
               });
               break;
             }
@@ -868,9 +832,8 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Explicit interface implementations are exported (accessible through interface)
-    const isExported = isInInterface ||
-                      modifiers.includes('public') ||
-                      isExplicitInterfaceImplementation;
+    const isExported =
+      isInInterface || modifiers.includes('public') || isExplicitInterfaceImplementation;
 
     return {
       name,
@@ -879,7 +842,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: isExported,
       visibility: finalVisibility,
-      signature: this.extractMethodSignature(node, content)
+      signature: this.extractMethodSignature(node, content),
     };
   }
 
@@ -898,7 +861,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility: visibility || Visibility.PRIVATE,
-      signature: this.extractPropertySignature(node, content)
+      signature: this.extractPropertySignature(node, content),
     };
   }
 
@@ -909,7 +872,9 @@ export class CSharpParser extends ChunkedParser {
 
     // Extract field type - in C# AST, type is in variable_declaration child, not directly on field_declaration
     let fieldType = 'object';
-    const variableDeclarationNode = node.children.find(child => child.type === 'variable_declaration');
+    const variableDeclarationNode = node.children.find(
+      child => child.type === 'variable_declaration'
+    );
     if (variableDeclarationNode) {
       const typeNode = variableDeclarationNode.childForFieldName('type');
       if (typeNode) {
@@ -935,7 +900,7 @@ export class CSharpParser extends ChunkedParser {
         end_line: declarator.endPosition.row + 1,
         is_exported: modifiers.includes('public'),
         visibility: visibility || Visibility.PRIVATE,
-        signature // Include type information in signature for later resolution
+        signature, // Include type information in signature for later resolution
       });
     }
 
@@ -962,7 +927,7 @@ export class CSharpParser extends ChunkedParser {
         end_line: declarator.endPosition.row + 1,
         is_exported: modifiers.includes('public'),
         visibility: visibility || Visibility.PRIVATE,
-        signature: `event ${name}`
+        signature: `event ${name}`,
       });
     }
 
@@ -984,7 +949,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility: visibility || Visibility.PUBLIC,
-      signature: this.extractDelegateSignature(node, content)
+      signature: this.extractDelegateSignature(node, content),
     };
   }
 
@@ -1003,11 +968,14 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility: visibility || Visibility.PRIVATE,
-      signature: this.extractConstructorSignature(node, content)
+      signature: this.extractConstructorSignature(node, content),
     };
   }
 
-  private extractLocalFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractLocalFunctionSymbol(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -1026,11 +994,15 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: false, // Local functions are never exported
       visibility,
-      signature: this.extractLocalFunctionSignature(node, content, contextName)
+      signature: this.extractLocalFunctionSignature(node, content, contextName),
     };
   }
 
-  private extractLocalFunctionSignature(node: Parser.SyntaxNode, content: string, contextName: string): string {
+  private extractLocalFunctionSignature(
+    node: Parser.SyntaxNode,
+    content: string,
+    contextName: string
+  ): string {
     const nameNode = node.childForFieldName('name');
     const name = nameNode ? this.getNodeText(nameNode, content) : '';
 
@@ -1055,7 +1027,11 @@ export class CSharpParser extends ChunkedParser {
    * @param content - The file content
    * @returns The resolved class type (e.g., "CardManager") or null if not found
    */
-  private resolveCallingObjectType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): string | null {
+  private resolveCallingObjectType(
+    callingObject: string,
+    rootNode: Parser.SyntaxNode,
+    content: string
+  ): string | null {
     if (!callingObject || callingObject.trim() === '') {
       return null;
     }
@@ -1073,7 +1049,7 @@ export class CSharpParser extends ChunkedParser {
         () => this.resolveFieldType(callingObject, rootNode, content),
         () => this.resolveLocalVariableType(callingObject, rootNode, content),
         () => this.resolveParameterType(callingObject, rootNode, content),
-        () => this.resolvePropertyType(callingObject, rootNode, content)
+        () => this.resolvePropertyType(callingObject, rootNode, content),
       ];
 
       for (const strategy of strategies) {
@@ -1095,17 +1071,22 @@ export class CSharpParser extends ChunkedParser {
     }
   }
 
-
   /**
    * Strategy 1: Resolve field type
    */
-  private resolveFieldType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+  private resolveFieldType(
+    callingObject: string,
+    rootNode: Parser.SyntaxNode,
+    content: string
+  ): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
     const fieldNodes = this.getNodesOfType(rootNode, 'field_declaration');
 
     for (const fieldNode of fieldNodes) {
       let fieldType = '';
-      const variableDeclarationNode = fieldNode.children.find(child => child.type === 'variable_declaration');
+      const variableDeclarationNode = fieldNode.children.find(
+        child => child.type === 'variable_declaration'
+      );
       if (variableDeclarationNode) {
         const typeNode = variableDeclarationNode.childForFieldName('type');
         if (typeNode) {
@@ -1125,7 +1106,7 @@ export class CSharpParser extends ChunkedParser {
           return {
             type: resolvedType,
             source: 'field',
-            fullQualifiedName: fieldType
+            fullQualifiedName: fieldType,
           };
         }
       }
@@ -1136,7 +1117,11 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Strategy 2: Resolve local variable type
    */
-  private resolveLocalVariableType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+  private resolveLocalVariableType(
+    callingObject: string,
+    rootNode: Parser.SyntaxNode,
+    content: string
+  ): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
     const localDeclarations = this.getNodesOfType(rootNode, 'local_declaration_statement');
 
@@ -1159,7 +1144,7 @@ export class CSharpParser extends ChunkedParser {
           return {
             type: resolvedType,
             source: 'variable',
-            fullQualifiedName: varType
+            fullQualifiedName: varType,
           };
         }
       }
@@ -1170,7 +1155,11 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Strategy 3: Resolve parameter type
    */
-  private resolveParameterType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+  private resolveParameterType(
+    callingObject: string,
+    rootNode: Parser.SyntaxNode,
+    content: string
+  ): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
     const methodNodes = this.getNodesOfType(rootNode, 'method_declaration');
 
@@ -1192,7 +1181,7 @@ export class CSharpParser extends ChunkedParser {
             return {
               type: resolvedType,
               source: 'parameter',
-              fullQualifiedName: paramType
+              fullQualifiedName: paramType,
             };
           }
         }
@@ -1204,7 +1193,11 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Strategy 4: Resolve property type
    */
-  private resolvePropertyType(callingObject: string, rootNode: Parser.SyntaxNode, content: string): EnhancedTypeInfo | null {
+  private resolvePropertyType(
+    callingObject: string,
+    rootNode: Parser.SyntaxNode,
+    content: string
+  ): EnhancedTypeInfo | null {
     const cleanObjectName = callingObject.trim().replace(/^(this\.|_)/, '');
     const propertyNodes = this.getNodesOfType(rootNode, 'property_declaration');
 
@@ -1221,7 +1214,7 @@ export class CSharpParser extends ChunkedParser {
         return {
           type: resolvedType,
           source: 'property',
-          fullQualifiedName: propertyType
+          fullQualifiedName: propertyType,
         };
       }
     }
@@ -1249,10 +1242,7 @@ export class CSharpParser extends ChunkedParser {
     if (cleanType.startsWith('I') && cleanType.length > 1 && /^[A-Z]/.test(cleanType.charAt(1))) {
       // Check if this looks like an interface name (IClassName -> ClassName)
       const withoutI = cleanType.substring(1);
-      logger.debug('C# interface type conversion', {
-        original: cleanType,
-        converted: withoutI
-      });
+
       return withoutI;
     }
 
@@ -1262,10 +1252,6 @@ export class CSharpParser extends ChunkedParser {
   private extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) {
-      logger.debug('C# method call extraction failed: no function node', {
-        line: node.startPosition.row + 1,
-        nodeType: node.type
-      });
       return null;
     }
 
@@ -1291,11 +1277,15 @@ export class CSharpParser extends ChunkedParser {
     } else if (functionNode.type === 'generic_name') {
       // For generic method calls like Method<T>()
       const nameNode = functionNode.childForFieldName('name');
-      methodName = nameNode ? this.getNodeText(nameNode, content) : this.getNodeText(functionNode, content);
+      methodName = nameNode
+        ? this.getNodeText(nameNode, content)
+        : this.getNodeText(functionNode, content);
     } else if (functionNode.type === 'qualified_name') {
       // For qualified calls like Namespace.Class.Method()
       const nameNode = functionNode.childForFieldName('name');
-      methodName = nameNode ? this.getNodeText(nameNode, content) : this.getNodeText(functionNode, content);
+      methodName = nameNode
+        ? this.getNodeText(nameNode, content)
+        : this.getNodeText(functionNode, content);
     } else if (functionNode.type === 'conditional_access_expression') {
       // For conditional access calls like obj?.Method() - extract the final method in the chain
       // Look for member_binding_expression nodes which contain the method names in chained calls
@@ -1304,14 +1294,10 @@ export class CSharpParser extends ChunkedParser {
       if (memberBindingNodes.length > 0) {
         // Get the last member_binding_expression for the final method in the chain
         const finalMemberBinding = memberBindingNodes[memberBindingNodes.length - 1];
-        const identifierNode = finalMemberBinding.children.find(child => child.type === 'identifier');
+        const identifierNode = finalMemberBinding.children.find(
+          child => child.type === 'identifier'
+        );
         methodName = identifierNode ? this.getNodeText(identifierNode, content) : '';
-
-        logger.debug('C# conditional access method extracted from member binding', {
-          methodName,
-          memberBindingCount: memberBindingNodes.length,
-          finalBindingText: this.getNodeText(finalMemberBinding, content)
-        });
       }
 
       if (!methodName) {
@@ -1324,7 +1310,9 @@ export class CSharpParser extends ChunkedParser {
     } else if (functionNode.type === 'invocation_expression') {
       // For nested invocation expressions like Method1().Method2()
       const innerFunction = functionNode.childForFieldName('function');
-      methodName = innerFunction ? this.getNodeText(innerFunction, content) : this.getNodeText(functionNode, content);
+      methodName = innerFunction
+        ? this.getNodeText(innerFunction, content)
+        : this.getNodeText(functionNode, content);
     } else {
       // For complex expressions, use the full text but try to extract meaningful names
       const fullText = this.getNodeText(functionNode, content);
@@ -1347,11 +1335,6 @@ export class CSharpParser extends ChunkedParser {
 
     // Skip if we couldn't extract a meaningful method name
     if (!methodName || methodName.length === 0) {
-      logger.debug('C# method call extraction failed: no method name', {
-        line: node.startPosition.row + 1,
-        functionType: functionNode.type,
-        functionText: this.getNodeText(functionNode, content).substring(0, 50)
-      });
       return null;
     }
 
@@ -1374,32 +1357,16 @@ export class CSharpParser extends ChunkedParser {
         if (resolvedObjectType) {
           // Create qualified method name: "ClassName.MethodName"
           qualifiedMethodName = `${resolvedObjectType}.${methodName}`;
-
-          logger.debug('C# calling object type resolved', {
-            callingObject,
-            cleanObjectName: callingObject.trim().replace(/^(this\.|_)/, ''),
-            resolvedType: resolvedObjectType
-          });
-        } else {
-          logger.debug('C# calling object type could not be resolved', {
-            methodName,
-            callingObject,
-            line: node.startPosition.row + 1
-          });
         }
       } catch (error) {
         // Don't let resolution errors break the dependency creation
         logger.debug('C# calling object resolution failed', {
           callingObject,
           methodName,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : 'Unknown error',
         });
       }
     }
-
-    // Log method call detection
-    logger.debug('C# method call extraction details');
-
 
     // Parameter Context Extraction
     let parameterContext: string | undefined;
@@ -1415,11 +1382,15 @@ export class CSharpParser extends ChunkedParser {
         parameterContext = parameters.join(', ');
 
         // Generate deterministic call instance ID to distinguish multiple calls to same method
-        callInstanceId = this.generateCallInstanceId(methodName, node.startPosition.row + 1, parameterContext, this.currentFilePath);
+        callInstanceId = this.generateCallInstanceId(
+          methodName,
+          node.startPosition.row + 1,
+          parameterContext,
+          this.currentFilePath
+        );
 
         // Try to resolve parameter types when possible
         parameterTypes = this.extractParameterTypes(node, content, parameters);
-
       }
     } catch (error) {
       // Don't let parameter extraction errors break dependency creation
@@ -1433,8 +1404,9 @@ export class CSharpParser extends ChunkedParser {
 
       // Enhanced context fields
       calling_object: callingObject || undefined,
-      resolved_class: (qualifiedMethodName !== methodName) ? qualifiedMethodName.split('.')[0] : undefined,
-      qualified_context: (qualifiedMethodName !== methodName) ? qualifiedMethodName : undefined,
+      resolved_class:
+        qualifiedMethodName !== methodName ? qualifiedMethodName.split('.')[0] : undefined,
+      qualified_context: qualifiedMethodName !== methodName ? qualifiedMethodName : undefined,
       method_signature: this.buildMethodSignature(methodName, node, content),
       file_context: this.currentFilePath || undefined,
       namespace_context: this.getCurrentNamespace(node, content),
@@ -1442,11 +1414,14 @@ export class CSharpParser extends ChunkedParser {
       // Parameter context fields
       parameter_context: parameterContext,
       call_instance_id: callInstanceId,
-      parameter_types: parameterTypes
+      parameter_types: parameterTypes,
     };
   }
 
-  private extractMemberAccessDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  private extractMemberAccessDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -1461,15 +1436,13 @@ export class CSharpParser extends ChunkedParser {
     };
   }
 
-
-  private extractConstructorDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  private extractConstructorDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     // Get the type being constructed
     const typeNode = node.childForFieldName('type');
     if (!typeNode) {
-      logger.debug('C# constructor call extraction failed: no type node', {
-        line: node.startPosition.row + 1,
-        nodeType: node.type
-      });
       return null;
     }
 
@@ -1513,16 +1486,10 @@ export class CSharpParser extends ChunkedParser {
 
     // Skip if we couldn't extract a meaningful type name
     if (!typeName || typeName.length === 0) {
-      logger.debug('C# constructor call extraction failed: no type name', {
-        line: node.startPosition.row + 1,
-        typeNodeType: typeNode.type,
-        typeNodeText: this.getNodeText(typeNode, content).substring(0, 50)
-      });
       return null;
     }
 
     const callerName = this.findContainingFunction(node, content);
-
 
     return {
       from_symbol: callerName,
@@ -1534,7 +1501,7 @@ export class CSharpParser extends ChunkedParser {
       calling_object: 'new', // Indicate this is a constructor call
       method_signature: `${typeName}()`, // Constructor signature
       file_context: this.currentFilePath || undefined,
-      namespace_context: this.getCurrentNamespace(node, content)
+      namespace_context: this.getCurrentNamespace(node, content),
     };
   }
 
@@ -1550,11 +1517,6 @@ export class CSharpParser extends ChunkedParser {
   ): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
     const maxChainDepth = 10; // Prevent infinite recursion
-
-    logger.debug('C# conditional access extraction starting', {
-      line: node.startPosition.row + 1,
-      nodeText: this.getNodeText(node, content).substring(0, 100)
-    });
 
     // First, try to extract chained calls using regex for complete coverage
     // This handles cases like _serviceA?.MethodOne()?.MethodTwo()
@@ -1572,32 +1534,23 @@ export class CSharpParser extends ChunkedParser {
 
       if (chainedCalls.length > 0) {
         dependencies.push(...chainedCalls);
-
-        logger.debug('C# conditional access chained calls extracted', {
-          count: chainedCalls.length,
-          expression: expressionText.substring(0, 100),
-          methods: chainedCalls.map(d => d.to_symbol)
-        });
       }
     }
 
     // Extract all invocation expressions within the conditional access chain
     const invocationNodes = this.getNodesOfType(node, 'invocation_expression');
 
-    logger.debug('C# conditional access invocation nodes found', {
-      count: invocationNodes.length
-    });
-
     // Process each invocation expression to capture chained method calls
     for (const invocationNode of invocationNodes) {
       const dependency = this.extractCallDependency(invocationNode, content);
       if (dependency) {
         // Check if we already have this dependency from regex extraction
-        const isDuplicate = dependencies.some(d =>
-          d.to_symbol === dependency.to_symbol &&
-          d.from_symbol === dependency.from_symbol &&
-          d.line_number === dependency.line_number &&
-          d.dependency_type === dependency.dependency_type
+        const isDuplicate = dependencies.some(
+          d =>
+            d.to_symbol === dependency.to_symbol &&
+            d.from_symbol === dependency.from_symbol &&
+            d.line_number === dependency.line_number &&
+            d.dependency_type === dependency.dependency_type
         );
 
         if (!isDuplicate) {
@@ -1612,12 +1565,6 @@ export class CSharpParser extends ChunkedParser {
             line_number: dependency.line_number,
           };
           dependencies.push(referenceDependency);
-
-          logger.debug('C# conditional access call and reference extracted', {
-            from: dependency.from_symbol,
-            to: dependency.to_symbol,
-            line: dependency.line_number,
-          });
         }
       }
     }
@@ -1625,9 +1572,6 @@ export class CSharpParser extends ChunkedParser {
     // Always check for member binding within conditional access to create REFERENCES
     // (Don't return early - we need both CALLS from invocations AND REFERENCES from member binding)
     const memberBindingNodes = this.getNodesOfType(node, 'member_binding_expression');
-    logger.debug('C# conditional access member binding nodes found', {
-      count: memberBindingNodes.length
-    });
 
     for (const memberBindingNode of memberBindingNodes) {
       const identifierNode = memberBindingNode.children.find(child => child.type === 'identifier');
@@ -1657,12 +1601,6 @@ export class CSharpParser extends ChunkedParser {
 
         dependencies.push(callDependency);
         dependencies.push(referenceDependency);
-
-        logger.debug('C# conditional access method call and reference extracted', {
-          from: callDependency.from_symbol,
-          to: callDependency.to_symbol,
-          line: callDependency.line_number
-        });
       } else {
         // For property access, create only REFERENCES dependency
         const dependency: ParsedDependency = {
@@ -1673,21 +1611,8 @@ export class CSharpParser extends ChunkedParser {
         };
 
         dependencies.push(dependency);
-
-        logger.debug('C# conditional access property reference extracted', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
-          type: dependency.dependency_type,
-          line: dependency.line_number
-        });
       }
     }
-
-    logger.debug('C# conditional access dependencies extraction completed', {
-      count: dependencies.length,
-      callsDependencies: dependencies.filter(d => d.dependency_type === DependencyType.CALLS).length,
-      referencesDependencies: dependencies.filter(d => d.dependency_type === DependencyType.REFERENCES).length
-    });
 
     return dependencies;
   }
@@ -1718,17 +1643,9 @@ export class CSharpParser extends ChunkedParser {
     if (truncatedMatch) {
       // Add parentheses to the last identifier to make it look like a method call
       expressionText = expressionText + '()';
-      logger.debug('C# fixed truncated method call by adding parentheses', {
-        original: expressionText.substring(0, 100),
-        methodName: truncatedMatch[1]
-      });
     } else if (openParens > closeParens) {
       // Add missing closing parentheses
       expressionText = expressionText + ')'.repeat(openParens - closeParens);
-      logger.debug('C# fixed truncated expression by adding closing parentheses', {
-        original: expressionText.substring(0, 100),
-        addedParens: openParens - closeParens
-      });
     }
 
     // Pattern to match ALL method calls, including chained ones: obj?.Method1()?.Method2()
@@ -1737,28 +1654,16 @@ export class CSharpParser extends ChunkedParser {
     let match;
     const foundMethods: string[] = [];
 
-    logger.debug('C# extractChainedCallsFromText analyzing', {
-      expression: expressionText,
-      callerName: callerName
-    });
-
     while ((match = methodCallPattern.exec(expressionText)) !== null) {
       const methodName = match[1];
 
       // Skip if this is likely the initial object name (comes before any ?. or .)
       const beforeMatch = expressionText.substring(0, match.index);
-      const isInitialObject = !beforeMatch.includes('?.') && !beforeMatch.includes('.') && !beforeMatch.includes('(');
+      const isInitialObject =
+        !beforeMatch.includes('?.') && !beforeMatch.includes('.') && !beforeMatch.includes('(');
 
       // Skip constructor calls (new ClassName())
       const isConstructor = beforeMatch.trim().endsWith('new');
-
-      logger.debug('C# regex match evaluation', {
-        methodName: methodName,
-        beforeMatch: beforeMatch.substring(Math.max(0, beforeMatch.length - 20)),
-        isInitialObject: isInitialObject,
-        isConstructor: isConstructor,
-        willInclude: !isInitialObject && !isConstructor && !foundMethods.includes(methodName)
-      });
 
       if (!isInitialObject && !isConstructor && !foundMethods.includes(methodName)) {
         // ENHANCED: Enhanced field-based call resolution
@@ -1783,48 +1688,35 @@ export class CSharpParser extends ChunkedParser {
               try {
                 // Find the conditional access node that contains this method call
                 if (rootNode && content) {
-                  logger.debug('C# conditional access parameter extraction attempting', {
+                  const conditionalAccessNode = this.findConditionalAccessNodeForMethod(
+                    rootNode,
+                    content,
                     methodName,
-                    fieldName,
                     lineNumber
-                  });
-
-                  const conditionalAccessNode = this.findConditionalAccessNodeForMethod(rootNode, content, methodName, lineNumber);
+                  );
                   if (conditionalAccessNode) {
                     const parameters = this.extractMethodParameters(conditionalAccessNode, content);
                     if (parameters.length > 0) {
                       parameterContext = parameters.join(', ');
-                      callInstanceId = this.generateCallInstanceId(methodName, conditionalAccessNode.startPosition.row + 1, parameterContext, this.currentFilePath);
-                      parameterTypes = this.extractParameterTypes(conditionalAccessNode, content, parameters);
-
-                      logger.debug('C# conditional access parameters extracted', {
+                      callInstanceId = this.generateCallInstanceId(
                         methodName,
-                        fieldName,
+                        conditionalAccessNode.startPosition.row + 1,
                         parameterContext,
-                        parameterCount: parameters.length
-                      });
-                    } else {
-                      logger.debug('C# conditional access no parameters found', {
-                        methodName,
-                        fieldName,
-                        nodeText: this.getNodeText(conditionalAccessNode, content)
-                      });
+                        this.currentFilePath
+                      );
+                      parameterTypes = this.extractParameterTypes(
+                        conditionalAccessNode,
+                        content,
+                        parameters
+                      );
                     }
-                  } else {
-                    logger.debug('C# conditional access node not found', {
-                      methodName,
-                      fieldName,
-                      lineNumber
-                    });
                   }
-                } else {
-                  logger.debug('C# conditional access parameter extraction skipped - missing rootNode or content');
                 }
               } catch (error) {
                 logger.warn('C# conditional access parameter extraction failed', {
                   methodName,
                   fieldName,
-                  error: error instanceof Error ? error.message : 'Unknown error'
+                  error: error instanceof Error ? error.message : 'Unknown error',
                 });
               }
 
@@ -1838,7 +1730,7 @@ export class CSharpParser extends ChunkedParser {
                 parameter_context: parameterContext,
                 call_instance_id: callInstanceId,
                 parameter_types: parameterTypes,
-                calling_object: fieldName
+                calling_object: fieldName,
               };
 
               const fieldBasedReferenceDependency: ParsedDependency = {
@@ -1847,20 +1739,11 @@ export class CSharpParser extends ChunkedParser {
                 dependency_type: DependencyType.REFERENCES,
                 line_number: lineNumber,
                 qualified_context: `field_call_${fieldName}`,
-                calling_object: fieldName
+                calling_object: fieldName,
               };
 
               dependencies.push(fieldBasedCallDependency);
               dependencies.push(fieldBasedReferenceDependency);
-
-              logger.debug('C# field-based conditional access call and reference extracted', {
-                from: fieldBasedCallDependency.from_symbol,
-                to: fieldBasedCallDependency.to_symbol,
-                fieldName: fieldName,
-                fieldType: fieldType,
-                parameterContext: parameterContext,
-                callInstanceId: callInstanceId
-              });
               continue; // Skip the fallback logic
             }
           }
@@ -1884,12 +1767,6 @@ export class CSharpParser extends ChunkedParser {
 
         dependencies.push(callDependency);
         dependencies.push(referenceDependency);
-
-        logger.debug('C# chained conditional access call and reference extracted via regex', {
-          from: callDependency.from_symbol,
-          to: callDependency.to_symbol,
-          pattern: match[0]
-        });
       }
     }
 
@@ -1906,19 +1783,16 @@ export class CSharpParser extends ChunkedParser {
         };
 
         dependencies.push(dependency);
-
-        logger.debug('C# conditional access property extracted via regex', {
-          from: dependency.from_symbol,
-          to: dependency.to_symbol,
-          pattern: match[0]
-        });
       }
     }
 
     return dependencies;
   }
 
-  private extractInheritanceDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
+  private extractInheritanceDependencies(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
     // Find the parent class/interface declaration to get the correct 'from_symbol'
@@ -1982,9 +1856,11 @@ export class CSharpParser extends ChunkedParser {
     let parent = baseListNode.parent;
 
     while (parent) {
-      if (parent.type === 'class_declaration' ||
-          parent.type === 'interface_declaration' ||
-          parent.type === 'struct_declaration') {
+      if (
+        parent.type === 'class_declaration' ||
+        parent.type === 'interface_declaration' ||
+        parent.type === 'struct_declaration'
+      ) {
         return parent;
       }
       parent = parent.parent;
@@ -2028,7 +1904,7 @@ export class CSharpParser extends ChunkedParser {
       filePath || 'unknown',
       lineNumber.toString(),
       methodName,
-      parameterContext || 'no-params'
+      parameterContext || 'no-params',
     ].join('|');
 
     // Create a hash of the context data to ensure deterministic IDs
@@ -2049,9 +1925,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Check if it starts with 'I' followed by a capital letter (PascalCase interface convention)
-    return name.charAt(0) === 'I' &&
-           name.charAt(1) >= 'A' &&
-           name.charAt(1) <= 'Z';
+    return name.charAt(0) === 'I' && name.charAt(1) >= 'A' && name.charAt(1) <= 'Z';
   }
 
   /**
@@ -2089,38 +1963,30 @@ export class CSharpParser extends ChunkedParser {
                   const className = typeName.substring(1);
                   fieldMap.set(fieldName, className);
                 }
-
-                logger.debug('C# field declaration extracted', {
-                  fieldName,
-                  typeName,
-                  className: typeName.startsWith('I') && typeName.length > 1 ? typeName.substring(1) : undefined
-                });
               }
             }
           }
         } catch (error) {
           logger.debug('C# field extraction failed for individual field', {
-            error: error instanceof Error ? error.message : 'Unknown error'
+            error: error instanceof Error ? error.message : 'Unknown error',
           });
           // Continue processing other fields if one fails
           continue;
         }
       }
-
-      logger.debug('C# field declarations extracted', {
-        totalFields: fieldMap.size,
-        fields: Array.from(fieldMap.entries()).map(([name, type]) => ({ name, type }))
-      });
     } catch (error) {
       logger.debug('C# field declaration extraction failed', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
 
     return fieldMap;
   }
 
-  private extractConstraintDependencies(node: Parser.SyntaxNode, content: string): ParsedDependency[] {
+  private extractConstraintDependencies(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
     // Extract type constraints
@@ -2146,8 +2012,8 @@ export class CSharpParser extends ChunkedParser {
 
   private extractUsingDirective(node: Parser.SyntaxNode, content: string): ParsedImport | null {
     // Look for identifier or qualified_name child nodes
-    const nameNode = node.children.find(child =>
-      child.type === 'identifier' || child.type === 'qualified_name'
+    const nameNode = node.children.find(
+      child => child.type === 'identifier' || child.type === 'qualified_name'
     );
     if (!nameNode) return null;
 
@@ -2158,7 +2024,7 @@ export class CSharpParser extends ChunkedParser {
       imported_names: ['*'],
       import_type: 'namespace',
       line_number: node.startPosition.row + 1,
-      is_dynamic: false
+      is_dynamic: false,
     };
   }
 
@@ -2173,7 +2039,7 @@ export class CSharpParser extends ChunkedParser {
       imported_names: [aliasName],
       import_type: 'named',
       line_number: node.startPosition.row + 1,
-      is_dynamic: false
+      is_dynamic: false,
     };
   }
 
@@ -2185,7 +2051,11 @@ export class CSharpParser extends ChunkedParser {
     });
   }
 
-  private extractPublicDeclaration(node: Parser.SyntaxNode, content: string, type: string): ParsedExport | null {
+  private extractPublicDeclaration(
+    node: Parser.SyntaxNode,
+    content: string,
+    type: string
+  ): ParsedExport | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -2194,7 +2064,7 @@ export class CSharpParser extends ChunkedParser {
     return {
       exported_names: [name],
       export_type: 'named',
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
     };
   }
 
@@ -2214,16 +2084,17 @@ export class CSharpParser extends ChunkedParser {
           message: `C# syntax error at line ${errorNode.startPosition.row + 1}`,
           line: errorNode.startPosition.row + 1,
           column: errorNode.startPosition.column + 1,
-          severity: 'error'
+          severity: 'error',
         });
       }
     }
 
     // Check for common C# constructs that should be present
-    const hasNamespaceOrClass = this.getNodesOfType(rootNode, 'namespace_declaration').length > 0 ||
-                                this.getNodesOfType(rootNode, 'class_declaration').length > 0 ||
-                                this.getNodesOfType(rootNode, 'interface_declaration').length > 0 ||
-                                this.getNodesOfType(rootNode, 'struct_declaration').length > 0;
+    const hasNamespaceOrClass =
+      this.getNodesOfType(rootNode, 'namespace_declaration').length > 0 ||
+      this.getNodesOfType(rootNode, 'class_declaration').length > 0 ||
+      this.getNodesOfType(rootNode, 'interface_declaration').length > 0 ||
+      this.getNodesOfType(rootNode, 'struct_declaration').length > 0;
 
     // Check for top-level statements (C# 9+ feature)
     const hasTopLevelStatements = this.getNodesOfType(rootNode, 'global_statement').length > 0;
@@ -2231,10 +2102,11 @@ export class CSharpParser extends ChunkedParser {
     if (!hasNamespaceOrClass && !hasTopLevelStatements) {
       // This might be okay for some C# files (like global using files), so make it a warning
       errors.push({
-        message: 'No namespace, class, interface, struct declarations or top-level statements found - verify C# file structure',
+        message:
+          'No namespace, class, interface, struct declarations or top-level statements found - verify C# file structure',
         line: 1,
         column: 1,
-        severity: 'warning'
+        severity: 'warning',
       });
     }
 
@@ -2255,7 +2127,7 @@ export class CSharpParser extends ChunkedParser {
           message: 'No using directives or C# declarations found - verify file is valid C#',
           line: 1,
           column: 1,
-          severity: 'warning'
+          severity: 'warning',
         });
       }
     }
@@ -2267,7 +2139,11 @@ export class CSharpParser extends ChunkedParser {
    * Validate method call detection by comparing AST results with text-based analysis
    * This helps identify potential gaps in Tree-sitter parsing
    */
-  private validateMethodCallDetection(content: string, dependencies: ParsedDependency[], filePath: string): ParseError[] {
+  private validateMethodCallDetection(
+    content: string,
+    dependencies: ParsedDependency[],
+    filePath: string
+  ): ParseError[] {
     const validationErrors: ParseError[] = [];
 
     // Improved regex that excludes common false positives
@@ -2276,31 +2152,32 @@ export class CSharpParser extends ChunkedParser {
     // - String literals: "text.Method("
     // - Comments: // text.Method(
     // - Method definitions: ReturnType Method(
-    const methodCallRegex = /(?<!new\s+\w*\.)(?<!\/\/.*?)(?<!")(\w+)(?:\?\??\.)(\w+)\s*\(|(?<!new\s+)(?<!\/\/.*?)(?<!")(\w+)\.(\w+)\s*\(/g;
+    const methodCallRegex =
+      /(?<!new\s+\w*\.)(?<!\/\/.*?)(?<!")(\w+)(?:\?\??\.)(\w+)\s*\(|(?<!new\s+)(?<!\/\/.*?)(?<!")(\w+)\.(\w+)\s*\(/g;
     const textBasedCalls = new Set<string>();
     const excludePatterns = [
-      /new\s+\w*\.\w+\s*\(/g,  // Constructor calls like new Godot.Collections.Dictionary()
-      /"[^"]*\w+\s*\([^"]*"/g,  // String literals containing method-like patterns
-      /\/\/.*?\w+\s*\(/g,       // Comments containing method-like patterns
+      /new\s+\w*\.\w+\s*\(/g, // Constructor calls like new Godot.Collections.Dictionary()
+      /"[^"]*\w+\s*\([^"]*"/g, // String literals containing method-like patterns
+      /\/\/.*?\w+\s*\(/g, // Comments containing method-like patterns
       /public|private|protected|internal\s+[\w\s<>]*\s+\w+\s*\(/g, // Method definitions
       /override\s+[\w\s<>]*\s+\w+\s*\(/g, // Override method definitions
-      /virtual\s+[\w\s<>]*\s+\w+\s*\(/g,  // Virtual method definitions
+      /virtual\s+[\w\s<>]*\s+\w+\s*\(/g, // Virtual method definitions
       /abstract\s+[\w\s<>]*\s+\w+\s*\(/g, // Abstract method definitions
-      /static\s+[\w\s<>]*\s+\w+\s*\(/g,   // Static method definitions
+      /static\s+[\w\s<>]*\s+\w+\s*\(/g, // Static method definitions
       // Explicit interface implementations - these are method declarations, not calls
       /\b[\w\s<>]*\s+[I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g,
       /\b[I][A-Za-z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g,
-      /\b[A-Z][a-zA-Z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g  // Broader pattern for explicit implementations
+      /\b[A-Z][a-zA-Z0-9]*\.[a-zA-Z_][a-zA-Z0-9_]*\s*\(/g, // Broader pattern for explicit implementations
     ];
 
     // First, identify exclusion ranges
-    const excludeRanges: Array<{start: number, end: number}> = [];
+    const excludeRanges: Array<{ start: number; end: number }> = [];
     for (const pattern of excludePatterns) {
       let match;
       while ((match = pattern.exec(content)) !== null) {
         excludeRanges.push({
           start: match.index,
-          end: match.index + match[0].length
+          end: match.index + match[0].length,
         });
       }
     }
@@ -2312,15 +2189,17 @@ export class CSharpParser extends ChunkedParser {
       const matchEnd = match.index + match[0].length;
 
       // Check if this match overlaps with any exclusion range
-      const isExcluded = excludeRanges.some(range =>
-        (matchStart >= range.start && matchStart <= range.end) ||
-        (matchEnd >= range.start && matchEnd <= range.end)
+      const isExcluded = excludeRanges.some(
+        range =>
+          (matchStart >= range.start && matchStart <= range.end) ||
+          (matchEnd >= range.start && matchEnd <= range.end)
       );
 
       if (!isExcluded) {
         // Extract method name from different capture groups
         const methodName = match[2] || match[4]; // Avoid the null coalescing and regular object patterns
-        if (methodName && methodName.length > 1) { // Skip single characters
+        if (methodName && methodName.length > 1) {
+          // Skip single characters
           // Preserve original case for better matching
           textBasedCalls.add(methodName);
         }
@@ -2338,8 +2217,8 @@ export class CSharpParser extends ChunkedParser {
     // Find potentially missed method calls with case-insensitive comparison
     const potentiallyMissed: string[] = [];
     for (const textCall of textBasedCalls) {
-      const found = Array.from(astDetectedCalls).some(astCall =>
-        astCall.toLowerCase() === textCall.toLowerCase()
+      const found = Array.from(astDetectedCalls).some(
+        astCall => astCall.toLowerCase() === textCall.toLowerCase()
       );
 
       if (!found) {
@@ -2358,28 +2237,17 @@ export class CSharpParser extends ChunkedParser {
           filePath,
           textBasedCalls: textBasedCalls.size,
           astDetectedCalls: astDetectedCalls.size,
-          missRatio: missRatio.toFixed(2)
+          missRatio: missRatio.toFixed(2),
         });
 
         validationErrors.push({
           message: `Potential method call '${textCall}' detected in text but not in AST - verify parsing completeness`,
           line: 1,
           column: 1,
-          severity: 'warning'
+          severity: 'warning',
         });
       }
     }
-
-    // Log validation summary
-    logger.debug('C# method call validation completed', {
-      filePath,
-      textBasedCallsFound: textBasedCalls.size,
-      astDetectedCalls: astDetectedCalls.size,
-      potentiallyMissedCalls: potentiallyMissed,
-      missRatio: missRatio.toFixed(2),
-      validationErrors: validationErrors.length,
-      reportingThreshold: shouldReport ? 'exceeded' : 'within acceptable range'
-    });
 
     return validationErrors;
   }
@@ -2408,42 +2276,23 @@ export class CSharpParser extends ChunkedParser {
    * Two-phase approach: 1) Collect full context, 2) Find method and build qualified name
    */
   private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {
-    logger.debug('C# findContainingFunction starting', {
-      startNodeType: callNode.type,
-      startNodeText: this.getNodeText(callNode, content).substring(0, 50)
-    });
-
     // Phase 1: Collect complete context by traversing up the AST
     const context = this.collectASTContext(callNode, content);
-
-    logger.debug('C# findContainingFunction collected context', {
-      className: context.className,
-      namespaceName: context.namespaceName,
-      interfaceName: context.interfaceName,
-      structName: context.structName
-    });
 
     // Phase 2: Find the specific method/constructor/property with complete context
     let parent = callNode.parent;
     while (parent) {
-      logger.debug('C# findContainingFunction searching for method', {
-        nodeType: parent.type
-      });
-
       // Method declarations
       if (parent.type === 'method_declaration') {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
           const methodName = this.getNodeText(nameNode, content);
           const containerName = context.className || context.interfaceName || context.structName;
-          const qualifiedName = this.buildQualifiedName(context.namespaceName, containerName, methodName);
-
-          logger.debug('C# findContainingFunction found method with full context', {
-            methodName,
+          const qualifiedName = this.buildQualifiedName(
+            context.namespaceName,
             containerName,
-            namespaceName: context.namespaceName,
-            qualifiedName
-          });
+            methodName
+          );
 
           return qualifiedName;
         }
@@ -2455,7 +2304,11 @@ export class CSharpParser extends ChunkedParser {
         if (nameNode) {
           const constructorName = this.getNodeText(nameNode, content);
           const containerName = context.className || context.structName;
-          return this.buildQualifiedName(context.namespaceName, containerName, `.ctor(${constructorName})`);
+          return this.buildQualifiedName(
+            context.namespaceName,
+            containerName,
+            `.ctor(${constructorName})`
+          );
         }
       }
 
@@ -2470,8 +2323,8 @@ export class CSharpParser extends ChunkedParser {
           let accessorParent = callNode.parent;
           while (accessorParent && accessorParent !== parent) {
             if (accessorParent.type === 'accessor_declaration') {
-              const keyword = accessorParent.children.find(child =>
-                child.type === 'get' || child.type === 'set' || child.type === 'init'
+              const keyword = accessorParent.children.find(
+                child => child.type === 'get' || child.type === 'set' || child.type === 'init'
               );
               if (keyword) {
                 accessorType = `.${keyword.type}`;
@@ -2482,7 +2335,11 @@ export class CSharpParser extends ChunkedParser {
           }
 
           const containerName = context.className || context.interfaceName || context.structName;
-          return this.buildQualifiedName(context.namespaceName, containerName, `${propertyName}${accessorType}`);
+          return this.buildQualifiedName(
+            context.namespaceName,
+            containerName,
+            `${propertyName}${accessorType}`
+          );
         }
       }
 
@@ -2492,7 +2349,11 @@ export class CSharpParser extends ChunkedParser {
         if (nameNode) {
           const eventName = this.getNodeText(nameNode, content);
           const containerName = context.className || context.interfaceName || context.structName;
-          return this.buildQualifiedName(context.namespaceName, containerName, `${eventName}.event`);
+          return this.buildQualifiedName(
+            context.namespaceName,
+            containerName,
+            `${eventName}.event`
+          );
         }
       }
 
@@ -2505,9 +2366,15 @@ export class CSharpParser extends ChunkedParser {
       // Operator declarations
       if (parent.type === 'operator_declaration') {
         const operatorKeyword = parent.children.find(child => child.type === 'operator_token');
-        const operatorName = operatorKeyword ? this.getNodeText(operatorKeyword, content) : 'operator';
+        const operatorName = operatorKeyword
+          ? this.getNodeText(operatorKeyword, content)
+          : 'operator';
         const containerName = context.className || context.interfaceName || context.structName;
-        return this.buildQualifiedName(context.namespaceName, containerName, `operator_${operatorName}`);
+        return this.buildQualifiedName(
+          context.namespaceName,
+          containerName,
+          `operator_${operatorName}`
+        );
       }
 
       // Local function declarations (C# 7.0+)
@@ -2543,7 +2410,10 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Phase 1: Collect complete AST context by traversing up to the root
    */
-  private collectASTContext(startNode: Parser.SyntaxNode, content: string): {
+  private collectASTContext(
+    startNode: Parser.SyntaxNode,
+    content: string
+  ): {
     className: string;
     namespaceName: string;
     interfaceName: string;
@@ -2562,9 +2432,6 @@ export class CSharpParser extends ChunkedParser {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
           className = this.getNodeText(nameNode, content);
-          logger.debug('C# collectASTContext found class', {
-            className
-          });
         }
       }
 
@@ -2607,7 +2474,7 @@ export class CSharpParser extends ChunkedParser {
       className,
       namespaceName,
       interfaceName,
-      structName
+      structName,
     };
   }
 
@@ -2647,13 +2514,6 @@ export class CSharpParser extends ChunkedParser {
       if (!existing) {
         // First occurrence, add it
         uniqueMap.set(key, dependency);
-      } else {
-        // Duplicate found, keep first occurrence
-        logger.debug('C# dependency deduplication: ignored duplicate', {
-          key,
-          from: dependency.from_symbol,
-          to: dependency.to_symbol
-        });
       }
     }
 
@@ -2665,10 +2525,23 @@ export class CSharpParser extends ChunkedParser {
 
     // C# modifier types in tree-sitter-c-sharp grammar
     const csharpModifierTypes = new Set([
-      'public', 'private', 'internal', 'protected',
-      'static', 'partial', 'abstract', 'sealed',
-      'virtual', 'override', 'readonly', 'async',
-      'const', 'new', 'extern', 'unsafe', 'volatile'
+      'public',
+      'private',
+      'internal',
+      'protected',
+      'static',
+      'partial',
+      'abstract',
+      'sealed',
+      'virtual',
+      'override',
+      'readonly',
+      'async',
+      'const',
+      'new',
+      'extern',
+      'unsafe',
+      'volatile',
     ]);
 
     // Look for modifier nodes and extract their types
@@ -2737,13 +2610,14 @@ export class CSharpParser extends ChunkedParser {
 
     // Extract return type - look for any type child node
     let returnType = 'void';
-    const typeNode = node.children.find(child =>
-      child.type === 'predefined_type' ||
-      child.type === 'identifier' ||
-      child.type === 'qualified_name' ||
-      child.type === 'generic_name' ||
-      child.type === 'array_type' ||
-      child.type === 'nullable_type'
+    const typeNode = node.children.find(
+      child =>
+        child.type === 'predefined_type' ||
+        child.type === 'identifier' ||
+        child.type === 'qualified_name' ||
+        child.type === 'generic_name' ||
+        child.type === 'array_type' ||
+        child.type === 'nullable_type'
     );
     if (typeNode) {
       returnType = this.getNodeText(typeNode, content);
@@ -2836,11 +2710,14 @@ export class CSharpParser extends ChunkedParser {
         'interface_declaration',
         'struct_declaration',
         'enum_declaration',
-        'delegate_declaration'
+        'delegate_declaration',
       ];
 
       // Also track file-scoped namespace declarations (C# 10+)
-      const fileScopedNamespace = this.getNodesOfType(tree.rootNode, 'file_scoped_namespace_declaration');
+      const fileScopedNamespace = this.getNodesOfType(
+        tree.rootNode,
+        'file_scoped_namespace_declaration'
+      );
 
       // Process each type of declaration
       for (const type of topLevelTypes) {
@@ -2868,7 +2745,7 @@ export class CSharpParser extends ChunkedParser {
             startLine: node.startPosition.row + 1,
             endLine: node.endPosition.row + 1,
             name,
-            depth
+            depth,
           });
         }
       }
@@ -2890,7 +2767,7 @@ export class CSharpParser extends ChunkedParser {
           startLine: firstUsing.startPosition.row + 1,
           endLine: lastUsing.endPosition.row + 1,
           name: 'using_directives',
-          depth: 0
+          depth: 0,
         });
       }
 
@@ -2952,7 +2829,7 @@ export class CSharpParser extends ChunkedParser {
       if (singleDecl.endPos - singleDecl.startPos + 1 > maxChunkSize) {
         logger.warn('File contains single large declaration exceeding chunk size', {
           declaration: singleDecl.name,
-          size: singleDecl.endPos - singleDecl.startPos + 1
+          size: singleDecl.endPos - singleDecl.startPos + 1,
         });
         // For a single large declaration, we'll need to parse it as an oversized chunk
         // Return empty boundaries to process the entire file as one chunk
@@ -2961,7 +2838,9 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Extract using directives to preserve in each chunk
-    const usingDirectives = usingBlock ? content.substring(usingBlock.startPos, usingBlock.endPos + 1) : '';
+    const usingDirectives = usingBlock
+      ? content.substring(usingBlock.startPos, usingBlock.endPos + 1)
+      : '';
     const usingSize = usingDirectives.length;
 
     // Start after using directives
@@ -2994,7 +2873,7 @@ export class CSharpParser extends ChunkedParser {
         logger.warn('Single declaration exceeds chunk size, will process as single chunk', {
           declaration: decl.name,
           size: declSize,
-          maxChunkSize
+          maxChunkSize,
         });
 
         // If this is not the first declaration in chunk, create boundary before it
@@ -3010,7 +2889,8 @@ export class CSharpParser extends ChunkedParser {
         // For large declarations, we'll process them as a single oversized chunk
         // Create boundary after this large declaration
         const boundaryPos = decl.endPos;
-        if (i < nonUsingDeclarations.length - 1) { // Only add boundary if not the last declaration
+        if (i < nonUsingDeclarations.length - 1) {
+          // Only add boundary if not the last declaration
           boundaries.push(boundaryPos);
           currentChunkStart = decl.endPos + 1;
           currentChunkSize = 0;
@@ -3067,12 +2947,17 @@ export class CSharpParser extends ChunkedParser {
       const searchEnd = Math.min(chunkStart + maxChunkSize, content.length);
 
       // If remaining content fits in one chunk, we're done
-      if (searchEnd >= content.length && (content.length - chunkStart) <= maxChunkSize) {
+      if (searchEnd >= content.length && content.length - chunkStart <= maxChunkSize) {
         break;
       }
 
       // Use improved state tracking with focus on class boundaries
-      const selectedBoundary = this.findBestFallbackBoundary(content, chunkStart, searchStart, searchEnd);
+      const selectedBoundary = this.findBestFallbackBoundary(
+        content,
+        chunkStart,
+        searchStart,
+        searchEnd
+      );
 
       if (selectedBoundary > chunkStart) {
         boundaries.push(selectedBoundary);
@@ -3084,7 +2969,7 @@ export class CSharpParser extends ChunkedParser {
         logger.error('Using emergency fallback boundary', {
           chunkStart,
           fallback,
-          contentLength: content.length
+          contentLength: content.length,
         });
         boundaries.push(fallback);
         break;
@@ -3097,9 +2982,14 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Find best boundary using state tracking with strong class boundary preference
    */
-  private findBestFallbackBoundary(content: string, chunkStart: number, searchStart: number, searchEnd: number): number {
+  private findBestFallbackBoundary(
+    content: string,
+    chunkStart: number,
+    searchStart: number,
+    searchEnd: number
+  ): number {
     const state = this.initializeCSharpParseState();
-    const boundaries: Array<{position: number, quality: number, type: string}> = [];
+    const boundaries: Array<{ position: number; quality: number; type: string }> = [];
 
     // Parse from chunk start to build up state
     for (let i = chunkStart; i < searchEnd && i < content.length; i++) {
@@ -3116,12 +3006,16 @@ export class CSharpParser extends ChunkedParser {
         if (char === '}' && state.braceLevel === 0) {
           // Check if this might be end of a class/namespace
           const context = content.substring(Math.max(0, i - 500), i);
-          if (context.includes('class ') || context.includes('interface ') ||
-              context.includes('namespace ') || context.includes('struct ')) {
+          if (
+            context.includes('class ') ||
+            context.includes('interface ') ||
+            context.includes('namespace ') ||
+            context.includes('struct ')
+          ) {
             boundaries.push({
               position: i,
               quality: 1.0,
-              type: 'class_end'
+              type: 'class_end',
             });
           }
         }
@@ -3131,7 +3025,7 @@ export class CSharpParser extends ChunkedParser {
           boundaries.push({
             position: i,
             quality: 0.7,
-            type: 'statement_end'
+            type: 'statement_end',
           });
         }
 
@@ -3140,7 +3034,7 @@ export class CSharpParser extends ChunkedParser {
           boundaries.push({
             position: i,
             quality: 0.5,
-            type: 'block_end'
+            type: 'block_end',
           });
         }
       }
@@ -3157,7 +3051,10 @@ export class CSharpParser extends ChunkedParser {
     return boundaries.length > 0 ? boundaries[0].position : -1;
   }
 
-  protected mergeChunkResults(chunks: ParseResult[], chunkMetadata: ChunkResult[]): MergedParseResult {
+  protected mergeChunkResults(
+    chunks: ParseResult[],
+    chunkMetadata: ChunkResult[]
+  ): MergedParseResult {
     const allSymbols: ParsedSymbol[] = [];
     const allDependencies: ParsedDependency[] = [];
     const allImports: ParsedImport[] = [];
@@ -3193,10 +3090,12 @@ export class CSharpParser extends ChunkedParser {
       chunksProcessed: chunks.length,
       metadata: {
         totalChunks: chunkMetadata.length,
-        duplicatesRemoved: (allSymbols.length - uniqueSymbols.length) +
-                          (allDependencies.length - uniqueDependencies.length),
-        crossChunkReferencesFound: this.findCrossChunkReferences(uniqueSymbols, uniqueDependencies)
-      }
+        duplicatesRemoved:
+          allSymbols.length -
+          uniqueSymbols.length +
+          (allDependencies.length - uniqueDependencies.length),
+        crossChunkReferencesFound: this.findCrossChunkReferences(uniqueSymbols, uniqueDependencies),
+      },
     };
   }
 
@@ -3241,7 +3140,7 @@ export class CSharpParser extends ChunkedParser {
       dependencies: mergedResult.dependencies,
       imports: mergedResult.imports,
       exports: mergedResult.exports,
-      errors: mergedResult.errors
+      errors: mergedResult.errors,
     };
   }
 
@@ -3290,7 +3189,7 @@ export class CSharpParser extends ChunkedParser {
       namespaceContext: '',
       classContext: '',
       inheritanceContext: '',
-      currentIndentLevel: 0
+      currentIndentLevel: 0,
     };
   }
 
@@ -3547,11 +3446,7 @@ export class CSharpParser extends ChunkedParser {
     }
   }
 
-  private isSafeBoundaryPoint(
-    state: CSharpParseState,
-    position: number,
-    content: string
-  ): boolean {
+  private isSafeBoundaryPoint(state: CSharpParseState, position: number, content: string): boolean {
     // Not safe if we're inside a string or comment
     if (state.inString !== 'none' || state.inComment !== 'none') {
       return false;
@@ -3585,14 +3480,21 @@ export class CSharpParser extends ChunkedParser {
     if (char === '\n' && position > 0) {
       // Look ahead to see if next non-whitespace starts a method/property/class
       let lookahead = position + 1;
-      while (lookahead < content.length && (content[lookahead] === ' ' || content[lookahead] === '\t' || content[lookahead] === '\n')) {
+      while (
+        lookahead < content.length &&
+        (content[lookahead] === ' ' || content[lookahead] === '\t' || content[lookahead] === '\n')
+      ) {
         lookahead++;
       }
 
       if (lookahead < content.length) {
         const nextContent = content.substring(lookahead, Math.min(lookahead + 50, content.length));
         // Check for common C# keywords that start declarations
-        if (nextContent.match(/^(public|private|protected|internal|static|abstract|virtual|override|sealed|partial|class|interface|struct|enum|namespace|using)/)) {
+        if (
+          nextContent.match(
+            /^(public|private|protected|internal|static|abstract|virtual|override|sealed|partial|class|interface|struct|enum|namespace|using)/
+          )
+        ) {
           return true;
         }
       }
@@ -3611,7 +3513,11 @@ export class CSharpParser extends ChunkedParser {
     // High quality: End of complete structures
     if (position === state.lastNamespaceEnd) {
       quality += 0.5;
-    } else if (position === state.lastClassEnd || position === state.lastInterfaceEnd || position === state.lastStructEnd) {
+    } else if (
+      position === state.lastClassEnd ||
+      position === state.lastInterfaceEnd ||
+      position === state.lastStructEnd
+    ) {
       quality += 0.4;
     } else if (position === state.lastMethodEnd) {
       quality += 0.3;
@@ -3646,7 +3552,7 @@ export class CSharpParser extends ChunkedParser {
     }
 
     // Penalty for deep nesting
-    quality -= (state.braceLevel * 0.05);
+    quality -= state.braceLevel * 0.05;
 
     // Bonus for clean boundaries (after newline)
     if (position < content.length - 1 && content[position + 1] === '\n') {
@@ -3661,7 +3567,6 @@ export class CSharpParser extends ChunkedParser {
     return Math.max(0, Math.min(1, quality));
   }
 
-
   // Context preservation methods for merging chunks
 
   private preserveUsingDirectives(chunkResults: ParseResult[]): ParsedImport[] {
@@ -3671,12 +3576,16 @@ export class CSharpParser extends ChunkedParser {
     chunkResults.forEach(result => {
       result.imports.forEach(imp => {
         // Check if this is a C# using directive
-        if (imp.import_type === 'namespace' || imp.source.startsWith('System') || imp.source.includes('.')) {
+        if (
+          imp.import_type === 'namespace' ||
+          imp.source.startsWith('System') ||
+          imp.source.includes('.')
+        ) {
           const key = imp.source;
           if (!allUsings.has(key)) {
             allUsings.set(key, {
               ...imp,
-              import_type: 'namespace' // Normalize import type for C# usings
+              import_type: 'namespace', // Normalize import type for C# usings
             });
           }
         }
@@ -3686,8 +3595,14 @@ export class CSharpParser extends ChunkedParser {
     return Array.from(allUsings.values());
   }
 
-  private preserveClassContext(chunkResults: ParseResult[], existingSymbols: ParsedSymbol[]): ParsedSymbol[] {
-    const classHierarchy = new Map<string, { parent?: string, interfaces: string[], signature?: string }>();
+  private preserveClassContext(
+    chunkResults: ParseResult[],
+    existingSymbols: ParsedSymbol[]
+  ): ParsedSymbol[] {
+    const classHierarchy = new Map<
+      string,
+      { parent?: string; interfaces: string[]; signature?: string }
+    >();
 
     // Build complete class hierarchy from all chunks
     chunkResults.forEach(result => {
@@ -3698,7 +3613,7 @@ export class CSharpParser extends ChunkedParser {
             classHierarchy.set(symbol.name, {
               parent: undefined,
               interfaces: [],
-              signature: symbol.signature
+              signature: symbol.signature,
             });
           } else {
             // Merge signature information from multiple chunks
@@ -3712,19 +3627,25 @@ export class CSharpParser extends ChunkedParser {
 
     // Apply preserved context to symbols
     return existingSymbols.map(symbol => {
-      if ((symbol.symbol_type === 'class' || symbol.symbol_type === 'interface') && classHierarchy.has(symbol.name)) {
+      if (
+        (symbol.symbol_type === 'class' || symbol.symbol_type === 'interface') &&
+        classHierarchy.has(symbol.name)
+      ) {
         const hierarchy = classHierarchy.get(symbol.name)!;
         return {
           ...symbol,
           // Preserve or enhance signature with inheritance info
-          signature: symbol.signature || hierarchy.signature || symbol.name
+          signature: symbol.signature || hierarchy.signature || symbol.name,
         };
       }
       return symbol;
     });
   }
 
-  private preserveInheritanceContext(chunkResults: ParseResult[], existingDependencies: ParsedDependency[]): ParsedDependency[] {
+  private preserveInheritanceContext(
+    chunkResults: ParseResult[],
+    existingDependencies: ParsedDependency[]
+  ): ParsedDependency[] {
     const inheritanceMap = new Map<string, Set<string>>();
 
     // Build inheritance relationships from all chunks
@@ -3745,10 +3666,9 @@ export class CSharpParser extends ChunkedParser {
     inheritanceMap.forEach((targets, key) => {
       const [source, type] = key.split(':');
       targets.forEach(target => {
-        const exists = preservedDeps.some(dep =>
-          dep.from_symbol === source &&
-          dep.to_symbol === target &&
-          dep.dependency_type === type
+        const exists = preservedDeps.some(
+          dep =>
+            dep.from_symbol === source && dep.to_symbol === target && dep.dependency_type === type
         );
 
         if (!exists) {
@@ -3765,7 +3685,10 @@ export class CSharpParser extends ChunkedParser {
     return preservedDeps;
   }
 
-  private findCrossChunkReferences(symbols: ParsedSymbol[], dependencies: ParsedDependency[]): number {
+  private findCrossChunkReferences(
+    symbols: ParsedSymbol[],
+    dependencies: ParsedDependency[]
+  ): number {
     // Count dependencies that reference symbols from different chunks
     let crossChunkCount = 0;
     const symbolChunkMap = new Map<string, number>();
@@ -3791,7 +3714,11 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Build method signature with parameters for enhanced context (Phase 3.1)
    */
-  private buildMethodSignature(methodName: string, node: Parser.SyntaxNode, content: string): string | undefined {
+  private buildMethodSignature(
+    methodName: string,
+    node: Parser.SyntaxNode,
+    content: string
+  ): string | undefined {
     try {
       // Try to find the method definition by traversing the AST
       const methodDefinition = this.findMethodDefinition(methodName, node, content);
@@ -3810,7 +3737,7 @@ export class CSharpParser extends ChunkedParser {
     } catch (error) {
       logger.debug('Failed to build method signature', {
         methodName,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
       return undefined;
     }
@@ -3850,7 +3777,7 @@ export class CSharpParser extends ChunkedParser {
       return undefined;
     } catch (error) {
       logger.debug('Failed to extract namespace context', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
       return undefined;
     }
@@ -3859,7 +3786,11 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Find method definition in the AST for signature extraction
    */
-  private findMethodDefinition(methodName: string, searchNode: Parser.SyntaxNode, content: string): Parser.SyntaxNode | null {
+  private findMethodDefinition(
+    methodName: string,
+    searchNode: Parser.SyntaxNode,
+    content: string
+  ): Parser.SyntaxNode | null {
     const rootNode = this.findASTRoot(searchNode);
     return this.findMethodDefinitionRecursive(methodName, rootNode, content);
   }
@@ -3867,7 +3798,11 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Recursively search for method definition
    */
-  private findMethodDefinitionRecursive(methodName: string, node: Parser.SyntaxNode, content: string): Parser.SyntaxNode | null {
+  private findMethodDefinitionRecursive(
+    methodName: string,
+    node: Parser.SyntaxNode,
+    content: string
+  ): Parser.SyntaxNode | null {
     // Check if current node is a method declaration
     if (node.type === 'method_declaration') {
       const nameNode = node.childForFieldName('name');
@@ -3891,7 +3826,10 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Extract method signature from method definition node
    */
-  private extractMethodSignatureFromDefinition(methodNode: Parser.SyntaxNode, content: string): string {
+  private extractMethodSignatureFromDefinition(
+    methodNode: Parser.SyntaxNode,
+    content: string
+  ): string {
     try {
       const modifiers = this.extractModifiers(methodNode, content);
       const returnType = this.extractMethodReturnType(methodNode, content);
@@ -3905,7 +3843,7 @@ export class CSharpParser extends ChunkedParser {
       return `${modifierString}${returnTypeString}${methodName}(${parameters.join(', ')})`;
     } catch (error) {
       logger.debug('Failed to extract method signature from definition', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
       return 'Unknown';
     }
@@ -3918,7 +3856,12 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Find the conditional access node that contains a method call at a specific line
    */
-  private findConditionalAccessNodeForMethod(rootNode: Parser.SyntaxNode, content: string, methodName: string, lineNumber: number): Parser.SyntaxNode | null {
+  private findConditionalAccessNodeForMethod(
+    rootNode: Parser.SyntaxNode,
+    content: string,
+    methodName: string,
+    lineNumber: number
+  ): Parser.SyntaxNode | null {
     // Look for conditional access expressions that contain invocation expressions
     const conditionalAccessNodes = this.getNodesOfType(rootNode, 'conditional_access_expression');
 
@@ -3968,7 +3911,10 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Extract parameters from method definition for signature building
    */
-  private extractMethodDefinitionParameters(methodNode: Parser.SyntaxNode, content: string): string[] {
+  private extractMethodDefinitionParameters(
+    methodNode: Parser.SyntaxNode,
+    content: string
+  ): string[] {
     const parameters: string[] = [];
 
     const parameterList = methodNode.childForFieldName('parameters');
@@ -3989,7 +3935,11 @@ export class CSharpParser extends ChunkedParser {
    * Extract parameter types from method call arguments
    * Attempts to resolve types of parameters when possible
    */
-  private extractParameterTypes(node: Parser.SyntaxNode, content: string, parameters: string[]): string[] {
+  private extractParameterTypes(
+    node: Parser.SyntaxNode,
+    content: string,
+    parameters: string[]
+  ): string[] {
     const parameterTypes: string[] = [];
 
     try {
@@ -4008,7 +3958,7 @@ export class CSharpParser extends ChunkedParser {
       }
     } catch (error) {
       logger.debug('Failed to extract parameter types', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
 
@@ -4088,5 +4038,4 @@ export class CSharpParser extends ChunkedParser {
     }
     return null;
   }
-
 }

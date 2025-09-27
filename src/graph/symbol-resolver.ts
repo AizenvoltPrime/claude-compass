@@ -39,10 +39,6 @@ export class SymbolResolver {
    */
   public setFieldTypeMap(fieldTypeMap: Map<string, string>): void {
     this.fieldTypeMap = fieldTypeMap;
-    this.logger.debug('Field type mappings set for symbol resolution', {
-      fieldCount: fieldTypeMap.size,
-      fields: Array.from(fieldTypeMap.entries()),
-    });
   }
 
   /**
@@ -50,7 +46,6 @@ export class SymbolResolver {
    */
   public clearFieldTypeMap(): void {
     this.fieldTypeMap.clear();
-    this.logger.debug('Field type mappings cleared');
   }
 
   /**
@@ -87,21 +82,11 @@ export class SymbolResolver {
                 this.fieldTypeMap.set(fieldName, className);
               }
 
-              this.logger.debug('Field type extracted from signature', {
-                fieldName,
-                fieldType,
-                signature: fieldSymbol.signature,
-              });
             }
           }
         }
       }
 
-      this.logger.debug('Field type context set for C# file', {
-        filePath: sourceContext.filePath,
-        fieldCount: this.fieldTypeMap.size,
-        fields: Array.from(this.fieldTypeMap.entries()),
-      });
     } catch (error) {
       this.logger.warn(`Failed to set field context for ${sourceContext.filePath}`, {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -227,21 +212,12 @@ export class SymbolResolver {
     }
 
     if (!fromSymbol) {
-      // Only log if we couldn't resolve even with the fallback
-      this.logger.debug('Source symbol not found in file context', {
-        symbolName: dependency.from_symbol,
-        filePath: sourceContext.filePath,
-      });
       return null;
     }
 
     // Resolve the target symbol with proper scoping
     const toSymbol = this.resolveTargetSymbol(sourceContext, dependency.to_symbol, dependency);
     if (!toSymbol) {
-      this.logger.debug('Target symbol could not be resolved', {
-        symbolName: dependency.to_symbol,
-        filePath: sourceContext.filePath,
-      });
       return null;
     }
 
@@ -271,12 +247,6 @@ export class SymbolResolver {
           // Target already has class context from parser
           const memberResult = this.resolveMemberExpression(sourceContext, targetSymbolName);
           if (memberResult) {
-            this.logger.debug('Resolved symbol via field-based context', {
-              fieldName,
-              fieldType,
-              targetSymbolName,
-              filePath: sourceContext.filePath,
-            });
             return memberResult;
           }
         }
@@ -287,10 +257,6 @@ export class SymbolResolver {
     if (targetSymbolName.includes('.')) {
       const memberExpressionSymbol = this.resolveMemberExpression(sourceContext, targetSymbolName);
       if (memberExpressionSymbol) {
-        this.logger.debug('Resolved member expression symbol', {
-          symbolName: targetSymbolName,
-          filePath: sourceContext.filePath,
-        });
         return memberExpressionSymbol;
       }
     }
@@ -298,30 +264,18 @@ export class SymbolResolver {
     // 1. First check local file scope
     const localSymbol = sourceContext.symbols.find(s => s.name === targetSymbolName);
     if (localSymbol) {
-      this.logger.debug('Resolved symbol in local scope', {
-        symbolName: targetSymbolName,
-        filePath: sourceContext.filePath,
-      });
       return localSymbol;
     }
 
     // 2. Check imported symbols
     const importedSymbol = this.resolveImportedSymbol(sourceContext, targetSymbolName);
     if (importedSymbol) {
-      this.logger.debug('Resolved imported symbol', {
-        symbolName: targetSymbolName,
-        filePath: sourceContext.filePath,
-      });
       return importedSymbol;
     }
 
     // 3. Check for store method patterns (Pinia stores)
     const storeMethodSymbol = this.resolveStoreMethod(sourceContext, targetSymbolName);
     if (storeMethodSymbol) {
-      this.logger.debug('Resolved store method symbol', {
-        symbolName: targetSymbolName,
-        filePath: sourceContext.filePath,
-      });
       return storeMethodSymbol;
     }
 
@@ -329,22 +283,10 @@ export class SymbolResolver {
     // But only if there's a single unambiguous match
     const exportedOptions = this.exportedSymbols.get(targetSymbolName) || [];
     if (exportedOptions.length === 1) {
-      this.logger.debug('Resolved globally exported symbol', {
-        symbolName: targetSymbolName,
-        filePath: sourceContext.filePath,
-        exportedFrom: exportedOptions[0].fromFile,
-      });
       return exportedOptions[0].symbol;
     }
 
     // 5. If multiple matches exist, we cannot resolve without explicit import
-    if (exportedOptions.length > 1) {
-      this.logger.debug('Ambiguous symbol resolution - multiple exports found', {
-        symbolName: targetSymbolName,
-        filePath: sourceContext.filePath,
-        exportCount: exportedOptions.length,
-      });
-    }
 
     // 6. As a final fallback, check framework-provided symbols (PHPUnit, Laravel, etc.)
     const frameworkSymbol = this.resolveFrameworkSymbol(
@@ -353,11 +295,6 @@ export class SymbolResolver {
       dependency
     );
     if (frameworkSymbol) {
-      this.logger.debug('Resolved framework symbol', {
-        symbolName: targetSymbolName,
-        filePath: sourceContext.filePath,
-        framework: frameworkSymbol.framework,
-      });
       return frameworkSymbol;
     }
 
@@ -377,12 +314,6 @@ export class SymbolResolver {
     const objectName = memberExpression.substring(0, dotIndex);
     const methodName = memberExpression.substring(dotIndex + 1);
 
-    this.logger.debug('Resolving member expression', {
-      fullExpression: memberExpression,
-      objectName,
-      methodName,
-      filePath: sourceContext.filePath,
-    });
 
     // Strategy 1: Check if objectName is directly imported
     for (const importDecl of sourceContext.imports) {
@@ -390,11 +321,6 @@ export class SymbolResolver {
         // Find the target file that exports this object
         const targetSymbol = this.findMethodInImportedObject(importDecl, objectName, methodName);
         if (targetSymbol) {
-          this.logger.debug('Resolved member expression via direct import', {
-            objectName,
-            methodName,
-            targetFile: targetSymbol.file_id,
-          });
           return targetSymbol;
         }
       }
@@ -407,11 +333,6 @@ export class SymbolResolver {
       methodName
     );
     if (storeMethodSymbol) {
-      this.logger.debug('Resolved member expression via store pattern', {
-        objectName,
-        methodName,
-        targetFile: storeMethodSymbol.file_id,
-      });
       return storeMethodSymbol;
     }
 
@@ -423,10 +344,6 @@ export class SymbolResolver {
         s => s.name === methodName && (s.symbol_type === 'method' || s.symbol_type === 'function')
       );
       if (localMethod) {
-        this.logger.debug('Resolved member expression in local scope', {
-          objectName,
-          methodName,
-        });
         return localMethod;
       }
     }
@@ -440,12 +357,6 @@ export class SymbolResolver {
           // Resolve field type to target class method
           const classMethodResult = this.resolveCSharpClassMethod(fieldType, methodName);
           if (classMethodResult) {
-            this.logger.debug('Resolved member expression via field type mapping', {
-              fieldName: objectName,
-              fieldType,
-              methodName,
-              targetFile: classMethodResult.file_id,
-            });
             return classMethodResult;
           }
         }
@@ -641,11 +552,6 @@ export class SymbolResolver {
       updated_at: new Date()
     };
 
-    this.logger.debug('Created virtual external library symbol', {
-      symbolName: targetSymbolName,
-      framework: frameworkSymbol.framework,
-      importSource: importDecl.source,
-    });
 
     return virtualSymbol;
   }
@@ -738,12 +644,6 @@ export class SymbolResolver {
         // Look for a method with the target name in stores that match this pattern
         const storeMethodSymbol = this.findStoreMethod(storeName, targetSymbolName);
         if (storeMethodSymbol) {
-          this.logger.debug('Resolved store method via factory pattern', {
-            factoryName: storeFactoryName,
-            storeName,
-            methodName: targetSymbolName,
-            filePath: sourceContext.filePath,
-          });
           return storeMethodSymbol;
         }
       }
@@ -937,12 +837,6 @@ export class SymbolResolver {
       updated_at: new Date(),
     };
 
-    this.logger.debug('Created virtual framework symbol', {
-      symbolName: targetSymbolName,
-      framework: frameworkSymbol.framework,
-      context,
-      filePath: sourceContext.filePath,
-    });
 
     return virtualSymbol;
   }
