@@ -51,6 +51,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 ./dist/src/cli/index.js analyze . --verbose          # Verbose analysis
 ./dist/src/cli/index.js analyze . --force-full       # Force full analysis (clears existing data)
 ./dist/src/cli/index.js analyze . --no-test-files    # Exclude test files
+./dist/src/cli/index.js analyze /path/to/repo --debug-file scripts/core/managers/CardManager.cs --verbose  # Debug single file parsing
 
 # Clear repository data (with confirmation prompt bypass)
 ./dist/src/cli/index.js clear <repository-name> --yes
@@ -186,6 +187,9 @@ Setup file: `tests/setup.ts` initializes test database
 ```bash
 # Enable debug logging
 CLAUDE_COMPASS_DEBUG=true ./dist/src/cli/index.js analyze /path --verbose
+
+# Debug single file parsing (for parser development and troubleshooting)
+./dist/src/cli/index.js analyze /path/to/repo --debug-file relative/path/to/file.cs --verbose
 
 ### Database Migrations
 
