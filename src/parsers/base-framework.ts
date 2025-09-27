@@ -68,7 +68,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     this.frameworkType = frameworkType;
     this.patterns = this.getFrameworkPatterns();
 
-    logger.debug(`Initialized ${frameworkType} framework parser`);
   }
 
   /**
@@ -80,7 +79,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       // Check if file needs chunked parsing due to size constraints
       let baseResult: ParseResult;
       if (this.shouldUseChunking(content, options)) {
-        logger.debug(`Using chunked parsing for large file`, { filePath, size: content.length });
         baseResult = await this.parseFileInChunks(filePath, content, options);
       } else {
         // Get base parsing result using direct parsing
@@ -152,11 +150,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     const ext = path.extname(filePath);
     const fileName = path.basename(filePath);
 
-    logger.debug(`Checking framework applicability for ${this.frameworkType}`, {
-      filePath,
-      extension: ext,
-      patternsCount: this.patterns.length
-    });
 
     // Check file extension patterns
     const hasApplicableExtension = this.patterns.some(pattern =>
@@ -172,11 +165,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     const hasApplicableContent = this.patterns.some(pattern => {
       try {
         const matches = pattern.pattern.test(content);
-        logger.debug(`Content pattern test for ${this.frameworkType}`, {
-          filePath,
-          patternName: pattern.name,
-          matches
-        });
         return matches;
       } catch (error) {
         logger.warn(`Pattern test failed for ${pattern.name}`, { error });

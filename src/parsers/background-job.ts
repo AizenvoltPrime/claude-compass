@@ -2,7 +2,16 @@ import Parser from 'tree-sitter';
 import JavaScript from 'tree-sitter-javascript';
 import { BaseFrameworkParser, FrameworkParseOptions, ParseFileResult } from './base-framework';
 import { MergedParseResult } from './chunked-parser';
-import { ParsedSymbol, ParsedDependency, ParsedImport, ParsedExport, ParseResult, ParseOptions, ParseError, FrameworkEntity } from './base';
+import {
+  ParsedSymbol,
+  ParsedDependency,
+  ParsedImport,
+  ParsedExport,
+  ParseResult,
+  ParseOptions,
+  ParseError,
+  FrameworkEntity,
+} from './base';
 import { SymbolType, DependencyType, JobQueueType, WorkerType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
@@ -83,8 +92,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
     return ['.js', '.ts', '.jsx', '.tsx'];
   }
 
-  async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-
+  async parseFile(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions = {}
+  ): Promise<ParseFileResult> {
     // Check if this file contains job-related code
     if (!this.containsJobPatterns(content)) {
       return {
@@ -98,21 +110,24 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         metadata: {
           framework: 'background-job',
           fileType: 'non-job',
-          isFrameworkSpecific: false
-        }
+          isFrameworkSpecific: false,
+        },
       };
     }
 
     // Check if chunking should be used for large files
-    if (options.enableChunking !== false &&
-        content.length > (options.chunkSize || 28 * 1024)) {
+    if (options.enableChunking !== false && content.length > (options.chunkSize || 28 * 1024)) {
       // Use chunked parsing for large files
       const chunkedResult = await this.parseFileInChunks(filePath, content, options);
       // Convert MergedParseResult to ParseResult with framework entities
       const baseResult = this.convertMergedResult(chunkedResult);
 
       // Add framework-specific analysis to chunked result
-      const frameworkEntities = this.analyzeFrameworkEntitiesFromResult(baseResult, content, filePath);
+      const frameworkEntities = this.analyzeFrameworkEntitiesFromResult(
+        baseResult,
+        content,
+        filePath
+      );
 
       const result: ParseFileResult = {
         filePath,
@@ -121,8 +136,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         metadata: {
           framework: 'background-job',
           fileType: 'analyzed',
-          isFrameworkSpecific: frameworkEntities.length > 0
-        }
+          isFrameworkSpecific: frameworkEntities.length > 0,
+        },
       };
 
       return this.addJobSpecificAnalysis(result, content, filePath);
@@ -153,16 +168,15 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         metadata: {
           framework: 'background-job',
           fileType: 'job',
-          isFrameworkSpecific: true
-        }
+          isFrameworkSpecific: true,
+        },
       };
-
     } catch (error) {
       result.errors.push({
         message: `Background job analysis failed: ${(error as Error).message}`,
         line: 1,
         column: 1,
-        severity: 'warning'
+        severity: 'warning',
       });
 
       return {
@@ -172,8 +186,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         metadata: {
           framework: 'background-job',
           fileType: 'job',
-          isFrameworkSpecific: true
-        }
+          isFrameworkSpecific: true,
+        },
       };
     }
   }
@@ -282,7 +296,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       /background.*job/i,
       /task.*queue/i,
       /\.enqueue\(/,
-      /\.dequeue\(/
+      /\.dequeue\(/,
     ];
 
     return jobPatterns.some(pattern => pattern.test(content));
@@ -329,17 +343,17 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Extract job-specific symbols
    */
-  private extractJobSymbols(filePath: string, content: string, jobSystems: (JobQueueType | WorkerType)[]): ParsedSymbol[] {
+  private extractJobSymbols(
+    filePath: string,
+    content: string,
+    jobSystems: (JobQueueType | WorkerType)[]
+  ): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     if (jobSystems.length === 0) return symbols;
 
     // Skip detailed analysis for large files to avoid Tree-sitter limits
     if (content.length > 28000) {
-      logger.debug('Skipping background job symbol extraction for large file', {
-        filePath,
-        contentSize: content.length
-      });
       return symbols;
     }
 
@@ -373,10 +387,6 @@ export class BackgroundJobParser extends BaseFrameworkParser {
 
     // Skip detailed analysis for large files to avoid Tree-sitter limits
     if (content.length > 28000) {
-      logger.debug('Skipping background job dependency extraction for large file', {
-        filePath,
-        contentSize: content.length
-      });
       return dependencies;
     }
 
@@ -396,7 +406,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Extract queue definitions
    */
-  private extractQueueDefinitions(tree: Parser.Tree, content: string, jobSystems: (JobQueueType | WorkerType)[]): ParsedSymbol[] {
+  private extractQueueDefinitions(
+    tree: Parser.Tree,
+    content: string,
+    jobSystems: (JobQueueType | WorkerType)[]
+  ): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     const variableNodes = this.findNodesOfType(tree.rootNode, 'variable_declarator');
@@ -411,7 +425,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Extract job definitions
    */
-  private extractJobDefinitions(tree: Parser.Tree, content: string, jobSystems: (JobQueueType | WorkerType)[]): ParsedSymbol[] {
+  private extractJobDefinitions(
+    tree: Parser.Tree,
+    content: string,
+    jobSystems: (JobQueueType | WorkerType)[]
+  ): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     const callNodes = this.findNodesOfType(tree.rootNode, 'call_expression');
@@ -426,7 +444,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Extract job processors
    */
-  private extractJobProcessors(tree: Parser.Tree, content: string, jobSystems: (JobQueueType | WorkerType)[]): ParsedSymbol[] {
+  private extractJobProcessors(
+    tree: Parser.Tree,
+    content: string,
+    jobSystems: (JobQueueType | WorkerType)[]
+  ): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     const callNodes = this.findNodesOfType(tree.rootNode, 'call_expression');
@@ -456,7 +478,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Extract queue symbol from variable declaration
    */
-  private extractQueueSymbol(node: Parser.SyntaxNode, content: string, jobSystems: (JobQueueType | WorkerType)[]): ParsedSymbol | null {
+  private extractQueueSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    jobSystems: (JobQueueType | WorkerType)[]
+  ): ParsedSymbol | null {
     const nameNode = node.children.find(child => child.type === 'identifier');
     if (!nameNode) return null;
 
@@ -475,14 +501,17 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `Queue: ${name}`
+      signature: `Queue: ${name}`,
     };
   }
 
   /**
    * Extract job definition symbol
    */
-  private extractJobDefinitionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractJobDefinitionSymbol(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedSymbol | null {
     const functionName = this.getFunctionNameFromCall(node, content);
     if (!functionName) return null;
 
@@ -503,7 +532,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `Job: ${jobName} (${functionName})`
+      signature: `Job: ${jobName} (${functionName})`,
     };
   }
 
@@ -526,7 +555,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `Processor: ${processorName}`
+      signature: `Processor: ${processorName}`,
     };
   }
 
@@ -549,14 +578,17 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `Worker: ${workerName}`
+      signature: `Worker: ${workerName}`,
     };
   }
 
   /**
    * Extract job call dependency
    */
-  private extractJobCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  private extractJobCallDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     const functionName = this.getFunctionNameFromCall(node, content);
     if (!functionName) return null;
 
@@ -570,7 +602,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
             from_symbol: 'current_context',
             to_symbol: targetJob,
             dependency_type: DependencyType.PROCESSES_JOB,
-            line_number: this.getLineNumber(node.startIndex, content)
+            line_number: this.getLineNumber(node.startIndex, content),
           };
         }
       }
@@ -582,7 +614,10 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Create framework entities for job systems
    */
-  private createJobFrameworkEntities(filePath: string, jobSystems: (JobQueueType | WorkerType)[]): FrameworkEntity[] {
+  private createJobFrameworkEntities(
+    filePath: string,
+    jobSystems: (JobQueueType | WorkerType)[]
+  ): FrameworkEntity[] {
     const entities: FrameworkEntity[] = [];
 
     if (jobSystems.length === 0) return entities;
@@ -598,8 +633,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         jobSystems,
         queues: this.jobQueues.filter(q => q.filePath === filePath),
         workers: this.workerThreads.filter(w => w.filePath === filePath),
-        detectedAt: new Date().toISOString()
-      }
+        detectedAt: new Date().toISOString(),
+      },
     });
 
     return entities;
@@ -609,8 +644,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
 
   private getFunctionNameFromCall(node: Parser.SyntaxNode, content: string): string | null {
     if (node.type !== 'call_expression') return null;
-    const functionNode = node.children.find(child =>
-      child.type === 'identifier' || child.type === 'member_expression'
+    const functionNode = node.children.find(
+      child => child.type === 'identifier' || child.type === 'member_expression'
     );
     if (!functionNode) return null;
 
@@ -623,8 +658,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   private getCallArguments(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
     const argumentsNode = node.children.find(child => child.type === 'arguments');
     if (!argumentsNode) return [];
-    return argumentsNode.children.filter(child =>
-      child.type !== '(' && child.type !== ')' && child.type !== ','
+    return argumentsNode.children.filter(
+      child => child.type !== '(' && child.type !== ')' && child.type !== ','
     );
   }
 
@@ -645,7 +680,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `function ${name}(...)`
+      signature: `function ${name}(...)`,
     };
   }
 
@@ -660,11 +695,14 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `var ${name}`
+      signature: `var ${name}`,
     };
   }
 
-  protected extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  protected extractCallDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     const functionName = this.getFunctionNameFromCall(node, content);
     if (!functionName) return null;
 
@@ -672,7 +710,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       from_symbol: 'current_function',
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: this.getLineNumber(node.startIndex, content)
+      line_number: this.getLineNumber(node.startIndex, content),
     };
   }
 
@@ -683,7 +721,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       imported_names: [],
       import_type: 'named',
       line_number: this.getLineNumber(node.startIndex, content),
-      is_dynamic: false
+      is_dynamic: false,
     };
   }
 
@@ -692,7 +730,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
     return {
       exported_names: [],
       export_type: 'named',
-      line_number: this.getLineNumber(node.startIndex, content)
+      line_number: this.getLineNumber(node.startIndex, content),
     };
   }
 
@@ -729,32 +767,32 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         name: 'bull-queue',
         pattern: /import.*bull|require.*bull|new Bull\(|new Queue\(/i,
         fileExtensions: ['.js', '.ts'],
-        priority: 10
+        priority: 10,
       },
       {
         name: 'agenda-jobs',
         pattern: /import.*agenda|require.*agenda|new Agenda\(/i,
         fileExtensions: ['.js', '.ts'],
-        priority: 9
+        priority: 9,
       },
       {
         name: 'worker-threads',
         pattern: /worker_threads|new Worker\(|isMainThread|parentPort/,
         fileExtensions: ['.js', '.ts'],
-        priority: 8
+        priority: 8,
       },
       {
         name: 'bee-queue',
         pattern: /bee-queue/i,
         fileExtensions: ['.js', '.ts'],
-        priority: 7
+        priority: 7,
       },
       {
         name: 'kue-jobs',
         pattern: /import.*kue|require.*kue|kue\.createQueue/i,
         fileExtensions: ['.js', '.ts'],
-        priority: 6
-      }
+        priority: 6,
+      },
     ];
   }
 
@@ -807,8 +845,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       metadata: {
         totalChunks: chunks.length,
         duplicatesRemoved: 0,
-        crossChunkReferencesFound: 0
-      }
+        crossChunkReferencesFound: 0,
+      },
     };
 
     const seenSymbols = new Set<string>();
@@ -884,14 +922,18 @@ export class BackgroundJobParser extends BaseFrameworkParser {
       dependencies: mergedResult.dependencies,
       imports: mergedResult.imports,
       exports: mergedResult.exports,
-      errors: mergedResult.errors
+      errors: mergedResult.errors,
     };
   }
 
   /**
    * Analyze framework entities from already-parsed results
    */
-  private analyzeFrameworkEntitiesFromResult(result: ParseResult, content: string, filePath: string): FrameworkEntity[] {
+  private analyzeFrameworkEntitiesFromResult(
+    result: ParseResult,
+    content: string,
+    filePath: string
+  ): FrameworkEntity[] {
     try {
       // Framework-specific analysis based on symbols found by base parsing
       const jobSystems = this.detectJobSystems(content);
@@ -899,7 +941,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
     } catch (error) {
       this.logger.warn('Failed to analyze framework entities from parsed result', {
         filePath,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       return [];
     }
@@ -908,7 +950,11 @@ export class BackgroundJobParser extends BaseFrameworkParser {
   /**
    * Add job-specific analysis to parsed results
    */
-  private addJobSpecificAnalysis(result: ParseFileResult, content: string, filePath: string): ParseFileResult {
+  private addJobSpecificAnalysis(
+    result: ParseFileResult,
+    content: string,
+    filePath: string
+  ): ParseFileResult {
     try {
       // Detect job systems used in this file
       const jobSystems = this.detectJobSystems(content);
@@ -933,7 +979,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         ...result.metadata,
         framework: 'background-job',
         fileType: 'job',
-        isFrameworkSpecific: true
+        isFrameworkSpecific: true,
       };
 
       return result;
@@ -942,7 +988,7 @@ export class BackgroundJobParser extends BaseFrameworkParser {
         message: `Background job analysis failed: ${(error as Error).message}`,
         line: 0,
         column: 0,
-        severity: 'error'
+        severity: 'error',
       });
 
       return {
@@ -951,8 +997,8 @@ export class BackgroundJobParser extends BaseFrameworkParser {
           ...result.metadata,
           framework: 'background-job',
           fileType: 'error',
-          isFrameworkSpecific: false
-        }
+          isFrameworkSpecific: false,
+        },
       };
     }
   }

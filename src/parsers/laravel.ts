@@ -1,15 +1,7 @@
 import Parser from 'tree-sitter';
 import { php } from 'tree-sitter-php';
-import {
-  BaseFrameworkParser,
-  FrameworkPattern,
-  FrameworkParseOptions
-} from './base-framework';
-import {
-  FrameworkEntity,
-  FrameworkParseResult,
-  ParseResult
-} from './base';
+import { BaseFrameworkParser, FrameworkPattern, FrameworkParseOptions } from './base-framework';
+import { FrameworkEntity, FrameworkParseResult, ParseResult } from './base';
 import { ChunkResult, MergedParseResult } from './chunked-parser';
 import { PHPParser } from './php';
 import { SyntaxNode } from 'tree-sitter';
@@ -247,124 +239,128 @@ export class LaravelParser extends BaseFrameworkParser {
         name: 'laravel-controller',
         pattern: /class\s+\w+Controller\s+extends\s+(Controller|BaseController)/,
         fileExtensions: ['.php'],
-        description: 'Laravel controller classes extending base Controller'
+        description: 'Laravel controller classes extending base Controller',
       },
       {
         name: 'laravel-model',
         pattern: /class\s+\w+\s+extends\s+(Model|Authenticatable|Pivot)/,
         fileExtensions: ['.php'],
-        description: 'Eloquent model classes extending Model, Authenticatable, or Pivot'
+        description: 'Eloquent model classes extending Model, Authenticatable, or Pivot',
       },
       {
         name: 'laravel-route',
         pattern: /Route::(get|post|put|delete|patch|any|match|resource|group)/,
         fileExtensions: ['.php'],
-        description: 'Laravel route definitions using Route facade'
+        description: 'Laravel route definitions using Route facade',
       },
       {
         name: 'laravel-middleware',
         pattern: /class\s+\w+\s+(implements\s+.*Middleware|extends\s+.*Middleware)/,
         fileExtensions: ['.php'],
-        description: 'Laravel middleware classes'
+        description: 'Laravel middleware classes',
       },
       {
         name: 'laravel-service-provider',
         pattern: /class\s+\w+ServiceProvider\s+extends\s+ServiceProvider/,
         fileExtensions: ['.php'],
-        description: 'Laravel service provider classes'
+        description: 'Laravel service provider classes',
       },
       {
         name: 'laravel-job',
         pattern: /class\s+\w+\s+implements\s+.*ShouldQueue/,
         fileExtensions: ['.php'],
-        description: 'Laravel queueable job classes'
+        description: 'Laravel queueable job classes',
       },
       {
         name: 'laravel-command',
         pattern: /class\s+\w+\s+extends\s+Command/,
         fileExtensions: ['.php'],
-        description: 'Laravel Artisan command classes'
+        description: 'Laravel Artisan command classes',
       },
       {
         name: 'laravel-migration',
         pattern: /class\s+\w+\s+extends\s+Migration/,
         fileExtensions: ['.php'],
-        description: 'Laravel database migration classes'
+        description: 'Laravel database migration classes',
       },
       {
         name: 'laravel-seeder',
         pattern: /class\s+\w+\s+extends\s+Seeder/,
         fileExtensions: ['.php'],
-        description: 'Laravel database seeder classes'
+        description: 'Laravel database seeder classes',
       },
       // Missing Laravel entity patterns from improvement plan
       {
         name: 'laravel-form-request',
         pattern: /class\s+\w+\s+extends\s+FormRequest/,
         fileExtensions: ['.php'],
-        description: 'Laravel Form Request classes for validation'
+        description: 'Laravel Form Request classes for validation',
       },
       {
         name: 'laravel-event',
         pattern: /class\s+\w+\s+implements\s+.*ShouldBroadcast/,
         fileExtensions: ['.php'],
-        description: 'Laravel Event classes with broadcasting'
+        description: 'Laravel Event classes with broadcasting',
       },
       {
         name: 'laravel-mail',
         pattern: /class\s+\w+\s+extends\s+Mailable/,
         fileExtensions: ['.php'],
-        description: 'Laravel Mail classes'
+        description: 'Laravel Mail classes',
       },
       {
         name: 'laravel-policy',
         pattern: /class\s+\w+.*Policy/,
         fileExtensions: ['.php'],
-        description: 'Laravel Policy classes for authorization'
+        description: 'Laravel Policy classes for authorization',
       },
       {
         name: 'laravel-listener',
         pattern: /class\s+\w+.*\s+public\s+function\s+handle/,
         fileExtensions: ['.php'],
-        description: 'Laravel Event Listener classes'
+        description: 'Laravel Event Listener classes',
       },
       {
         name: 'laravel-factory',
         pattern: /class\s+\w+Factory\s+extends\s+Factory/,
         fileExtensions: ['.php'],
-        description: 'Laravel Factory classes for model generation'
+        description: 'Laravel Factory classes for model generation',
       },
       {
         name: 'laravel-trait',
         pattern: /trait\s+\w+/,
         fileExtensions: ['.php'],
-        description: 'PHP Traits used in Laravel applications'
+        description: 'PHP Traits used in Laravel applications',
       },
       {
         name: 'laravel-resource',
         pattern: /class\s+\w+\s+extends\s+.*Resource/,
         fileExtensions: ['.php'],
-        description: 'Laravel API Resource classes'
+        description: 'Laravel API Resource classes',
       },
       {
         name: 'laravel-observer',
         pattern: /class\s+\w+Observer/,
         fileExtensions: ['.php'],
-        description: 'Laravel Model Observer classes'
+        description: 'Laravel Model Observer classes',
       },
       {
         name: 'laravel-service',
         pattern: /class\s+\w+Service/,
         fileExtensions: ['.php'],
-        description: 'Laravel Service classes for business logic'
-      }
+        description: 'Laravel Service classes for business logic',
+      },
     ];
   }
 
   /**
    * Extract API schemas from Laravel controllers
    */
-  private async extractApiSchemas(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelApiSchema[]> {
+  private async extractApiSchemas(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelApiSchema[]> {
     const apiSchemas: LaravelApiSchema[] = [];
 
     try {
@@ -379,7 +375,13 @@ export class LaravelParser extends BaseFrameworkParser {
           for (const methodNode of methods) {
             const methodName = this.getMethodName(methodNode, content);
             if (methodName && this.isApiMethod(methodNode, content)) {
-              const schema = await this.parseApiMethodSchema(methodNode, methodName, className, content, filePath);
+              const schema = await this.parseApiMethodSchema(
+                methodNode,
+                methodName,
+                className,
+                content,
+                filePath
+              );
               if (schema) {
                 apiSchemas.push(schema);
               }
@@ -414,7 +416,6 @@ export class LaravelParser extends BaseFrameworkParser {
 
       // Extract response schema
       const responseSchema = this.extractResponseSchema(methodNode, content);
-
 
       return {
         type: 'api_schema',
@@ -514,7 +515,11 @@ export class LaravelParser extends BaseFrameworkParser {
     if (methodName_lower.includes('destroy') || methodName_lower.includes('delete')) {
       return 'DELETE';
     }
-    if (methodName_lower.includes('index') || methodName_lower.includes('show') || methodName_lower.includes('get')) {
+    if (
+      methodName_lower.includes('index') ||
+      methodName_lower.includes('show') ||
+      methodName_lower.includes('get')
+    ) {
       return 'GET';
     }
 
@@ -676,7 +681,6 @@ export class LaravelParser extends BaseFrameworkParser {
     return nodes;
   }
 
-
   /**
    * Detect Laravel framework entities in the given file
    */
@@ -685,8 +689,6 @@ export class LaravelParser extends BaseFrameworkParser {
     filePath: string,
     options: FrameworkParseOptions
   ): Promise<FrameworkParseResult> {
-    logger.debug(`Detecting Laravel entities in ${filePath}`);
-
     const entities: FrameworkEntity[] = [];
 
     try {
@@ -703,36 +705,33 @@ export class LaravelParser extends BaseFrameworkParser {
 
       // Route files get special treatment
       const isRoute = this.isRouteFile(filePath);
-      logger.debug('Laravel route file check', { filePath, isRoute });
       if (isRoute) {
-        logger.debug('Extracting Laravel routes from file', { filePath });
         const routes = await this.extractLaravelRoutes(content, filePath, tree.rootNode);
-        logger.debug('Laravel routes extracted', { filePath, routeCount: routes.length });
         entities.push(...routes);
       }
 
       // Extract entities based on file content and AST
-      entities.push(...await this.extractLaravelControllers(content, filePath, tree.rootNode));
-      entities.push(...await this.extractEloquentModels(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelMiddleware(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelJobs(content, filePath, tree.rootNode));
-      entities.push(...await this.extractServiceProviders(content, filePath, tree.rootNode));
-      entities.push(...await this.extractArtisanCommands(content, filePath, tree.rootNode));
+      entities.push(...(await this.extractLaravelControllers(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractEloquentModels(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelMiddleware(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelJobs(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractServiceProviders(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractArtisanCommands(content, filePath, tree.rootNode)));
 
       // Extract missing Laravel entity types from improvement plan
-      entities.push(...await this.extractFormRequests(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelEvents(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelMail(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelPolicies(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelListeners(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelServices(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelFactories(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelTraits(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelResources(content, filePath, tree.rootNode));
-      entities.push(...await this.extractLaravelObservers(content, filePath, tree.rootNode));
+      entities.push(...(await this.extractFormRequests(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelEvents(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelMail(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelPolicies(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelListeners(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelServices(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelFactories(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelTraits(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelResources(content, filePath, tree.rootNode)));
+      entities.push(...(await this.extractLaravelObservers(content, filePath, tree.rootNode)));
 
       // Extract API schemas from controller methods
-      entities.push(...await this.extractApiSchemas(content, filePath, tree.rootNode));
+      entities.push(...(await this.extractApiSchemas(content, filePath, tree.rootNode)));
 
       // Extract validation rules from FormRequest classes
       if (filePath.includes('Request') && content.includes('FormRequest')) {
@@ -753,12 +752,7 @@ export class LaravelParser extends BaseFrameworkParser {
         }
       }
 
-      logger.debug(`Detected ${entities.length} Laravel entities in ${filePath}`, {
-        entities: entities.map(e => ({ type: e.type, name: e.name }))
-      });
-
       return { entities };
-
     } catch (error) {
       logger.error(`Laravel entity detection failed for ${filePath}`, { error: error.message });
       return { entities: [] };
@@ -779,22 +773,22 @@ export class LaravelParser extends BaseFrameworkParser {
       '/routes/',
       '/database/migrations/',
       '/database/seeders/',
-      '/app/Console/Commands/'
+      '/app/Console/Commands/',
     ];
 
     const isLaravelPath = laravelPatterns.some(pattern => filePath.includes(pattern));
 
     // Check if content is valid before checking Laravel patterns
-    const hasLaravelCode = content && (
-      content.includes('laravel') ||
-      content.includes('illuminate') ||
-      content.includes('Illuminate\\') ||
-      content.includes('App\\') ||
-      content.includes('Route::') ||
-      content.includes('extends Model') ||
-      content.includes('extends Authenticatable') ||
-      content.includes('extends Controller')
-    );
+    const hasLaravelCode =
+      content &&
+      (content.includes('laravel') ||
+        content.includes('illuminate') ||
+        content.includes('Illuminate\\') ||
+        content.includes('App\\') ||
+        content.includes('Route::') ||
+        content.includes('extends Model') ||
+        content.includes('extends Authenticatable') ||
+        content.includes('extends Controller'));
 
     return filePath.endsWith('.php') && (isLaravelPath || hasLaravelCode);
   }
@@ -804,20 +798,22 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel routes from route files
    */
-  private async extractLaravelRoutes(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelRoute[]> {
+  private async extractLaravelRoutes(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelRoute[]> {
     const routes: LaravelRoute[] = [];
     const processedNodes = new Set<SyntaxNode>();
 
-    logger.debug(`Extracting routes from ${filePath}`);
-
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         // Check for route groups
         if (this.isRouteGroup(node)) {
           const groupMiddleware = this.getRouteGroupMiddleware(node, content);
 
           // Process routes inside the group
-          this.traverseNode(node, (innerNode) => {
+          this.traverseNode(node, innerNode => {
             if (this.isRouteDefinition(innerNode)) {
               processedNodes.add(innerNode); // Mark as processed to avoid double processing
               const route = this.parseRouteDefinition(innerNode, filePath, content);
@@ -858,7 +854,18 @@ export class LaravelParser extends BaseFrameworkParser {
 
         if (className?.text === 'Route' && methodName) {
           const method = methodName.text;
-          return ['get', 'post', 'put', 'delete', 'patch', 'any', 'match', 'resource', 'apiResource', 'group'].includes(method);
+          return [
+            'get',
+            'post',
+            'put',
+            'delete',
+            'patch',
+            'any',
+            'match',
+            'resource',
+            'apiResource',
+            'group',
+          ].includes(method);
         }
       }
     }
@@ -868,7 +875,11 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Parse a route definition node into a LaravelRoute entity
    */
-  private parseRouteDefinition(node: SyntaxNode, filePath: string, content: string): LaravelRoute | null {
+  private parseRouteDefinition(
+    node: SyntaxNode,
+    filePath: string,
+    content: string
+  ): LaravelRoute | null {
     try {
       const method = this.getRouteMethod(node);
       const path = this.getRoutePath(node, content);
@@ -896,8 +907,8 @@ export class LaravelParser extends BaseFrameworkParser {
           domain: this.getRouteDomain(node, content),
           isResource: method === 'resource' || method === 'apiResource',
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse route definition`, { error: error.message });
@@ -922,7 +933,7 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         if (node.type === 'class_declaration' && this.extendsController(content, node)) {
           const controller = this.parseController(node, filePath, content);
           if (controller) {
@@ -947,10 +958,12 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is a Laravel controller
    */
   private isControllerFile(filePath: string, content: string): boolean {
-    return filePath.includes('/app/Http/Controllers/') ||
-           path.basename(filePath).endsWith('Controller.php') ||
-           content.includes('extends Controller') ||
-           content.includes('extends BaseController');
+    return (
+      filePath.includes('/app/Http/Controllers/') ||
+      path.basename(filePath).endsWith('Controller.php') ||
+      content.includes('extends Controller') ||
+      content.includes('extends BaseController')
+    );
   }
 
   /**
@@ -960,14 +973,20 @@ export class LaravelParser extends BaseFrameworkParser {
     const className = this.getClassName(node, content);
     if (!className) return false;
 
-    const classPattern = new RegExp(`class\\s+${className}\\s+extends\\s+(Controller|BaseController)`);
+    const classPattern = new RegExp(
+      `class\\s+${className}\\s+extends\\s+(Controller|BaseController)`
+    );
     return classPattern.test(content);
   }
 
   /**
    * Parse a controller class node
    */
-  private parseController(node: SyntaxNode, filePath: string, content: string): LaravelController | null {
+  private parseController(
+    node: SyntaxNode,
+    filePath: string,
+    content: string
+  ): LaravelController | null {
     try {
       const className = this.getClassName(node, content);
       if (!className) return null;
@@ -990,8 +1009,8 @@ export class LaravelParser extends BaseFrameworkParser {
           dependencies: this.getConstructorDependencies(node, content),
           isApiController: this.isApiController(filePath, content),
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse controller`, { error: error.message });
@@ -1016,7 +1035,7 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         if (node.type === 'class_declaration' && this.extendsModel(content, node)) {
           const model = this.parseModel(node, filePath, content);
           if (model) {
@@ -1035,15 +1054,16 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is an Eloquent model
    */
   private isModelFile(filePath: string, content: string): boolean {
-    return filePath.includes('/app/Models/') ||
-           (filePath.includes('/app/') && (
-             content.includes('extends Model') ||
-             content.includes('extends Authenticatable') ||
-             content.includes('extends Pivot') ||
-             content.includes('extends User') ||
-             content.includes('use Authenticatable') ||
-             content.includes('use HasFactory')
-           ));
+    return (
+      filePath.includes('/app/Models/') ||
+      (filePath.includes('/app/') &&
+        (content.includes('extends Model') ||
+          content.includes('extends Authenticatable') ||
+          content.includes('extends Pivot') ||
+          content.includes('extends User') ||
+          content.includes('use Authenticatable') ||
+          content.includes('use HasFactory')))
+    );
   }
 
   /**
@@ -1058,7 +1078,7 @@ export class LaravelParser extends BaseFrameworkParser {
       'Model',
       'Authenticatable',
       'Pivot',
-      'User' // Legacy Laravel user model pattern
+      'User', // Legacy Laravel user model pattern
     ];
 
     for (const baseClass of modelBaseClasses) {
@@ -1069,13 +1089,14 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     // Check for traits that indicate a model
-    if (content.includes(`class ${className}`) && (
-      content.includes('use Authenticatable') ||
-      content.includes('use HasFactory') ||
-      content.includes('use Notifiable') ||
-      content.includes('protected $fillable') ||
-      content.includes('protected $guarded')
-    )) {
+    if (
+      content.includes(`class ${className}`) &&
+      (content.includes('use Authenticatable') ||
+        content.includes('use HasFactory') ||
+        content.includes('use Notifiable') ||
+        content.includes('protected $fillable') ||
+        content.includes('protected $guarded'))
+    ) {
       return true;
     }
 
@@ -1112,8 +1133,8 @@ export class LaravelParser extends BaseFrameworkParser {
           mutators: this.getModelMutators(node, content),
           accessors: this.getModelAccessors(node, content),
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse model`, { error: error.message });
@@ -1138,7 +1159,7 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         if (node.type === 'class_declaration' && this.implementsMiddleware(content, node)) {
           const middlewareEntity = this.parseMiddleware(node, filePath, content);
           if (middlewareEntity) {
@@ -1157,10 +1178,12 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is a middleware
    */
   private isMiddlewareFile(filePath: string, content: string): boolean {
-    return filePath.includes('/app/Http/Middleware/') ||
-           path.basename(filePath).endsWith('Middleware.php') ||
-           content.includes('implements Middleware') ||
-           content.includes('extends Middleware');
+    return (
+      filePath.includes('/app/Http/Middleware/') ||
+      path.basename(filePath).endsWith('Middleware.php') ||
+      content.includes('implements Middleware') ||
+      content.includes('extends Middleware')
+    );
   }
 
   /**
@@ -1177,7 +1200,11 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Parse a middleware class node
    */
-  private parseMiddleware(node: SyntaxNode, filePath: string, content: string): LaravelMiddleware | null {
+  private parseMiddleware(
+    node: SyntaxNode,
+    filePath: string,
+    content: string
+  ): LaravelMiddleware | null {
     try {
       const className = this.getClassName(node, content);
       if (!className) return null;
@@ -1198,8 +1225,8 @@ export class LaravelParser extends BaseFrameworkParser {
           group: this.getMiddlewareGroup(content, className),
           terminable: this.isTerminableMiddleware(node, content),
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse middleware`, { error: error.message });
@@ -1224,7 +1251,7 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         if (node.type === 'class_declaration' && this.implementsShouldQueue(content, node)) {
           const job = this.parseJob(node, filePath, content);
           if (job) {
@@ -1243,9 +1270,11 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is a job
    */
   private isJobFile(filePath: string, content: string): boolean {
-    return filePath.includes('/app/Jobs/') ||
-           path.basename(filePath).endsWith('Job.php') ||
-           content.includes('implements ShouldQueue');
+    return (
+      filePath.includes('/app/Jobs/') ||
+      path.basename(filePath).endsWith('Job.php') ||
+      content.includes('implements ShouldQueue')
+    );
   }
 
   /**
@@ -1290,8 +1319,8 @@ export class LaravelParser extends BaseFrameworkParser {
           delay: this.getJobDelay(node, content),
           hasFailedMethod: this.hasFailedMethod(node, content),
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse job`, { error: error.message });
@@ -1316,7 +1345,7 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         if (node.type === 'class_declaration' && this.extendsServiceProvider(content, node)) {
           const provider = this.parseServiceProvider(node, filePath, content);
           if (provider) {
@@ -1335,9 +1364,11 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is a service provider
    */
   private isServiceProviderFile(filePath: string, content: string): boolean {
-    return filePath.includes('/app/Providers/') ||
-           path.basename(filePath).endsWith('ServiceProvider.php') ||
-           content.includes('extends ServiceProvider');
+    return (
+      filePath.includes('/app/Providers/') ||
+      path.basename(filePath).endsWith('ServiceProvider.php') ||
+      content.includes('extends ServiceProvider')
+    );
   }
 
   /**
@@ -1354,7 +1385,11 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Parse a service provider class node
    */
-  private parseServiceProvider(node: SyntaxNode, filePath: string, content: string): LaravelServiceProvider | null {
+  private parseServiceProvider(
+    node: SyntaxNode,
+    filePath: string,
+    content: string
+  ): LaravelServiceProvider | null {
     try {
       const className = this.getClassName(node, content);
       if (!className) return null;
@@ -1375,8 +1410,8 @@ export class LaravelParser extends BaseFrameworkParser {
           deferred: this.isDeferredProvider(content, className),
           provides: this.getProviderProvides(content, className),
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse service provider`, { error: error.message });
@@ -1401,7 +1436,7 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     try {
-      this.traverseNode(rootNode, (node) => {
+      this.traverseNode(rootNode, node => {
         if (node.type === 'class_declaration' && this.extendsCommand(content, node)) {
           const command = this.parseCommand(node, filePath, content);
           if (command) {
@@ -1420,9 +1455,11 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is an Artisan command
    */
   private isCommandFile(filePath: string, content: string): boolean {
-    return filePath.includes('/app/Console/Commands/') ||
-           path.basename(filePath).endsWith('Command.php') ||
-           content.includes('extends Command');
+    return (
+      filePath.includes('/app/Console/Commands/') ||
+      path.basename(filePath).endsWith('Command.php') ||
+      content.includes('extends Command')
+    );
   }
 
   /**
@@ -1460,8 +1497,8 @@ export class LaravelParser extends BaseFrameworkParser {
           arguments: this.getCommandArguments(signature),
           options: this.getCommandOptions(signature),
           line: node.startPosition.row + 1,
-          column: node.startPosition.column
-        }
+          column: node.startPosition.column,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse command`, { error: error.message });
@@ -1475,9 +1512,13 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if file is a route file
    */
   private isRouteFile(filePath: string): boolean {
-    return filePath.includes('/routes/') &&
-           (filePath.endsWith('web.php') || filePath.endsWith('api.php') ||
-            filePath.endsWith('console.php') || filePath.endsWith('channels.php'));
+    return (
+      filePath.includes('/routes/') &&
+      (filePath.endsWith('web.php') ||
+        filePath.endsWith('api.php') ||
+        filePath.endsWith('console.php') ||
+        filePath.endsWith('channels.php'))
+    );
   }
 
   /**
@@ -1577,7 +1618,10 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Get route handler from route definition
    */
-  private getRouteHandler(node: SyntaxNode, content: string): {controller?: string, action?: string} | null {
+  private getRouteHandler(
+    node: SyntaxNode,
+    content: string
+  ): { controller?: string; action?: string } | null {
     const args = this.findArgumentsNode(node);
     if (args && args.children && args.children.length > 2) {
       // Second argument is usually the handler (skip opening parenthesis and first argument)
@@ -1599,7 +1643,7 @@ export class LaravelParser extends BaseFrameworkParser {
           if (elements.length >= 2) {
             return {
               controller: elements[0],
-              action: elements[1]
+              action: elements[1],
             };
           }
         }
@@ -1630,16 +1674,19 @@ export class LaravelParser extends BaseFrameworkParser {
         const arrayMatch = match.match(/\[(.*?)\]/);
         if (arrayMatch) {
           const middlewareList = arrayMatch[1];
-          const items = middlewareList.split(',').map(item =>
-            item.trim().replace(/^['"]|['"]$/g, '')
-          ).filter(item => item.length > 0);
+          const items = middlewareList
+            .split(',')
+            .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
+            .filter(item => item.length > 0);
           middleware.push(...items);
         }
       }
     }
 
     // Also look for single middleware
-    const singleMiddlewareMatches = statementContent.match(/->middleware\(\s*['"]([^'"]+)['"]\s*\)/g);
+    const singleMiddlewareMatches = statementContent.match(
+      /->middleware\(\s*['"]([^'"]+)['"]\s*\)/g
+    );
     if (singleMiddlewareMatches) {
       for (const match of singleMiddlewareMatches) {
         const middlewareMatch = match.match(/['"]([^'"]+)['"]/);
@@ -1711,7 +1758,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getControllerActions(node: SyntaxNode, content: string): string[] {
     const actions: string[] = [];
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration' && this.isPublicMethod(child, content)) {
         const methodName = this.getMethodName(child, content);
         if (methodName && !methodName.startsWith('__')) {
@@ -1744,7 +1791,12 @@ export class LaravelParser extends BaseFrameworkParser {
   private getMethodModifiers(node: SyntaxNode, content: string): string[] {
     const modifiers: string[] = [];
     for (const child of node.children) {
-      if (child.type === 'visibility_modifier' || child.type === 'static_modifier' || child.type === 'abstract_modifier' || child.type === 'final_modifier') {
+      if (
+        child.type === 'visibility_modifier' ||
+        child.type === 'static_modifier' ||
+        child.type === 'abstract_modifier' ||
+        child.type === 'final_modifier'
+      ) {
         const modifier = content.slice(child.startIndex, child.endIndex);
         modifiers.push(modifier);
       }
@@ -1768,7 +1820,7 @@ export class LaravelParser extends BaseFrameworkParser {
     const middleware: string[] = [];
 
     // Look for constructor method in the class
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === '__construct') {
@@ -1776,7 +1828,9 @@ export class LaravelParser extends BaseFrameworkParser {
           const constructorBody = content.slice(child.startIndex, child.endIndex);
 
           // Find $this->middleware() calls
-          const middlewareMatches = constructorBody.match(/\$this->middleware\(\s*['"]([^'"]+)['"]\s*\)/g);
+          const middlewareMatches = constructorBody.match(
+            /\$this->middleware\(\s*['"]([^'"]+)['"]\s*\)/g
+          );
           if (middlewareMatches) {
             for (const match of middlewareMatches) {
               const middlewareMatch = match.match(/['"]([^'"]+)['"]/);
@@ -1865,7 +1919,10 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Get model relationships
    */
-  private getModelRelationships(node: SyntaxNode, content: string): Array<{
+  private getModelRelationships(
+    node: SyntaxNode,
+    content: string
+  ): Array<{
     name: string;
     type: string;
     relatedModel: string;
@@ -1880,7 +1937,7 @@ export class LaravelParser extends BaseFrameworkParser {
       localKey?: string;
     }> = [];
 
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName) {
@@ -1898,7 +1955,11 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Parse relationship method
    */
-  private parseRelationshipMethod(node: SyntaxNode, methodName: string, content: string): {
+  private parseRelationshipMethod(
+    node: SyntaxNode,
+    methodName: string,
+    content: string
+  ): {
     name: string;
     type: string;
     relatedModel: string;
@@ -1914,7 +1975,7 @@ export class LaravelParser extends BaseFrameworkParser {
       { type: 'belongsTo', pattern: /\$this->belongsTo\(([^,)]+)/ },
       { type: 'belongsToMany', pattern: /\$this->belongsToMany\(([^,)]+)/ },
       { type: 'hasOneThrough', pattern: /\$this->hasOneThrough\(([^,)]+)/ },
-      { type: 'hasManyThrough', pattern: /\$this->hasManyThrough\(([^,)]+)/ }
+      { type: 'hasManyThrough', pattern: /\$this->hasManyThrough\(([^,)]+)/ },
     ];
 
     for (const { type, pattern } of relationshipPatterns) {
@@ -1927,7 +1988,7 @@ export class LaravelParser extends BaseFrameworkParser {
           type,
           relatedModel,
           foreignKey: this.extractForeignKey(methodBody),
-          localKey: this.extractLocalKey(methodBody)
+          localKey: this.extractLocalKey(methodBody),
         };
       }
     }
@@ -2020,7 +2081,7 @@ export class LaravelParser extends BaseFrameworkParser {
     const scopes: string[] = [];
 
     // Find all scope methods in the class
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName && methodName.startsWith('scope') && methodName.length > 5) {
@@ -2041,7 +2102,7 @@ export class LaravelParser extends BaseFrameworkParser {
     const mutators: string[] = [];
 
     // Find all mutator methods in the class
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName && methodName.startsWith('set') && methodName.endsWith('Attribute')) {
@@ -2063,7 +2124,7 @@ export class LaravelParser extends BaseFrameworkParser {
     const accessors: string[] = [];
 
     // Find all accessor methods in the class
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName && methodName.startsWith('get') && methodName.endsWith('Attribute')) {
@@ -2082,7 +2143,10 @@ export class LaravelParser extends BaseFrameworkParser {
    * Convert camelCase to snake_case
    */
   private camelToSnakeCase(str: string): string {
-    return str.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    return str
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '');
   }
 
   /**
@@ -2090,7 +2154,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getMiddlewareHandleMethod(node: SyntaxNode, content: string): string | null {
     let handleMethod = null;
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'handle') {
@@ -2107,12 +2171,12 @@ export class LaravelParser extends BaseFrameworkParser {
   private getMiddlewareParameters(node: SyntaxNode, content: string): string[] {
     const parameters: string[] = [];
 
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'handle') {
           // Find the parameter list for the handle method
-          this.traverseNode(child, (paramNode) => {
+          this.traverseNode(child, paramNode => {
             if (paramNode.type === 'formal_parameters') {
               const paramContent = content.slice(paramNode.startIndex, paramNode.endIndex);
 
@@ -2141,7 +2205,7 @@ export class LaravelParser extends BaseFrameworkParser {
   private isTerminableMiddleware(node: SyntaxNode, content: string): boolean {
     let hasTerminateMethod = false;
 
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'terminate') {
@@ -2158,8 +2222,10 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private isGlobalMiddleware(filePath: string): boolean {
     // This is a simplified check based on file location
-    return filePath.includes('/app/Http/Middleware/') &&
-           (filePath.includes('TrustProxies') || filePath.includes('EncryptCookies'));
+    return (
+      filePath.includes('/app/Http/Middleware/') &&
+      (filePath.includes('TrustProxies') || filePath.includes('EncryptCookies'))
+    );
   }
 
   /**
@@ -2183,7 +2249,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getJobHandleMethod(node: SyntaxNode, content: string): string | null {
     let handleMethod = null;
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'handle') {
@@ -2244,9 +2310,11 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private isBatchableJob(content: string, className: string): boolean {
     // Check for Batchable trait usage in various forms
-    return content.includes('use Batchable') ||
-           content.includes('Batchable;') ||
-           /use\s+.*Batchable/.test(content);
+    return (
+      content.includes('use Batchable') ||
+      content.includes('Batchable;') ||
+      /use\s+.*Batchable/.test(content)
+    );
   }
 
   /**
@@ -2271,7 +2339,7 @@ export class LaravelParser extends BaseFrameworkParser {
   private hasFailedMethod(node: SyntaxNode, content: string): boolean {
     let hasFailedMethod = false;
 
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'failed') {
@@ -2288,7 +2356,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getProviderRegisterMethod(node: SyntaxNode, content: string): string | null {
     let registerMethod = null;
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'register') {
@@ -2304,7 +2372,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getProviderBootMethod(node: SyntaxNode, content: string): string | null {
     let bootMethod = null;
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'boot') {
@@ -2381,7 +2449,7 @@ export class LaravelParser extends BaseFrameworkParser {
    */
   private getCommandHandleMethod(node: SyntaxNode, content: string): string | null {
     let handleMethod = null;
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration') {
         const methodName = this.getMethodName(child, content);
         if (methodName === 'handle') {
@@ -2444,7 +2512,6 @@ export class LaravelParser extends BaseFrameworkParser {
     return options;
   }
 
-
   // Required implementations from ChunkedParser and BaseParser
 
   /**
@@ -2490,7 +2557,10 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Merge results from multiple chunks
    */
-  protected mergeChunkResults(chunks: ParseResult[], chunkMetadata: ChunkResult[]): MergedParseResult {
+  protected mergeChunkResults(
+    chunks: ParseResult[],
+    chunkMetadata: ChunkResult[]
+  ): MergedParseResult {
     const merged: MergedParseResult = {
       symbols: [],
       dependencies: [],
@@ -2501,8 +2571,8 @@ export class LaravelParser extends BaseFrameworkParser {
       metadata: {
         totalChunks: chunkMetadata.length,
         duplicatesRemoved: 0,
-        crossChunkReferencesFound: 0
-      }
+        crossChunkReferencesFound: 0,
+      },
     };
 
     for (const chunk of chunks) {
@@ -2584,9 +2654,10 @@ export class LaravelParser extends BaseFrameworkParser {
     const middlewareMatches = statementContent.match(/Route::middleware\(\s*\[(.*?)\]\s*\)->group/);
     if (middlewareMatches) {
       const middlewareList = middlewareMatches[1];
-      const items = middlewareList.split(',').map(item =>
-        item.trim().replace(/^['"]|['"]$/g, '')
-      ).filter(item => item.length > 0);
+      const items = middlewareList
+        .split(',')
+        .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
+        .filter(item => item.length > 0);
       return items;
     }
 
@@ -2615,9 +2686,11 @@ export class LaravelParser extends BaseFrameworkParser {
     for (const child of node.children) {
       if (child.type === 'arguments') {
         for (const arg of child.children) {
-          if (arg.type === 'array_creation_expression' ||
-              arg.type === 'string' ||
-              arg.type === 'encapsed_string') {
+          if (
+            arg.type === 'array_creation_expression' ||
+            arg.type === 'string' ||
+            arg.type === 'encapsed_string'
+          ) {
             args.push(content.slice(arg.startIndex, arg.endIndex));
           }
         }
@@ -2652,12 +2725,18 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Parse controller from ERROR node using text patterns
    */
-  private parseControllerFromError(node: SyntaxNode, filePath: string, content: string): LaravelController | null {
+  private parseControllerFromError(
+    node: SyntaxNode,
+    filePath: string,
+    content: string
+  ): LaravelController | null {
     try {
       const nodeText = content.slice(node.startIndex, node.endIndex);
 
       // Extract class name using regex
-      const classMatch = nodeText.match(/class\s+(\w+Controller)\s+extends\s+(Controller|BaseController)/);
+      const classMatch = nodeText.match(
+        /class\s+(\w+Controller)\s+extends\s+(Controller|BaseController)/
+      );
       if (!classMatch) return null;
 
       const className = classMatch[1];
@@ -2686,8 +2765,8 @@ export class LaravelParser extends BaseFrameworkParser {
           isApiController: this.isApiController(filePath, content),
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
-          malformed: true // Flag to indicate this was extracted from malformed code
-        }
+          malformed: true, // Flag to indicate this was extracted from malformed code
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse controller from ERROR node`, { error: error.message });
@@ -2700,10 +2779,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Form Request classes
    */
-  private async extractFormRequests(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelFormRequest[]> {
+  private async extractFormRequests(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelFormRequest[]> {
     const formRequests: LaravelFormRequest[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('extends FormRequest')) {
@@ -2718,7 +2801,11 @@ export class LaravelParser extends BaseFrameworkParser {
     return formRequests;
   }
 
-  private parseFormRequest(node: SyntaxNode, content: string, filePath: string): LaravelFormRequest | null {
+  private parseFormRequest(
+    node: SyntaxNode,
+    content: string,
+    filePath: string
+  ): LaravelFormRequest | null {
     try {
       const name = this.getClassName(node, content);
       if (!name) return null;
@@ -2738,8 +2825,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse form request`, { error: error.message });
@@ -2750,10 +2837,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Event classes
    */
-  private async extractLaravelEvents(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelEvent[]> {
+  private async extractLaravelEvents(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelEvent[]> {
     const events: LaravelEvent[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('ShouldBroadcast')) {
@@ -2781,7 +2872,9 @@ export class LaravelParser extends BaseFrameworkParser {
         filePath,
         framework: 'laravel',
         shouldBroadcast: classText.includes('ShouldBroadcast'),
-        broadcastType: classText.includes('ShouldBroadcastNow') ? 'ShouldBroadcastNow' : 'ShouldBroadcast',
+        broadcastType: classText.includes('ShouldBroadcastNow')
+          ? 'ShouldBroadcastNow'
+          : 'ShouldBroadcast',
         channels: this.extractChannels(classText),
         broadcastWith: {},
         metadata: {
@@ -2789,8 +2882,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse event`, { error: error.message });
@@ -2801,10 +2894,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Mail classes
    */
-  private async extractLaravelMail(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelMail[]> {
+  private async extractLaravelMail(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelMail[]> {
     const mailClasses: LaravelMail[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('extends Mailable')) {
@@ -2840,8 +2937,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse mail`, { error: error.message });
@@ -2852,10 +2949,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Policy classes
    */
-  private async extractLaravelPolicies(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelPolicy[]> {
+  private async extractLaravelPolicies(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelPolicy[]> {
     const policies: LaravelPolicy[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('Policy') || filePath.includes('/Policies/')) {
@@ -2890,8 +2991,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse policy`, { error: error.message });
@@ -2902,10 +3003,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Listener classes
    */
-  private async extractLaravelListeners(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelListener[]> {
+  private async extractLaravelListeners(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelListener[]> {
     const listeners: LaravelListener[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('function handle') || filePath.includes('/Listeners/')) {
@@ -2920,7 +3025,11 @@ export class LaravelParser extends BaseFrameworkParser {
     return listeners;
   }
 
-  private parseListener(node: SyntaxNode, content: string, filePath: string): LaravelListener | null {
+  private parseListener(
+    node: SyntaxNode,
+    content: string,
+    filePath: string
+  ): LaravelListener | null {
     try {
       const name = this.getClassName(node, content);
       if (!name) return null;
@@ -2940,8 +3049,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse listener`, { error: error.message });
@@ -2952,10 +3061,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Service classes
    */
-  private async extractLaravelServices(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelService[]> {
+  private async extractLaravelServices(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelService[]> {
     const services: LaravelService[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('Service') || filePath.includes('/Services/')) {
@@ -2988,8 +3101,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse service`, { error: error.message });
@@ -3000,10 +3113,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Factory classes
    */
-  private async extractLaravelFactories(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelFactory[]> {
+  private async extractLaravelFactories(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelFactory[]> {
     const factories: LaravelFactory[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('extends Factory')) {
@@ -3038,8 +3155,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse factory`, { error: error.message });
@@ -3050,10 +3167,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Trait classes
    */
-  private async extractLaravelTraits(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelTrait[]> {
+  private async extractLaravelTraits(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelTrait[]> {
     const traits: LaravelTrait[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'trait_declaration') {
         const trait = this.parseTrait(node, content, filePath);
         if (trait) {
@@ -3083,8 +3204,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse trait`, { error: error.message });
@@ -3095,10 +3216,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Resource classes
    */
-  private async extractLaravelResources(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelResource[]> {
+  private async extractLaravelResources(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelResource[]> {
     const resources: LaravelResource[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('extends') && classText.includes('Resource')) {
@@ -3113,7 +3238,11 @@ export class LaravelParser extends BaseFrameworkParser {
     return resources;
   }
 
-  private parseResource(node: SyntaxNode, content: string, filePath: string): LaravelResource | null {
+  private parseResource(
+    node: SyntaxNode,
+    content: string,
+    filePath: string
+  ): LaravelResource | null {
     try {
       const name = this.getClassName(node, content);
       if (!name) return null;
@@ -3133,8 +3262,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse resource`, { error: error.message });
@@ -3145,10 +3274,14 @@ export class LaravelParser extends BaseFrameworkParser {
   /**
    * Extract Laravel Observer classes
    */
-  private async extractLaravelObservers(content: string, filePath: string, rootNode: SyntaxNode): Promise<LaravelObserver[]> {
+  private async extractLaravelObservers(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): Promise<LaravelObserver[]> {
     const observers: LaravelObserver[] = [];
 
-    this.traverseNode(rootNode, (node) => {
+    this.traverseNode(rootNode, node => {
       if (node.type === 'class_declaration') {
         const classText = content.substring(node.startIndex, node.endIndex);
         if (classText.includes('Observer') || filePath.includes('/Observers/')) {
@@ -3163,7 +3296,11 @@ export class LaravelParser extends BaseFrameworkParser {
     return observers;
   }
 
-  private parseObserver(node: SyntaxNode, content: string, filePath: string): LaravelObserver | null {
+  private parseObserver(
+    node: SyntaxNode,
+    content: string,
+    filePath: string
+  ): LaravelObserver | null {
     try {
       const name = this.getClassName(node, content);
       if (!name) return null;
@@ -3183,8 +3320,8 @@ export class LaravelParser extends BaseFrameworkParser {
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1
-        }
+          end_line: node.endPosition.row + 1,
+        },
       };
     } catch (error) {
       logger.warn(`Failed to parse observer`, { error: error.message });
@@ -3196,7 +3333,7 @@ export class LaravelParser extends BaseFrameworkParser {
 
   private getPublicMethods(node: SyntaxNode, content: string): string[] {
     const methods: string[] = [];
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'method_declaration' && this.isPublicMethod(child, content)) {
         const methodName = this.getMethodName(child, content);
         if (methodName && !methodName.startsWith('__')) {
@@ -3229,7 +3366,9 @@ export class LaravelParser extends BaseFrameworkParser {
 
   private extractMessages(classText: string): Record<string, string> {
     const messages: Record<string, string> = {};
-    const messagesMatch = classText.match(/function\s+messages\s*\(\)[\s\S]*?return\s*\[([\s\S]*?)\];/);
+    const messagesMatch = classText.match(
+      /function\s+messages\s*\(\)[\s\S]*?return\s*\[([\s\S]*?)\];/
+    );
     if (messagesMatch) {
       // Basic message extraction - similar to rules
       const messagesContent = messagesMatch[1];
@@ -3248,7 +3387,9 @@ export class LaravelParser extends BaseFrameworkParser {
 
   private extractChannels(classText: string): string[] {
     const channels: string[] = [];
-    const channelsMatch = classText.match(/function\s+broadcastOn\s*\(\)[\s\S]*?return\s*\[([\s\S]*?)\];/);
+    const channelsMatch = classText.match(
+      /function\s+broadcastOn\s*\(\)[\s\S]*?return\s*\[([\s\S]*?)\];/
+    );
     if (channelsMatch) {
       // Extract channel names - simplified implementation
       const channelsContent = channelsMatch[1];
@@ -3286,10 +3427,14 @@ export class LaravelParser extends BaseFrameworkParser {
     const dependencies: string[] = [];
     const useMatches = content.match(/use\s+([A-Z][a-zA-Z\\]*);/g);
     if (useMatches) {
-      dependencies.push(...useMatches.map(match => {
-        const [, dependency] = match.match(/use\s+([A-Z][a-zA-Z\\]*);/) || [];
-        return dependency || '';
-      }).filter(Boolean));
+      dependencies.push(
+        ...useMatches
+          .map(match => {
+            const [, dependency] = match.match(/use\s+([A-Z][a-zA-Z\\]*);/) || [];
+            return dependency || '';
+          })
+          .filter(Boolean)
+      );
     }
     return dependencies;
   }
@@ -3303,10 +3448,14 @@ export class LaravelParser extends BaseFrameworkParser {
     const states: string[] = [];
     const stateMatches = classText.match(/function\s+([a-zA-Z]+)\s*\(/g);
     if (stateMatches) {
-      states.push(...stateMatches.map(match => {
-        const [, state] = match.match(/function\s+([a-zA-Z]+)\s*\(/) || [];
-        return state || '';
-      }).filter(state => state !== 'definition' && state !== '__construct'));
+      states.push(
+        ...stateMatches
+          .map(match => {
+            const [, state] = match.match(/function\s+([a-zA-Z]+)\s*\(/) || [];
+            return state || '';
+          })
+          .filter(state => state !== 'definition' && state !== '__construct')
+      );
     }
     return states;
   }
@@ -3322,7 +3471,7 @@ export class LaravelParser extends BaseFrameworkParser {
 
   private getProperties(node: SyntaxNode, content: string): string[] {
     const properties: string[] = [];
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'property_declaration') {
         const propertyText = content.substring(child.startIndex, child.endIndex);
         const propertyMatch = propertyText.match(/\$([a-zA-Z_][a-zA-Z0-9_]*)/);
@@ -3336,7 +3485,7 @@ export class LaravelParser extends BaseFrameworkParser {
 
   private extractTraitUses(node: SyntaxNode, content: string): string[] {
     const uses: string[] = [];
-    this.traverseNode(node, (child) => {
+    this.traverseNode(node, child => {
       if (child.type === 'use_declaration') {
         const useText = content.substring(child.startIndex, child.endIndex);
         const useMatch = useText.match(/use\s+([A-Z][a-zA-Z]*)/);
@@ -3360,7 +3509,18 @@ export class LaravelParser extends BaseFrameworkParser {
   }
 
   private extractObservedEvents(classText: string): string[] {
-    const events = ['creating', 'created', 'updating', 'updated', 'saving', 'saved', 'deleting', 'deleted', 'restoring', 'restored'];
+    const events = [
+      'creating',
+      'created',
+      'updating',
+      'updated',
+      'saving',
+      'saved',
+      'deleting',
+      'deleted',
+      'restoring',
+      'restored',
+    ];
     return events.filter(event => classText.includes(`function ${event}`));
   }
 }

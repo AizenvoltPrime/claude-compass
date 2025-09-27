@@ -255,7 +255,6 @@ export class FrameworkDetector {
    * Detect frameworks in a project directory
    */
   async detectFrameworks(projectPath: string): Promise<FrameworkDetectionResult> {
-    logger.debug(`Detecting frameworks in ${projectPath}`);
 
     try {
       const packageJson = await this.readPackageJson(projectPath);

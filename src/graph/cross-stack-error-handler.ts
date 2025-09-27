@@ -147,7 +147,6 @@ export class CrossStackErrorHandler extends EventEmitter {
         logger.warn(logMessage, logContext);
         break;
       case ErrorSeverity.LOW:
-        logger.debug(logMessage, logContext);
         break;
     }
 

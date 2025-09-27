@@ -76,14 +76,6 @@ export class TransitiveAnalyzer {
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
     const includeCrossStack = options.includeCrossStack || false;
 
-    logger.debug('Starting transitive caller analysis', {
-      symbolId,
-      maxDepth,
-      includeTypes: options.includeTypes,
-      excludeTypes: options.excludeTypes,
-      includeCrossStack,
-    });
-
     if (includeCrossStack) {
       return this.traverseCallersWithCrossStack(symbolId, options);
     } else {
@@ -108,27 +100,21 @@ export class TransitiveAnalyzer {
     const results: TransitiveResult[] = [];
     let maxDepthReached = 0;
 
-    await this.traverseCallers(
-      symbolId,
-      [],
-      0,
-      maxDepth,
-      visited,
-      cycles,
-      results,
-      options
-    );
+    await this.traverseCallers(symbolId, [], 0, maxDepth, visited, cycles, results, options);
 
     maxDepthReached = Math.max(...results.map(r => r.depth), 0);
 
-    const enhancedResults = await this.enhanceResultsWithCallChains(results, options.showCallChains || false);
+    const enhancedResults = await this.enhanceResultsWithCallChains(
+      results,
+      options.showCallChains || false
+    );
 
     return {
       results: enhancedResults,
       maxDepthReached,
       totalPaths: enhancedResults.length,
       cyclesDetected: cycles.size,
-      executionTimeMs: Date.now() - startTime
+      executionTimeMs: Date.now() - startTime,
     };
   }
 
@@ -137,7 +123,7 @@ export class TransitiveAnalyzer {
    */
   private async traverseCallersWithCrossStack(
     symbolId: number,
-    options: TransitiveAnalysisOptions,
+    options: TransitiveAnalysisOptions
   ): Promise<TransitiveAnalysisResult> {
     const startTime = Date.now();
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
@@ -151,12 +137,14 @@ export class TransitiveAnalyzer {
     // Include cross-stack dependency types in the traversal
     const enhancedOptions: TransitiveAnalysisOptions = {
       ...options,
-      includeTypes: options.includeTypes ? [
-        ...options.includeTypes,
-        DependencyType.API_CALL,
-        DependencyType.SHARES_SCHEMA,
-        DependencyType.FRONTEND_BACKEND
-      ] : undefined
+      includeTypes: options.includeTypes
+        ? [
+            ...options.includeTypes,
+            DependencyType.API_CALL,
+            DependencyType.SHARES_SCHEMA,
+            DependencyType.FRONTEND_BACKEND,
+          ]
+        : undefined,
     };
 
     await this.traverseCallersWithCrossStackSupport(
@@ -167,19 +155,22 @@ export class TransitiveAnalyzer {
       visited,
       cycles,
       results,
-      enhancedOptions,
+      enhancedOptions
     );
 
     maxDepthReached = Math.max(...results.map(r => r.depth), 0);
 
-    const enhancedResults = await this.enhanceResultsWithCallChains(results, options.showCallChains || false);
+    const enhancedResults = await this.enhanceResultsWithCallChains(
+      results,
+      options.showCallChains || false
+    );
 
     return {
       results: enhancedResults,
       maxDepthReached,
       totalPaths: enhancedResults.length,
       cyclesDetected: cycles.size,
-      executionTimeMs: Date.now() - startTime
+      executionTimeMs: Date.now() - startTime,
     };
   }
 
@@ -194,7 +185,7 @@ export class TransitiveAnalyzer {
     visited: Set<number>,
     cycles: Set<string>,
     results: TransitiveResult[],
-    options: TransitiveAnalysisOptions,
+    options: TransitiveAnalysisOptions
   ): Promise<void> {
     // Stop if we've reached max depth
     if (currentDepth >= maxDepth) {
@@ -207,7 +198,6 @@ export class TransitiveAnalyzer {
     if (visited.has(symbolId)) {
       const cycleKey = [...currentPath, symbolId].sort().join('-');
       cycles.add(cycleKey);
-      logger.debug('Cycle detected in cross-stack caller traversal', { symbolId, path: currentPath });
       return;
     }
 
@@ -229,7 +219,7 @@ export class TransitiveAnalyzer {
           symbolId: fromSymbolId,
           path: newPath,
           depth: currentDepth + 1,
-          dependencies: [caller]
+          dependencies: [caller],
         });
 
         // Recurse to find callers of this caller
@@ -243,8 +233,8 @@ export class TransitiveAnalyzer {
           newVisited,
           cycles,
           results,
-          options,
-            );
+          options
+        );
       }
 
       // Process cross-stack callers
@@ -260,7 +250,7 @@ export class TransitiveAnalyzer {
           symbolId: fromSymbolId,
           path: newPath,
           depth: currentDepth + 1,
-          dependencies: [caller]
+          dependencies: [caller],
         });
 
         // Recurse to find callers of this cross-stack caller
@@ -272,8 +262,8 @@ export class TransitiveAnalyzer {
           visited,
           cycles,
           results,
-          options,
-            );
+          options
+        );
       }
     } catch (error) {
       logger.error('Error traversing cross-stack callers', { symbolId, error: error.message });
@@ -293,39 +283,26 @@ export class TransitiveAnalyzer {
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
     // Process all dependencies for comprehensive analysis
 
-    logger.debug('Starting transitive dependency analysis', {
-      symbolId,
-      maxDepth,
-      includeTypes: options.includeTypes,
-      excludeTypes: options.excludeTypes
-    });
-
     const visited = new Set<number>();
     const cycles = new Set<string>();
     const results: TransitiveResult[] = [];
     let maxDepthReached = 0;
 
-    await this.traverseDependencies(
-      symbolId,
-      [],
-      0,
-      maxDepth,
-      visited,
-      cycles,
-      results,
-      options
-    );
+    await this.traverseDependencies(symbolId, [], 0, maxDepth, visited, cycles, results, options);
 
     maxDepthReached = Math.max(...results.map(r => r.depth), 0);
 
-    const enhancedResults = await this.enhanceResultsWithCallChains(results, options.showCallChains || false);
+    const enhancedResults = await this.enhanceResultsWithCallChains(
+      results,
+      options.showCallChains || false
+    );
 
     return {
       results: enhancedResults,
       maxDepthReached,
       totalPaths: enhancedResults.length,
       cyclesDetected: cycles.size,
-      executionTimeMs: Date.now() - startTime
+      executionTimeMs: Date.now() - startTime,
     };
   }
 
@@ -353,7 +330,6 @@ export class TransitiveAnalyzer {
     if (visited.has(symbolId)) {
       const cycleKey = [...currentPath, symbolId].sort().join('-');
       cycles.add(cycleKey);
-      logger.debug('Cycle detected in caller traversal', { symbolId, path: currentPath });
       return;
     }
 
@@ -373,7 +349,7 @@ export class TransitiveAnalyzer {
           symbolId: fromSymbolId,
           path: newPath,
           depth: currentDepth + 1,
-          dependencies: [caller]
+          dependencies: [caller],
         });
 
         // Recurse to find callers of this caller
@@ -420,7 +396,6 @@ export class TransitiveAnalyzer {
     if (visited.has(symbolId)) {
       const cycleKey = [...currentPath, symbolId].sort().join('-');
       cycles.add(cycleKey);
-      logger.debug('Cycle detected in dependency traversal', { symbolId, path: currentPath });
       return;
     }
 
@@ -440,7 +415,7 @@ export class TransitiveAnalyzer {
           symbolId: toSymbolId,
           path: newPath,
           depth: currentDepth + 1,
-          dependencies: [dependency]
+          dependencies: [dependency],
         });
 
         // Recurse to find dependencies of this dependency
@@ -473,17 +448,15 @@ export class TransitiveAnalyzer {
     const startTime = Date.now();
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
 
-    logger.debug('Starting cross-stack impact analysis', {
-      symbolId,
-      maxDepth,
-      includeTransitive: options.includeTransitive
-    });
-
     // Get frontend impact (if this is a backend symbol)
     const frontendOptions: TransitiveAnalysisOptions = {
       maxDepth,
       includeCrossStack: true,
-      includeTypes: [DependencyType.API_CALL, DependencyType.SHARES_SCHEMA, DependencyType.FRONTEND_BACKEND]
+      includeTypes: [
+        DependencyType.API_CALL,
+        DependencyType.SHARES_SCHEMA,
+        DependencyType.FRONTEND_BACKEND,
+      ],
     };
 
     const frontendImpactResult = options.includeTransitive
@@ -494,7 +467,11 @@ export class TransitiveAnalyzer {
     const backendOptions: TransitiveAnalysisOptions = {
       maxDepth,
       includeCrossStack: true,
-      includeTypes: [DependencyType.API_CALL, DependencyType.SHARES_SCHEMA, DependencyType.FRONTEND_BACKEND]
+      includeTypes: [
+        DependencyType.API_CALL,
+        DependencyType.SHARES_SCHEMA,
+        DependencyType.FRONTEND_BACKEND,
+      ],
     };
 
     const backendImpactResult = options.includeTransitive
@@ -506,30 +483,21 @@ export class TransitiveAnalyzer {
 
     const executionTime = Date.now() - startTime;
 
-    logger.debug('Completed cross-stack impact analysis', {
-      symbolId,
-      frontendImpact: frontendImpactResult.results.length,
-      backendImpact: backendImpactResult.results.length,
-      crossStackRelationships: crossStackRelationships.length,
-      executionTimeMs: executionTime
-    });
-
     return {
       symbolId,
       frontendImpact: frontendImpactResult.results,
       backendImpact: backendImpactResult.results,
       crossStackRelationships,
-      totalImpactedSymbols: frontendImpactResult.results.length + backendImpactResult.results.length,
-      executionTimeMs: executionTime
+      totalImpactedSymbols:
+        frontendImpactResult.results.length + backendImpactResult.results.length,
+      executionTimeMs: executionTime,
     };
   }
 
   /**
    * Get cross-stack callers (symbols from different language stacks that call this symbol)
    */
-  private async getCrossStackCallers(
-    symbolId: number,
-  ): Promise<DependencyWithSymbols[]> {
+  private async getCrossStackCallers(symbolId: number): Promise<DependencyWithSymbols[]> {
     const query = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
@@ -539,7 +507,7 @@ export class TransitiveAnalyzer {
       .whereIn('dependencies.dependency_type', [
         DependencyType.API_CALL,
         DependencyType.SHARES_SCHEMA,
-        DependencyType.FRONTEND_BACKEND
+        DependencyType.FRONTEND_BACKEND,
       ])
       .select(
         'dependencies.*',
@@ -566,47 +534,55 @@ export class TransitiveAnalyzer {
       line_number: row.line_number,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      from_symbol: row.from_symbol_id ? {
-        id: row.from_symbol_id,
-        name: row.from_symbol_name,
-        symbol_type: row.from_symbol_type,
-        file: row.from_file_path ? {
-          path: row.from_file_path,
-          language: row.from_language
-        } : undefined
-      } : undefined,
-      to_symbol: row.to_symbol_id ? {
-        id: row.to_symbol_id,
-        name: row.to_symbol_name,
-        symbol_type: row.to_symbol_type,
-        file: row.to_file_path ? {
-          path: row.to_file_path,
-          language: row.to_language
-        } : undefined
-      } : undefined
+      from_symbol: row.from_symbol_id
+        ? {
+            id: row.from_symbol_id,
+            name: row.from_symbol_name,
+            symbol_type: row.from_symbol_type,
+            file: row.from_file_path
+              ? {
+                  path: row.from_file_path,
+                  language: row.from_language,
+                }
+              : undefined,
+          }
+        : undefined,
+      to_symbol: row.to_symbol_id
+        ? {
+            id: row.to_symbol_id,
+            name: row.to_symbol_name,
+            symbol_type: row.to_symbol_type,
+            file: row.to_file_path
+              ? {
+                  path: row.to_file_path,
+                  language: row.to_language,
+                }
+              : undefined,
+          }
+        : undefined,
     })) as DependencyWithSymbols[];
   }
 
   /**
    * Get cross-stack relationships for a symbol
    */
-  private async getCrossStackRelationships(
-    symbolId: number,
-  ): Promise<CrossStackRelationship[]> {
+  private async getCrossStackRelationships(symbolId: number): Promise<CrossStackRelationship[]> {
     // Get relationships where this symbol is either source or target
     const query = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
       .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
-      .where(function() {
-        this.where('dependencies.from_symbol_id', symbolId)
-          .orWhere('dependencies.to_symbol_id', symbolId);
+      .where(function () {
+        this.where('dependencies.from_symbol_id', symbolId).orWhere(
+          'dependencies.to_symbol_id',
+          symbolId
+        );
       })
       .whereIn('dependencies.dependency_type', [
         DependencyType.API_CALL,
         DependencyType.SHARES_SCHEMA,
-        DependencyType.FRONTEND_BACKEND
+        DependencyType.FRONTEND_BACKEND,
       ])
       .select(
         'dependencies.*',
@@ -629,19 +605,18 @@ export class TransitiveAnalyzer {
         id: row.from_symbol_id,
         name: row.from_symbol_name,
         type: row.from_symbol_type,
-        language: row.from_language || 'unknown'
+        language: row.from_language || 'unknown',
       },
       toSymbol: {
         id: row.to_symbol_id,
         name: row.to_symbol_name,
         type: row.to_symbol_type,
-        language: row.to_language || 'unknown'
+        language: row.to_language || 'unknown',
       },
       relationshipType: row.dependency_type,
-      path: [] // Will be populated by traversal algorithms
+      path: [], // Will be populated by traversal algorithms
     }));
   }
-
 
   /**
    * Get direct callers from database with filtering
@@ -688,22 +663,30 @@ export class TransitiveAnalyzer {
       line_number: row.line_number,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      from_symbol: row.from_symbol_id ? {
-        id: row.from_symbol_id,
-        name: row.from_symbol_name,
-        symbol_type: row.from_symbol_type,
-        file: row.from_file_path ? {
-          path: row.from_file_path
-        } : undefined
-      } : undefined,
-      to_symbol: row.to_symbol_id ? {
-        id: row.to_symbol_id,
-        name: row.to_symbol_name,
-        symbol_type: row.to_symbol_type,
-        file: row.to_file_path ? {
-          path: row.to_file_path
-        } : undefined
-      } : undefined
+      from_symbol: row.from_symbol_id
+        ? {
+            id: row.from_symbol_id,
+            name: row.from_symbol_name,
+            symbol_type: row.from_symbol_type,
+            file: row.from_file_path
+              ? {
+                  path: row.from_file_path,
+                }
+              : undefined,
+          }
+        : undefined,
+      to_symbol: row.to_symbol_id
+        ? {
+            id: row.to_symbol_id,
+            name: row.to_symbol_name,
+            symbol_type: row.to_symbol_type,
+            file: row.to_file_path
+              ? {
+                  path: row.to_file_path,
+                }
+              : undefined,
+          }
+        : undefined,
     })) as DependencyWithSymbols[];
   }
 
@@ -752,22 +735,30 @@ export class TransitiveAnalyzer {
       line_number: row.line_number,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      from_symbol: row.from_symbol_id ? {
-        id: row.from_symbol_id,
-        name: row.from_symbol_name,
-        symbol_type: row.from_symbol_type,
-        file: row.from_file_path ? {
-          path: row.from_file_path
-        } : undefined
-      } : undefined,
-      to_symbol: row.to_symbol_id ? {
-        id: row.to_symbol_id,
-        name: row.to_symbol_name,
-        symbol_type: row.to_symbol_type,
-        file: row.to_file_path ? {
-          path: row.to_file_path
-        } : undefined
-      } : undefined
+      from_symbol: row.from_symbol_id
+        ? {
+            id: row.from_symbol_id,
+            name: row.from_symbol_name,
+            symbol_type: row.from_symbol_type,
+            file: row.from_file_path
+              ? {
+                  path: row.from_file_path,
+                }
+              : undefined,
+          }
+        : undefined,
+      to_symbol: row.to_symbol_id
+        ? {
+            id: row.to_symbol_id,
+            name: row.to_symbol_name,
+            symbol_type: row.to_symbol_type,
+            file: row.to_file_path
+              ? {
+                  path: row.to_file_path,
+                }
+              : undefined,
+          }
+        : undefined,
     })) as DependencyWithSymbols[];
   }
 
@@ -775,9 +766,7 @@ export class TransitiveAnalyzer {
    * Format a call chain from symbol ID path to human-readable format
    * Converts [123, 456, 789] to "DeckController._Ready() → InitializeServices() → CardManager.SetHandPositions()"
    */
-  async formatCallChain(
-    path: number[],
-  ): Promise<string> {
+  async formatCallChain(path: number[]): Promise<string> {
     if (path.length === 0) {
       return '';
     }
@@ -810,9 +799,8 @@ export class TransitiveAnalyzer {
           part += '()';
         }
 
-
         // Add file context for cross-file calls
-        if (i > 0 && symbolInfo.filePath !== symbolNames.get(path[i-1])?.filePath) {
+        if (i > 0 && symbolInfo.filePath !== symbolNames.get(path[i - 1])?.filePath) {
           part += ` (${this.getShortFilePath(symbolInfo.filePath)})`;
         }
 
@@ -823,7 +811,7 @@ export class TransitiveAnalyzer {
     } catch (error) {
       logger.warn('Failed to format call chain', {
         path,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
       return `Call chain [${path.join(' → ')}]`;
     }
@@ -832,12 +820,17 @@ export class TransitiveAnalyzer {
   /**
    * Resolve symbol names from IDs efficiently using batch query
    */
-  private async resolveSymbolNames(symbolIds: number[]): Promise<Map<number, {
-    name: string;
-    className?: string;
-    isCallable: boolean;
-    filePath: string;
-  }>> {
+  private async resolveSymbolNames(symbolIds: number[]): Promise<
+    Map<
+      number,
+      {
+        name: string;
+        className?: string;
+        isCallable: boolean;
+        filePath: string;
+      }
+    >
+  > {
     const symbolMap = new Map();
 
     if (symbolIds.length === 0) {
@@ -873,7 +866,7 @@ export class TransitiveAnalyzer {
         name: row.name,
         className,
         isCallable,
-        filePath: row.file_path || 'unknown'
+        filePath: row.file_path || 'unknown',
       });
     }
 
@@ -885,9 +878,7 @@ export class TransitiveAnalyzer {
    */
   private getShortFilePath(fullPath: string): string {
     const parts = fullPath.split(/[/\\]/);
-    return parts.length > 3
-      ? `.../${parts.slice(-2).join('/')}`
-      : fullPath;
+    return parts.length > 3 ? `.../${parts.slice(-2).join('/')}` : fullPath;
   }
 
   /**
@@ -905,13 +896,13 @@ export class TransitiveAnalyzer {
 
     // Format call chains for all results
     const enhancedResults = await Promise.all(
-      results.map(async (result) => {
+      results.map(async result => {
         const fullPath = [...result.path, result.symbolId];
         const callChain = await this.formatCallChain(fullPath);
 
         return {
           ...result,
-          call_chain: callChain
+          call_chain: callChain,
         };
       })
     );
@@ -924,7 +915,6 @@ export class TransitiveAnalyzer {
    */
   clearCache(): void {
     this.cache.clear();
-    logger.debug('Transitive analysis cache cleared');
   }
 
   /**
@@ -933,7 +923,7 @@ export class TransitiveAnalyzer {
   getCacheStats(): { size: number; keys: string[] } {
     return {
       size: this.cache.size,
-      keys: Array.from(this.cache.keys())
+      keys: Array.from(this.cache.keys()),
     };
   }
 }

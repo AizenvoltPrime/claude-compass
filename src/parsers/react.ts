@@ -153,15 +153,12 @@ export class ReactParser extends BaseFrameworkParser {
       if (ext === '.tsx' || ext === '.ts') {
         // Use TypeScript TSX for TypeScript files
         this.parser.setLanguage(TypeScript.tsx);
-        logger.debug(`Using TypeScript TSX parser for ${filePath}`);
       } else if (ext === '.jsx') {
         // Use TypeScript JSX for JSX files (better JSX support than JavaScript parser)
         this.parser.setLanguage(TypeScript.tsx);
-        logger.debug(`Using TypeScript TSX parser for JSX file ${filePath}`);
       } else {
         // Use JavaScript parser for .js files
         this.parser.setLanguage(JavaScript);
-        logger.debug(`Using JavaScript parser for ${filePath}`);
       }
     } catch (error) {
       logger.warn(`Failed to set parser language for ${filePath}, falling back to JavaScript`, { error });
@@ -244,7 +241,6 @@ export class ReactParser extends BaseFrameworkParser {
         entities.push(...contexts);
       }
 
-      logger.debug(`Detected ${entities.length} React entities in ${filePath}`);
 
     } catch (error) {
       logger.error(`React entity detection failed for ${filePath}`, { error });
@@ -779,7 +775,6 @@ export class ReactParser extends BaseFrameworkParser {
   private async extractReactProps(tree: any, component: any): Promise<PropDefinition[]> {
     const props: PropDefinition[] = [];
 
-    logger.debug(`Extracting props for component type: ${component.type}`);
 
     // For functional components, look for destructured props parameter
     if (component.type === 'function') {
@@ -810,7 +805,6 @@ export class ReactParser extends BaseFrameworkParser {
       }
 
       const params = this.getFunctionParameters(functionNode);
-      logger.debug(`Found ${params.length} function parameters for component ${component.name}`);
       if (params.length > 0) {
         // Find the first actual parameter (not punctuation)
         const actualParams = params.filter((param: any) =>
@@ -834,7 +828,6 @@ export class ReactParser extends BaseFrameworkParser {
 
           if (objectPattern) {
             const extractedProps = this.extractObjectPatternProperties(objectPattern);
-            logger.debug(`Extracted ${extractedProps.length} props from component ${component.name}:`, extractedProps.map(p => p.name));
 
             // Extract destructured prop names
             for (const prop of extractedProps) {
@@ -1920,7 +1913,6 @@ export class ReactParser extends BaseFrameworkParser {
       const useTypeScript = this.isTypeScriptFile(filePath) || this.shouldUseTypeScriptParser(content);
       const parser = useTypeScript ? this.typescriptParser : this.javascriptParser;
 
-      logger.debug(`Using ${useTypeScript ? 'TypeScript' : 'JavaScript'} parser for ${filePath}`);
 
       // Delegate to the appropriate language parser
       const result = await parser.parseFile(filePath, content, options);

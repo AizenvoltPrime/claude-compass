@@ -8,14 +8,14 @@ import {
   ParsedExport,
   ParseResult,
   ParseOptions,
-  ParseError
+  ParseError,
 } from './base';
 import { createComponentLogger } from '../utils/logger';
 import {
   ChunkedParser,
   MergedParseResult,
   ChunkedParseOptions,
-  ChunkResult
+  ChunkResult,
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
 
@@ -46,18 +46,22 @@ export class JavaScriptParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `File is too large (${content.length} bytes, limit: ${validatedOptions.maxFileSize} bytes)`,
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: `File is too large (${content.length} bytes, limit: ${validatedOptions.maxFileSize} bytes)`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
 
     // Check if chunking should be used and is enabled
-    if (chunkedOptions.enableChunking !== false &&
-        content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
+    if (
+      chunkedOptions.enableChunking !== false &&
+      content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)
+    ) {
       const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
       return this.convertMergedResult(chunkedResult);
     }
@@ -83,12 +87,14 @@ export class JavaScriptParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: 'Failed to parse syntax tree',
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: 'Failed to parse syntax tree',
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
 
@@ -99,11 +105,13 @@ export class JavaScriptParser extends ChunkedParser {
       const exports = this.extractExports(tree.rootNode, content);
 
       return {
-        symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== 'private'),
+        symbols: validatedOptions.includePrivateSymbols
+          ? symbols
+          : symbols.filter(s => s.visibility !== 'private'),
         dependencies,
         imports,
         exports,
-        errors: []
+        errors: [],
       };
     } finally {
       // Tree-sitter trees are automatically garbage collected in Node.js
@@ -146,12 +154,14 @@ export class JavaScriptParser extends ChunkedParser {
     const arrowNodes = this.findNodesOfType(rootNode, 'arrow_function');
     for (const node of arrowNodes) {
       // Skip arrow functions that are already captured as variable assignments
-      if (node.parent?.type !== 'variable_declarator' && node.parent?.type !== 'assignment_expression') {
+      if (
+        node.parent?.type !== 'variable_declarator' &&
+        node.parent?.type !== 'assignment_expression'
+      ) {
         const symbol = this.extractArrowFunctionSymbol(node, content);
         if (symbol) symbols.push(symbol);
       }
     }
-
 
     return symbols;
   }
@@ -201,8 +211,9 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     // Extract default exports
-    const defaultExportNodes = this.findNodesOfType(rootNode, 'export_statement')
-      .filter(node => this.getNodeText(node, content).includes('default'));
+    const defaultExportNodes = this.findNodesOfType(rootNode, 'export_statement').filter(node =>
+      this.getNodeText(node, content).includes('default')
+    );
 
     for (const node of defaultExportNodes) {
       const exportInfo = this.extractDefaultExport(node, content);
@@ -229,7 +240,7 @@ export class JavaScriptParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
-      signature
+      signature,
     };
   }
 
@@ -243,7 +254,10 @@ export class JavaScriptParser extends ChunkedParser {
     let symbolType = SymbolType.VARIABLE;
 
     // Check if it's an arrow function
-    if (valueNode && (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression')) {
+    if (
+      valueNode &&
+      (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression')
+    ) {
       symbolType = SymbolType.FUNCTION;
     }
 
@@ -262,7 +276,7 @@ export class JavaScriptParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
-      signature: valueNode ? this.getNodeText(valueNode, content) : undefined
+      signature: valueNode ? this.getNodeText(valueNode, content) : undefined,
     };
   }
 
@@ -277,7 +291,7 @@ export class JavaScriptParser extends ChunkedParser {
       symbol_type: SymbolType.CLASS,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: this.isSymbolExported(node, name, content)
+      is_exported: this.isSymbolExported(node, name, content),
     };
   }
 
@@ -309,11 +323,14 @@ export class JavaScriptParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: false, // Methods are not directly exported
       visibility,
-      signature
+      signature,
     };
   }
 
-  private extractArrowFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractArrowFunctionSymbol(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedSymbol | null {
     return {
       name: 'arrow_function',
       symbol_type: SymbolType.FUNCTION,
@@ -321,7 +338,7 @@ export class JavaScriptParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: false,
       visibility: Visibility.PRIVATE,
-      signature: this.getNodeText(node, content).substring(0, 100)
+      signature: this.getNodeText(node, content).substring(0, 100),
     };
   }
 
@@ -333,8 +350,12 @@ export class JavaScriptParser extends ChunkedParser {
 
     // Walk up the AST to find containing function or method
     while (parent) {
-      if (parent.type === 'function_declaration' || parent.type === 'function_expression' ||
-          parent.type === 'arrow_function' || parent.type === 'method_definition') {
+      if (
+        parent.type === 'function_declaration' ||
+        parent.type === 'function_expression' ||
+        parent.type === 'arrow_function' ||
+        parent.type === 'method_definition'
+      ) {
         // Extract name from the function node
         if (parent.type === 'function_declaration') {
           const nameNode = parent.childForFieldName('name');
@@ -376,7 +397,7 @@ export class JavaScriptParser extends ChunkedParser {
       from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
     };
   }
 
@@ -441,7 +462,7 @@ export class JavaScriptParser extends ChunkedParser {
       imported_names: importedNames,
       import_type: importType,
       line_number: node.startPosition.row + 1,
-      is_dynamic: false
+      is_dynamic: false,
     };
   }
 
@@ -468,7 +489,7 @@ export class JavaScriptParser extends ChunkedParser {
         imported_names: [], // CommonJS doesn't have named imports in the same way
         import_type: 'default',
         line_number: node.startPosition.row + 1,
-        is_dynamic: false
+        is_dynamic: false,
       });
     }
 
@@ -498,7 +519,7 @@ export class JavaScriptParser extends ChunkedParser {
         imported_names: [],
         import_type: 'default',
         line_number: node.startPosition.row + 1,
-        is_dynamic: true
+        is_dynamic: true,
       });
     }
 
@@ -529,7 +550,7 @@ export class JavaScriptParser extends ChunkedParser {
       exported_names: exportedNames,
       export_type: exportType,
       source,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
     };
   }
 
@@ -537,7 +558,7 @@ export class JavaScriptParser extends ChunkedParser {
     return {
       exported_names: ['default'],
       export_type: 'default',
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
     };
   }
 
@@ -554,7 +575,7 @@ export class JavaScriptParser extends ChunkedParser {
         exports.push({
           exported_names: [leftText],
           export_type: 'named',
-          line_number: node.startPosition.row + 1
+          line_number: node.startPosition.row + 1,
         });
       }
     }
@@ -592,7 +613,7 @@ export class JavaScriptParser extends ChunkedParser {
     // JavaScript-specific boundary patterns in order of preference
     const boundaryPatterns = [
       // End of function/class/interface definitions with proper closure
-      /}\s*(?:;)?\s*(?:\n\s*\n|\n\s*\/\/|\n\s*\/\*)/g,  // Closing brace with semicolon and spacing
+      /}\s*(?:;)?\s*(?:\n\s*\n|\n\s*\/\/|\n\s*\/\*)/g, // Closing brace with semicolon and spacing
 
       // End of export statements
       /export\s+(?:default\s+)?(?:function|class|const|let|var)\s+\w+[^}]*}\s*(?:;)?\s*\n/g,
@@ -619,7 +640,7 @@ export class JavaScriptParser extends ChunkedParser {
       /;\s*\n\s*\n/g,
 
       // Simple closing braces with newlines
-      /}\s*\n/g
+      /}\s*\n/g,
     ];
 
     // Find all potential boundaries
@@ -627,7 +648,8 @@ export class JavaScriptParser extends ChunkedParser {
       let match;
       while ((match = pattern.exec(searchContent)) !== null) {
         const position = match.index + match[0].length;
-        if (position > 100 && position < searchLimit) { // Ensure reasonable minimum chunk size
+        if (position > 100 && position < searchLimit) {
+          // Ensure reasonable minimum chunk size
           boundaries.push(position);
         }
       }
@@ -640,7 +662,10 @@ export class JavaScriptParser extends ChunkedParser {
   /**
    * Merge results from multiple chunks, handling duplicates and cross-chunk references
    */
-  protected mergeChunkResults(chunks: ParseResult[], chunkMetadata: ChunkResult[]): MergedParseResult {
+  protected mergeChunkResults(
+    chunks: ParseResult[],
+    chunkMetadata: ChunkResult[]
+  ): MergedParseResult {
     const allSymbols: ParsedSymbol[] = [];
     const allDependencies: ParsedDependency[] = [];
     const allImports: ParsedImport[] = [];
@@ -665,7 +690,11 @@ export class JavaScriptParser extends ChunkedParser {
     const mergedExports = this.removeDuplicateExports(allExports);
 
     // Detect cross-chunk references
-    const crossChunkReferences = this.detectCrossChunkReferences(mergedSymbols, mergedDependencies, chunkMetadata);
+    const crossChunkReferences = this.detectCrossChunkReferences(
+      mergedSymbols,
+      mergedDependencies,
+      chunkMetadata
+    );
 
     return {
       symbols: mergedSymbols,
@@ -676,10 +705,12 @@ export class JavaScriptParser extends ChunkedParser {
       chunksProcessed: chunks.length,
       metadata: {
         totalChunks: chunkMetadata.length,
-        duplicatesRemoved: (allSymbols.length - mergedSymbols.length) +
-                          (allDependencies.length - mergedDependencies.length),
-        crossChunkReferencesFound: crossChunkReferences
-      }
+        duplicatesRemoved:
+          allSymbols.length -
+          mergedSymbols.length +
+          (allDependencies.length - mergedDependencies.length),
+        crossChunkReferencesFound: crossChunkReferences,
+      },
     };
   }
 
@@ -692,7 +723,7 @@ export class JavaScriptParser extends ChunkedParser {
       dependencies: mergedResult.dependencies,
       imports: mergedResult.imports,
       exports: mergedResult.exports,
-      errors: mergedResult.errors
+      errors: mergedResult.errors,
     };
   }
 
@@ -744,14 +775,15 @@ export class JavaScriptParser extends ChunkedParser {
 
       if (fromSymbol && toSymbol) {
         // Find which chunks these symbols belong to
-        const fromChunk = chunkMetadata.findIndex(chunk =>
-          dep.line_number >= chunk.startLine && dep.line_number <= chunk.endLine
+        const fromChunk = chunkMetadata.findIndex(
+          chunk => dep.line_number >= chunk.startLine && dep.line_number <= chunk.endLine
         );
-        const toChunkFrom = chunkMetadata.findIndex(chunk =>
-          fromSymbol.start_line >= chunk.startLine && fromSymbol.start_line <= chunk.endLine
+        const toChunkFrom = chunkMetadata.findIndex(
+          chunk =>
+            fromSymbol.start_line >= chunk.startLine && fromSymbol.start_line <= chunk.endLine
         );
-        const toChunkTo = chunkMetadata.findIndex(chunk =>
-          toSymbol.start_line >= chunk.startLine && toSymbol.start_line <= chunk.endLine
+        const toChunkTo = chunkMetadata.findIndex(
+          chunk => toSymbol.start_line >= chunk.startLine && toSymbol.start_line <= chunk.endLine
         );
 
         // If symbols are in different chunks, it's a cross-chunk reference
@@ -798,16 +830,9 @@ export class JavaScriptParser extends ChunkedParser {
       ];
 
       // Check if error message contains any false positive pattern
-      const isFalsePositive = falsePositivePatterns.some(pattern =>
-        message.includes(pattern)
-      );
+      const isFalsePositive = falsePositivePatterns.some(pattern => message.includes(pattern));
 
       if (isFalsePositive) {
-        logger.debug('Filtering out false positive parsing error', {
-          message: error.message,
-          line: error.line,
-          severity: error.severity
-        });
         return false;
       }
 

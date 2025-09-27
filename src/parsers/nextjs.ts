@@ -102,7 +102,6 @@ export class NextJSParser extends BaseFrameworkParser {
         if (middleware) entities.push(middleware);
       }
 
-      logger.debug(`Detected ${entities.length} Next.js entities in ${filePath}`);
 
     } catch (error) {
       logger.error(`Next.js entity detection failed for ${filePath}`, { error });

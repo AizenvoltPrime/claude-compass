@@ -15,7 +15,6 @@ export class McpResources {
   }
 
   async readResource(uri: string) {
-    this.logger.debug('Reading resource', { uri });
 
     const [protocol, resource] = uri.split('://');
 
@@ -50,7 +49,6 @@ export class McpResources {
       // Get all repositories from the database
       const repositories = await this.dbService.getAllRepositories();
 
-      this.logger.debug('Retrieved repositories', { count: repositories.length });
 
       return {
         contents: [

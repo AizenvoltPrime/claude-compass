@@ -204,7 +204,6 @@ export class GodotParser extends BaseFrameworkParser {
     try {
       if (filePath.endsWith('.tscn')) {
         // Parse Godot scene file
-        logger.debug('Attempting to parse Godot scene file', { filePath });
         const scene = await this.parseGodotScene(content, filePath, options);
         if (scene) {
           entities.push(scene);
@@ -213,23 +212,16 @@ export class GodotParser extends BaseFrameworkParser {
         }
       } else if (filePath.endsWith('.cs') && this.isGodotScript(content)) {
         // Parse Godot C# script
-        logger.debug('Attempting to parse Godot C# script', { filePath });
         const script = await this.parseGodotScript(content, filePath, options);
         if (script) {
           entities.push(script);
         }
       } else if (filePath.endsWith('project.godot')) {
         // Parse project configuration for autoloads
-        logger.debug('Attempting to parse Godot project config', { filePath });
         const autoloads = await this.parseGodotProject(content, filePath, options);
         entities.push(...autoloads);
       }
 
-      logger.debug('Godot framework entities detected', {
-        filePath,
-        entityCount: entities.length,
-        entityTypes: entities.map(e => e.type)
-      });
 
       return { entities };
     } catch (error) {

@@ -45,13 +45,6 @@ export class SimpleCrossStackAnalyzer {
     const urlMatch = this.matchUrlPattern(vueCall.url, laravelRoute.pattern);
 
     if (urlMatch) {
-      this.logger.debug('Cross-stack relationship found', {
-        vueComponent: vueCall.component,
-        laravelController: laravelRoute.controller_method,
-        method: vueCall.method,
-        urlPattern: laravelRoute.pattern,
-      });
-
       return {
         from_component: vueCall.component,
         to_endpoint: laravelRoute.controller_method,
@@ -133,12 +126,6 @@ export class SimpleCrossStackAnalyzer {
         }
       }
     }
-
-    this.logger.debug('Cross-stack analysis complete', {
-      vueCallsProcessed: vueCalls.length,
-      laravelRoutesProcessed: laravelRoutes.length,
-      relationshipsFound: relationships.length,
-    });
 
     return relationships;
   }

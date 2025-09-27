@@ -132,10 +132,6 @@ export class CrossStackParser {
     const safeVueResults = vueResults || [];
     const safeLaravelResults = laravelResults || [];
 
-    logger.debug('Starting cross-stack relationship detection with error handling', {
-      vueFiles: safeVueResults.length,
-      laravelFiles: safeLaravelResults.length,
-    });
 
     const startTime = process.hrtime.bigint();
     const relationships: CrossStackRelationship[] = [];
@@ -157,7 +153,6 @@ export class CrossStackParser {
         let vueApiCalls: ApiCallInfo[] = [];
         try {
           vueApiCalls = this.extractVueApiCalls(safeVueResults);
-          logger.debug(`Extracted ${vueApiCalls.length} Vue API calls`);
         } catch (error) {
           crossStackErrorHandler.handleError(
             CrossStackErrorType.PATTERN_MATCH_FAILURE,
@@ -174,7 +169,6 @@ export class CrossStackParser {
         let laravelRoutes: LaravelRoute_CrossStack[] = [];
         try {
           laravelRoutes = this.extractLaravelRoutes(safeLaravelResults);
-          logger.debug(`Extracted ${laravelRoutes.length} Laravel routes`);
         } catch (error) {
           crossStackErrorHandler.handleError(
             CrossStackErrorType.PATTERN_MATCH_FAILURE,
@@ -202,7 +196,6 @@ export class CrossStackParser {
         let urlMatches: ApiCallMatch[] = [];
         try {
           urlMatches = this.matchUrlPatterns(vueApiCalls, laravelRoutes);
-          logger.debug(`Found ${urlMatches.length} potential URL matches`);
         } catch (error) {
           crossStackErrorHandler.handleError(
             CrossStackErrorType.PATTERN_MATCH_FAILURE,
@@ -252,11 +245,6 @@ export class CrossStackParser {
           failedRelationships
         );
 
-        logger.debug(`Created ${relationships.length} cross-stack relationships`, {
-          successful: successfulRelationships,
-          failed: failedRelationships,
-          executionTimeMs: executionTime
-        });
 
         return relationships;
       },
@@ -309,15 +297,6 @@ export class CrossStackParser {
     const endTime = process.hrtime.bigint();
     const executionTime = Number(endTime - startTime) / 1000000;
 
-    logger.debug('URL pattern matching completed', {
-      vueCallsCount: vueApiCalls.length,
-      laravelRoutesCount: laravelRoutes.length,
-      totalComparisons,
-      matchesFound: matches.length,
-      cacheHits,
-      cacheHitRate: totalComparisons > 0 ? (cacheHits / totalComparisons) * 100 : 0,
-      executionTimeMs: executionTime
-    });
 
     return matches;
   }
@@ -360,15 +339,6 @@ export class CrossStackParser {
     const endTime = process.hrtime.bigint();
     const executionTime = Number(endTime - startTime) / 1000000;
 
-    logger.debug('Schema structure comparison completed', {
-      tsInterfacesCount: tsInterfaces.length,
-      phpValidationRulesCount: phpValidationRules.length,
-      totalComparisons,
-      matchesFound: matches.length,
-      cacheHits,
-      cacheHitRate: totalComparisons > 0 ? (cacheHits / totalComparisons) * 100 : 0,
-      executionTimeMs: executionTime
-    });
 
     return matches.sort((a, b) => b.compatibility.score - a.compatibility.score);
   }
@@ -657,10 +627,6 @@ export class CrossStackParser {
         );
 
         if (driftResult.driftDetected) {
-          logger.debug(`Schema drift detected for ${tsInterface.name}`, {
-            driftSeverity: driftResult.driftSeverity,
-            changesCount: driftResult.changes.length
-          });
         }
       }
 
@@ -742,7 +708,6 @@ export class CrossStackParser {
         }
       }
 
-      logger.debug(`Created ${matches.length} basic fallback matches`);
       return matches.sort((a, b) => b.similarity.score - a.similarity.score);
     } catch (error) {
       crossStackErrorHandler.handleError(

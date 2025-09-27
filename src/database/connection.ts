@@ -29,7 +29,6 @@ function processJsonbFields(row: any): any {
         processedRow[field] = JSON.parse(processedRow[field]);
       } catch (e) {
         // If parsing fails, keep the original value
-        logger.debug(`Failed to parse JSONB field ${field}:`, processedRow[field]);
       }
     }
   }

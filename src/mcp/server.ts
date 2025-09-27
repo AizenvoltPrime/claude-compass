@@ -92,7 +92,6 @@ export class ClaudeCompassMCPServer {
   private setupHandlers(): void {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      logger.debug('Received list_tools request');
 
       return {
         tools: [
@@ -308,7 +307,6 @@ export class ClaudeCompassMCPServer {
 
     // List available resources
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      logger.debug('Received list_resources request');
 
       return {
         resources: [
@@ -326,7 +324,6 @@ export class ClaudeCompassMCPServer {
     this.server.setRequestHandler(CallToolRequestSchema, async request => {
       const { name, arguments: args } = request.params;
 
-      logger.debug('Received tool call', { name, args });
 
       try {
         let response: any;
@@ -369,11 +366,6 @@ export class ClaudeCompassMCPServer {
           response = await compressResponsePayload(response, DEFAULT_COMPRESSION_CONFIG);
         }
 
-        logger.debug('Tool call completed with optimizations', {
-          name,
-          compressed: response.metadata?.compressed,
-          compressionRatio: response.metadata?.compressionRatio,
-        });
 
         return response;
       } catch (error) {
@@ -389,7 +381,6 @@ export class ClaudeCompassMCPServer {
     this.server.setRequestHandler(ReadResourceRequestSchema, async request => {
       const { uri } = request.params;
 
-      logger.debug('Received read_resource request', { uri });
 
       try {
         return await this.resources.readResource(uri);

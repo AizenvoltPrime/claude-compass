@@ -44,8 +44,6 @@ export class MultiParser {
     options: MultiParseOptions = {},
     detectionResult?: FrameworkDetectionResult
   ): Promise<MultiParseResult> {
-    logger.debug(`Multi-parsing file with framework detection`, { filePath });
-
     // Declare applicableParsers in broader scope so catch block can access it
     let applicableParsers: string[] = [];
 
@@ -55,13 +53,6 @@ export class MultiParser {
         const projectRoot = options.frameworkContext?.projectRoot || this.findProjectRoot(filePath);
         try {
           detectionResult = await this.detector.detectFrameworks(projectRoot);
-          if (detectionResult && detectionResult.frameworks) {
-            logger.debug(`Detected frameworks for ${filePath}`, {
-              frameworks: detectionResult.frameworks.map(f => f.name),
-            });
-          } else {
-            logger.debug(`No frameworks detected for ${filePath}`);
-          }
         } catch (error) {
           logger.warn(`Framework detection failed for ${filePath}`, { error: error.message });
           detectionResult = {
@@ -109,8 +100,6 @@ export class MultiParser {
         logger.warn(`No applicable parsers found for file`, { filePath });
         return this.createEmptyResult(filePath, []);
       }
-
-      logger.debug(`Using parsers for ${filePath}`, { parsers: applicableParsers });
 
       // Parse with each applicable parser
       const parseResults: { parser: string; result: ParseFileResult }[] = [];
@@ -496,8 +485,6 @@ export class MultiParser {
     // NEW: Cross-stack relationship detection
     const crossStackRelationships = await this.detectCrossStackRelationships(allResults);
     if (crossStackRelationships.length > 0) {
-      logger.debug(`Detected ${crossStackRelationships.length} cross-stack relationships`);
-
       // Add cross-stack dependencies to the merged dependencies array
       for (const relationship of crossStackRelationships) {
         if (!allDependencies.some(d => this.dependenciesEqual(d, relationship.dependency))) {
@@ -552,11 +539,6 @@ export class MultiParser {
       if (vueResults.length === 0 || laravelResults.length === 0) {
         return [];
       }
-
-      logger.debug('Attempting cross-stack relationship detection', {
-        vueResults: vueResults.length,
-        laravelResults: laravelResults.length,
-      });
 
       // Use CrossStackParser to detect relationships
       const crossStackParser = new CrossStackParser();
@@ -781,11 +763,6 @@ export class MultiParser {
       const isFalsePositive = falsePositivePatterns.some(pattern => message.includes(pattern));
 
       if (isFalsePositive) {
-        logger.debug('Filtering out false positive parsing error', {
-          message: error.message,
-          line: error.line,
-          severity: error.severity,
-        });
         return false;
       }
 

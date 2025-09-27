@@ -83,10 +83,6 @@ export class VueParser extends BaseFrameworkParser {
   private parseScriptContent(scriptContent: string, isTypeScript: boolean): Parser.Tree | null {
     // Check if content is too large for direct parsing
     if (scriptContent.length > 28000) {
-      logger.debug('Skipping direct parsing for large Vue script content', {
-        size: scriptContent.length,
-        isTypeScript
-      });
       return null;
     }
 
@@ -106,8 +102,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Override parseFile to handle Vue SFCs properly
    */
-  async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-
+  async parseFile(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions = {}
+  ): Promise<ParseFileResult> {
     try {
       // For Vue SFCs, handle chunked parsing at script level if needed
       if (filePath.endsWith('.vue')) {
@@ -116,7 +115,6 @@ export class VueParser extends BaseFrameworkParser {
 
       // For regular JS/TS files, use base framework parser
       return await super.parseFile(filePath, content, options);
-
     } catch (error) {
       logger.error(`Vue parsing failed for ${filePath}`, { error });
 
@@ -126,12 +124,14 @@ export class VueParser extends BaseFrameworkParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `Vue parsing error: ${error.message}`,
-          line: 0,
-          column: 0,
-          severity: 'error',
-        }],
+        errors: [
+          {
+            message: `Vue parsing error: ${error.message}`,
+            line: 0,
+            column: 0,
+            severity: 'error',
+          },
+        ],
         frameworkEntities: [],
         metadata: {
           framework: 'vue',
@@ -144,7 +144,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse Vue SFC with chunked parsing support for large script sections
    */
-  private async parseVueSFCWithChunking(filePath: string, content: string, options: FrameworkParseOptions): Promise<ParseFileResult> {
+  private async parseVueSFCWithChunking(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions
+  ): Promise<ParseFileResult> {
     const sections = this.extractSFCSections(content);
 
     // Extract symbols, imports, etc. from script section
@@ -163,17 +167,15 @@ export class VueParser extends BaseFrameworkParser {
         // Check if script content needs chunking (force chunking for large scripts regardless of options)
         const forceChunkingOptions = { ...options, enableChunking: true };
         if (scriptContent && this.shouldUseChunking(scriptContent, forceChunkingOptions)) {
-          logger.debug(`Using chunked parsing for large Vue script section`, {
-            filePath,
-            scriptSize: scriptContent.length,
-            totalSize: content.length
-          });
-
           // Create a temporary script file path for chunked parsing
           const scriptFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
 
           // Use chunked parsing on just the script content
-          const chunkedResult = await this.parseFileInChunks(scriptFilePath, scriptContent, options);
+          const chunkedResult = await this.parseFileInChunks(
+            scriptFilePath,
+            scriptContent,
+            options
+          );
 
           symbols = chunkedResult.symbols;
           imports = chunkedResult.imports;
@@ -241,7 +243,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse Vue Single File Component with proper script extraction
    */
-  private async parseVueSFC(filePath: string, content: string, options: FrameworkParseOptions): Promise<ParseFileResult> {
+  private async parseVueSFC(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions
+  ): Promise<ParseFileResult> {
     const sections = this.extractSFCSections(content);
 
     // Extract symbols, imports, etc. from script section
@@ -318,7 +324,10 @@ export class VueParser extends BaseFrameworkParser {
     const apiCalls: VueApiCall[] = [];
 
     try {
-      const isTypeScript = filePath.includes('.ts') || scriptContent.includes('interface ') || scriptContent.includes('type ');
+      const isTypeScript =
+        filePath.includes('.ts') ||
+        scriptContent.includes('interface ') ||
+        scriptContent.includes('type ');
       const tree = this.parseScriptContent(scriptContent, isTypeScript);
 
       if (!tree?.rootNode) {
@@ -354,7 +363,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse individual API call expression
    */
-  private parseApiCallExpression(node: Parser.SyntaxNode, scriptContent: string, filePath: string): VueApiCall | null {
+  private parseApiCallExpression(
+    node: Parser.SyntaxNode,
+    scriptContent: string,
+    filePath: string
+  ): VueApiCall | null {
     const functionNode = node.child(0);
     if (!functionNode) return null;
 
@@ -427,7 +440,10 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse fetch() or $fetch() call arguments
    */
-  private parseFetchCall(argsNode: Parser.SyntaxNode | null, scriptContent: string): {
+  private parseFetchCall(
+    argsNode: Parser.SyntaxNode | null,
+    scriptContent: string
+  ): {
     url: string;
     method: string;
     requestType?: string;
@@ -471,7 +487,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse axios call arguments
    */
-  private parseAxiosCall(functionNode: Parser.SyntaxNode, argsNode: Parser.SyntaxNode | null, scriptContent: string): {
+  private parseAxiosCall(
+    functionNode: Parser.SyntaxNode,
+    argsNode: Parser.SyntaxNode | null,
+    scriptContent: string
+  ): {
     url: string;
     method: string;
     requestType?: string;
@@ -503,7 +523,10 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse useFetch() call arguments (Nuxt.js)
    */
-  private parseUseFetchCall(argsNode: Parser.SyntaxNode | null, scriptContent: string): {
+  private parseUseFetchCall(
+    argsNode: Parser.SyntaxNode | null,
+    scriptContent: string
+  ): {
     url: string;
     method: string;
     requestType?: string;
@@ -582,7 +605,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse interface declaration node
    */
-  private parseInterfaceDeclaration(node: Parser.SyntaxNode, scriptContent: string, filePath: string): VueTypeInterface | null {
+  private parseInterfaceDeclaration(
+    node: Parser.SyntaxNode,
+    scriptContent: string,
+    filePath: string
+  ): VueTypeInterface | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -606,9 +633,18 @@ export class VueParser extends BaseFrameworkParser {
     // Determine usage based on naming conventions
     let usage: VueTypeInterface['usage'] = 'generic';
     const lowerName = interfaceName.toLowerCase();
-    if (lowerName.includes('request') || lowerName.includes('input') || lowerName.includes('create') || lowerName.includes('update')) {
+    if (
+      lowerName.includes('request') ||
+      lowerName.includes('input') ||
+      lowerName.includes('create') ||
+      lowerName.includes('update')
+    ) {
       usage = 'request';
-    } else if (lowerName.includes('response') || lowerName.includes('result') || lowerName.includes('data')) {
+    } else if (
+      lowerName.includes('response') ||
+      lowerName.includes('result') ||
+      lowerName.includes('data')
+    ) {
       usage = 'response';
     }
 
@@ -632,7 +668,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse type alias declaration node
    */
-  private parseTypeAliasDeclaration(node: Parser.SyntaxNode, scriptContent: string, filePath: string): VueTypeInterface | null {
+  private parseTypeAliasDeclaration(
+    node: Parser.SyntaxNode,
+    scriptContent: string,
+    filePath: string
+  ): VueTypeInterface | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -667,7 +707,10 @@ export class VueParser extends BaseFrameworkParser {
       if (text.startsWith('`') && text.endsWith('`')) {
         return text.slice(1, -1);
       }
-      if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+      if (
+        (text.startsWith('"') && text.endsWith('"')) ||
+        (text.startsWith("'") && text.endsWith("'"))
+      ) {
         return text.slice(1, -1);
       }
       return text;
@@ -675,7 +718,10 @@ export class VueParser extends BaseFrameworkParser {
     return node.text;
   }
 
-  private findObjectProperty(objectNode: Parser.SyntaxNode, propertyName: string): Parser.SyntaxNode | null {
+  private findObjectProperty(
+    objectNode: Parser.SyntaxNode,
+    propertyName: string
+  ): Parser.SyntaxNode | null {
     for (let i = 0; i < objectNode.childCount; i++) {
       const child = objectNode.child(i);
       if (child && child.type === 'pair') {
@@ -724,7 +770,10 @@ export class VueParser extends BaseFrameworkParser {
     return undefined;
   }
 
-  private parsePropertySignature(node: Parser.SyntaxNode, content: string): VueTypeInterface['properties'][0] | null {
+  private parsePropertySignature(
+    node: Parser.SyntaxNode,
+    content: string
+  ): VueTypeInterface['properties'][0] | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -751,7 +800,6 @@ export class VueParser extends BaseFrameworkParser {
     try {
       if (filePath.endsWith('.vue')) {
         // Parse Vue Single File Component
-        logger.debug('Attempting to parse Vue SFC', { filePath });
         const component = await this.parseVueSFCEntity(content, filePath, options);
         if (component) {
           entities.push(component);
@@ -788,7 +836,11 @@ export class VueParser extends BaseFrameworkParser {
         entities.push(...apiCalls);
 
         // Extract TypeScript interfaces (only for TypeScript files or scripts)
-        const isTypeScript = sections.scriptLang === 'ts' || filePath.includes('.ts') || scriptContent.includes('interface ') || scriptContent.includes('type ');
+        const isTypeScript =
+          sections.scriptLang === 'ts' ||
+          filePath.includes('.ts') ||
+          scriptContent.includes('interface ') ||
+          scriptContent.includes('type ');
         if (isTypeScript) {
           const typeInterfaces = this.parseTypeScriptInterfaces(scriptContent, filePath);
           entities.push(...typeInterfaces);
@@ -799,7 +851,7 @@ export class VueParser extends BaseFrameworkParser {
     }
 
     return {
-      entities
+      entities,
     };
   }
 
@@ -811,20 +863,8 @@ export class VueParser extends BaseFrameworkParser {
     filePath: string,
     options: FrameworkParseOptions
   ): Promise<FrameworkEntity | null> {
-    logger.debug('parseVueSFCEntity called', { filePath });
     const sections = this.extractSFCSections(content);
     const componentName = this.extractComponentName(filePath);
-    logger.debug('Extracted SFC sections and component name', {
-      filePath,
-      componentName,
-      hasScript: !!(sections.script || sections.scriptSetup),
-      hasTemplate: !!sections.template,
-      hasStyle: !!sections.style,
-      scriptLang: sections.scriptLang,
-      scriptLength: (sections.script || sections.scriptSetup)?.length || 0,
-      templateLength: sections.template?.length || 0
-    });
-
     // Parse script content if available
     let scriptTree = null;
     const scriptContent = sections.scriptSetup || sections.script;
@@ -835,10 +875,6 @@ export class VueParser extends BaseFrameworkParser {
 
         // Check if script content is too large and skip tree parsing for framework entity extraction
         if (scriptContent.length > 28000) {
-          logger.debug(`Skipping script tree parsing for large Vue component`, {
-            filePath,
-            scriptSize: scriptContent.length
-          });
           // For large scripts, we skip detailed parsing for framework entities
           // The symbols will be extracted via the main parseFile path with chunking
           scriptTree = null;
@@ -887,7 +923,7 @@ export class VueParser extends BaseFrameworkParser {
       defineExpose: [],
       defineModel: [],
       watchEffect: [],
-      computed: []
+      computed: [],
     };
     let vueUseComposables = [];
     let vitePatterns = { globImports: [], envVariables: [], hotReload: false };
@@ -896,15 +932,19 @@ export class VueParser extends BaseFrameworkParser {
       interfaces: [],
       types: [],
       generics: [],
-      imports: []
+      imports: [],
     };
 
     try {
-      advancedComposition = scriptTree ? this.extractAdvancedCompositionAPI(scriptTree) : advancedComposition;
+      advancedComposition = scriptTree
+        ? this.extractAdvancedCompositionAPI(scriptTree)
+        : advancedComposition;
       vueUseComposables = scriptTree ? this.extractVueUseComposables(scriptTree) : [];
       vitePatterns = this.extractVitePatterns(content);
       stylingFeatures = this.extractStylingFeatures(content);
-      typescriptFeatures = scriptTree ? this.extractTypeScriptFeatures(content, scriptTree) : typescriptFeatures;
+      typescriptFeatures = scriptTree
+        ? this.extractTypeScriptFeatures(content, scriptTree)
+        : typescriptFeatures;
     } catch (error) {
       logger.warn(`Failed to extract advanced Vue component features for ${filePath}`, { error });
       // Continue with default values
@@ -938,7 +978,8 @@ export class VueParser extends BaseFrameworkParser {
         // Advanced Composition API
         providedKeys: advancedComposition.provide.map(p => p.key),
         injectedKeys: advancedComposition.inject.map(i => i.key),
-        hasProvideInject: advancedComposition.provide.length > 0 || advancedComposition.inject.length > 0,
+        hasProvideInject:
+          advancedComposition.provide.length > 0 || advancedComposition.inject.length > 0,
         exposedMethods: advancedComposition.defineExpose,
         exposedProperties: advancedComposition.defineExpose,
         hasDefineExpose: advancedComposition.defineExpose.length > 0,
@@ -948,7 +989,7 @@ export class VueParser extends BaseFrameworkParser {
         // Template analysis
         directives: {
           builtin: directives.filter(d => d.type === 'built-in').map(d => `v-${d.name}`),
-          custom: directives.filter(d => d.type === 'custom').map(d => `v-${d.name}`)
+          custom: directives.filter(d => d.type === 'custom').map(d => `v-${d.name}`),
         },
         eventHandlers: eventHandlers.map(h => h.event),
         scopedSlots: scopedSlots.map(s => s.name),
@@ -968,7 +1009,7 @@ export class VueParser extends BaseFrameworkParser {
           envVariables: vitePatterns.envVariables,
           hasGlobImports: vitePatterns.globImports.length > 0,
           hasEnvVariables: vitePatterns.envVariables.length > 0,
-          hasHotReload: vitePatterns.hotReload
+          hasHotReload: vitePatterns.hotReload,
         },
 
         // Styling features
@@ -980,7 +1021,7 @@ export class VueParser extends BaseFrameworkParser {
           scoped: /<style[^>]*\s+scoped/.test(content),
           variables: this.extractCSSVariables(content),
           hasDynamicStyling: this.hasDynamicStyling(content),
-          dynamicStyleVariables: this.extractDynamicStyleVariables(content)
+          dynamicStyleVariables: this.extractDynamicStyleVariables(content),
         },
 
         // TypeScript integration
@@ -994,19 +1035,11 @@ export class VueParser extends BaseFrameworkParser {
             hasTypeScript: sections.scriptLang === 'ts' || content.includes('lang="ts"'),
             hasGenerics: typescriptFeatures.generics.length > 0 || genericFunctions.length > 0,
             genericFunctions,
-            hasUtilityTypes: this.hasUtilityTypes(content)
+            hasUtilityTypes: this.hasUtilityTypes(content),
           };
-        })()
-      }
+        })(),
+      },
     };
-
-    logger.debug('parseVueSFCEntity completed', {
-      filePath,
-      componentName: component?.name,
-      componentType: component?.type,
-      hasMetadata: !!component?.metadata,
-      isComponentNull: !component
-    });
 
     return component;
   }
@@ -1038,13 +1071,13 @@ export class VueParser extends BaseFrameworkParser {
         name: 'vue-router',
         pattern: /createRouter|useRouter|useRoute|router\.(push|replace)|RouterView|RouterLink/,
         fileExtensions: ['.js', '.ts', '.vue'],
-          description: 'Vue Router usage',
+        description: 'Vue Router usage',
       },
       {
         name: 'pinia-store',
         pattern: /defineStore|usePinia|createPinia/,
         fileExtensions: ['.js', '.ts'],
-          description: 'Pinia store definition',
+        description: 'Pinia store definition',
       },
       {
         name: 'vue-built-in-components',
@@ -1056,11 +1089,12 @@ export class VueParser extends BaseFrameworkParser {
         name: 'vue-advanced-composition',
         pattern: /provide\s*\(|inject\s*\(|defineExpose\s*\(|defineModel\s*\(/,
         fileExtensions: ['.vue', '.js', '.ts'],
-          description: 'Vue 3 advanced Composition API',
+        description: 'Vue 3 advanced Composition API',
       },
       {
         name: 'vueuse-composables',
-        pattern: /@vueuse\/core|@vueuse\/head|use[A-Z]\w*(?:Storage|Element|Mouse|Keyboard|Network|Browser)/,
+        pattern:
+          /@vueuse\/core|@vueuse\/head|use[A-Z]\w*(?:Storage|Element|Mouse|Keyboard|Network|Browser)/,
         fileExtensions: ['.js', '.ts', '.vue'],
         description: 'VueUse composables library',
       },
@@ -1068,17 +1102,16 @@ export class VueParser extends BaseFrameworkParser {
         name: 'vite-patterns',
         pattern: /import\.meta\.glob|import\.meta\.env|import\.meta\.hot/,
         fileExtensions: ['.js', '.ts', '.vue'],
-          description: 'Vite-specific patterns',
+        description: 'Vite-specific patterns',
       },
       {
         name: 'vue-testing',
         pattern: /@vue\/test-utils|mount\s*\(|shallowMount\s*\(|\.stories\./,
         fileExtensions: ['.js', '.ts', '.spec.js', '.test.js', '.stories.js'],
-          description: 'Vue testing patterns',
+        description: 'Vue testing patterns',
       },
     ];
   }
-
 
   /**
    * Parse Vue Single File Component (.vue files)
@@ -1125,7 +1158,12 @@ export class VueParser extends BaseFrameworkParser {
 
       // Parse template section for component dependencies and advanced features
       let builtInComponents: string[] = [];
-      let directives: Array<{ name: string; type: 'built-in' | 'custom'; modifiers: string[]; arguments?: string }> = [];
+      let directives: Array<{
+        name: string;
+        type: 'built-in' | 'custom';
+        modifiers: string[];
+        arguments?: string;
+      }> = [];
       let scopedSlots: Array<{ name: string; props: string[] }> = [];
       let templateRefs: string[] = [];
       let dynamicComponents: string[] = [];
@@ -1207,7 +1245,7 @@ export class VueParser extends BaseFrameworkParser {
             name: d.name,
             type: d.type,
             modifiers: d.modifiers,
-            arguments: d.arguments
+            arguments: d.arguments,
           })),
           scopedSlots,
           templateRefs,
@@ -1224,7 +1262,7 @@ export class VueParser extends BaseFrameworkParser {
             scoped: /<style[^>]*\s+scoped/.test(content),
             variables: this.extractCSSVariables(content),
             hasDynamicStyling: this.hasDynamicStyling(content),
-            dynamicStyleVariables: this.extractDynamicStyleVariables(content)
+            dynamicStyleVariables: this.extractDynamicStyleVariables(content),
           },
           // Testing patterns
           testingPatterns,
@@ -1234,7 +1272,6 @@ export class VueParser extends BaseFrameworkParser {
       };
 
       return component;
-
     } catch (error) {
       logger.error(`Failed to parse Vue SFC: ${filePath}`, { error });
       return null;
@@ -1248,17 +1285,16 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Analyze Vue script section for component metadata
    */
-  private async analyzeVueScript(scriptContent: string, filePath: string): Promise<{
+  private async analyzeVueScript(
+    scriptContent: string,
+    filePath: string
+  ): Promise<{
     props: PropDefinition[];
     emits: string[];
     composables: string[];
   }> {
     // Skip detailed analysis for large scripts to avoid Tree-sitter limits
     if (scriptContent.length > 28000) {
-      logger.debug(`Skipping detailed Vue script analysis for large file`, {
-        filePath,
-        scriptSize: scriptContent.length
-      });
       return { props: [], emits: [], composables: [] };
     }
 
@@ -1465,7 +1501,7 @@ export class VueParser extends BaseFrameworkParser {
           const object = caller.child(0)?.text;
           const property = caller.child(2)?.text;
 
-          if ((object === '$emit' || property === 'emit')) {
+          if (object === '$emit' || property === 'emit') {
             const argsNode = node.child(1);
             const firstArg = argsNode?.child(1);
             const emitName = this.extractStringLiteral(firstArg);
@@ -1523,7 +1559,6 @@ export class VueParser extends BaseFrameworkParser {
     return composables;
   }
 
-
   /**
    * Extract advanced Composition API patterns
    */
@@ -1541,7 +1576,7 @@ export class VueParser extends BaseFrameworkParser {
       defineExpose: [] as string[],
       defineModel: [] as Array<{ name: string; options?: string }>,
       watchEffect: [] as string[],
-      computed: [] as string[]
+      computed: [] as string[],
     };
 
     if (!tree?.rootNode) return result;
@@ -1557,7 +1592,7 @@ export class VueParser extends BaseFrameworkParser {
             if (provideArgs.length >= 1) {
               result.provide.push({
                 key: provideArgs[0],
-                value: provideArgs[1]
+                value: provideArgs[1],
               });
             }
             break;
@@ -1567,7 +1602,7 @@ export class VueParser extends BaseFrameworkParser {
             if (injectArgs.length >= 1) {
               result.inject.push({
                 key: injectArgs[0],
-                defaultValue: injectArgs[1]
+                defaultValue: injectArgs[1],
               });
             }
             break;
@@ -1587,13 +1622,13 @@ export class VueParser extends BaseFrameworkParser {
             if (modelArgs.length >= 1) {
               result.defineModel.push({
                 name: modelArgs[0],
-                options: modelArgs[1]
+                options: modelArgs[1],
               });
             } else {
               // defineModel() without parameters defaults to 'modelValue'
               result.defineModel.push({
                 name: 'modelValue',
-                options: undefined
+                options: undefined,
               });
             }
             break;
@@ -1749,9 +1784,18 @@ export class VueParser extends BaseFrameworkParser {
   private extractLifecycleHooks(tree: any, content: string): string[] {
     const lifecycle: string[] = [];
     const lifecycleHooks = [
-      'beforeCreate', 'created', 'beforeMount', 'mounted',
-      'beforeUpdate', 'updated', 'beforeUnmount', 'unmounted',
-      'beforeDestroy', 'destroyed', 'activated', 'deactivated'
+      'beforeCreate',
+      'created',
+      'beforeMount',
+      'mounted',
+      'beforeUpdate',
+      'updated',
+      'beforeUnmount',
+      'unmounted',
+      'beforeDestroy',
+      'destroyed',
+      'activated',
+      'deactivated',
     ];
 
     if (!tree?.rootNode) return lifecycle;
@@ -1778,27 +1822,80 @@ export class VueParser extends BaseFrameworkParser {
     // Common VueUse composables
     const commonVueUse = [
       // Core
-      'useCounter', 'useToggle', 'useBoolean', 'useClipboard', 'useColorMode',
-      'useCycleList', 'useLocalStorage', 'useSessionStorage', 'useStorage',
-      'usePreferredDark', 'usePreferredLanguages', 'useTitle', 'useFavicon',
-      'useDebounce', 'useFetch', 'useAsyncState',
+      'useCounter',
+      'useToggle',
+      'useBoolean',
+      'useClipboard',
+      'useColorMode',
+      'useCycleList',
+      'useLocalStorage',
+      'useSessionStorage',
+      'useStorage',
+      'usePreferredDark',
+      'usePreferredLanguages',
+      'useTitle',
+      'useFavicon',
+      'useDebounce',
+      'useFetch',
+      'useAsyncState',
       // Browser
-      'useActiveElement', 'useBreakpoints', 'useBrowserLocation', 'useClipboard',
-      'useEventListener', 'useFullscreen', 'useGeolocation', 'useIdle',
-      'useIntersectionObserver', 'useMediaQuery', 'useMemory', 'useMouseInElement',
-      'useMousePressed', 'useNetwork', 'useOnline', 'usePageLeave', 'usePermission',
-      'usePreferredColorScheme', 'usePreferredReducedMotion', 'useResizeObserver',
-      'useScriptTag', 'useShare', 'useSpeechRecognition', 'useSpeechSynthesis',
-      'useUrlSearchParams', 'useVibrate', 'useWakeLock', 'useWebNotification',
+      'useActiveElement',
+      'useBreakpoints',
+      'useBrowserLocation',
+      'useClipboard',
+      'useEventListener',
+      'useFullscreen',
+      'useGeolocation',
+      'useIdle',
+      'useIntersectionObserver',
+      'useMediaQuery',
+      'useMemory',
+      'useMouseInElement',
+      'useMousePressed',
+      'useNetwork',
+      'useOnline',
+      'usePageLeave',
+      'usePermission',
+      'usePreferredColorScheme',
+      'usePreferredReducedMotion',
+      'useResizeObserver',
+      'useScriptTag',
+      'useShare',
+      'useSpeechRecognition',
+      'useSpeechSynthesis',
+      'useUrlSearchParams',
+      'useVibrate',
+      'useWakeLock',
+      'useWebNotification',
       // Sensors
-      'useAccelerometer', 'useBattery', 'useDeviceMotion', 'useDeviceOrientation',
-      'useDevicePixelRatio', 'useDocumentVisibility', 'useElementBounding',
-      'useElementSize', 'useElementVisibility', 'useEyeDropper', 'useFps',
-      'useKeyModifier', 'useMagicKeys', 'useMouse', 'useMousePressed', 'useParallax',
-      'usePointerSwipe', 'useScroll', 'useScrollLock', 'useSwipe', 'useTextareaAutosize',
-      'useWindowFocus', 'useWindowScroll', 'useWindowSize',
+      'useAccelerometer',
+      'useBattery',
+      'useDeviceMotion',
+      'useDeviceOrientation',
+      'useDevicePixelRatio',
+      'useDocumentVisibility',
+      'useElementBounding',
+      'useElementSize',
+      'useElementVisibility',
+      'useEyeDropper',
+      'useFps',
+      'useKeyModifier',
+      'useMagicKeys',
+      'useMouse',
+      'useMousePressed',
+      'useParallax',
+      'usePointerSwipe',
+      'useScroll',
+      'useScrollLock',
+      'useSwipe',
+      'useTextareaAutosize',
+      'useWindowFocus',
+      'useWindowScroll',
+      'useWindowSize',
       // Head management
-      'useHead', 'useSeoMeta', 'useServerHead'
+      'useHead',
+      'useSeoMeta',
+      'useServerHead',
     ];
 
     const traverse = (node: Parser.SyntaxNode) => {
@@ -1837,7 +1934,7 @@ export class VueParser extends BaseFrameworkParser {
     const result = {
       globImports: [] as string[],
       envVariables: [] as string[],
-      hotReload: false
+      hotReload: false,
     };
 
     // Extract import.meta.glob patterns
@@ -1874,7 +1971,7 @@ export class VueParser extends BaseFrameworkParser {
       cssModules: false,
       scopedStyles: false,
       cssVariables: [] as string[],
-      preprocessor: undefined as string | undefined
+      preprocessor: undefined as string | undefined,
     };
 
     // Check for CSS Modules
@@ -1906,7 +2003,6 @@ export class VueParser extends BaseFrameworkParser {
     return result;
   }
 
-
   /**
    * Detect testing patterns
    */
@@ -1920,7 +2016,7 @@ export class VueParser extends BaseFrameworkParser {
       isTestFile: false,
       isStoryFile: false,
       testUtils: [] as string[],
-      testFramework: undefined as string | undefined
+      testFramework: undefined as string | undefined,
     };
 
     // Check if it's a test file
@@ -1935,7 +2031,10 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Enhance TypeScript integration for Vue components
    */
-  private extractTypeScriptFeatures(content: string, tree: any): {
+  private extractTypeScriptFeatures(
+    content: string,
+    tree: any
+  ): {
     interfaces: Array<{ name: string; properties: string[] }>;
     types: Array<{ name: string; definition: string }>;
     generics: string[];
@@ -1945,7 +2044,7 @@ export class VueParser extends BaseFrameworkParser {
       interfaces: [] as Array<{ name: string; properties: string[] }>,
       types: [] as Array<{ name: string; definition: string }>,
       generics: [] as string[],
-      imports: [] as Array<{ name: string; isTypeOnly: boolean; source: string }>
+      imports: [] as Array<{ name: string; isTypeOnly: boolean; source: string }>,
     };
 
     if (!tree?.rootNode) return result;
@@ -1959,7 +2058,7 @@ export class VueParser extends BaseFrameworkParser {
           const properties = this.extractInterfaceProperties(node);
           result.interfaces.push({
             name: interfaceName,
-            properties
+            properties,
           });
         }
       }
@@ -1972,7 +2071,7 @@ export class VueParser extends BaseFrameworkParser {
           const definition = node.text;
           result.types.push({
             name: typeName,
-            definition
+            definition,
           });
         }
       }
@@ -2003,7 +2102,7 @@ export class VueParser extends BaseFrameworkParser {
             result.imports.push({
               name,
               isTypeOnly: true,
-              source
+              source,
             });
           }
         }
@@ -2110,7 +2209,7 @@ export class VueParser extends BaseFrameworkParser {
         // Also add kebab-case version for compatibility
         const kebabCase = component
           .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2') // Handle consecutive capitals
-          .replace(/([a-z])([A-Z])/g, '$1-$2')      // Handle normal camelCase
+          .replace(/([a-z])([A-Z])/g, '$1-$2') // Handle normal camelCase
           .toLowerCase();
         builtInComponents.push(kebabCase);
       }
@@ -2135,10 +2234,27 @@ export class VueParser extends BaseFrameworkParser {
       arguments?: string;
     }> = [];
 
-    const builtInDirectives = ['if', 'else', 'else-if', 'show', 'for', 'on', 'bind', 'model', 'slot', 'pre', 'cloak', 'once', 'memo', 'text', 'html'];
+    const builtInDirectives = [
+      'if',
+      'else',
+      'else-if',
+      'show',
+      'for',
+      'on',
+      'bind',
+      'model',
+      'slot',
+      'pre',
+      'cloak',
+      'once',
+      'memo',
+      'text',
+      'html',
+    ];
 
     // Match directives: v-directive:argument.modifier1.modifier2="value"
-    const directiveRegex = /v-([a-zA-Z][a-zA-Z0-9-]*)(?::([a-zA-Z][a-zA-Z0-9-]*))?(?:\.([a-zA-Z0-9.-]+))?/g;
+    const directiveRegex =
+      /v-([a-zA-Z][a-zA-Z0-9-]*)(?::([a-zA-Z][a-zA-Z0-9-]*))?(?:\.([a-zA-Z0-9.-]+))?/g;
 
     let match: RegExpExecArray | null;
     while ((match = directiveRegex.exec(templateContent)) !== null) {
@@ -2146,20 +2262,23 @@ export class VueParser extends BaseFrameworkParser {
       const argument = match[2];
       const modifiers = match[3] ? match[3].split('.') : [];
 
-      const type: 'built-in' | 'custom' = builtInDirectives.includes(directiveName) ? 'built-in' : 'custom';
+      const type: 'built-in' | 'custom' = builtInDirectives.includes(directiveName)
+        ? 'built-in'
+        : 'custom';
 
       const directive = {
         name: directiveName,
         type,
         modifiers,
-        ...(argument && { arguments: argument })
+        ...(argument && { arguments: argument }),
       };
 
       // Avoid duplicates
-      const exists = directives.some(d =>
-        d.name === directive.name &&
-        d.arguments === directive.arguments &&
-        JSON.stringify(d.modifiers) === JSON.stringify(directive.modifiers)
+      const exists = directives.some(
+        d =>
+          d.name === directive.name &&
+          d.arguments === directive.arguments &&
+          JSON.stringify(d.modifiers) === JSON.stringify(directive.modifiers)
       );
 
       if (!exists) {
@@ -2185,7 +2304,8 @@ export class VueParser extends BaseFrameworkParser {
     // Fixed regex to properly handle scoped slot patterns in template content
     // The templateContent contains inner template content, so we search for template tags within it
     // Matches: <template #slotName="{ prop1, prop2 }"> or <template v-slot:slotName="{ prop1, prop2 }">
-    const scopedSlotRegex = /<template\s+(?:#([a-zA-Z][a-zA-Z0-9-]*)|v-slot:([a-zA-Z][a-zA-Z0-9-]*))="?\{\s*([^}]*)\s*\}"?/g;
+    const scopedSlotRegex =
+      /<template\s+(?:#([a-zA-Z][a-zA-Z0-9-]*)|v-slot:([a-zA-Z][a-zA-Z0-9-]*))="?\{\s*([^}]*)\s*\}"?/g;
 
     let match: RegExpExecArray | null;
     while ((match = scopedSlotRegex.exec(templateContent)) !== null) {
@@ -2200,7 +2320,7 @@ export class VueParser extends BaseFrameworkParser {
 
       scopedSlots.push({
         name: slotName,
-        props
+        props,
       });
     }
 
@@ -2262,7 +2382,8 @@ export class VueParser extends BaseFrameworkParser {
     }> = [];
 
     // Match @event.modifier="handler" or v-on:event.modifier="handler"
-    const eventRegex = /(?:@([a-zA-Z][a-zA-Z0-9-]*)|v-on:([a-zA-Z][a-zA-Z0-9-]*))(?:\.([a-zA-Z0-9.-]+))?="([^"]+)"/g;
+    const eventRegex =
+      /(?:@([a-zA-Z][a-zA-Z0-9-]*)|v-on:([a-zA-Z][a-zA-Z0-9-]*))(?:\.([a-zA-Z0-9.-]+))?="([^"]+)"/g;
 
     let match: RegExpExecArray | null;
     while ((match = eventRegex.exec(templateContent)) !== null) {
@@ -2273,7 +2394,7 @@ export class VueParser extends BaseFrameworkParser {
       handlers.push({
         event,
         handler,
-        modifiers
+        modifiers,
       });
     }
 
@@ -2289,9 +2410,6 @@ export class VueParser extends BaseFrameworkParser {
     try {
       // Skip lifecycle extraction for large scripts to avoid Tree-sitter limits
       if (scriptContent.length > 28000) {
-        logger.debug('Skipping lifecycle extraction for large Vue script', {
-          scriptSize: scriptContent.length
-        });
         return lifecycleMethods;
       }
 
@@ -2299,9 +2417,17 @@ export class VueParser extends BaseFrameworkParser {
       if (!tree?.rootNode) return lifecycleMethods;
 
       const vueLifecycleHooks = [
-        'beforeCreate', 'created', 'beforeMount', 'mounted',
-        'beforeUpdate', 'updated', 'beforeUnmount', 'unmounted',
-        'activated', 'deactivated', 'errorCaptured'
+        'beforeCreate',
+        'created',
+        'beforeMount',
+        'mounted',
+        'beforeUpdate',
+        'updated',
+        'beforeUnmount',
+        'unmounted',
+        'activated',
+        'deactivated',
+        'errorCaptured',
       ];
 
       const traverse = (node: any) => {
@@ -2338,12 +2464,12 @@ export class VueParser extends BaseFrameworkParser {
             // Convert onMounted -> mounted, onCreated -> created, etc.
             const hookName = functionName.substring(2).toLowerCase();
             const lifecycleMap: Record<string, string> = {
-              'mounted': 'mounted',
-              'updated': 'updated',
-              'unmounted': 'unmounted',
-              'beforemount': 'beforeMount',
-              'beforeupdate': 'beforeUpdate',
-              'beforeunmount': 'beforeUnmount'
+              mounted: 'mounted',
+              updated: 'updated',
+              unmounted: 'unmounted',
+              beforemount: 'beforeMount',
+              beforeupdate: 'beforeUpdate',
+              beforeunmount: 'beforeUnmount',
             };
 
             if (lifecycleMap[hookName]) {
@@ -2410,10 +2536,6 @@ export class VueParser extends BaseFrameworkParser {
     try {
       // Skip composable detection for large files to avoid Tree-sitter limits
       if (content.length > 28000) {
-        logger.debug('Skipping composable detection for large file', {
-          filePath,
-          contentSize: content.length
-        });
         return composables;
       }
 
@@ -2432,13 +2554,14 @@ export class VueParser extends BaseFrameworkParser {
             isDefault: func.isDefault,
             parameters: func.parameters,
             returns: func.returns,
-            lifecycle: func.dependencies.filter(d => ['onMounted', 'onUnmounted', 'onUpdated'].includes(d))
+            lifecycle: func.dependencies.filter(d =>
+              ['onMounted', 'onUnmounted', 'onUpdated'].includes(d)
+            ),
           },
         };
 
         composables.push(composable);
       }
-
     } catch (error) {
       logger.error(`Failed to parse Vue composables in ${filePath}`, { error });
     }
@@ -2485,8 +2608,12 @@ export class VueParser extends BaseFrameworkParser {
         const valueNode = node.child(2);
         const name = nameNode?.text;
 
-        if (name && name.startsWith('use') && name.length > 3 &&
-            (valueNode?.type === 'arrow_function' || valueNode?.type === 'function_expression')) {
+        if (
+          name &&
+          name.startsWith('use') &&
+          name.length > 3 &&
+          (valueNode?.type === 'arrow_function' || valueNode?.type === 'function_expression')
+        ) {
           functions.push(this.analyzeComposableFunction(valueNode, name, false));
         }
       }
@@ -2496,9 +2623,12 @@ export class VueParser extends BaseFrameworkParser {
         let funcNode = null;
         for (let i = 0; i < node.childCount; i++) {
           const child = node.child(i);
-          if (child && (child.type === 'function_declaration' ||
+          if (
+            child &&
+            (child.type === 'function_declaration' ||
               child.type === 'arrow_function' ||
-              child.type === 'function_expression')) {
+              child.type === 'function_expression')
+          ) {
             funcNode = child;
             break;
           }
@@ -2526,7 +2656,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Analyze a composable function to extract its metadata
    */
-  private analyzeComposableFunction(node: any, name: string, isDefault: boolean): {
+  private analyzeComposableFunction(
+    node: any,
+    name: string,
+    isDefault: boolean
+  ): {
     name: string;
     returns: string[];
     dependencies: string[];
@@ -2585,7 +2719,12 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Analyze composable function body for return values and dependencies
    */
-  private analyzeComposableBody(body: any, returns: string[], dependencies: string[], reactiveRefs: string[]): void {
+  private analyzeComposableBody(
+    body: any,
+    returns: string[],
+    dependencies: string[],
+    reactiveRefs: string[]
+  ): void {
     const traverse = (node: any) => {
       // Look for return statements
       if (node.type === 'return_statement') {
@@ -2689,10 +2828,6 @@ export class VueParser extends BaseFrameworkParser {
     try {
       // Skip route analysis for large files to avoid Tree-sitter limits
       if (content.length > 28000) {
-        logger.debug('Skipping route analysis for large file', {
-          filePath,
-          contentSize: content.length
-        });
         return routes;
       }
 
@@ -2701,7 +2836,6 @@ export class VueParser extends BaseFrameworkParser {
 
       // Find route definitions in different patterns
       this.findRouteDefinitions(tree.rootNode, routes, filePath);
-
     } catch (error) {
       logger.error(`Failed to parse Vue Router routes in ${filePath}`, { error });
     }
@@ -2712,7 +2846,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Find and extract route definitions from AST
    */
-  private findRouteDefinitions(node: Parser.SyntaxNode, routes: VueRoute[], filePath: string): void {
+  private findRouteDefinitions(
+    node: Parser.SyntaxNode,
+    routes: VueRoute[],
+    filePath: string
+  ): void {
     const traverse = (node: Parser.SyntaxNode) => {
       // Pattern 1: createRouter({ routes: [...] })
       if (node.type === 'call_expression') {
@@ -2779,7 +2917,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse routes array and extract individual route objects
    */
-  private parseRoutesArray(arrayNode: Parser.SyntaxNode, routes: VueRoute[], filePath: string): void {
+  private parseRoutesArray(
+    arrayNode: Parser.SyntaxNode,
+    routes: VueRoute[],
+    filePath: string
+  ): void {
     for (let i = 0; i < arrayNode.childCount; i++) {
       const routeNode = arrayNode.child(i);
       if (routeNode?.type === 'object') {
@@ -2801,7 +2943,7 @@ export class VueParser extends BaseFrameworkParser {
       filePath,
       path: '',
       component: null,
-      metadata: {}
+      metadata: {},
     };
 
     let metaObject: any = {};
@@ -2832,7 +2974,10 @@ export class VueParser extends BaseFrameworkParser {
             route.metadata.component = componentValue;
 
             // Check if it's a lazy loaded component
-            if (valueNode.type === 'arrow_function' || this.getVueNodeText(valueNode).includes('import(')) {
+            if (
+              valueNode.type === 'arrow_function' ||
+              this.getVueNodeText(valueNode).includes('import(')
+            ) {
               route.metadata.lazy = true;
             }
             break;
@@ -2932,10 +3077,6 @@ export class VueParser extends BaseFrameworkParser {
     try {
       // Skip store analysis for large files to avoid Tree-sitter limits
       if (content.length > 28000) {
-        logger.debug('Skipping store analysis for large file', {
-          filePath,
-          contentSize: content.length
-        });
         return [];
       }
 
@@ -2962,15 +3103,14 @@ export class VueParser extends BaseFrameworkParser {
             getters: storeDefinition.getters,
             actions: storeDefinition.actions,
             composableName: storeDefinition.composableName,
-            isDefaultExport: storeDefinition.isDefaultExport
-          }
+            isDefaultExport: storeDefinition.isDefaultExport,
+          },
         };
 
         stores.push(store);
       }
 
       return stores;
-
     } catch (error) {
       logger.error(`Failed to parse Pinia stores in ${filePath}`, { error });
       return [];
@@ -3164,7 +3304,7 @@ export class VueParser extends BaseFrameworkParser {
       actions,
       composableName,
       isDefaultExport,
-      style
+      style,
     };
   }
 
@@ -3212,7 +3352,10 @@ export class VueParser extends BaseFrameworkParser {
             }
           }
           // Check if it's a function (action)
-          else if (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression') {
+          else if (
+            valueNode.type === 'arrow_function' ||
+            valueNode.type === 'function_expression'
+          ) {
             actions.push(varName);
           }
         }
@@ -3347,10 +3490,6 @@ export class VueParser extends BaseFrameworkParser {
     try {
       // Skip component analysis for large files to avoid Tree-sitter limits
       if (content.length > 28000) {
-        logger.debug('Skipping component analysis for large file', {
-          filePath,
-          contentSize: content.length
-        });
         return null;
       }
 
@@ -3380,12 +3519,11 @@ export class VueParser extends BaseFrameworkParser {
           props: componentDefinition.props.map(p => p.name),
           emits: componentDefinition.emits,
           lifecycle: componentDefinition.lifecycle || [],
-          definitionType: componentDefinition.definitionType
+          definitionType: componentDefinition.definitionType,
         },
       };
 
       return component;
-
     } catch (error) {
       logger.error(`Failed to parse Vue component in ${filePath}`, { error });
       return null;
@@ -3455,8 +3593,10 @@ export class VueParser extends BaseFrameworkParser {
       // Pattern 4: createApp({ ... }) or new Vue({ ... })
       if (node.type === 'call_expression') {
         const functionNode = node.child(0);
-        if (functionNode?.text === 'createApp' ||
-           (functionNode?.type === 'new_expression' && functionNode.child(1)?.text === 'Vue')) {
+        if (
+          functionNode?.text === 'createApp' ||
+          (functionNode?.type === 'new_expression' && functionNode.child(1)?.text === 'Vue')
+        ) {
           const argsNode = node.child(1);
           const configNode = argsNode?.child(1); // First argument
           if (configNode?.type === 'object') {
@@ -3483,7 +3623,16 @@ export class VueParser extends BaseFrameworkParser {
    * Check if an object looks like a Vue component configuration
    */
   private looksLikeVueComponent(objectNode: Parser.SyntaxNode): boolean {
-    const componentProperties = ['data', 'computed', 'methods', 'props', 'emits', 'setup', 'template', 'render'];
+    const componentProperties = [
+      'data',
+      'computed',
+      'methods',
+      'props',
+      'emits',
+      'setup',
+      'template',
+      'render',
+    ];
 
     for (let i = 0; i < objectNode.childCount; i++) {
       const pairNode = objectNode.child(i);
@@ -3503,7 +3652,10 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Parse Vue component options object
    */
-  private parseComponentOptions(configNode: Parser.SyntaxNode, definitionType: string): {
+  private parseComponentOptions(
+    configNode: Parser.SyntaxNode,
+    definitionType: string
+  ): {
     props: PropDefinition[];
     emits: string[];
     slots: string[];
@@ -3523,7 +3675,7 @@ export class VueParser extends BaseFrameworkParser {
       isCompositionAPI: false,
       hasTemplate: false,
       definitionType,
-      lifecycle: [] as string[]
+      lifecycle: [] as string[],
     };
 
     for (let i = 0; i < configNode.childCount; i++) {
@@ -3657,8 +3809,10 @@ export class VueParser extends BaseFrameworkParser {
   }
 
   private isPiniaStore(filePath: string, content: string): boolean {
-    const hasStoreInPath = filePath.includes('store') || filePath.includes('stores') ||
-                          filePath.toLowerCase().includes('pinia');
+    const hasStoreInPath =
+      filePath.includes('store') ||
+      filePath.includes('stores') ||
+      filePath.toLowerCase().includes('pinia');
     return hasStoreInPath && this.containsPattern(content, /defineStore/);
   }
 
@@ -3703,12 +3857,14 @@ export class VueParser extends BaseFrameworkParser {
             dependencies: [],
             imports: [],
             exports: [],
-            errors: [{
-              message: 'Failed to parse Vue script content',
-              line: 1,
-              column: 1,
-              severity: 'error',
-            }],
+            errors: [
+              {
+                message: 'Failed to parse Vue script content',
+                line: 1,
+                column: 1,
+                severity: 'error',
+              },
+            ],
           };
         }
 
@@ -3740,12 +3896,14 @@ export class VueParser extends BaseFrameworkParser {
           dependencies: [],
           imports: [],
           exports: [],
-          errors: [{
-            message: `Vue script parsing error: ${error.message}`,
-            line: 1,
-            column: 1,
-            severity: 'error',
-          }],
+          errors: [
+            {
+              message: `Vue script parsing error: ${error.message}`,
+              line: 1,
+              column: 1,
+              severity: 'error',
+            },
+          ],
         };
       }
     }
@@ -3787,7 +3945,7 @@ export class VueParser extends BaseFrameworkParser {
       dependencies: [] as any[],
       imports: [] as any[],
       exports: [] as any[],
-      errors: [] as any[]
+      errors: [] as any[],
     };
 
     for (const chunk of chunks) {
@@ -3831,7 +3989,7 @@ export class VueParser extends BaseFrameworkParser {
               start_line: node.startPosition?.row + 1 || 1,
               end_line: node.endPosition?.row + 1 || 1,
               is_exported: false,
-              signature: this.getVueNodeText(node)
+              signature: this.getVueNodeText(node),
             });
           } else {
             symbols.push({
@@ -3840,7 +3998,7 @@ export class VueParser extends BaseFrameworkParser {
               start_line: node.startPosition?.row + 1 || 1,
               end_line: node.endPosition?.row + 1 || 1,
               is_exported: false,
-              signature: this.getVueNodeText(node)
+              signature: this.getVueNodeText(node),
             });
           }
         }
@@ -3864,16 +4022,17 @@ export class VueParser extends BaseFrameworkParser {
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
-            signature: this.getVueNodeText(node)
+            signature: this.getVueNodeText(node),
           });
         }
       }
 
-
       // Interface declarations: interface User {}
       // Handle both proper interface_declaration and ERROR nodes from JS parser on TS
-      if (node.type === 'interface_declaration' ||
-          (node.type === 'ERROR' && node.text.startsWith('interface '))) {
+      if (
+        node.type === 'interface_declaration' ||
+        (node.type === 'ERROR' && node.text.startsWith('interface '))
+      ) {
         let nameNode = null;
 
         if (node.type === 'interface_declaration') {
@@ -3896,7 +4055,7 @@ export class VueParser extends BaseFrameworkParser {
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
-            signature: this.getVueNodeText(node)
+            signature: this.getVueNodeText(node),
           });
         }
       }
@@ -3911,7 +4070,7 @@ export class VueParser extends BaseFrameworkParser {
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
-            signature: this.getVueNodeText(node)
+            signature: this.getVueNodeText(node),
           });
         }
       }
@@ -3926,7 +4085,7 @@ export class VueParser extends BaseFrameworkParser {
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
-            signature: this.getVueNodeText(node)
+            signature: this.getVueNodeText(node),
           });
         }
       }
@@ -3939,9 +4098,21 @@ export class VueParser extends BaseFrameworkParser {
 
           // Check if this is a Vue lifecycle hook or composable that takes a callback
           const vueCallbacks = [
-            'onMounted', 'onUnmounted', 'onUpdated', 'onCreated', 'onBeforeMount', 'onBeforeUpdate',
-            'onBeforeUnmount', 'onActivated', 'onDeactivated', 'onErrorCaptured',
-            'watch', 'watchEffect', 'computed', 'readonly', 'customRef'
+            'onMounted',
+            'onUnmounted',
+            'onUpdated',
+            'onCreated',
+            'onBeforeMount',
+            'onBeforeUpdate',
+            'onBeforeUnmount',
+            'onActivated',
+            'onDeactivated',
+            'onErrorCaptured',
+            'watch',
+            'watchEffect',
+            'computed',
+            'readonly',
+            'customRef',
           ];
 
           if (vueCallbacks.includes(functionName)) {
@@ -3950,14 +4121,17 @@ export class VueParser extends BaseFrameworkParser {
             if (argumentsNode) {
               for (let i = 0; i < argumentsNode.childCount; i++) {
                 const child = argumentsNode.child(i);
-                if (child && (child.type === 'arrow_function' || child.type === 'function_expression')) {
+                if (
+                  child &&
+                  (child.type === 'arrow_function' || child.type === 'function_expression')
+                ) {
                   symbols.push({
                     name: `${functionName}_callback`,
                     symbol_type: 'function',
                     start_line: child.startPosition?.row + 1 || 1,
                     end_line: child.endPosition?.row + 1 || 1,
                     is_exported: false,
-                    signature: this.getVueNodeText(child)
+                    signature: this.getVueNodeText(child),
                   });
                   break;
                 }
@@ -4008,7 +4182,10 @@ export class VueParser extends BaseFrameworkParser {
    * Override extractCallDependency to properly extract method names from member expressions
    * and identify the actual calling function
    */
-  protected extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  protected extractCallDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) return null;
 
@@ -4026,7 +4203,20 @@ export class VueParser extends BaseFrameworkParser {
       return null;
     }
 
-    const skipMethods = ['console', 'log', 'error', 'warn', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'toString', 'valueOf'];
+    const skipMethods = [
+      'console',
+      'log',
+      'error',
+      'warn',
+      'push',
+      'pop',
+      'shift',
+      'unshift',
+      'slice',
+      'splice',
+      'toString',
+      'valueOf',
+    ];
     if (skipMethods.includes(functionName)) return null;
 
     // Find the actual containing function instead of using generic "caller"
@@ -4036,7 +4226,7 @@ export class VueParser extends BaseFrameworkParser {
       from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
     };
   }
 
@@ -4047,8 +4237,8 @@ export class VueParser extends BaseFrameworkParser {
     const callLine = callNode.startPosition.row + 1;
 
     // Find all extracted symbols that contain this line
-    const candidateSymbols = this.extractedSymbols.filter(symbol =>
-      symbol.start_line <= callLine && callLine <= symbol.end_line
+    const candidateSymbols = this.extractedSymbols.filter(
+      symbol => symbol.start_line <= callLine && callLine <= symbol.end_line
     );
 
     if (candidateSymbols.length === 0) {
@@ -4142,7 +4332,7 @@ export class VueParser extends BaseFrameworkParser {
             imported_names: importedNames,
             import_type: importType,
             line_number: node.startPosition?.row + 1 || 1,
-            is_dynamic: false
+            is_dynamic: false,
           });
         }
       }
@@ -4160,7 +4350,7 @@ export class VueParser extends BaseFrameworkParser {
               imported_names: [],
               import_type: 'side_effect',
               line_number: node.startPosition?.row + 1 || 1,
-              is_dynamic: true
+              is_dynamic: true,
             });
           }
         }
@@ -4305,7 +4495,6 @@ export class VueParser extends BaseFrameworkParser {
           });
         }
       }
-
     } catch (error) {
       logger.warn(`Error extracting template symbols: ${error}`);
     }
@@ -4325,10 +4514,40 @@ export class VueParser extends BaseFrameworkParser {
    */
   private isJavaScriptKeyword(word: string): boolean {
     const keywords = new Set([
-      'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
-      'do', 'switch', 'case', 'break', 'continue', 'try', 'catch', 'finally',
-      'throw', 'new', 'this', 'typeof', 'instanceof', 'in', 'of', 'true', 'false',
-      'null', 'undefined', 'void', 'delete', 'class', 'extends', 'super', 'static'
+      'const',
+      'let',
+      'var',
+      'function',
+      'return',
+      'if',
+      'else',
+      'for',
+      'while',
+      'do',
+      'switch',
+      'case',
+      'break',
+      'continue',
+      'try',
+      'catch',
+      'finally',
+      'throw',
+      'new',
+      'this',
+      'typeof',
+      'instanceof',
+      'in',
+      'of',
+      'true',
+      'false',
+      'null',
+      'undefined',
+      'void',
+      'delete',
+      'class',
+      'extends',
+      'super',
+      'static',
     ]);
 
     return keywords.has(word);
@@ -4363,7 +4582,6 @@ export class VueParser extends BaseFrameworkParser {
     }
     return names;
   }
-
 
   /**
    * Extract CSS Modules classes
@@ -4475,7 +4693,10 @@ export class VueParser extends BaseFrameworkParser {
       const varMatches = match[1].match(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g);
       if (varMatches) {
         for (const varMatch of varMatches) {
-          if (!variables.includes(varMatch) && !['true', 'false', 'null', 'undefined'].includes(varMatch)) {
+          if (
+            !variables.includes(varMatch) &&
+            !['true', 'false', 'null', 'undefined'].includes(varMatch)
+          ) {
             variables.push(varMatch);
           }
         }
@@ -4490,7 +4711,8 @@ export class VueParser extends BaseFrameworkParser {
    */
   private extractUtilityTypes(content: string): string[] {
     const utilityTypes: string[] = [];
-    const regex = /\b(Partial|Required|Readonly|Record|Pick|Omit|Exclude|Extract|NonNullable|Parameters|ConstructorParameters|ReturnType|InstanceType|ThisParameterType|OmitThisParameter|ThisType|Uppercase|Lowercase|Capitalize|Uncapitalize|Array|Promise)\b/g;
+    const regex =
+      /\b(Partial|Required|Readonly|Record|Pick|Omit|Exclude|Extract|NonNullable|Parameters|ConstructorParameters|ReturnType|InstanceType|ThisParameterType|OmitThisParameter|ThisType|Uppercase|Lowercase|Capitalize|Uncapitalize|Array|Promise)\b/g;
 
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
@@ -4524,6 +4746,8 @@ export class VueParser extends BaseFrameworkParser {
    * Check if content has utility types
    */
   private hasUtilityTypes(content: string): boolean {
-    return /\b(Partial|Required|Readonly|Record|Pick|Omit|Exclude|Extract|NonNullable|Parameters|ConstructorParameters|ReturnType|InstanceType|Array|Promise)</.test(content);
+    return /\b(Partial|Required|Readonly|Record|Pick|Omit|Exclude|Extract|NonNullable|Parameters|ConstructorParameters|ReturnType|InstanceType|Array|Promise)</.test(
+      content
+    );
   }
 }
