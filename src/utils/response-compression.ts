@@ -52,10 +52,6 @@ export async function compressResponsePayload(
 
   // Only compress if payload exceeds threshold
   if (originalSize < config.threshold) {
-    logger.debug('Payload below compression threshold', {
-      originalSize,
-      threshold: config.threshold
-    });
     return response;
   }
 
@@ -67,27 +63,23 @@ export async function compressResponsePayload(
     // Encode compressed data as base64 for JSON transport
     const compressedString = compressed.toString('base64');
 
-    logger.debug('Payload compressed successfully', {
-      originalSize,
-      compressedSize,
-      compressionRatio: `${compressionRatio.toFixed(1)}%`
-    });
-
     return {
-      content: [{
-        type: 'text',
-        text: compressedString
-      }],
+      content: [
+        {
+          type: 'text',
+          text: compressedString,
+        },
+      ],
       metadata: {
         compressed: true,
         originalSize,
         compressedSize,
-        compressionRatio
-      }
+        compressionRatio,
+      },
     };
   } catch (error) {
     logger.error('Compression failed, returning original payload', {
-      error: (error as Error).message
+      error: (error as Error).message,
     });
     return response;
   }
@@ -96,9 +88,7 @@ export async function compressResponsePayload(
 /**
  * Decompresses MCP response payload if it was compressed
  */
-export async function decompressResponsePayload(
-  response: CompressedResponse
-): Promise<any> {
+export async function decompressResponsePayload(response: CompressedResponse): Promise<any> {
   if (!response.metadata?.compressed) {
     return response;
   }
@@ -109,10 +99,12 @@ export async function decompressResponsePayload(
     const decompressedString = decompressed.toString('utf8');
 
     return {
-      content: [{
-        type: 'text',
-        text: decompressedString
-      }]
+      content: [
+        {
+          type: 'text',
+          text: decompressedString,
+        },
+      ],
     };
   } catch (error) {
     logger.error('Decompression failed', { error: (error as Error).message });
@@ -131,11 +123,6 @@ export function optimizeResponsePayload(response: any, maxSize: number = 1024 * 
     return response;
   }
 
-  logger.debug('Response payload exceeds max size, optimizing', {
-    currentSize,
-    maxSize
-  });
-
   // Implement intelligent truncation strategies
   if (response.content?.[0]?.data) {
     const data = JSON.parse(response.content[0].data);
@@ -147,7 +134,7 @@ export function optimizeResponsePayload(response: any, maxSize: number = 1024 * 
       data.truncated = {
         total_results: originalCount,
         showing: data.callers.length,
-        message: `Results truncated due to size limits. Use pagination for complete results.`
+        message: `Results truncated due to size limits. Use pagination for complete results.`,
       };
     }
 
@@ -159,7 +146,7 @@ export function optimizeResponsePayload(response: any, maxSize: number = 1024 * 
           data[key] = data[key].slice(0, 100);
           data[`${key}_truncated`] = {
             total: originalCount,
-            showing: 100
+            showing: 100,
           };
         }
       }

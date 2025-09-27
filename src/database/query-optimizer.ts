@@ -70,7 +70,6 @@ export class QueryOptimizer {
       }
     }
 
-    logger.debug('Executing optimized transitive callers query', { symbolId, maxDepth, dependencyTypes });
 
     try {
       // Use recursive CTE for efficient transitive traversal
@@ -146,13 +145,6 @@ export class QueryOptimizer {
       const executionTime = Date.now() - startTime;
       const metrics = this.createMetrics('transitive-callers', startTime, transformedResults.length, false);
 
-      logger.debug('Optimized transitive callers query completed', {
-        symbolId,
-        maxDepth,
-        resultsCount: transformedResults.length,
-        executionTimeMs: executionTime
-      });
-
       return {
         data: transformedResults,
         fromCache: false,
@@ -191,7 +183,6 @@ export class QueryOptimizer {
       }
     }
 
-    logger.debug('Executing optimized transitive dependencies query', { symbolId, maxDepth, dependencyTypes });
 
     try {
       // Use recursive CTE for efficient transitive traversal
@@ -266,13 +257,6 @@ export class QueryOptimizer {
 
       const executionTime = Date.now() - startTime;
       const metrics = this.createMetrics('transitive-dependencies', startTime, transformedResults.length, false);
-
-      logger.debug('Optimized transitive dependencies query completed', {
-        symbolId,
-        maxDepth,
-        resultsCount: transformedResults.length,
-        executionTimeMs: executionTime
-      });
 
       return {
         data: transformedResults,
@@ -524,12 +508,10 @@ export class QueryOptimizer {
    */
   clearCache(): void {
     this.cache.clear();
-    logger.debug('Query optimizer cache cleared');
   }
 
   clearMetrics(): void {
     this.metrics = [];
-    logger.debug('Query optimizer metrics cleared');
   }
 
   /**

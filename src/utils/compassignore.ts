@@ -35,17 +35,11 @@ export class CompassIgnore {
       logger.info('CompassIgnore loaded from file', {
         file: compassignorePath,
         patterns: patterns.length,
-        gitignorePatterns: gitignorePatterns.length
+        gitignorePatterns: gitignorePatterns.length,
       });
 
       return new CompassIgnore(patterns, gitignorePatterns);
     } catch (error) {
-      // File doesn't exist or can't be read - return empty instance
-      logger.debug('Could not load .compassignore file', {
-        path: compassignorePath,
-        error: (error as Error).message
-      });
-
       // Try to load just .gitignore
       const dir = path.dirname(compassignorePath);
       const gitignorePatterns = await this.loadGitignore(dir);
@@ -106,12 +100,12 @@ export class CompassIgnore {
   /**
    * Get all active patterns (for debugging)
    */
-  getPatterns(): { patterns: string[], gitignore: string[], regex: string[], glob: string[] } {
+  getPatterns(): { patterns: string[]; gitignore: string[]; regex: string[]; glob: string[] } {
     return {
       patterns: [...this.patterns],
       gitignore: [...this.gitignorePatterns],
       regex: this.regexPatterns.map(r => r.source),
-      glob: [...this.globPatterns]
+      glob: [...this.globPatterns],
     };
   }
 
@@ -123,8 +117,7 @@ export class CompassIgnore {
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0 && !line.startsWith('#')) // Remove empty lines and comments
-      .filter(line => !line.startsWith('!')) // TODO: Future support for negation patterns
-      ;
+      .filter(line => !line.startsWith('!')); // TODO: Future support for negation patterns
   }
 
   /**
@@ -135,11 +128,6 @@ export class CompassIgnore {
       const gitignorePath = path.join(dirPath, '.gitignore');
       const content = await fs.readFile(gitignorePath, 'utf-8');
       const patterns = this.parseIgnoreContent(content);
-
-      logger.debug('Loaded .gitignore patterns', {
-        path: gitignorePath,
-        count: patterns.length
-      });
 
       return patterns;
     } catch (error) {
@@ -161,7 +149,6 @@ export class CompassIgnore {
         const regexSource = pattern.slice(7, -1); // Remove '/regex:' and trailing '/'
         try {
           this.regexPatterns.push(new RegExp(regexSource));
-          logger.debug('Added regex pattern', { pattern: regexSource });
         } catch (error) {
           logger.warn('Invalid regex pattern', { pattern, error: (error as Error).message });
         }
@@ -170,13 +157,6 @@ export class CompassIgnore {
         this.globPatterns.push(pattern);
       }
     }
-
-    logger.debug('Parsed patterns', {
-      total: this.patterns.length,
-      regex: this.regexPatterns.length,
-      glob: this.globPatterns.length,
-      gitignore: this.gitignorePatterns.length
-    });
   }
 
   /**
@@ -185,7 +165,6 @@ export class CompassIgnore {
   private matchesGlobPatterns(normalizedPath: string, fileName: string): boolean {
     for (const pattern of this.globPatterns) {
       if (this.matchesGlob(normalizedPath, fileName, pattern)) {
-        logger.debug('Path matched glob pattern', { path: normalizedPath, pattern });
         return true;
       }
     }
@@ -198,7 +177,6 @@ export class CompassIgnore {
   private matchesRegexPatterns(normalizedPath: string): boolean {
     for (const regex of this.regexPatterns) {
       if (regex.test(normalizedPath)) {
-        logger.debug('Path matched regex pattern', { path: normalizedPath, pattern: regex.source });
         return true;
       }
     }
@@ -211,7 +189,6 @@ export class CompassIgnore {
   private matchesGitignorePatterns(normalizedPath: string): boolean {
     for (const pattern of this.gitignorePatterns) {
       if (this.matchesGitignorePattern(normalizedPath, pattern)) {
-        logger.debug('Path matched gitignore pattern', { path: normalizedPath, pattern });
         return true;
       }
     }
@@ -227,9 +204,11 @@ export class CompassIgnore {
     // Directory patterns ending with /
     if (pattern.endsWith('/')) {
       const dirPattern = pattern.slice(0, -1);
-      return normalizedPath.includes('/' + dirPattern + '/') ||
-             normalizedPath.startsWith(dirPattern + '/') ||
-             normalizedPath === dirPattern;
+      return (
+        normalizedPath.includes('/' + dirPattern + '/') ||
+        normalizedPath.startsWith(dirPattern + '/') ||
+        normalizedPath === dirPattern
+      );
     }
 
     // Absolute patterns starting with /
@@ -244,40 +223,49 @@ export class CompassIgnore {
 
     // Simple wildcard patterns
     if (pattern.includes('*') || pattern.includes('?')) {
-      return this.matchesGlobPattern(fileName, pattern) ||
-             this.matchesGlobPattern(normalizedPath, pattern);
+      return (
+        this.matchesGlobPattern(fileName, pattern) ||
+        this.matchesGlobPattern(normalizedPath, pattern)
+      );
     }
 
     // Exact matches
-    return normalizedPath === pattern ||
-           fileName === pattern ||
-           normalizedPath.endsWith('/' + pattern);
+    return (
+      normalizedPath === pattern || fileName === pattern || normalizedPath.endsWith('/' + pattern)
+    );
   }
 
   /**
    * Handle double asterisk glob patterns
    */
-  private matchesDoubleAsterisk(normalizedPath: string, fileName: string, pattern: string): boolean {
+  private matchesDoubleAsterisk(
+    normalizedPath: string,
+    fileName: string,
+    pattern: string
+  ): boolean {
     if (pattern.startsWith('**/')) {
       // **/pattern - matches pattern anywhere in the path
       const suffix = pattern.slice(3);
-      return normalizedPath.endsWith('/' + suffix) ||
-             fileName === suffix ||
-             this.matchesGlobPattern(fileName, suffix);
+      return (
+        normalizedPath.endsWith('/' + suffix) ||
+        fileName === suffix ||
+        this.matchesGlobPattern(fileName, suffix)
+      );
     }
 
     if (pattern.endsWith('/**')) {
       // pattern/** - matches anything under pattern directory
       const prefix = pattern.slice(0, -3);
-      return normalizedPath.startsWith(prefix + '/') ||
-             normalizedPath === prefix;
+      return normalizedPath.startsWith(prefix + '/') || normalizedPath === prefix;
     }
 
     if (pattern.includes('/**/')) {
       // pattern/**/suffix - matches suffix anywhere under pattern
       const [prefix, suffix] = pattern.split('/**/');
-      return normalizedPath.startsWith(prefix + '/') &&
-             (normalizedPath.includes('/' + suffix) || normalizedPath.endsWith('/' + suffix));
+      return (
+        normalizedPath.startsWith(prefix + '/') &&
+        (normalizedPath.includes('/' + suffix) || normalizedPath.endsWith('/' + suffix))
+      );
     }
 
     return false;
@@ -290,8 +278,8 @@ export class CompassIgnore {
     // Convert glob pattern to regex
     const regexPattern = pattern
       .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except * and ?
-      .replace(/\*/g, '.*')  // * matches any characters
-      .replace(/\?/g, '.');  // ? matches any single character
+      .replace(/\*/g, '.*') // * matches any characters
+      .replace(/\?/g, '.'); // ? matches any single character
 
     const regex = new RegExp('^' + regexPattern + '$');
     return regex.test(text);
@@ -370,7 +358,7 @@ export const DEFAULT_IGNORE_PATTERNS = [
   '*.tmp',
   '*.temp',
   '.tmp/',
-  '.temp/'
+  '.temp/',
 ];
 
 /**

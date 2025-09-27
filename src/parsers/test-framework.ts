@@ -2,7 +2,16 @@ import Parser from 'tree-sitter';
 import JavaScript from 'tree-sitter-javascript';
 import { BaseFrameworkParser, FrameworkParseOptions, ParseFileResult } from './base-framework';
 import { MergedParseResult } from './chunked-parser';
-import { ParsedSymbol, ParsedDependency, ParsedImport, ParsedExport, ParseResult, ParseOptions, ParseError, FrameworkEntity } from './base';
+import {
+  ParsedSymbol,
+  ParsedDependency,
+  ParsedImport,
+  ParsedExport,
+  ParseResult,
+  ParseOptions,
+  ParseError,
+  FrameworkEntity,
+} from './base';
 import { SymbolType, DependencyType, TestFrameworkType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import * as path from 'path';
@@ -59,11 +68,25 @@ export class TestFrameworkParser extends BaseFrameworkParser {
   }
 
   getSupportedExtensions(): string[] {
-    return ['.test.js', '.test.ts', '.spec.js', '.spec.ts', '.test.jsx', '.test.tsx', '.spec.jsx', '.spec.tsx', '.e2e.js', '.e2e.ts'];
+    return [
+      '.test.js',
+      '.test.ts',
+      '.spec.js',
+      '.spec.ts',
+      '.test.jsx',
+      '.test.tsx',
+      '.spec.jsx',
+      '.spec.tsx',
+      '.e2e.js',
+      '.e2e.ts',
+    ];
   }
 
-  async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-
+  async parseFile(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions = {}
+  ): Promise<ParseFileResult> {
     // Check if this is a test file
     if (!this.isTestFile(filePath)) {
       return {
@@ -77,22 +100,25 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         metadata: {
           framework: 'test-framework',
           fileType: 'non-test',
-          isFrameworkSpecific: false
-        }
+          isFrameworkSpecific: false,
+        },
       };
     }
 
     // Check if chunked parsing is needed for large files (force chunking for large files regardless of options)
     const forceChunkingOptions = { ...options, enableChunking: true };
     if (this.shouldUseChunking(content, forceChunkingOptions)) {
-      this.logger.debug(`Using chunked parsing for large test file`, { filePath, size: content.length });
       // Use chunked parsing for large files
       const chunkedResult = await this.parseFileInChunks(filePath, content, options);
       // Convert MergedParseResult to ParseResult with framework entities
       const baseResult = this.convertMergedResult(chunkedResult);
 
       // Add framework-specific analysis to chunked result
-      const frameworkEntities = this.analyzeFrameworkEntitiesFromResult(baseResult, content, filePath);
+      const frameworkEntities = this.analyzeFrameworkEntitiesFromResult(
+        baseResult,
+        content,
+        filePath
+      );
 
       const result: ParseFileResult = {
         filePath,
@@ -101,8 +127,8 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         metadata: {
           framework: 'test-framework',
           fileType: 'analyzed',
-          isFrameworkSpecific: frameworkEntities.length > 0
-        }
+          isFrameworkSpecific: frameworkEntities.length > 0,
+        },
       };
 
       return this.addTestSpecificAnalysis(result, content, filePath);
@@ -134,16 +160,15 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         metadata: {
           framework: 'test-framework',
           fileType: 'test',
-          isFrameworkSpecific: true
-        }
+          isFrameworkSpecific: true,
+        },
       };
-
     } catch (error) {
       result.errors.push({
         message: `Test framework analysis failed: ${(error as Error).message}`,
         line: 1,
         column: 1,
-        severity: 'warning'
+        severity: 'warning',
       });
 
       return {
@@ -153,8 +178,8 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         metadata: {
           framework: 'test-framework',
           fileType: 'test',
-          isFrameworkSpecific: true
-        }
+          isFrameworkSpecific: true,
+        },
       };
     }
   }
@@ -221,17 +246,17 @@ export class TestFrameworkParser extends BaseFrameworkParser {
   /**
    * Extract test-specific symbols like test suites and test cases
    */
-  private extractTestSymbols(filePath: string, content: string, frameworks: TestFrameworkType[]): ParsedSymbol[] {
+  private extractTestSymbols(
+    filePath: string,
+    content: string,
+    frameworks: TestFrameworkType[]
+  ): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     if (frameworks.length === 0) return symbols;
 
     // Skip detailed analysis for large test files to avoid Tree-sitter limits
     if (content.length > 28000) {
-      logger.debug('Skipping test symbol extraction for large file', {
-        filePath,
-        contentSize: content.length
-      });
       return symbols;
     }
 
@@ -247,7 +272,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         start_line: 1,
         end_line: content.split('\n').length,
         is_exported: false,
-        signature: `Test Suite: ${testSuiteName} (${frameworks.join(', ')})`
+        signature: `Test Suite: ${testSuiteName} (${frameworks.join(', ')})`,
       });
 
       // Extract test cases
@@ -272,10 +297,6 @@ export class TestFrameworkParser extends BaseFrameworkParser {
 
     // Skip detailed analysis for large test files to avoid Tree-sitter limits
     if (content.length > 28000) {
-      logger.debug('Skipping test dependency extraction for large file', {
-        filePath,
-        contentSize: content.length
-      });
       return dependencies;
     }
 
@@ -321,14 +342,18 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `${functionName}("${testName}")`
+      signature: `${functionName}("${testName}")`,
     };
   }
 
   /**
    * Extract test coverage dependency from import statement
    */
-  private extractTestCoverageDependency(node: Parser.SyntaxNode, content: string, testSuiteName: string): ParsedDependency | null {
+  private extractTestCoverageDependency(
+    node: Parser.SyntaxNode,
+    content: string,
+    testSuiteName: string
+  ): ParsedDependency | null {
     const source = this.getImportSource(node, content);
     if (!source || this.isTestFrameworkImport(source)) {
       return null;
@@ -338,7 +363,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       from_symbol: testSuiteName,
       to_symbol: source,
       dependency_type: DependencyType.TEST_COVERS,
-      line_number: this.getLineNumber(node.startIndex, content)
+      line_number: this.getLineNumber(node.startIndex, content),
     };
   }
 
@@ -351,7 +376,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       /\.test\.(js|ts|jsx|tsx)$/,
       /\.spec\.(js|ts|jsx|tsx)$/,
       /\.e2e\.(js|ts)$/,
-      /\.integration\.(js|ts)$/
+      /\.integration\.(js|ts)$/,
     ];
 
     // Check file name patterns
@@ -368,7 +393,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       '/cypress/',
       '/e2e/',
       '/integration/',
-      '/specs/'
+      '/specs/',
     ];
 
     return testDirectories.some(dir => normalizedPath.includes(dir));
@@ -413,7 +438,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       /expect\(.*\)\.toEqual/,
       /describe\s*\(/,
       /test\s*\(/,
-      /it\s*\(/
+      /it\s*\(/,
     ];
 
     return jestPatterns.some(pattern => pattern.test(content));
@@ -426,23 +451,19 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       /vi\.mock\(/,
       /vi\.fn\(/,
       /vi\.spyOn\(/,
-      /import\s*\{[^}]*vi[^}]*\}\s*from\s*['"]vitest['"]/
+      /import\s*\{[^}]*vi[^}]*\}\s*from\s*['"]vitest['"]/,
     ];
 
     return vitestPatterns.some(pattern => pattern.test(content));
   }
 
   private containsCypressPatterns(content: string, filePath: string): boolean {
-    const cypressPatterns = [
-      /cy\./,
-      /Cypress\./,
-      /import.*cypress/i,
-      /cypress\/support/i
-    ];
+    const cypressPatterns = [/cy\./, /Cypress\./, /import.*cypress/i, /cypress\/support/i];
 
-    const isCypressFile = filePath.includes('cypress/') ||
-                         filePath.includes('/cypress/') ||
-                         filePath.includes('\\cypress\\');
+    const isCypressFile =
+      filePath.includes('cypress/') ||
+      filePath.includes('/cypress/') ||
+      filePath.includes('\\cypress\\');
 
     return isCypressFile || cypressPatterns.some(pattern => pattern.test(content));
   }
@@ -454,7 +475,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       /page\./,
       /browser\./,
       /context\./,
-      /playwright/i
+      /playwright/i,
     ];
 
     return playwrightPatterns.some(pattern => pattern.test(content));
@@ -465,9 +486,15 @@ export class TestFrameworkParser extends BaseFrameworkParser {
    */
   private isTestFunction(functionName: string): boolean {
     const testFunctions = [
-      'describe', 'describe.skip', 'describe.only',
-      'test', 'test.skip', 'test.only',
-      'it', 'it.skip', 'it.only'
+      'describe',
+      'describe.skip',
+      'describe.only',
+      'test',
+      'test.skip',
+      'test.only',
+      'it',
+      'it.skip',
+      'it.only',
     ];
     return testFunctions.includes(functionName);
   }
@@ -485,7 +512,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       '@cypress',
       '@playwright',
       'playwright',
-      '@testing-library'
+      '@testing-library',
     ];
 
     return testFrameworkPackages.some(pkg => importPath.startsWith(pkg));
@@ -495,7 +522,9 @@ export class TestFrameworkParser extends BaseFrameworkParser {
 
   private getFunctionNameFromCall(node: Parser.SyntaxNode, content: string): string | null {
     if (node.type !== 'call_expression') return null;
-    const functionNode = node.children.find(child => child.type === 'identifier' || child.type === 'member_expression');
+    const functionNode = node.children.find(
+      child => child.type === 'identifier' || child.type === 'member_expression'
+    );
     if (!functionNode) return null;
     return this.getNodeText(functionNode, content);
   }
@@ -503,7 +532,9 @@ export class TestFrameworkParser extends BaseFrameworkParser {
   private getCallArguments(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
     const argumentsNode = node.children.find(child => child.type === 'arguments');
     if (!argumentsNode) return [];
-    return argumentsNode.children.filter(child => child.type !== '(' && child.type !== ')' && child.type !== ',');
+    return argumentsNode.children.filter(
+      child => child.type !== '(' && child.type !== ')' && child.type !== ','
+    );
   }
 
   private getStringLiteral(node: Parser.SyntaxNode, content: string): string | null {
@@ -535,7 +566,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false, // Will be determined by export analysis
-      signature: `function ${name}(...)`
+      signature: `function ${name}(...)`,
     };
   }
 
@@ -550,11 +581,14 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       start_line: this.getLineNumber(node.startIndex, content),
       end_line: this.getLineNumber(node.endIndex, content),
       is_exported: false,
-      signature: `var ${name}`
+      signature: `var ${name}`,
     };
   }
 
-  protected extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  protected extractCallDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     const functionName = this.getFunctionNameFromCall(node, content);
     if (!functionName) return null;
 
@@ -562,7 +596,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       from_symbol: 'current_function', // This would need better context tracking
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: this.getLineNumber(node.startIndex, content)
+      line_number: this.getLineNumber(node.startIndex, content),
     };
   }
 
@@ -575,7 +609,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       imported_names: [], // Would need more detailed parsing
       import_type: 'named',
       line_number: this.getLineNumber(node.startIndex, content),
-      is_dynamic: false
+      is_dynamic: false,
     };
   }
 
@@ -583,14 +617,17 @@ export class TestFrameworkParser extends BaseFrameworkParser {
     return {
       exported_names: [], // Would need more detailed parsing
       export_type: 'named',
-      line_number: this.getLineNumber(node.startIndex, content)
+      line_number: this.getLineNumber(node.startIndex, content),
     };
   }
 
   /**
    * Create framework entities for detected test frameworks
    */
-  private createTestFrameworkEntities(filePath: string, frameworks: TestFrameworkType[]): FrameworkEntity[] {
+  private createTestFrameworkEntities(
+    filePath: string,
+    frameworks: TestFrameworkType[]
+  ): FrameworkEntity[] {
     const entities: FrameworkEntity[] = [];
 
     if (frameworks.length === 0) return entities;
@@ -605,8 +642,8 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       metadata: {
         frameworks,
         testCases: this.testSuites.find(suite => suite.filePath === filePath)?.testCases || [],
-        detectedAt: new Date().toISOString()
-      }
+        detectedAt: new Date().toISOString(),
+      },
     });
 
     return entities;
@@ -675,26 +712,26 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         name: 'jest-test',
         pattern: /describe\s*\(|test\s*\(|it\s*\(|expect\s*\(/,
         fileExtensions: ['.test.js', '.test.ts', '.spec.js', '.spec.ts'],
-        priority: 10
+        priority: 10,
       },
       {
         name: 'vitest-test',
         pattern: /import.*vitest|vi\./,
         fileExtensions: ['.test.js', '.test.ts', '.spec.js', '.spec.ts'],
-        priority: 9
+        priority: 9,
       },
       {
         name: 'cypress-test',
         pattern: /cy\.|Cypress\./,
         fileExtensions: ['.cy.js', '.cy.ts'],
-        priority: 8
+        priority: 8,
       },
       {
         name: 'playwright-test',
         pattern: /import.*@playwright|page\./,
         fileExtensions: ['.spec.js', '.spec.ts'],
-        priority: 7
-      }
+        priority: 7,
+      },
     ];
   }
 
@@ -747,8 +784,8 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       metadata: {
         totalChunks: chunks.length,
         duplicatesRemoved: 0,
-        crossChunkReferencesFound: 0
-      }
+        crossChunkReferencesFound: 0,
+      },
     };
 
     // Track seen symbols by name and line to avoid duplicates
@@ -796,14 +833,18 @@ export class TestFrameworkParser extends BaseFrameworkParser {
       dependencies: mergedResult.dependencies,
       imports: mergedResult.imports,
       exports: mergedResult.exports,
-      errors: mergedResult.errors
+      errors: mergedResult.errors,
     };
   }
 
   /**
    * Analyze framework entities from already-parsed results
    */
-  private analyzeFrameworkEntitiesFromResult(result: ParseResult, content: string, filePath: string): FrameworkEntity[] {
+  private analyzeFrameworkEntitiesFromResult(
+    result: ParseResult,
+    content: string,
+    filePath: string
+  ): FrameworkEntity[] {
     try {
       // Framework-specific analysis based on symbols found by base parsing
       const frameworks = this.detectTestFrameworks(content, filePath);
@@ -811,7 +852,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
     } catch (error) {
       this.logger.warn('Failed to analyze framework entities from parsed result', {
         filePath,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
       return [];
     }
@@ -820,7 +861,11 @@ export class TestFrameworkParser extends BaseFrameworkParser {
   /**
    * Add test-specific analysis to parsed results
    */
-  private addTestSpecificAnalysis(result: ParseFileResult, content: string, filePath: string): ParseFileResult {
+  private addTestSpecificAnalysis(
+    result: ParseFileResult,
+    content: string,
+    filePath: string
+  ): ParseFileResult {
     try {
       // Detect test framework(s) used in this file
       const frameworks = this.detectTestFrameworks(content, filePath);
@@ -845,7 +890,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         ...result.metadata,
         framework: 'test-framework',
         fileType: 'test',
-        isFrameworkSpecific: true
+        isFrameworkSpecific: true,
       };
 
       return result;
@@ -854,7 +899,7 @@ export class TestFrameworkParser extends BaseFrameworkParser {
         message: `Test framework analysis failed: ${(error as Error).message}`,
         line: 0,
         column: 0,
-        severity: 'error'
+        severity: 'error',
       });
 
       return {
@@ -863,8 +908,8 @@ export class TestFrameworkParser extends BaseFrameworkParser {
           ...result.metadata,
           framework: 'test-framework',
           fileType: 'error',
-          isFrameworkSpecific: false
-        }
+          isFrameworkSpecific: false,
+        },
       };
     }
   }

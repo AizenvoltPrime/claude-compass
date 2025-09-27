@@ -455,12 +455,6 @@ export class SymbolGraphBuilder {
               // No target symbol found - log this for potential file dependency creation
               // This is especially important for Laravel static method calls like User::all, User::create
               if (dep.dependency_type === DependencyType.CALLS) {
-                this.logger.debug('No target symbol found for call dependency', {
-                  from: symbol.name,
-                  to: dep.to_symbol,
-                  line: dep.line_number,
-                  fileId: symbol.file_id,
-                });
                 // These unresolved calls will be handled as file dependencies in the GraphBuilder
               }
             }

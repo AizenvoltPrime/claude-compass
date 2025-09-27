@@ -148,7 +148,9 @@ export class DatabaseService {
         return parameterTypes.split(',').map(s => s.trim());
       } catch (error) {
         // Fall back to comma-separated string parsing
-        logger.warn('Failed to parse parameter_types as JSON', { error: error instanceof Error ? error.message : String(error) });
+        logger.warn('Failed to parse parameter_types as JSON', {
+          error: error instanceof Error ? error.message : String(error),
+        });
         return parameterTypes.split(',').map(s => s.trim());
       }
     }
@@ -295,7 +297,6 @@ export class DatabaseService {
 
   // File operations
   async createFile(data: CreateFile): Promise<File> {
-
     // Try to find existing file first
     const existingFile = await this.db('files')
       .where({ repo_id: data.repo_id, path: data.path })
@@ -474,14 +475,12 @@ export class DatabaseService {
   async createSymbols(symbols: CreateSymbol[]): Promise<Symbol[]> {
     if (symbols.length === 0) return [];
 
-
     // Break into smaller batches for better memory management and transaction performance
     const BATCH_SIZE = 50;
     const results: Symbol[] = [];
 
     for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
       const batch = symbols.slice(i, i + BATCH_SIZE);
-
 
       const batchResults = await this.db('symbols').insert(batch).returning('*');
       results.push(...(batchResults as Symbol[]));
@@ -499,13 +498,11 @@ export class DatabaseService {
   ): Promise<Symbol[]> {
     if (symbols.length === 0) return [];
 
-
     const BATCH_SIZE = 50;
     const results: Symbol[] = [];
 
     for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
       const batch = symbols.slice(i, i + BATCH_SIZE);
-
 
       const batchResults = await this.db('symbols').insert(batch).returning('*');
       results.push(...(batchResults as Symbol[]));
@@ -1038,7 +1035,6 @@ export class DatabaseService {
       vector: 0.4,
       fulltext: 0.3,
     };
-
 
     // Run multiple search strategies in parallel with graceful fallback for vector search
     const lexicalPromise = this.lexicalSearch(query, repoIds, {

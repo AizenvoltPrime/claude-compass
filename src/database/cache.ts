@@ -57,9 +57,12 @@ export class QueryCache<T = any> {
 
     // Cleanup expired entries periodically
     if (config.ttlMs > 0) {
-      setInterval(() => {
-        this.cleanupExpiredEntries();
-      }, Math.min(config.ttlMs / 4, 60000)); // Cleanup every quarter TTL or 1 minute max
+      setInterval(
+        () => {
+          this.cleanupExpiredEntries();
+        },
+        Math.min(config.ttlMs / 4, 60000)
+      ); // Cleanup every quarter TTL or 1 minute max
     }
 
     logger.debug('Query cache initialized', {
@@ -85,9 +88,11 @@ export class QueryCache<T = any> {
     if (Array.isArray(obj)) return obj.map(item => this.sortObject(item));
 
     const sortedObj: any = {};
-    Object.keys(obj).sort().forEach(key => {
-      sortedObj[key] = this.sortObject(obj[key]);
-    });
+    Object.keys(obj)
+      .sort()
+      .forEach(key => {
+        sortedObj[key] = this.sortObject(obj[key]);
+      });
     return sortedObj;
   }
 
@@ -141,8 +146,10 @@ export class QueryCache<T = any> {
     let evictedCount = 0;
 
     for (const [key, entry] of entries) {
-      if (this.cache.size <= this.config.maxEntries / 2 &&
-          this.stats.totalSize + spaceNeeded <= this.config.maxSizeBytes) {
+      if (
+        this.cache.size <= this.config.maxEntries / 2 &&
+        this.stats.totalSize + spaceNeeded <= this.config.maxSizeBytes
+      ) {
         break; // Evicted enough
       }
 
@@ -218,8 +225,10 @@ export class QueryCache<T = any> {
     }
 
     // Evict entries if necessary
-    if (this.cache.size >= this.config.maxEntries ||
-        this.stats.totalSize + size > this.config.maxSizeBytes) {
+    if (
+      this.cache.size >= this.config.maxEntries ||
+      this.stats.totalSize + size > this.config.maxSizeBytes
+    ) {
       this.evictLRUEntries(size);
     }
 
@@ -338,9 +347,7 @@ export const queryCache = new QueryCache({
 /**
  * Decorator function to add caching to database methods
  */
-export function cacheable<T extends any[], R>(
-  ttlMs: number = DEFAULT_CACHE_CONFIG.ttlMs
-) {
+export function cacheable<T extends any[], R>(ttlMs: number = DEFAULT_CACHE_CONFIG.ttlMs) {
   return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 

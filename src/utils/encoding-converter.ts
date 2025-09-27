@@ -58,13 +58,10 @@ export class EncodingConverter {
    * Detect the encoding of a buffer using multiple detection methods
    */
   static async detectEncoding(buffer: Buffer): Promise<EncodingDetectionResult> {
-    logger.debug('Starting encoding detection', { bufferLength: buffer.length });
-
     try {
       // Step 1: Check for BOM
       const bomResult = this.detectBOM(buffer);
       if (bomResult.hasBOM) {
-        logger.debug('BOM detected', { encoding: bomResult.detectedEncoding });
         return {
           detectedEncoding: bomResult.detectedEncoding!,
           hasIssues: false,
@@ -80,7 +77,6 @@ export class EncodingConverter {
       // Step 3: UTF-8 validation
       const utf8Result = this.validateUTF8(buffer);
       if (utf8Result.isValid) {
-        logger.debug('Valid UTF-8 detected');
         return {
           detectedEncoding: 'utf-8',
           hasIssues: stats.replacementChars > 0,
@@ -92,7 +88,6 @@ export class EncodingConverter {
       // Step 4: UTF-16 detection (without BOM)
       const utf16Result = this.detectUTF16(buffer);
       if (utf16Result.encoding !== 'utf-8') {
-        logger.debug('UTF-16 detected without BOM', { encoding: utf16Result.encoding });
         return {
           detectedEncoding: utf16Result.encoding,
           hasIssues: false,
@@ -103,10 +98,6 @@ export class EncodingConverter {
 
       // Step 5: Extended ASCII detection (Windows-1252 vs ISO-8859-1)
       const extendedResult = this.detectExtendedASCII(buffer, stats);
-
-      logger.debug('Encoding detection completed', {
-        detectedEncoding: extendedResult.detectedEncoding,
-      });
 
       return {
         ...extendedResult,
@@ -137,8 +128,6 @@ export class EncodingConverter {
    * Convert a buffer to UTF-8 string using detected or specified encoding
    */
   static async convertToUtf8(buffer: Buffer, sourceEncoding?: string): Promise<string> {
-    logger.debug('Converting to UTF-8', { sourceEncoding, bufferLength: buffer.length });
-
     try {
       let encoding = sourceEncoding;
 
@@ -146,10 +135,6 @@ export class EncodingConverter {
       if (!encoding) {
         const detection = await this.detectEncoding(buffer);
         encoding = detection.detectedEncoding;
-
-        logger.debug('Auto-detected encoding', {
-          encoding,
-        });
       }
 
       // Remove BOM if present
@@ -196,12 +181,6 @@ export class EncodingConverter {
       // Clean up the result
       result = this.normalizeLineEndings(result);
       result = this.cleanUpString(result);
-
-      logger.debug('Conversion completed', {
-        originalLength: buffer.length,
-        resultLength: result.length,
-        encoding,
-      });
 
       return result;
     } catch (error) {

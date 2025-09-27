@@ -300,9 +300,6 @@ export abstract class BaseParser {
       if (tree && tree.rootNode) {
         if (tree.rootNode.hasError) {
           this.syntaxErrorCount++;
-          this.logger.debug('Syntax tree contains errors', {
-            errorCount: this.countTreeErrors(tree.rootNode),
-          });
         }
         return tree;
       } else {

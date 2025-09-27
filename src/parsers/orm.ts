@@ -5,8 +5,20 @@
 
 import * as path from 'path';
 import { createComponentLogger } from '../utils/logger';
-import { BaseFrameworkParser, FrameworkParseOptions, ParseFileResult, FrameworkPattern } from './base-framework';
-import { FrameworkEntity, FrameworkParseResult, ParsedSymbol, ParsedDependency, ParsedImport, ParsedExport } from './base';
+import {
+  BaseFrameworkParser,
+  FrameworkParseOptions,
+  ParseFileResult,
+  FrameworkPattern,
+} from './base-framework';
+import {
+  FrameworkEntity,
+  FrameworkParseResult,
+  ParsedSymbol,
+  ParsedDependency,
+  ParsedImport,
+  ParsedExport,
+} from './base';
 import { SymbolType, DependencyType } from '../database/models';
 import Parser from 'tree-sitter';
 
@@ -20,7 +32,7 @@ export enum ORMType {
   OBJECTION = 'objection',
   BOOKSHELF = 'bookshelf',
   WATERLINE = 'waterline',
-  MIKRO_ORM = 'mikro-orm'
+  MIKRO_ORM = 'mikro-orm',
 }
 
 export enum RelationType {
@@ -32,7 +44,7 @@ export enum RelationType {
   HAS_ONE = 'has_one',
   HAS_MANY = 'has_many',
   EMBED = 'embed',
-  REFERENCE = 'reference'
+  REFERENCE = 'reference',
 }
 
 export interface ORMEntity {
@@ -101,7 +113,17 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   getSupportedExtensions(): string[] {
-    return ['.prisma', '.ts', '.js', '.model.ts', '.model.js', '.entity.ts', '.entity.js', '.schema.ts', '.schema.js'];
+    return [
+      '.prisma',
+      '.ts',
+      '.js',
+      '.model.ts',
+      '.model.js',
+      '.entity.ts',
+      '.entity.js',
+      '.schema.ts',
+      '.schema.js',
+    ];
   }
 
   getFrameworkPatterns(): FrameworkPattern[] {
@@ -110,26 +132,26 @@ export class ORMParser extends BaseFrameworkParser {
         name: 'prisma-schema',
         pattern: /model\s+\w+\s*{|enum\s+\w+\s*{|generator\s+\w+\s*{/,
         fileExtensions: ['.prisma'],
-        description: 'Prisma schema definition with models and enums'
+        description: 'Prisma schema definition with models and enums',
       },
       {
         name: 'typeorm-entity',
         pattern: /@Entity\s*\(|@Column\s*\(|@PrimaryGeneratedColumn\s*\(/,
         fileExtensions: ['.ts', '.js'],
-        description: 'TypeORM entity with decorators'
+        description: 'TypeORM entity with decorators',
       },
       {
         name: 'sequelize-model',
         pattern: /sequelize\.define\s*\(|Model\.init\s*\(|DataTypes\./,
         fileExtensions: ['.ts', '.js'],
-        description: 'Sequelize model definition'
+        description: 'Sequelize model definition',
       },
       {
         name: 'mongoose-schema',
         pattern: /new\s+Schema\s*\(|mongoose\.model\s*\(|Schema\s*\(/,
         fileExtensions: ['.ts', '.js'],
-        description: 'Mongoose schema definition'
-      }
+        description: 'Mongoose schema definition',
+      },
     ];
   }
 
@@ -166,7 +188,7 @@ export class ORMParser extends BaseFrameworkParser {
       imports: [],
       exports: [],
       errors: [],
-      chunksProcessed: chunks.length
+      chunksProcessed: chunks.length,
     };
 
     for (const chunk of chunks) {
@@ -180,8 +202,11 @@ export class ORMParser extends BaseFrameworkParser {
     return merged;
   }
 
-  async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-
+  async parseFile(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions = {}
+  ): Promise<ParseFileResult> {
     // Handle empty content early to avoid parse errors
     if (!content || content.trim().length === 0) {
       return {
@@ -190,7 +215,7 @@ export class ORMParser extends BaseFrameworkParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: []
+        errors: [],
       };
     }
 
@@ -226,16 +251,40 @@ export class ORMParser extends BaseFrameworkParser {
             await this.parseTypeORMEntity(filePath, content, symbols, dependencies, ormEntityNames);
             break;
           case ORMType.SEQUELIZE:
-            await this.parseSequelizeModel(filePath, content, symbols, dependencies, ormEntityNames);
+            await this.parseSequelizeModel(
+              filePath,
+              content,
+              symbols,
+              dependencies,
+              ormEntityNames
+            );
             break;
           case ORMType.MONGOOSE:
-            await this.parseMongooseSchema(filePath, content, symbols, dependencies, ormEntityNames);
+            await this.parseMongooseSchema(
+              filePath,
+              content,
+              symbols,
+              dependencies,
+              ormEntityNames
+            );
             break;
           case ORMType.OBJECTION:
-            await this.parseObjectionModel(filePath, content, symbols, dependencies, ormEntityNames);
+            await this.parseObjectionModel(
+              filePath,
+              content,
+              symbols,
+              dependencies,
+              ormEntityNames
+            );
             break;
           case ORMType.MIKRO_ORM:
-            await this.parseMikroORMEntity(filePath, content, symbols, dependencies, ormEntityNames);
+            await this.parseMikroORMEntity(
+              filePath,
+              content,
+              symbols,
+              dependencies,
+              ormEntityNames
+            );
             break;
         }
       }
@@ -250,13 +299,6 @@ export class ORMParser extends BaseFrameworkParser {
         return true;
       });
 
-      logger.debug('ORM parsing completed', {
-        filePath,
-        detectedORMs: Array.from(this.detectedORMs),
-        symbolsFound: filteredSymbols.length,
-        ormEntities: Array.from(ormEntityNames)
-      });
-
       // Return merged result with framework entities from base class
       return {
         ...baseResult,
@@ -264,9 +306,8 @@ export class ORMParser extends BaseFrameworkParser {
         dependencies,
         imports,
         exports,
-        errors
+        errors,
       };
-
     } catch (error) {
       logger.error('Error parsing ORM file', { filePath, error: error.message });
 
@@ -277,7 +318,7 @@ export class ORMParser extends BaseFrameworkParser {
         dependencies,
         imports,
         exports,
-        errors
+        errors,
       };
     }
   }
@@ -286,46 +327,74 @@ export class ORMParser extends BaseFrameworkParser {
     const ormTypes: ORMType[] = [];
 
     // Prisma detection
-    if (fileName === 'schema.prisma' || content.includes('@prisma/client') ||
-        content.includes('PrismaClient') || /model\s+\w+\s*{/.test(content)) {
+    if (
+      fileName === 'schema.prisma' ||
+      content.includes('@prisma/client') ||
+      content.includes('PrismaClient') ||
+      /model\s+\w+\s*{/.test(content)
+    ) {
       ormTypes.push(ORMType.PRISMA);
     }
 
     // TypeORM detection
-    if (content.includes('typeorm') || content.includes('@Entity') ||
-        content.includes('@Column') || content.includes('EntityRepository')) {
+    if (
+      content.includes('typeorm') ||
+      content.includes('@Entity') ||
+      content.includes('@Column') ||
+      content.includes('EntityRepository')
+    ) {
       ormTypes.push(ORMType.TYPEORM);
     }
 
     // Sequelize detection
-    if (content.includes('sequelize') || content.includes('DataTypes') ||
-        content.includes('Model.init') || content.includes('sequelize.define')) {
+    if (
+      content.includes('sequelize') ||
+      content.includes('DataTypes') ||
+      content.includes('Model.init') ||
+      content.includes('sequelize.define')
+    ) {
       ormTypes.push(ORMType.SEQUELIZE);
     }
 
     // Mongoose detection
-    if (content.includes('mongoose') || content.includes('Schema') ||
-        content.includes('model(') || /new\s+Schema\s*\(/.test(content)) {
+    if (
+      content.includes('mongoose') ||
+      content.includes('Schema') ||
+      content.includes('model(') ||
+      /new\s+Schema\s*\(/.test(content)
+    ) {
       ormTypes.push(ORMType.MONGOOSE);
     }
 
     // Objection.js detection
-    if (content.includes('objection') || content.includes('Model.extend') ||
-        content.includes('objection/Model') || content.includes('$relatedQuery')) {
+    if (
+      content.includes('objection') ||
+      content.includes('Model.extend') ||
+      content.includes('objection/Model') ||
+      content.includes('$relatedQuery')
+    ) {
       ormTypes.push(ORMType.OBJECTION);
     }
 
     // MikroORM detection
-    if (content.includes('@mikro-orm') || content.includes('MikroORM') ||
-        content.includes('@Entity') && content.includes('mikro-orm')) {
+    if (
+      content.includes('@mikro-orm') ||
+      content.includes('MikroORM') ||
+      (content.includes('@Entity') && content.includes('mikro-orm'))
+    ) {
       ormTypes.push(ORMType.MIKRO_ORM);
     }
 
     return ormTypes;
   }
 
-  private async parsePrismaSchema(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-
+  private async parsePrismaSchema(
+    filePath: string,
+    content: string,
+    symbols: any[],
+    dependencies: any[],
+    ormEntityNames: Set<string>
+  ): Promise<void> {
     // Parse Prisma models
     const modelRegex = /model\s+(\w+)\s*{([^}]+)}/g;
     let modelMatch;
@@ -341,11 +410,14 @@ export class ORMParser extends BaseFrameworkParser {
         fields: [],
         relationships: [],
         indexes: [],
-        validations: []
+        validations: [],
       };
 
       // Parse fields and relationships
-      const fieldLines = modelBody.split('\n').map(line => line.trim()).filter(line => line && !line.startsWith('//'));
+      const fieldLines = modelBody
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('//'));
 
       for (const line of fieldLines) {
         if (line.includes('@@')) {
@@ -368,7 +440,7 @@ export class ORMParser extends BaseFrameworkParser {
         symbol_type: SymbolType.ORM_ENTITY,
         start_line: this.getLineNumber(modelMatch.index!, content),
         end_line: this.getLineNumber(modelMatch.index! + modelMatch[0].length, content),
-        is_exported: true
+        is_exported: true,
       });
     }
 
@@ -384,7 +456,7 @@ export class ORMParser extends BaseFrameworkParser {
         symbol_type: SymbolType.ENUM,
         start_line: this.getLineNumber(enumMatch.index!, content),
         end_line: this.getLineNumber(enumMatch.index! + enumMatch[0].length, content),
-        is_exported: true
+        is_exported: true,
       });
     }
   }
@@ -404,8 +476,9 @@ export class ORMParser extends BaseFrameworkParser {
       nullable: fieldType.includes('?'),
       primaryKey: modifiers.includes('@id'),
       unique: modifiers.includes('@unique'),
-      autoGenerate: modifiers.includes('@default(autoincrement())') || modifiers.includes('@default(cuid())'),
-      defaultValue: this.extractDefaultValue(modifiers)
+      autoGenerate:
+        modifiers.includes('@default(autoincrement())') || modifiers.includes('@default(cuid())'),
+      defaultValue: this.extractDefaultValue(modifiers),
     };
 
     entity.fields.push(field);
@@ -419,18 +492,24 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private parsePrismaRelation(fieldName: string, fieldType: string, modifiers: string): ORMRelationship | null {
+  private parsePrismaRelation(
+    fieldName: string,
+    fieldType: string,
+    modifiers: string
+  ): ORMRelationship | null {
     const relationMatch = modifiers.match(/@relation\(([^)]+)\)/);
     if (!relationMatch) return null;
 
-    const relationType = fieldType.includes('[]') ? RelationType.ONE_TO_MANY : RelationType.MANY_TO_ONE;
+    const relationType = fieldType.includes('[]')
+      ? RelationType.ONE_TO_MANY
+      : RelationType.MANY_TO_ONE;
 
     return {
       name: fieldName,
       type: relationType,
       targetEntity: fieldType.replace('[]', '').replace('?', ''),
       foreignKey: this.extractRelationField(relationMatch[1], 'fields'),
-      inverseProperty: this.extractRelationField(relationMatch[1], 'references')
+      inverseProperty: this.extractRelationField(relationMatch[1], 'references'),
     };
   }
 
@@ -441,7 +520,7 @@ export class ORMParser extends BaseFrameworkParser {
         const fields = indexMatch[1].split(',').map(f => f.trim().replace(/['"]/g, ''));
         entity.indexes.push({
           fields,
-          unique: false
+          unique: false,
         });
       }
     } else if (line.includes('@@unique')) {
@@ -450,14 +529,19 @@ export class ORMParser extends BaseFrameworkParser {
         const fields = uniqueMatch[1].split(',').map(f => f.trim().replace(/['"]/g, ''));
         entity.indexes.push({
           fields,
-          unique: true
+          unique: true,
         });
       }
     }
   }
 
-  private async parseTypeORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-
+  private async parseTypeORMEntity(
+    filePath: string,
+    content: string,
+    symbols: any[],
+    dependencies: any[],
+    ormEntityNames: Set<string>
+  ): Promise<void> {
     // Find entity class
     const entityMatch = content.match(/@Entity\s*(?:\([^)]*\))?\s*(?:export\s+)?class\s+(\w+)/);
     if (!entityMatch) return;
@@ -471,7 +555,7 @@ export class ORMParser extends BaseFrameworkParser {
       fields: [],
       relationships: [],
       indexes: [],
-      validations: []
+      validations: [],
     };
 
     // Parse columns
@@ -488,7 +572,7 @@ export class ORMParser extends BaseFrameworkParser {
         nullable: fieldType.includes('null'),
         primaryKey: false, // Will be detected separately
         unique: false,
-        autoGenerate: false
+        autoGenerate: false,
       });
     }
 
@@ -504,7 +588,7 @@ export class ORMParser extends BaseFrameworkParser {
       name: entityName,
       symbol_type: SymbolType.ORM_ENTITY,
       start_line: this.getLineNumber(entityMatch.index!, content),
-      is_exported: true
+      is_exported: true,
     });
   }
 
@@ -527,14 +611,19 @@ export class ORMParser extends BaseFrameworkParser {
           name: fieldName,
           type: this.mapTypeORMRelationType(relationType),
           targetEntity,
-          inverseProperty: this.extractTypeORMInverseProperty(relationParams)
+          inverseProperty: this.extractTypeORMInverseProperty(relationParams),
         });
       }
     }
   }
 
-  private async parseSequelizeModel(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-
+  private async parseSequelizeModel(
+    filePath: string,
+    content: string,
+    symbols: any[],
+    dependencies: any[],
+    ormEntityNames: Set<string>
+  ): Promise<void> {
     // Find model definition
     const modelDefineMatch = content.match(/(\w+)\s*=\s*sequelize\.define\s*\(\s*['"`](\w+)['"`]/);
     const modelInitMatch = content.match(/class\s+(\w+)\s+extends\s+Model/);
@@ -555,7 +644,7 @@ export class ORMParser extends BaseFrameworkParser {
       fields: [],
       relationships: [],
       indexes: [],
-      validations: []
+      validations: [],
     };
 
     // Parse field definitions
@@ -570,7 +659,7 @@ export class ORMParser extends BaseFrameworkParser {
     symbols.push({
       name: modelName,
       symbol_type: SymbolType.ORM_ENTITY,
-      is_exported: true
+      is_exported: true,
     });
   }
 
@@ -594,7 +683,7 @@ export class ORMParser extends BaseFrameworkParser {
           nullable: !fieldConfig.includes('allowNull: false'),
           primaryKey: fieldConfig.includes('primaryKey: true'),
           unique: fieldConfig.includes('unique: true'),
-          autoGenerate: fieldConfig.includes('autoIncrement: true')
+          autoGenerate: fieldConfig.includes('autoIncrement: true'),
         });
       }
     }
@@ -614,14 +703,19 @@ export class ORMParser extends BaseFrameworkParser {
         entity.relationships.push({
           name: `${relationType}_${targetEntity}`,
           type: this.mapSequelizeRelationType(relationType),
-          targetEntity
+          targetEntity,
         });
       }
     }
   }
 
-  private async parseMongooseSchema(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-
+  private async parseMongooseSchema(
+    filePath: string,
+    content: string,
+    symbols: any[],
+    dependencies: any[],
+    ormEntityNames: Set<string>
+  ): Promise<void> {
     // Find schema definition
     const schemaMatch = content.match(/(\w+)Schema\s*=\s*new\s+Schema\s*\(/);
     const modelMatch = content.match(/model\s*\(\s*['"`](\w+)['"`]/);
@@ -642,7 +736,7 @@ export class ORMParser extends BaseFrameworkParser {
       fields: [],
       relationships: [],
       indexes: [],
-      validations: []
+      validations: [],
     };
 
     // Parse schema fields
@@ -656,7 +750,7 @@ export class ORMParser extends BaseFrameworkParser {
     symbols.push({
       name: modelName,
       symbol_type: SymbolType.ORM_ENTITY,
-      is_exported: true
+      is_exported: true,
     });
   }
 
@@ -680,7 +774,7 @@ export class ORMParser extends BaseFrameworkParser {
           nullable: !fieldConfig.includes('required: true'),
           primaryKey: fieldName === '_id',
           unique: fieldConfig.includes('unique: true'),
-          autoGenerate: false
+          autoGenerate: false,
         });
 
         // Check for references (relationships)
@@ -690,7 +784,7 @@ export class ORMParser extends BaseFrameworkParser {
             entity.relationships.push({
               name: fieldName,
               type: RelationType.REFERENCE,
-              targetEntity: refMatch[1]
+              targetEntity: refMatch[1],
             });
           }
         }
@@ -698,8 +792,13 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseObjectionModel(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-
+  private async parseObjectionModel(
+    filePath: string,
+    content: string,
+    symbols: any[],
+    dependencies: any[],
+    ormEntityNames: Set<string>
+  ): Promise<void> {
     const modelMatch = content.match(/class\s+(\w+)\s+extends\s+Model/);
     if (!modelMatch) return;
 
@@ -712,11 +811,13 @@ export class ORMParser extends BaseFrameworkParser {
       fields: [],
       relationships: [],
       indexes: [],
-      validations: []
+      validations: [],
     };
 
     // Parse table name
-    const tableNameMatch = content.match(/static\s+get\s+tableName\s*\(\s*\)\s*{\s*return\s*['"`](\w+)['"`]/);
+    const tableNameMatch = content.match(
+      /static\s+get\s+tableName\s*\(\s*\)\s*{\s*return\s*['"`](\w+)['"`]/
+    );
     if (tableNameMatch) {
       entity.tableName = tableNameMatch[1];
     }
@@ -735,12 +836,14 @@ export class ORMParser extends BaseFrameworkParser {
     symbols.push({
       name: modelName,
       symbol_type: SymbolType.ORM_ENTITY,
-      is_exported: true
+      is_exported: true,
     });
   }
 
   private parseObjectionJsonSchema(content: string, entity: ORMEntity): void {
-    const jsonSchemaMatch = content.match(/static\s+get\s+jsonSchema\s*\(\s*\)\s*{\s*return\s*({[^}]+})/s);
+    const jsonSchemaMatch = content.match(
+      /static\s+get\s+jsonSchema\s*\(\s*\)\s*{\s*return\s*({[^}]+})/s
+    );
     if (!jsonSchemaMatch) return;
 
     try {
@@ -763,7 +866,7 @@ export class ORMParser extends BaseFrameworkParser {
                 nullable: !fieldConfig.includes('required'),
                 primaryKey: fieldName === 'id',
                 unique: false,
-                autoGenerate: false
+                autoGenerate: false,
               });
             }
           }
@@ -775,7 +878,9 @@ export class ORMParser extends BaseFrameworkParser {
   }
 
   private parseObjectionRelationships(content: string, entity: ORMEntity): void {
-    const relationMappingsMatch = content.match(/static\s+get\s+relationMappings\s*\(\s*\)\s*{\s*return\s*({[^}]+})/s);
+    const relationMappingsMatch = content.match(
+      /static\s+get\s+relationMappings\s*\(\s*\)\s*{\s*return\s*({[^}]+})/s
+    );
     if (!relationMappingsMatch) return;
 
     const relationMappings = relationMappingsMatch[1];
@@ -795,7 +900,7 @@ export class ORMParser extends BaseFrameworkParser {
             entity.relationships.push({
               name: relationName,
               type: relationType,
-              targetEntity
+              targetEntity,
             });
           }
         }
@@ -803,8 +908,13 @@ export class ORMParser extends BaseFrameworkParser {
     }
   }
 
-  private async parseMikroORMEntity(filePath: string, content: string, symbols: any[], dependencies: any[], ormEntityNames: Set<string>): Promise<void> {
-
+  private async parseMikroORMEntity(
+    filePath: string,
+    content: string,
+    symbols: any[],
+    dependencies: any[],
+    ormEntityNames: Set<string>
+  ): Promise<void> {
     const entityMatch = content.match(/@Entity\s*(?:\([^)]*\))?\s*(?:export\s+)?class\s+(\w+)/);
     if (!entityMatch) return;
 
@@ -817,7 +927,7 @@ export class ORMParser extends BaseFrameworkParser {
       fields: [],
       relationships: [],
       indexes: [],
-      validations: []
+      validations: [],
     };
 
     // Parse properties
@@ -834,7 +944,7 @@ export class ORMParser extends BaseFrameworkParser {
         nullable: fieldType.includes('null'),
         primaryKey: false,
         unique: false,
-        autoGenerate: false
+        autoGenerate: false,
       });
     }
 
@@ -849,7 +959,7 @@ export class ORMParser extends BaseFrameworkParser {
     symbols.push({
       name: entityName,
       symbol_type: SymbolType.ORM_ENTITY,
-      is_exported: true
+      is_exported: true,
     });
   }
 
@@ -871,7 +981,7 @@ export class ORMParser extends BaseFrameworkParser {
           name: fieldName,
           type: this.mapTypeORMRelationType(relationType), // MikroORM uses similar decorators
           targetEntity,
-          inverseProperty: this.extractMikroORMInverseProperty(relationParams)
+          inverseProperty: this.extractMikroORMInverseProperty(relationParams),
         });
       }
     }
@@ -945,21 +1055,31 @@ export class ORMParser extends BaseFrameworkParser {
 
   private mapTypeORMRelationType(relationType: string): RelationType {
     switch (relationType) {
-      case 'OneToOne': return RelationType.ONE_TO_ONE;
-      case 'OneToMany': return RelationType.ONE_TO_MANY;
-      case 'ManyToOne': return RelationType.MANY_TO_ONE;
-      case 'ManyToMany': return RelationType.MANY_TO_MANY;
-      default: return RelationType.REFERENCE;
+      case 'OneToOne':
+        return RelationType.ONE_TO_ONE;
+      case 'OneToMany':
+        return RelationType.ONE_TO_MANY;
+      case 'ManyToOne':
+        return RelationType.MANY_TO_ONE;
+      case 'ManyToMany':
+        return RelationType.MANY_TO_MANY;
+      default:
+        return RelationType.REFERENCE;
     }
   }
 
   private mapSequelizeRelationType(relationType: string): RelationType {
     switch (relationType) {
-      case 'hasOne': return RelationType.HAS_ONE;
-      case 'hasMany': return RelationType.HAS_MANY;
-      case 'belongsTo': return RelationType.BELONGS_TO;
-      case 'belongsToMany': return RelationType.MANY_TO_MANY;
-      default: return RelationType.REFERENCE;
+      case 'hasOne':
+        return RelationType.HAS_ONE;
+      case 'hasMany':
+        return RelationType.HAS_MANY;
+      case 'belongsTo':
+        return RelationType.BELONGS_TO;
+      case 'belongsToMany':
+        return RelationType.MANY_TO_MANY;
+      default:
+        return RelationType.REFERENCE;
     }
   }
 
@@ -1010,22 +1130,21 @@ export class ORMParser extends BaseFrameworkParser {
         name: e.name,
         orm: e.orm,
         fieldCount: e.fields.length,
-        relationshipCount: e.relationships.length
+        relationshipCount: e.relationships.length,
       })),
-      repositories: this.repositories
+      repositories: this.repositories,
     };
   }
 
-  async detectFrameworkEntities(content: string, filePath: string, options: FrameworkParseOptions): Promise<FrameworkParseResult> {
+  async detectFrameworkEntities(
+    content: string,
+    filePath: string,
+    options: FrameworkParseOptions
+  ): Promise<FrameworkParseResult> {
     // This method is called by the base class
     const entities: FrameworkEntity[] = [];
 
     const detectedORMs = this.detectORMSystems(content, path.basename(filePath));
-    logger.debug('ORM detectFrameworkEntities called', {
-      filePath,
-      detectedORMs,
-      detectedCount: detectedORMs.length
-    });
 
     for (const orm of detectedORMs) {
       entities.push({
@@ -1034,19 +1153,13 @@ export class ORMParser extends BaseFrameworkParser {
         filePath,
         metadata: {
           orm,
-          filePath
-        }
+          filePath,
+        },
       });
     }
 
-    logger.debug('ORM detectFrameworkEntities returning', {
-      filePath,
-      entitiesCount: entities.length,
-      entities
-    });
-
     return {
-      entities
+      entities,
     };
   }
 
@@ -1064,7 +1177,7 @@ export class ORMParser extends BaseFrameworkParser {
           symbol_type: SymbolType.ORM_ENTITY,
           start_line: node.startPosition.row + 1,
           end_line: node.endPosition.row + 1,
-          is_exported: this.isExported(node)
+          is_exported: this.isExported(node),
         });
       }
     }
@@ -1079,7 +1192,7 @@ export class ORMParser extends BaseFrameworkParser {
           symbol_type: SymbolType.FUNCTION,
           start_line: node.startPosition.row + 1,
           end_line: node.endPosition.row + 1,
-          is_exported: this.isExported(node)
+          is_exported: this.isExported(node),
         });
       }
     }
@@ -1099,7 +1212,7 @@ export class ORMParser extends BaseFrameworkParser {
           from_symbol: 'unknown',
           to_symbol: memberNode.text,
           dependency_type: DependencyType.CALLS,
-          line_number: node.startPosition.row + 1
+          line_number: node.startPosition.row + 1,
         });
       }
     }
@@ -1120,7 +1233,7 @@ export class ORMParser extends BaseFrameworkParser {
           imported_names: [],
           import_type: 'side_effect',
           line_number: node.startPosition.row + 1,
-          is_dynamic: false
+          is_dynamic: false,
         });
       }
     }
@@ -1139,7 +1252,7 @@ export class ORMParser extends BaseFrameworkParser {
         exports.push({
           exported_names: [nameNode.text],
           export_type: node.text.includes('default') ? 'default' : 'named',
-          line_number: node.startPosition.row + 1
+          line_number: node.startPosition.row + 1,
         });
       }
     }
@@ -1149,8 +1262,7 @@ export class ORMParser extends BaseFrameworkParser {
 
   protected isExported(node: Parser.SyntaxNode): boolean {
     // Check if the node or its parent has export keyword
-    return node.type.includes('export') ||
-           (node.parent && node.parent.type.includes('export'));
+    return node.type.includes('export') || (node.parent && node.parent.type.includes('export'));
   }
 
   protected findNodesOfType(rootNode: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {

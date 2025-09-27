@@ -1624,23 +1624,29 @@ export class GraphBuilder {
           // Enhanced matching: check if dependency is within symbol line range
           // This handles cases where the dependency call is inside a method/function
           // but the from_symbol name doesn't exactly match the containing symbol name
-          if (dependency.line_number >= symbol.start_line &&
-              dependency.line_number <= symbol.end_line) {
-
+          if (
+            dependency.line_number >= symbol.start_line &&
+            dependency.line_number <= symbol.end_line
+          ) {
             // For symbols that are methods, functions, or classes, prioritize those
             // over properties or variables when the line matches
-            if (symbol.symbol_type === SymbolType.METHOD ||
-                symbol.symbol_type === SymbolType.FUNCTION ||
-                symbol.symbol_type === SymbolType.CLASS) {
+            if (
+              symbol.symbol_type === SymbolType.METHOD ||
+              symbol.symbol_type === SymbolType.FUNCTION ||
+              symbol.symbol_type === SymbolType.CLASS
+            ) {
               return true;
             }
 
             // Fallback: if no method/function/class contains this line,
             // accept any symbol that contains it
-            const hasMethodOrFunction = fileSymbols.some(s =>
-              (s.symbol_type === SymbolType.METHOD || s.symbol_type === SymbolType.FUNCTION || s.symbol_type === SymbolType.CLASS) &&
-              dependency.line_number >= s.start_line &&
-              dependency.line_number <= s.end_line
+            const hasMethodOrFunction = fileSymbols.some(
+              s =>
+                (s.symbol_type === SymbolType.METHOD ||
+                  s.symbol_type === SymbolType.FUNCTION ||
+                  s.symbol_type === SymbolType.CLASS) &&
+                dependency.line_number >= s.start_line &&
+                dependency.line_number <= s.end_line
             );
 
             if (!hasMethodOrFunction) {

@@ -124,7 +124,6 @@ export class NodeJSParser extends BaseFrameworkParser {
         entities.push(...controllers);
       }
 
-      logger.debug(`Detected ${entities.length} Node.js entities in ${filePath}`);
 
     } catch (error) {
       logger.error(`Node.js entity detection failed for ${filePath}`, { error });
