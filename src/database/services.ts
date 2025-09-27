@@ -1281,17 +1281,31 @@ export class DatabaseService {
     const results = await this.db('dependencies')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
       .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .select(
         'dependencies.*',
         'to_symbols.name as to_symbol_name',
         'to_symbols.symbol_type as to_symbol_type',
-        'to_files.path as to_file_path'
+        'to_files.path as to_file_path',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path'
       )
       .where('dependencies.from_symbol_id', symbolId)
       .distinct('dependencies.id');
 
     return results.map(result => ({
       ...result,
+      from_symbol: {
+        id: result.from_symbol_id,
+        name: result.from_symbol_name,
+        symbol_type: result.from_symbol_type,
+        file: {
+          id: result.from_file_id,
+          path: result.from_file_path,
+        },
+      },
       to_symbol: {
         id: result.to_symbol_id,
         name: result.to_symbol_name,

@@ -1146,11 +1146,11 @@ export class McpTools {
             text: JSON.stringify(
               {
                 dependencies: dependencies.map(dep => ({
-                  from: symbol.name,
+                  from: dep.from_symbol?.name || 'unknown',
                   to: dep.to_symbol?.name || 'unknown',
                   type: dep.dependency_type,
                   line_number: dep.line_number,
-                  file_path: dep.to_symbol?.file?.path,
+                  file_path: dep.from_symbol?.file?.path,
                 })),
                 total_count: dependencies.length,
                 query_info: {
