@@ -209,25 +209,103 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['dependency_type']);
   });
 
-  await knex.schema.createTable('godot_relationships', table => {
+  await knex.schema.createTable('godot_scenes', table => {
     table.increments('id').primary();
     table
-      .integer('from_symbol_id')
+      .integer('repo_id')
       .notNullable()
       .references('id')
-      .inTable('symbols')
+      .inTable('repositories')
       .onDelete('CASCADE');
-    table.integer('to_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
-    table.string('relationship_type').notNullable();
-    table.text('scene_path');
-    table.text('resource_path');
-    table.integer('line_number');
+    table.text('scene_path').notNullable();
+    table.string('scene_name');
+    table.integer('symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
+    table.text('script_path');
+    table.integer('node_count').defaultTo(0);
+    table.boolean('has_script').defaultTo(false);
+    table.jsonb('nodes').defaultTo('[]');
     table.jsonb('metadata').defaultTo('{}');
     table.timestamps(true, true);
 
-    table.index(['from_symbol_id', 'relationship_type']);
-    table.index(['to_symbol_id', 'relationship_type']);
-    table.index(['scene_path']);
+    table.unique(['repo_id', 'scene_path']);
+    table.index(['repo_id']);
+    table.index(['scene_name']);
+    table.index(['symbol_id']);
+    table.index(['has_script']);
+  });
+
+  await knex.schema.createTable('godot_nodes', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table
+      .integer('scene_id')
+      .notNullable()
+      .references('id')
+      .inTable('godot_scenes')
+      .onDelete('CASCADE');
+    table.string('node_name').notNullable();
+    table.string('node_type').notNullable();
+    table.integer('parent_node_id').references('id').inTable('godot_nodes').onDelete('CASCADE');
+    table.text('script_path');
+    table.jsonb('properties').defaultTo('{}');
+    table.timestamps(true, true);
+
+    table.unique(['scene_id', 'node_name']);
+    table.index(['repo_id']);
+    table.index(['scene_id']);
+    table.index(['node_type']);
+    table.index(['parent_node_id']);
+  });
+
+  await knex.schema.createTable('godot_scripts', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table.text('script_path').notNullable();
+    table.string('class_name').notNullable();
+    table.string('base_class');
+    table.boolean('is_autoload').defaultTo(false);
+    table.text('signals').defaultTo('[]'); // JSON string of signal definitions
+    table.text('exports').defaultTo('[]'); // JSON string of export definitions
+    table.jsonb('metadata').defaultTo('{}');
+    table.timestamps(true, true);
+
+    table.unique(['repo_id', 'script_path']);
+    table.index(['repo_id']);
+    table.index(['class_name']);
+    table.index(['is_autoload']);
+  });
+
+  await knex.schema.createTable('godot_relationships', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table.string('relationship_type').notNullable();
+    table.string('from_entity_type').notNullable();
+    table.integer('from_entity_id').notNullable();
+    table.string('to_entity_type').notNullable();
+    table.integer('to_entity_id').notNullable();
+    table.string('resource_id');
+    table.jsonb('metadata').defaultTo('{}');
+    table.timestamps(true, true);
+
+    table.index(['repo_id', 'relationship_type']);
+    table.index(['from_entity_type', 'from_entity_id']);
+    table.index(['to_entity_type', 'to_entity_id']);
+    table.index(['relationship_type']);
   });
 
   // Framework metadata table - stores framework-specific data as JSON
@@ -333,6 +411,9 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('composables');
   await knex.schema.dropTableIfExists('components');
   await knex.schema.dropTableIfExists('godot_relationships');
+  await knex.schema.dropTableIfExists('godot_scripts');
+  await knex.schema.dropTableIfExists('godot_nodes');
+  await knex.schema.dropTableIfExists('godot_scenes');
   await knex.schema.dropTableIfExists('package_dependencies');
   await knex.schema.dropTableIfExists('test_coverage');
   await knex.schema.dropTableIfExists('orm_relationships');
