@@ -32,12 +32,12 @@ export interface FileSizePolicy {
  * Recommended action for a file based on its size
  */
 export type FileSizeAction =
-  | 'process'    // Normal processing
-  | 'chunk'      // Use chunked parsing
-  | 'truncate'   // Use truncation (fallback)
-  | 'warn'       // Process but warn about size
-  | 'skip'       // Skip file due to size policy
-  | 'reject';    // Reject file entirely
+  | 'process' // Normal processing
+  | 'chunk' // Use chunked parsing
+  | 'truncate' // Use truncation (fallback)
+  | 'warn' // Process but warn about size
+  | 'skip' // Skip file due to size policy
+  | 'reject'; // Reject file entirely
 
 /**
  * Detailed recommendation with metadata
@@ -58,12 +58,12 @@ export interface FileSizeRecommendation {
  * Default file size policy for comprehensive analysis
  */
 export const DEFAULT_POLICY: FileSizePolicy = {
-  maxFileSize: 20 * 1024 * 1024,     // 20MB
-  chunkingThreshold: 50 * 1024,      // 50KB
-  truncationFallback: 28 * 1024,     // 28KB (Tree-sitter safe limit)
-  warnThreshold: 2 * 1024 * 1024,    // 2MB
-  minFileSize: 1,                    // 1 byte
-  maxChunksPerFile: 100
+  maxFileSize: 20 * 1024 * 1024, // 20MB
+  chunkingThreshold: 50 * 1024, // 50KB
+  truncationFallback: 28 * 1024, // 28KB (Tree-sitter safe limit)
+  warnThreshold: 2 * 1024 * 1024, // 2MB
+  minFileSize: 1, // 1 byte
+  maxChunksPerFile: 100,
 };
 
 /**
@@ -75,7 +75,7 @@ export class FileSizeManager {
   constructor(policy?: Partial<FileSizePolicy>) {
     this.policy = {
       ...DEFAULT_POLICY,
-      ...policy
+      ...policy,
     };
 
     this.validatePolicy();
@@ -85,17 +85,21 @@ export class FileSizeManager {
    * Check if a file should be rejected entirely
    */
   shouldRejectFile(size: number): boolean {
-    return size > this.policy.maxFileSize ||
-           (this.policy.minFileSize !== undefined && size < this.policy.minFileSize);
+    return (
+      size > this.policy.maxFileSize ||
+      (this.policy.minFileSize !== undefined && size < this.policy.minFileSize)
+    );
   }
 
   /**
    * Check if a file should be processed with chunking
    */
   shouldChunkFile(size: number): boolean {
-    return size > this.policy.chunkingThreshold &&
-           !this.shouldRejectFile(size) &&
-           !this.shouldSkipFile(size);
+    return (
+      size > this.policy.chunkingThreshold &&
+      !this.shouldRejectFile(size) &&
+      !this.shouldSkipFile(size)
+    );
   }
 
   /**
@@ -109,8 +113,7 @@ export class FileSizeManager {
    * Check if a file should be skipped based on optional skip threshold
    */
   shouldSkipFile(size: number): boolean {
-    return this.policy.skipThreshold !== undefined &&
-           size > this.policy.skipThreshold;
+    return this.policy.skipThreshold !== undefined && size > this.policy.skipThreshold;
   }
 
   /**
@@ -210,8 +213,8 @@ export class FileSizeManager {
         exceedsThreshold,
         estimatedChunks: action === 'chunk' ? this.estimateChunkCount(size) : undefined,
         estimatedProcessingTime: this.estimateProcessingTime(size, action),
-        recommendations
-      }
+        recommendations,
+      },
     };
   }
 
@@ -247,7 +250,7 @@ export class FileSizeManager {
       case 'chunk':
         // Chunking adds overhead
         const chunks = this.estimateChunkCount(size);
-        return (size / 1024) * baseTimePerKB * 1.5 + (chunks * 10);
+        return (size / 1024) * baseTimePerKB * 1.5 + chunks * 10;
 
       case 'truncate':
         // Truncation is faster since we process less content
@@ -276,13 +279,7 @@ export class FileSizeManager {
   updatePolicy(updates: Partial<FileSizePolicy>): void {
     this.policy = { ...this.policy, ...updates };
     this.validatePolicy();
-
-    logger.info('FileSizePolicy updated', {
-      updates,
-      newPolicy: this.policy
-    });
   }
-
 
   /**
    * Format file size in human-readable format
@@ -342,21 +339,21 @@ export class FileSizeManager {
     if (p.chunkingThreshold >= p.maxFileSize) {
       logger.warn('Chunking threshold is greater than or equal to max file size', {
         chunkingThreshold: p.chunkingThreshold,
-        maxFileSize: p.maxFileSize
+        maxFileSize: p.maxFileSize,
       });
     }
 
     if (p.truncationFallback > p.chunkingThreshold) {
       logger.warn('Truncation fallback is larger than chunking threshold', {
         truncationFallback: p.truncationFallback,
-        chunkingThreshold: p.chunkingThreshold
+        chunkingThreshold: p.chunkingThreshold,
       });
     }
 
     if (p.skipThreshold && p.skipThreshold >= p.maxFileSize) {
       logger.warn('Skip threshold is greater than or equal to max file size', {
         skipThreshold: p.skipThreshold,
-        maxFileSize: p.maxFileSize
+        maxFileSize: p.maxFileSize,
       });
     }
 
@@ -387,11 +384,16 @@ export const FileSizeUtils = {
     const numValue = parseFloat(value);
 
     switch (unit.toUpperCase()) {
-      case 'B': return numValue;
-      case 'KB': return numValue * 1024;
-      case 'MB': return numValue * 1024 * 1024;
-      case 'GB': return numValue * 1024 * 1024 * 1024;
-      default: throw new Error(`Unknown unit: ${unit}`);
+      case 'B':
+        return numValue;
+      case 'KB':
+        return numValue * 1024;
+      case 'MB':
+        return numValue * 1024 * 1024;
+      case 'GB':
+        return numValue * 1024 * 1024 * 1024;
+      default:
+        throw new Error(`Unknown unit: ${unit}`);
     }
   },
 
@@ -440,5 +442,5 @@ export const FileSizeUtils = {
     }
 
     return policy;
-  }
+  },
 };

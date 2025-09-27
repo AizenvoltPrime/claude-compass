@@ -332,8 +332,6 @@ export abstract class BaseParser {
     }
 
     try {
-      this.logger.info('Attempting encoding recovery', { filePath });
-
       // Re-read file as buffer for proper encoding detection
       const buffer = await fs.readFile(filePath);
       const encodingResult = await EncodingConverter.detectEncoding(buffer);
@@ -342,10 +340,6 @@ export abstract class BaseParser {
         buffer,
         encodingResult.detectedEncoding
       );
-      this.logger.info('Encoding recovery successful', {
-        filePath,
-        detectedEncoding: encodingResult.detectedEncoding,
-      });
       return recovered;
 
       return null;

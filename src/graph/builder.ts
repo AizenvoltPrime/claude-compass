@@ -654,10 +654,6 @@ export class GraphBuilder {
     const traverse = async (currentPath: string): Promise<void> => {
       try {
         const stats = await fs.stat(currentPath);
-        this.logger.info('Traversing path', {
-          path: currentPath,
-          isDirectory: stats.isDirectory(),
-        });
 
         if (stats.isDirectory()) {
           const dirName = path.basename(currentPath);

@@ -178,12 +178,6 @@ export class CSharpParser extends ChunkedParser {
 
         // If large declarations are more than 80% of file, parse as single chunk
         if (totalLargeSize > fileSize * 0.8) {
-          logger.info('Processing file with large class/namespace as single oversized chunk', {
-            declarationCount: nonUsingDeclarations.length,
-            largeDeclarationSize: totalLargeSize,
-            fileSize: fileSize,
-            percentage: Math.round((totalLargeSize * 100) / fileSize),
-          });
           // Bypass the size check by parsing directly
           const tree = this.parser.parse(content);
           const result = this.extractFromTree(tree, content, filePath, chunkedOptions);
@@ -243,16 +237,6 @@ export class CSharpParser extends ChunkedParser {
         filePath
       );
       validationErrors.push(...methodCallValidationErrors);
-
-      logger.info('C# parsing completed for large file', {
-        filePath,
-        symbolsFound: symbols.length,
-        dependenciesFound: dependencies.length,
-        importsFound: imports.length,
-        exportsFound: exports.length,
-        syntaxErrors: validationErrors.length,
-        hasErrors: tree.rootNode.hasError,
-      });
 
       return {
         symbols: validatedOptions.includePrivateSymbols
@@ -591,24 +575,6 @@ export class CSharpParser extends ChunkedParser {
     // Deduplicate dependencies to eliminate overlapping extractions
     const dedupedDependencies = this.deduplicateDependencies(dependencies);
 
-    logger.info('C# dependency extraction completed', {
-      totalDependencies: dependencies.length,
-      deduplicatedDependencies: dedupedDependencies.length,
-      duplicatesRemoved: dependencies.length - dedupedDependencies.length,
-      invocationExpressions: callNodes.length,
-      constructorExpressions: constructorNodes.length,
-      constructorDependencies,
-      conditionalAccessExpressions: conditionalAccessNodes.length,
-      memberAccessExpressions: memberAccessNodes.length,
-      memberAccessDependencies,
-      inheritanceRelationships: baseListNodes.length,
-      methodCalls: dedupedDependencies.filter(d => d.dependency_type === 'calls').length,
-      references: dedupedDependencies.filter(d => d.dependency_type === 'references').length,
-      inheritance: dedupedDependencies.filter(
-        d => d.dependency_type === 'inherits' || d.dependency_type === 'implements'
-      ).length,
-    });
-
     return dedupedDependencies;
   }
 
@@ -799,14 +765,6 @@ export class CSharpParser extends ChunkedParser {
             if (dotIndex > 0) {
               name = qualifiedName.substring(dotIndex + 1); // Just the method name
               isExplicitInterfaceImplementation = true;
-
-              // Log for debugging
-              this.logger?.debug('Detected explicit interface implementation', {
-                methodText: methodText.substring(0, 100),
-                qualifiedName,
-                extractedMethodName: name,
-                filePath: 'current-file',
-              });
               break;
             }
           }

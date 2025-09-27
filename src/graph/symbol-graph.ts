@@ -58,26 +58,17 @@ export class SymbolGraphBuilder {
     importsMap: Map<number, ParsedImport[]> = new Map(),
     exportsMap: Map<number, ParsedExport[]> = new Map()
   ): Promise<SymbolGraphData> {
-    this.logger.info('Building symbol graph', {
-      symbolCount: symbols.length,
-      fileCount: files.length,
-    });
 
     const nodes = this.createSymbolNodes(symbols);
 
     // Initialize symbol resolver with file context if available
     if (files.length > 0) {
       this.symbolResolver.initialize(files, symbols, importsMap, exportsMap);
-      const stats = this.symbolResolver.getResolutionStats();
-      this.logger.info('Symbol resolver initialized', stats);
+      this.symbolResolver.getResolutionStats();
     }
 
     const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0);
 
-    this.logger.info('Symbol graph built', {
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-    });
 
     return { nodes, edges };
   }
@@ -361,7 +352,6 @@ export class SymbolGraphBuilder {
 
     if (useFileAwareResolution) {
       // Use file-aware symbol resolution
-      this.logger.info('Using file-aware symbol resolution');
 
       // Group dependencies by file to resolve them with proper context
       const dependenciesByFile = new Map<
@@ -462,10 +452,6 @@ export class SymbolGraphBuilder {
         }
       }
 
-      this.logger.info('File-aware resolution completed', {
-        filesProcessed: dependenciesByFile.size,
-        edgesCreated: edges.length,
-      });
     } else {
       // Fallback to legacy name-based resolution (with warnings)
       this.logger.warn(

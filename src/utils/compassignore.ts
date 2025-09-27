@@ -32,12 +32,6 @@ export class CompassIgnore {
       const dir = path.dirname(compassignorePath);
       const gitignorePatterns = await this.loadGitignore(dir);
 
-      logger.info('CompassIgnore loaded from file', {
-        file: compassignorePath,
-        patterns: patterns.length,
-        gitignorePatterns: gitignorePatterns.length,
-      });
-
       return new CompassIgnore(patterns, gitignorePatterns);
     } catch (error) {
       // Try to load just .gitignore
