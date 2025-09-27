@@ -76,6 +76,7 @@ export async function up(knex: Knex): Promise<void> {
     table.string('namespace', 1000);
     table.jsonb('metadata').defaultTo('{}');
     table.text('raw_source');
+    table.specificType('search_vector', 'tsvector');
     table.timestamps(true, true);
 
     // Performance indexes
@@ -87,6 +88,8 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['is_exported']);
     table.index(['start_line']);
   });
+
+  await knex.raw('CREATE INDEX symbols_search_vector_idx ON symbols USING gin(search_vector)');
 
   await knex.schema.createTable('dependencies', table => {
     table.increments('id').primary();
