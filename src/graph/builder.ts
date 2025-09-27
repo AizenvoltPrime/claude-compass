@@ -691,10 +691,6 @@ export class GraphBuilder {
               relativePath: relativePath,
             });
           } else {
-            this.logger.info('File excluded', {
-              path: relativePath,
-              reason: 'shouldIncludeFile returned false',
-            });
           }
         }
       } catch (error) {
@@ -1672,28 +1668,12 @@ export class GraphBuilder {
       '.cs',
     ];
 
-    this.logger.info('Checking file inclusion', {
-      filePath,
-      ext,
-      allowedExtensions,
-      includeTestFiles: options.includeTestFiles,
-      isTestFile: this.isTestFile(relativePath),
-    });
 
     if (!allowedExtensions.includes(ext)) {
-      this.logger.info('File excluded: extension not allowed', {
-        filePath,
-        ext,
-        allowedExtensions,
-      });
       return false;
     }
 
     if (!options.includeTestFiles && this.isTestFile(relativePath)) {
-      this.logger.info('File excluded: test file and includeTestFiles is false', {
-        filePath,
-        relativePath,
-      });
       return false;
     }
 
