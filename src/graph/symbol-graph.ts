@@ -363,6 +363,9 @@ export class SymbolGraphBuilder {
       // Resolve dependencies for each file
       const nameToSymbolMap = this.createNameToSymbolMap(nodes);
 
+      // Build interface-to-implementation mapping for enhanced symbol resolution
+      const interfaceMap = this.buildInterfaceToImplementationMap(nodes, edges);
+
       for (const [fileId, symbolDeps] of dependenciesByFile) {
         const allDepsForFile = symbolDeps.flatMap(sd => sd.dependencies);
 
@@ -409,8 +412,8 @@ export class SymbolGraphBuilder {
               continue;
             }
 
-            // Try to find target symbols using name-based lookup
-            const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
+            // Try to find target symbols using enhanced qualified name lookup
+            const targetSymbols = this.enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap);
 
             if (targetSymbols.length > 0) {
               // Found target symbols, create edges
@@ -445,27 +448,15 @@ export class SymbolGraphBuilder {
       }
 
     } else {
-      // Fallback to legacy name-based resolution (with warnings)
-      this.logger.warn(
-        'Using legacy name-based symbol resolution - may produce false dependencies'
-      );
-
+      // Use enhanced symbol resolution without file-aware context
       const nameToSymbolMap = this.createNameToSymbolMap(nodes);
+      const interfaceMap = this.buildInterfaceToImplementationMap(nodes, edges);
 
       for (const symbol of symbols) {
         const dependencies = dependenciesMap.get(symbol.id) || [];
 
         for (const dep of dependencies) {
-          const targetSymbols = nameToSymbolMap.get(dep.to_symbol) || [];
-
-          // Warn about potential false positives when multiple symbols match
-          if (targetSymbols.length > 1) {
-            this.logger.warn('Multiple symbols found for dependency - potential false positive', {
-              symbolName: dep.to_symbol,
-              matchCount: targetSymbols.length,
-              sourceFile: symbol.file_id,
-            });
-          }
+          const targetSymbols = this.enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap);
 
           for (const targetSymbol of targetSymbols) {
             if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
@@ -519,5 +510,157 @@ export class SymbolGraphBuilder {
     }
 
     return uniqueEdges;
+  }
+
+  /**
+   * Parse qualified names like "IHandManager.SetHandPositions" into components
+   */
+  private parseQualifiedName(name: string): { qualifier?: string; memberName: string } {
+    const lastDotIndex = name.lastIndexOf('.');
+    if (lastDotIndex === -1) {
+      return { memberName: name };
+    }
+    return {
+      qualifier: name.substring(0, lastDotIndex),
+      memberName: name.substring(lastDotIndex + 1)
+    };
+  }
+
+  /**
+   * Build mapping from interfaces to their concrete implementations
+   */
+  private buildInterfaceToImplementationMap(
+    nodes: SymbolNode[],
+    edges: SymbolEdge[]
+  ): Map<string, SymbolNode[]> {
+    const interfaceMap = new Map<string, SymbolNode[]>();
+    const nodeMap = new Map<number, SymbolNode>();
+
+    // Create node lookup by ID
+    for (const node of nodes) {
+      nodeMap.set(node.id, node);
+    }
+
+    // Find inheritance and implementation relationships
+    const inheritanceEdges = edges.filter(edge =>
+      edge.type === DependencyType.INHERITS || edge.type === DependencyType.IMPLEMENTS
+    );
+
+    for (const edge of inheritanceEdges) {
+      const implementingClass = nodeMap.get(edge.from);
+      const interfaceOrBase = nodeMap.get(edge.to);
+
+      if (implementingClass && interfaceOrBase) {
+        // Map interface/base class name to implementing class
+        const existing = interfaceMap.get(interfaceOrBase.name) || [];
+        existing.push(implementingClass);
+        interfaceMap.set(interfaceOrBase.name, existing);
+
+        this.logger.debug('Interface mapping created', {
+          interface: interfaceOrBase.name,
+          implementation: implementingClass.name,
+          edgeType: edge.type
+        });
+      }
+    }
+
+    return interfaceMap;
+  }
+
+  /**
+   * Enhanced symbol lookup with qualified name resolution and interface mapping
+   */
+  private enhancedSymbolLookup(
+    targetName: string,
+    nameToSymbolMap: Map<string, SymbolNode[]>,
+    interfaceMap: Map<string, SymbolNode[]>
+  ): SymbolNode[] {
+    const parsed = this.parseQualifiedName(targetName);
+
+    // Handle qualified names (e.g., "IHandManager.SetHandPositions")
+    if (parsed.qualifier) {
+      this.logger.debug('Attempting qualified name resolution', {
+        targetName,
+        qualifier: parsed.qualifier,
+        memberName: parsed.memberName
+      });
+
+      // Step 1: Try exact qualified match by finding class and its members
+      const qualifierSymbols = nameToSymbolMap.get(parsed.qualifier) || [];
+      const memberSymbols = nameToSymbolMap.get(parsed.memberName) || [];
+
+      // Find member symbols that belong to the qualifier class/interface
+      const qualifiedMatches: SymbolNode[] = [];
+      for (const qualifierSymbol of qualifierSymbols) {
+        // Only consider class-type symbols as qualifiers
+        if (qualifierSymbol.type === 'class' || qualifierSymbol.type === 'interface') {
+          const classMembers = memberSymbols.filter(memberSymbol =>
+            qualifierSymbol.fileId === memberSymbol.fileId &&
+            memberSymbol.startLine >= qualifierSymbol.startLine &&
+            memberSymbol.endLine <= qualifierSymbol.endLine
+          );
+          qualifiedMatches.push(...classMembers);
+        }
+      }
+
+      if (qualifiedMatches.length > 0) {
+        this.logger.debug('Qualified name resolution successful', {
+          targetName,
+          qualifier: parsed.qualifier,
+          memberName: parsed.memberName,
+          matchCount: qualifiedMatches.length
+        });
+        return qualifiedMatches;
+      }
+
+      // Step 2: Try interface-to-implementation mapping
+      const implementingClasses = interfaceMap.get(parsed.qualifier) || [];
+      if (implementingClasses.length > 0) {
+        this.logger.debug('Attempting interface-to-implementation resolution', {
+          interface: parsed.qualifier,
+          implementationCount: implementingClasses.length
+        });
+
+        const interfaceResolutionMatches: SymbolNode[] = [];
+        for (const implementingClass of implementingClasses) {
+          // Only consider actual class implementations
+          if (implementingClass.type === 'class') {
+            const memberSymbols = nameToSymbolMap.get(parsed.memberName) || [];
+            const classMembers = memberSymbols.filter(memberSymbol =>
+              memberSymbol.fileId === implementingClass.fileId &&
+              memberSymbol.startLine >= implementingClass.startLine &&
+              memberSymbol.endLine <= implementingClass.endLine
+            );
+            interfaceResolutionMatches.push(...classMembers);
+          }
+        }
+
+        if (interfaceResolutionMatches.length > 0) {
+          this.logger.debug('Interface-to-implementation resolution successful', {
+            targetName,
+            interface: parsed.qualifier,
+            matchCount: interfaceResolutionMatches.length
+          });
+          return interfaceResolutionMatches;
+        }
+      }
+
+      // Qualified name resolution failed
+      this.logger.warn('Qualified name resolution failed', {
+        targetName,
+        qualifier: parsed.qualifier,
+        memberName: parsed.memberName
+      });
+      return [];
+    }
+
+    // Handle simple names (e.g., "SetHandPositions") - exact match only
+    const simpleMatches = nameToSymbolMap.get(parsed.memberName) || [];
+    this.logger.debug('Simple name resolution', {
+      targetName,
+      matchCount: simpleMatches.length
+    });
+
+    return simpleMatches;
   }
 }
