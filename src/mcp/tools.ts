@@ -644,7 +644,6 @@ export class McpTools {
       limit: 100, // Fixed limit (limit parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
       symbolTypes: [],
       isExported: validatedArgs.is_exported,
-      framework: detectedFramework, // Use detected framework
       repoIds: repoIds,
     };
 
@@ -774,6 +773,13 @@ export class McpTools {
             );
           case 'node':
             return fileLanguage === 'javascript' || fileLanguage === 'typescript';
+          case 'godot':
+            return (
+              s.file?.path?.endsWith('.tscn') ||
+              s.file?.path?.endsWith('.cs') ||
+              s.file?.path?.includes('scripts/') ||
+              s.file?.path?.includes('scenes/')
+            );
           default:
             return s.file?.path?.includes(frameworkPath);
         }
