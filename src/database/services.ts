@@ -560,13 +560,6 @@ export class DatabaseService {
       const foundInSearch = searchResults.some(s => s.id === testSymbolId);
       const foundInLexical = lexicalResults.some(s => s.id === testSymbolId);
 
-      logger.debug('Search infrastructure validation results', {
-        testSymbolName,
-        foundInSearch,
-        foundInLexical,
-        searchResultsCount: searchResults.length,
-        lexicalResultsCount: lexicalResults.length,
-      });
 
       return foundInSearch || foundInLexical;
     } catch (error) {
@@ -654,14 +647,6 @@ export class DatabaseService {
       return [];
     }
 
-    logger.debug('Symbol search (defaulting to fulltext)', {
-      query,
-      limit,
-      symbolTypes,
-      isExported,
-      framework,
-      repoIds: effectiveRepoIds,
-    });
 
     // Default to fulltext search for backwards compatibility
     return this.fullTextSearch(query, effectiveRepoIds, options);
@@ -1005,12 +990,6 @@ export class DatabaseService {
 
     const results = await baseQuery;
 
-    logger.debug('Vector search completed', {
-      query,
-      resultsCount: results.length,
-      similarityThreshold,
-      repoIds,
-    });
 
     return results.map((result: any) => ({
       ...result,
@@ -1080,12 +1059,6 @@ export class DatabaseService {
       { symbol: SymbolWithFile; scores: number[]; sources: string[] }
     >();
 
-    logger.debug('Merging results with explicit weights', {
-      weights,
-      lexicalCount: lexicalResults.length,
-      vectorCount: vectorResults.length,
-      fulltextCount: fullTextResults.length,
-    });
 
     // Process lexical results
     lexicalResults.forEach((symbol, index) => {
@@ -1170,7 +1143,6 @@ export class DatabaseService {
   async createDependencies(dependencies: CreateDependency[]): Promise<Dependency[]> {
     if (dependencies.length === 0) return [];
 
-    logger.debug('Creating dependencies in batch', { count: dependencies.length });
 
     // Process in chunks to avoid PostgreSQL parameter limits
     const BATCH_SIZE = 1000;
@@ -1231,7 +1203,6 @@ export class DatabaseService {
   async createFileDependencies(dependencies: CreateFileDependency[]): Promise<FileDependency[]> {
     if (dependencies.length === 0) return [];
 
-    logger.debug('Creating file dependencies in batch', { count: dependencies.length });
 
     // Deduplicate before processing to prevent constraint violations
     const uniqueDependencies = this.deduplicateFileDependencies(dependencies);
@@ -1470,11 +1441,6 @@ export class DatabaseService {
 
   // Route operations
   async createRoute(data: CreateRoute): Promise<Route> {
-    logger.debug('Creating route', {
-      path: data.path,
-      method: data.method,
-      framework: data.framework_type,
-    });
 
     // Convert array fields to JSON strings for JSONB columns
     const insertData = {
@@ -1614,7 +1580,6 @@ export class DatabaseService {
 
   // Component operations
   async createComponent(data: CreateComponent): Promise<Component> {
-    logger.debug('Creating component', { symbol_id: data.symbol_id, type: data.component_type });
 
     const [component] = await this.db('components').insert(data).returning('*');
 
@@ -1747,7 +1712,6 @@ export class DatabaseService {
 
   // Composable operations
   async createComposable(data: CreateComposable): Promise<Composable> {
-    logger.debug('Creating composable', { symbol_id: data.symbol_id, type: data.composable_type });
 
     const [composable] = await this.db('composables').insert(data).returning('*');
 
@@ -1797,10 +1761,6 @@ export class DatabaseService {
 
   // Framework metadata operations
   async storeFrameworkMetadata(data: CreateFrameworkMetadata): Promise<FrameworkMetadata> {
-    logger.debug('Storing framework metadata', {
-      framework: data.framework_type,
-      repo_id: data.repo_id,
-    });
 
     // Try to find existing metadata first
     const existingMetadata = await this.db('framework_metadata')
@@ -1864,7 +1824,6 @@ export class DatabaseService {
 
   // Godot Scene operations
   async storeGodotScene(data: CreateGodotScene): Promise<GodotScene> {
-    logger.debug('Storing Godot scene', { scene_path: data.scene_path, repo_id: data.repo_id });
 
     try {
       // Check if scene already exists
@@ -1927,7 +1886,6 @@ export class DatabaseService {
 
   // Godot Node operations
   async storeGodotNode(data: CreateGodotNode): Promise<GodotNode> {
-    logger.debug('Storing Godot node', { node_name: data.node_name, scene_id: data.scene_id });
 
     try {
       // Check if node already exists in this scene
@@ -1992,7 +1950,6 @@ export class DatabaseService {
 
   // Godot Script operations
   async storeGodotScript(data: CreateGodotScript): Promise<GodotScript> {
-    logger.debug('Storing Godot script', { script_path: data.script_path, repo_id: data.repo_id });
 
     try {
       // Check if script already exists
@@ -2088,10 +2045,6 @@ export class DatabaseService {
 
   // Godot Autoload operations
   async storeGodotAutoload(data: CreateGodotAutoload): Promise<GodotAutoload> {
-    logger.debug('Storing Godot autoload', {
-      autoload_name: data.autoload_name,
-      repo_id: data.repo_id,
-    });
 
     try {
       // Check if autoload already exists
@@ -2129,11 +2082,6 @@ export class DatabaseService {
 
   // Godot Relationship operations (Core of Solution 1)
   async createGodotRelationship(data: CreateGodotRelationship): Promise<GodotRelationship> {
-    logger.debug('Creating Godot relationship', {
-      type: data.relationship_type,
-      from: `${data.from_entity_type}:${data.from_entity_id}`,
-      to: `${data.to_entity_type}:${data.to_entity_id}`,
-    });
 
     try {
       // Check if relationship already exists
@@ -2149,13 +2097,11 @@ export class DatabaseService {
         .first();
 
       if (existingRelationship) {
-        logger.debug('Godot relationship already exists', { id: existingRelationship.id });
         return existingRelationship as GodotRelationship;
       }
 
       const [relationship] = await this.db('godot_relationships').insert(data).returning('*');
 
-      logger.debug('Created Godot relationship', { id: relationship.id });
       return relationship as GodotRelationship;
     } catch (error) {
       logger.error('Failed to create Godot relationship', {
@@ -2309,7 +2255,6 @@ export class DatabaseService {
 
   // Background Job Queue operations
   async createJobQueue(data: CreateJobQueue): Promise<JobQueue> {
-    logger.debug('Creating job queue', { name: data.name, type: data.queue_type });
     const [jobQueue] = await this.db('job_queues').insert(data).returning('*');
     return jobQueue as JobQueue;
   }
@@ -2333,7 +2278,6 @@ export class DatabaseService {
 
   // Job Definition operations
   async createJobDefinition(data: CreateJobDefinition): Promise<JobDefinition> {
-    logger.debug('Creating job definition', { job_name: data.job_name, queue_id: data.queue_id });
     const [jobDefinition] = await this.db('job_definitions').insert(data).returning('*');
     return jobDefinition as JobDefinition;
   }
@@ -2359,10 +2303,6 @@ export class DatabaseService {
 
   // Worker Thread operations
   async createWorkerThread(data: CreateWorkerThread): Promise<WorkerThread> {
-    logger.debug('Creating worker thread', {
-      worker_type: data.worker_type,
-      worker_file_id: data.worker_file_id,
-    });
     const [workerThread] = await this.db('worker_threads').insert(data).returning('*');
     return workerThread as WorkerThread;
   }
@@ -2381,7 +2321,6 @@ export class DatabaseService {
 
   // ORM Entity operations
   async createORMEntity(data: CreateORMEntity): Promise<ORMEntity> {
-    logger.debug('Creating ORM entity', { entity_name: data.entity_name, orm_type: data.orm_type });
     const [ormEntity] = await this.db('orm_entities').insert(data).returning('*');
     return ormEntity as ORMEntity;
   }
@@ -2414,11 +2353,6 @@ export class DatabaseService {
 
   // ORM Relationship operations
   async createORMRelationship(data: CreateORMRelationship): Promise<ORMRelationship> {
-    logger.debug('Creating ORM relationship', {
-      relationship_type: data.relationship_type,
-      from_entity_id: data.from_entity_id,
-      to_entity_id: data.to_entity_id,
-    });
     const [ormRelationship] = await this.db('orm_relationships').insert(data).returning('*');
     return ormRelationship as ORMRelationship;
   }
@@ -2449,10 +2383,6 @@ export class DatabaseService {
 
   // ORM Repository operations
   async createORMRepository(data: CreateORMRepository): Promise<ORMRepository> {
-    logger.debug('Creating ORM repository', {
-      repository_type: data.repository_type,
-      entity_id: data.entity_id,
-    });
     const [ormRepository] = await this.db('orm_repositories').insert(data).returning('*');
     return ormRepository as ORMRepository;
   }
@@ -2471,10 +2401,6 @@ export class DatabaseService {
 
   // Test Suite operations
   async createTestSuite(data: CreateTestSuite): Promise<TestSuite> {
-    logger.debug('Creating test suite', {
-      suite_name: data.suite_name,
-      framework_type: data.framework_type,
-    });
     const [testSuite] = await this.db('test_suites').insert(data).returning('*');
     return testSuite as TestSuite;
   }
@@ -2510,7 +2436,6 @@ export class DatabaseService {
 
   // Test Case operations
   async createTestCase(data: CreateTestCase): Promise<TestCase> {
-    logger.debug('Creating test case', { test_name: data.test_name, test_type: data.test_type });
     const [testCase] = await this.db('test_cases').insert(data).returning('*');
     return testCase as TestCase;
   }
@@ -2536,11 +2461,6 @@ export class DatabaseService {
 
   // Test Coverage operations
   async createTestCoverage(data: CreateTestCoverage): Promise<TestCoverage> {
-    logger.debug('Creating test coverage', {
-      test_case_id: data.test_case_id,
-      target_symbol_id: data.target_symbol_id,
-      coverage_type: data.coverage_type,
-    });
     const [testCoverage] = await this.db('test_coverage').insert(data).returning('*');
     return testCoverage as TestCoverage;
   }
@@ -2576,10 +2496,6 @@ export class DatabaseService {
 
   // Package Dependency operations
   async createPackageDependency(data: CreatePackageDependency): Promise<PackageDependency> {
-    logger.debug('Creating package dependency', {
-      package_name: data.package_name,
-      dependency_type: data.dependency_type,
-    });
     const [packageDependency] = await this.db('package_dependencies').insert(data).returning('*');
     return packageDependency as PackageDependency;
   }
@@ -2629,10 +2545,6 @@ export class DatabaseService {
 
   // Workspace Project operations
   async createWorkspaceProject(data: CreateWorkspaceProject): Promise<WorkspaceProject> {
-    logger.debug('Creating workspace project', {
-      project_name: data.project_name,
-      workspace_type: data.workspace_type,
-    });
     const [workspaceProject] = await this.db('workspace_projects').insert(data).returning('*');
     return workspaceProject as WorkspaceProject;
   }
@@ -2692,7 +2604,6 @@ export class DatabaseService {
   async getCrossStackDependencies(
     repoId: number
   ): Promise<{ apiCalls: ApiCall[]; dataContracts: DataContract[] }> {
-    logger.debug('Getting cross-stack dependencies', { repoId });
 
     // Get API calls
     const apiCalls = await this.db('api_calls')
@@ -2704,11 +2615,6 @@ export class DatabaseService {
       .where({ repo_id: repoId })
       .orderBy('created_at', 'desc');
 
-    logger.debug('Retrieved cross-stack dependencies', {
-      repoId,
-      apiCallsCount: apiCalls.length,
-      dataContractsCount: dataContracts.length,
-    });
 
     return {
       apiCalls: apiCalls as ApiCall[],
@@ -2739,7 +2645,6 @@ export class DatabaseService {
    * Get a framework entity by ID (routes, components, etc.)
    */
   async getFrameworkEntityById(id: number): Promise<Route | Component | Composable | null> {
-    logger.debug('Getting framework entity by ID', { id });
 
     // Try routes first
     const route = await this.db('routes').where({ id }).first();
@@ -2771,7 +2676,6 @@ export class DatabaseService {
   async createApiCalls(data: CreateApiCall[]): Promise<ApiCall[]> {
     if (data.length === 0) return [];
 
-    logger.debug('Creating API calls in batch', { count: data.length });
 
     const BATCH_SIZE = 100;
     const results: ApiCall[] = [];
@@ -2803,7 +2707,6 @@ export class DatabaseService {
   async createDataContracts(data: CreateDataContract[]): Promise<DataContract[]> {
     if (data.length === 0) return [];
 
-    logger.debug('Creating data contracts in batch', { count: data.length });
 
     const BATCH_SIZE = 100;
     const results: DataContract[] = [];
@@ -2844,7 +2747,6 @@ export class DatabaseService {
    * Get data contracts by schema name
    */
   async getDataContractsBySchema(schemaName: string): Promise<DataContract[]> {
-    logger.debug('Getting data contracts by schema name', { schemaName });
 
     const dataContracts = await this.db('data_contracts')
       .where({ name: schemaName })
@@ -2857,7 +2759,6 @@ export class DatabaseService {
    * Get frameworks used in a repository
    */
   async getRepositoryFrameworks(repoId: number): Promise<string[]> {
-    logger.debug('Getting repository frameworks', { repoId });
 
     const metadata = await this.db('framework_metadata')
       .where({ repo_id: repoId })
@@ -2873,7 +2774,6 @@ export class DatabaseService {
   async streamCrossStackData(
     repoId: number
   ): Promise<AsyncIterable<{ type: 'apiCall' | 'dataContract'; data: any }>> {
-    logger.debug('Streaming cross-stack data', { repoId });
 
     const stream = async function* (db: any) {
       // Stream API calls
@@ -2905,7 +2805,6 @@ export class DatabaseService {
    * Get cached pattern match result
    */
   async getCachedPatternMatch(key: string): Promise<any | null> {
-    logger.debug('Getting cached pattern match', { key });
     return this.cacheStore.get(`pattern:${key}`) || null;
   }
 
@@ -2913,7 +2812,6 @@ export class DatabaseService {
    * Cache pattern match result
    */
   async cachePatternMatch(key: string, value: any): Promise<void> {
-    logger.debug('Caching pattern match', { key });
     this.cacheStore.set(`pattern:${key}`, value);
   }
 
@@ -2921,7 +2819,6 @@ export class DatabaseService {
    * Get cached schema compatibility result
    */
   async getCachedSchemaCompatibility(key: string): Promise<any | null> {
-    logger.debug('Getting cached schema compatibility', { key });
     return this.cacheStore.get(`schema:${key}`) || null;
   }
 
@@ -2929,7 +2826,6 @@ export class DatabaseService {
    * Cache schema compatibility result
    */
   async cacheSchemaCompatibility(key: string, value: any): Promise<void> {
-    logger.debug('Caching schema compatibility', { key });
     this.cacheStore.set(`schema:${key}`, value);
   }
 
@@ -2947,7 +2843,6 @@ export class DatabaseService {
       message: string;
     }>;
   }> {
-    logger.debug('Performing cross-stack health check', { repoId });
 
     const issues: string[] = [];
     const recommendations: string[] = [];
@@ -3039,7 +2934,6 @@ export class DatabaseService {
       driftDetected: number;
     };
   }> {
-    logger.debug('Getting cross-stack health status', { repoId });
 
     try {
       const crossStackData = await this.getCrossStackDependencies(repoId);
@@ -3090,7 +2984,6 @@ export class DatabaseService {
     repoId: number,
     entityType: string
   ): Promise<(Route | Component | Composable | ORMEntity)[]> {
-    logger.debug('Getting framework entities by type', { repoId, entityType });
 
     const results: (Route | Component | Composable | ORMEntity)[] = [];
 
@@ -3125,7 +3018,6 @@ export class DatabaseService {
    * Get symbols by type for a repository
    */
   async getSymbolsByType(repoId: number, symbolType: string): Promise<Symbol[]> {
-    logger.debug('Getting symbols by type', { repoId, symbolType });
 
     const symbols = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
@@ -3141,7 +3033,6 @@ export class DatabaseService {
    * Get files by language for a repository
    */
   async getFilesByLanguage(repoId: number, language: string): Promise<File[]> {
-    logger.debug('Getting files by language', { repoId, language });
 
     const files = await this.db('files').where({ repo_id: repoId, language }).orderBy('path');
 
@@ -3156,7 +3047,6 @@ export class DatabaseService {
   private async getCachedEmbedding(text: string): Promise<number[]> {
     // Check cache first
     if (this.embeddingCache.has(text)) {
-      logger.debug('Using cached embedding', { text: text.substring(0, 50) });
       return this.embeddingCache.get(text)!;
     }
 
@@ -3170,12 +3060,8 @@ export class DatabaseService {
     if (this.embeddingCache.size > 1000) {
       const firstKey = this.embeddingCache.keys().next().value;
       this.embeddingCache.delete(firstKey);
-      logger.debug('Removed oldest embedding from cache', {
-        removedText: firstKey?.substring(0, 50),
-      });
     }
 
-    logger.debug('Generated and cached new embedding', { text: text.substring(0, 50) });
     return embedding;
   }
 
@@ -3191,7 +3077,6 @@ export class DatabaseService {
     description?: string
   ): Promise<void> {
     try {
-      logger.debug('Generating embeddings for symbol', { symbolId, name });
 
       const nameEmbedding = await this.embeddingService.generateEmbedding(name);
       const descEmbedding = description
@@ -3207,7 +3092,6 @@ export class DatabaseService {
           embedding_model: 'all-MiniLM-L6-v2',
         });
 
-      logger.debug('Successfully generated embeddings for symbol', { symbolId });
     } catch (error) {
       logger.warn(`Failed to generate embeddings for symbol ${symbolId}:`, error);
       throw error;
@@ -3222,7 +3106,6 @@ export class DatabaseService {
     if (symbols.length === 0) return;
 
     try {
-      logger.debug('Generating batch embeddings', { count: symbols.length });
 
       // Process each symbol individually for better error handling
       for (const symbol of symbols) {
@@ -3237,9 +3120,6 @@ export class DatabaseService {
         }
       }
 
-      logger.debug('Batch embedding generation completed', {
-        processedCount: symbols.length,
-      });
     } catch (error) {
       logger.error('Batch embedding generation failed:', error);
       throw error;
@@ -3357,7 +3237,6 @@ export class DatabaseService {
       }>;
     }>;
   }> {
-    logger.debug('Grouping calls by parameter context', { symbolId });
 
     // Get the target symbol information
     const targetSymbol = await this.getSymbolWithFile(symbolId);
@@ -3377,16 +3256,6 @@ export class DatabaseService {
         'from_files.path as caller_file_path'
       );
 
-    logger.debug('Parameter context query result', {
-      symbolId,
-      callsFound: calls.length,
-      sampleCalls: calls.slice(0, 3).map(call => ({
-        id: call.id,
-        parameter_context: call.parameter_context,
-        caller_name: call.caller_name,
-        line_number: call.line_number,
-      })),
-    });
 
     // Group calls by parameter context
     const parameterGroups = new Map<string, any>();
@@ -3420,11 +3289,6 @@ export class DatabaseService {
       ...group,
     }));
 
-    logger.debug('Parameter context grouping completed', {
-      symbolId,
-      totalVariations: parameterVariations.length,
-      totalCalls: calls.length,
-    });
 
     return {
       methodName: targetSymbol.name,
