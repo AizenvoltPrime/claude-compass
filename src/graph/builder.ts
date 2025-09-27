@@ -1362,10 +1362,30 @@ export class GraphBuilder {
         entityTypes: [...new Set(godotEntities.map(e => e.type))],
       });
 
-      // Use the GodotRelationshipBuilder to create relationships
+      // Retrieve stored Godot entities from database with proper IDs
+      const storedScenes = await this.dbService.getGodotScenesByRepository(repositoryId);
+      const storedScripts = await this.dbService.getGodotScriptsByRepository(repositoryId);
+      const storedAutoloads = await this.dbService.getGodotAutoloadsByRepository(repositoryId);
+
+      // Get all nodes from all scenes
+      const storedNodes: any[] = [];
+      for (const scene of storedScenes) {
+        const sceneNodes = await this.dbService.getGodotNodesByScene(scene.id);
+        storedNodes.push(...sceneNodes);
+      }
+
+      // Convert to framework entities format expected by the relationship builder
+      const storedGodotEntities = [
+        ...storedScenes.map((scene: any) => ({ ...scene, type: 'godot_scene' })),
+        ...storedNodes.map((node: any) => ({ ...node, type: 'godot_node' })),
+        ...storedScripts.map((script: any) => ({ ...script, type: 'godot_script' })),
+        ...storedAutoloads.map((autoload: any) => ({ ...autoload, type: 'godot_autoload' }))
+      ];
+
+      // Use the GodotRelationshipBuilder to create relationships with stored entities
       const relationships = await this.godotRelationshipBuilder.buildRelationships(
         repositoryId,
-        godotEntities
+        storedGodotEntities
       );
 
       this.logger.info('Godot framework relationships built successfully', {

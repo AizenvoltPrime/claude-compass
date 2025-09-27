@@ -285,6 +285,26 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['is_autoload']);
   });
 
+  await knex.schema.createTable('godot_autoloads', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table.string('autoload_name').notNullable();
+    table.text('script_path').notNullable();
+    table.integer('script_id').references('id').inTable('godot_scripts').onDelete('CASCADE');
+    table.jsonb('metadata').defaultTo('{}');
+    table.timestamps(true, true);
+
+    table.unique(['repo_id', 'autoload_name']);
+    table.index(['repo_id']);
+    table.index(['autoload_name']);
+    table.index(['script_id']);
+  });
+
   await knex.schema.createTable('godot_relationships', table => {
     table.increments('id').primary();
     table
@@ -411,6 +431,7 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('composables');
   await knex.schema.dropTableIfExists('components');
   await knex.schema.dropTableIfExists('godot_relationships');
+  await knex.schema.dropTableIfExists('godot_autoloads');
   await knex.schema.dropTableIfExists('godot_scripts');
   await knex.schema.dropTableIfExists('godot_nodes');
   await knex.schema.dropTableIfExists('godot_scenes');

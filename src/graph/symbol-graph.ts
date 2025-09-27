@@ -83,15 +83,7 @@ export class SymbolGraphBuilder {
     return symbolGraph.edges
       .filter(edge => {
         // Only include dependencies where both symbols exist in the graph
-        const isValid = validSymbolIds.has(edge.from) && validSymbolIds.has(edge.to);
-        if (!isValid) {
-          this.logger.warn('Filtering out dependency with invalid symbol reference', {
-            from: edge.from,
-            to: edge.to,
-            type: edge.type,
-          });
-        }
-        return isValid;
+        return validSymbolIds.has(edge.from) && validSymbolIds.has(edge.to);
       })
       .map(edge => ({
         from_symbol_id: edge.from,
