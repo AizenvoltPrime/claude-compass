@@ -10,6 +10,102 @@ import { logger, config } from '../utils';
 import { FileSizeUtils, DEFAULT_POLICY } from '../config/file-size-policy';
 import chalk from 'chalk';
 import ora from 'ora';
+import fs from 'fs/promises';
+import { CSharpParser } from '../parsers/csharp';
+
+// Debug file mode handler
+async function handleDebugFileMode(repositoryPath: string, debugFile: string, options: any): Promise<void> {
+  console.log(chalk.blue(`🔍 Debug Mode: Analyzing single file`));
+  console.log(chalk.gray(`Repository: ${repositoryPath}`));
+  console.log(chalk.gray(`Debug File: ${debugFile}`));
+
+  try {
+    // Resolve file path (can be relative to repository or absolute)
+    let filePath: string;
+    if (path.isAbsolute(debugFile)) {
+      filePath = debugFile;
+    } else {
+      filePath = path.resolve(repositoryPath, debugFile);
+    }
+
+    // Read file content
+    const content = await fs.readFile(filePath, 'utf-8');
+    console.log(chalk.green(`✓ Read file (${content.length} bytes)`));
+
+    // Optionally enable debug logging (disabled by default to prevent hanging)
+    if (options.verbose) {
+      logger.level = 'debug';
+      process.env.CLAUDE_COMPASS_DEBUG = 'true';
+    }
+
+    // Create parser based on file extension
+    const ext = path.extname(filePath).toLowerCase();
+    let parser: any;
+
+    switch (ext) {
+      case '.cs':
+        parser = new CSharpParser();
+        break;
+      default:
+        throw new Error(`Unsupported file extension: ${ext}`);
+    }
+
+    // Parse the file with timeout
+    console.log(chalk.blue(`🔧 Parsing with ${parser.constructor.name}...`));
+
+    // Create a timeout promise
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Parsing timeout after 30 seconds')), 30000);
+    });
+
+    // Race between parsing and timeout
+    const result = await Promise.race([
+      parser.parseFile(filePath, content),
+      timeoutPromise
+    ]).catch(error => {
+      throw error;
+    });
+
+    // Display results
+    console.log(chalk.green(`✓ Parsing completed`));
+    console.log(chalk.blue(`📊 Results:`));
+    console.log(`  - Symbols: ${result.symbols.length}`);
+    console.log(`  - Dependencies: ${result.dependencies.length}`);
+    console.log(`  - Imports: ${result.imports.length}`);
+    console.log(`  - Exports: ${result.exports.length}`);
+
+    // Show some sample dependencies
+    if (result.dependencies.length > 0) {
+      console.log(chalk.blue(`\n🔗 Sample Dependencies:`));
+      // Show HandManager dependencies first if they exist
+      const handManagerDeps = result.dependencies.filter((dep: any) =>
+        dep.to_symbol?.includes('HandManager') || dep.from_symbol?.includes('HandManager')
+      );
+
+      if (handManagerDeps.length > 0) {
+        console.log(chalk.green(`\n✅ HandManager Qualified Dependencies:`));
+        handManagerDeps.slice(0, 20).forEach((dep: any, i: number) => {
+          console.log(`  ${i + 1}. ${dep.from_symbol} → ${dep.to_symbol} (${dep.dependency_type})`);
+        });
+      }
+
+      result.dependencies.slice(0, 10).forEach((dep: any, i: number) => {
+        console.log(`  ${i + 1}. ${dep.from_symbol} → ${dep.to_symbol} (${dep.dependency_type})`);
+      });
+
+      if (result.dependencies.length > 10) {
+        console.log(`  ... and ${result.dependencies.length - 10} more`);
+      }
+    }
+
+    // Exit successfully
+    process.exit(0);
+
+  } catch (error) {
+    console.error(chalk.red(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+    process.exit(1);
+  }
+}
 
 // Helper function for CLI commands that need to exit cleanly
 async function cleanExit(code: number = 0): Promise<never> {
@@ -58,6 +154,7 @@ program
   .option('--max-file-size <size>', 'Maximum file size to process in bytes', '20971520') // 20MB
   .option('--chunking-threshold <size>', 'File size to start chunking', '51200') // 50KB
   .option('--warn-threshold <size>', 'File size to warn about', '2097152') // 2MB
+  .option('--debug-file <file>', 'Debug mode: analyze only the specified file (for debugging parser issues)')
   .option('--max-files <count>', 'Maximum number of files to process', '10000')
   .option(
     '--extensions <list>',
@@ -79,6 +176,11 @@ program
   .action(async (repositoryPath, options) => {
     if (options.verbose) {
       logger.level = 'debug';
+    }
+
+    // Handle debug file mode
+    if (options.debugFile) {
+      return handleDebugFileMode(repositoryPath, options.debugFile, options);
     }
 
     // Resolve relative paths to absolute paths
