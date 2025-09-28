@@ -172,6 +172,19 @@ LOG_LEVEL=debug
 Test files follow pattern: `*.test.ts` in `tests/` directory
 Setup file: `tests/setup.ts` initializes test database
 
+## Development Principles
+
+### Code Quality Standards
+
+**NEVER implement fallback business logic, backwards compatibility, or lazy solutions**
+
+- Write robust, well-designed code from the start
+- Avoid temporary fixes or "quick and dirty" solutions
+- Do not add fallback mechanisms that mask underlying issues
+- Implement proper error handling instead of silent failures
+- Address root causes rather than symptoms
+- Maintain high code quality standards throughout development
+
 ## Common Patterns
 
 ### Adding Language Support
