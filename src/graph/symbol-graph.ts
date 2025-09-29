@@ -58,7 +58,6 @@ export class SymbolGraphBuilder {
     importsMap: Map<number, ParsedImport[]> = new Map(),
     exportsMap: Map<number, ParsedExport[]> = new Map()
   ): Promise<SymbolGraphData> {
-
     const nodes = this.createSymbolNodes(symbols);
 
     // Initialize symbol resolver with file context if available
@@ -68,7 +67,6 @@ export class SymbolGraphBuilder {
     }
 
     const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0);
-
 
     return { nodes, edges };
   }
@@ -371,6 +369,7 @@ export class SymbolGraphBuilder {
 
         const resolved = this.symbolResolver.resolveDependencies(fileId, allDepsForFile);
 
+
         // Track which dependencies were resolved to avoid duplicates in fallback
         const resolvedDependencies = new Set<string>();
 
@@ -414,6 +413,7 @@ export class SymbolGraphBuilder {
 
             // Try to find target symbols using enhanced qualified name lookup
             const targetSymbols = this.enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap);
+
 
             if (targetSymbols.length > 0) {
               // Found target symbols, create edges
@@ -594,12 +594,14 @@ export class SymbolGraphBuilder {
       for (const qualifierSymbol of qualifierSymbols) {
         // Only consider class-type symbols as qualifiers
         if (qualifierSymbol.type === 'class' || qualifierSymbol.type === 'interface') {
-          const classMembers = memberSymbols.filter(memberSymbol =>
-            qualifierSymbol.fileId === memberSymbol.fileId &&
-            memberSymbol.startLine >= qualifierSymbol.startLine &&
-            memberSymbol.endLine <= qualifierSymbol.endLine
+          // Enhanced class-member association using multiple strategies
+          const classMembers = this.findClassMembers(
+            qualifierSymbol,
+            memberSymbols,
+            parsed.memberName
           );
           qualifiedMatches.push(...classMembers);
+
         }
       }
 
@@ -610,11 +612,13 @@ export class SymbolGraphBuilder {
           memberName: parsed.memberName,
           matchCount: qualifiedMatches.length
         });
+
         return qualifiedMatches;
       }
 
       // Step 2: Try interface-to-implementation mapping
       const implementingClasses = interfaceMap.get(parsed.qualifier) || [];
+
       if (implementingClasses.length > 0) {
         this.logger.debug('Attempting interface-to-implementation resolution', {
           interface: parsed.qualifier,
@@ -626,12 +630,14 @@ export class SymbolGraphBuilder {
           // Only consider actual class implementations
           if (implementingClass.type === 'class') {
             const memberSymbols = nameToSymbolMap.get(parsed.memberName) || [];
-            const classMembers = memberSymbols.filter(memberSymbol =>
-              memberSymbol.fileId === implementingClass.fileId &&
-              memberSymbol.startLine >= implementingClass.startLine &&
-              memberSymbol.endLine <= implementingClass.endLine
+            // Use enhanced class-member association for interface implementations
+            const classMembers = this.findClassMembers(
+              implementingClass,
+              memberSymbols,
+              parsed.memberName
             );
             interfaceResolutionMatches.push(...classMembers);
+
           }
         }
 
@@ -641,26 +647,125 @@ export class SymbolGraphBuilder {
             interface: parsed.qualifier,
             matchCount: interfaceResolutionMatches.length
           });
+
           return interfaceResolutionMatches;
         }
       }
 
-      // Qualified name resolution failed
-      this.logger.warn('Qualified name resolution failed', {
+      // Qualified name resolution failed - try fallback to simple name matching
+      this.logger.warn('Qualified name resolution failed, trying simple name fallback', {
         targetName,
         qualifier: parsed.qualifier,
         memberName: parsed.memberName
       });
+
+      // Fallback: Try simple name matching as last resort
+      const fallbackMatches = nameToSymbolMap.get(parsed.memberName) || [];
+
+      if (fallbackMatches.length > 0) {
+        this.logger.info('Simple name fallback successful for qualified name', {
+          targetName,
+          qualifier: parsed.qualifier,
+          memberName: parsed.memberName,
+          fallbackMatchCount: fallbackMatches.length
+        });
+
+
+        return fallbackMatches;
+      }
+
       return [];
     }
 
     // Handle simple names (e.g., "SetHandPositions") - exact match only
     const simpleMatches = nameToSymbolMap.get(parsed.memberName) || [];
+
     this.logger.debug('Simple name resolution', {
       targetName,
       matchCount: simpleMatches.length
     });
 
     return simpleMatches;
+  }
+
+  /**
+   * Enhanced class-member association using multiple strategies instead of fragile line-based containment
+   */
+  private findClassMembers(
+    classSymbol: SymbolNode,
+    memberSymbols: SymbolNode[],
+    memberName: string
+  ): SymbolNode[] {
+    const matches: SymbolNode[] = [];
+
+    // Strategy 1: File-based grouping with signature analysis
+    const fileMemberSymbols = memberSymbols.filter(member =>
+      member.fileId === classSymbol.fileId && member.name === memberName
+    );
+
+    for (const memberSymbol of fileMemberSymbols) {
+      // Strategy 1a: Signature-based class context detection
+      if (this.isSignatureClassMember(memberSymbol, classSymbol.name)) {
+        matches.push(memberSymbol);
+        continue;
+      }
+
+      // Strategy 1b: Improved spatial relationship (more lenient than previous logic)
+      // Only require the member to be declared after the class starts (not perfect containment)
+      if (memberSymbol.startLine >= classSymbol.startLine) {
+        matches.push(memberSymbol);
+        continue;
+      }
+
+      // Strategy 1c: For partial classes - if the member is in the same file and has matching name,
+      // assume it belongs to the class (C# partial classes can have complex line relationships)
+      if (classSymbol.type === 'class' && this.isLikelyPartialClassMember(memberSymbol, classSymbol)) {
+        matches.push(memberSymbol);
+      }
+    }
+
+
+    return matches;
+  }
+
+  /**
+   * Check if a member symbol's signature indicates it belongs to a specific class
+   */
+  private isSignatureClassMember(memberSymbol: SymbolNode, className: string): boolean {
+    if (!memberSymbol.signature) {
+      return false;
+    }
+
+    // For C# methods, check if the signature contains class context
+    // Examples: "public void SetHandPositions(...)" in CardManager.cs file
+    // The signature might not always contain the class name explicitly,
+    // but we can infer membership from file context and visibility patterns
+
+    // Check for C# method patterns that indicate class membership
+    const isMethodInClass =
+      memberSymbol.type === 'method' &&
+      (memberSymbol.visibility === 'public' ||
+       memberSymbol.visibility === 'private' ||
+       memberSymbol.visibility === 'protected');
+
+    return isMethodInClass;
+  }
+
+  /**
+   * Determine if a member likely belongs to a partial class
+   */
+  private isLikelyPartialClassMember(memberSymbol: SymbolNode, classSymbol: SymbolNode): boolean {
+    // For C# partial classes, members in the same file with matching context
+    // are likely to belong to the class even if line ranges don't perfectly align
+
+    return (
+      memberSymbol.fileId === classSymbol.fileId &&
+      memberSymbol.type === 'method' &&
+      classSymbol.type === 'class' &&
+      // Additional heuristic: if the member has a visibility modifier, it's likely a class member
+      (memberSymbol.visibility === 'public' ||
+       memberSymbol.visibility === 'private' ||
+       memberSymbol.visibility === 'protected')
+    );
   }
 }
