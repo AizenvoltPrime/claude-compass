@@ -973,25 +973,22 @@ export class McpTools {
             text: JSON.stringify(
               {
                 dependencies: callers.map(caller => {
-                  // Create qualified names for better clarity when symbols have same name
-                  const fromName = caller.from_symbol?.name || 'unknown';
                   const toName = symbol.name;
                   const fromFile = caller.from_symbol?.file?.path;
                   const toFile = symbol.file?.path;
 
-                  // If symbols have same name but different files, show qualified names
-                  const shouldQualify = fromName === toName && fromFile !== toFile;
+                  // Always extract class name from file path for consistency
+                  // This handles cases where symbol name is just method name or fully qualified
+                  const fromName = fromFile ? this.getClassNameFromPath(fromFile) : 'unknown';
 
-                  const qualifiedFromName = shouldQualify && fromFile
-                    ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
-                    : fromName;
-
-                  const qualifiedToName = shouldQualify && toFile
+                  // For "to" field: keep original qualification logic for target symbol
+                  const shouldQualifyTo = fromName === toName && fromFile !== toFile;
+                  const qualifiedToName = shouldQualifyTo && toFile
                     ? `${this.getClassNameFromPath(toFile)}.${toName}`
                     : toName;
 
                   return {
-                    from: qualifiedFromName,
+                    from: fromName,
                     to: qualifiedToName,
                     type: caller.dependency_type,
                     line_number: caller.line_number,
@@ -1164,25 +1161,22 @@ export class McpTools {
             text: JSON.stringify(
               {
                 dependencies: dependencies.map(dep => {
-                  // Create qualified names for better clarity when symbols have same name
-                  const fromName = dep.from_symbol?.name || 'unknown';
                   const toName = dep.to_symbol?.name || 'unknown';
                   const fromFile = dep.from_symbol?.file?.path;
                   const toFile = dep.to_symbol?.file?.path;
 
-                  // If symbols have same name but different files, show qualified names
-                  const shouldQualify = fromName === toName && fromFile !== toFile;
+                  // Always extract class name from file path for consistency
+                  // This handles cases where symbol name is just method name or fully qualified
+                  const fromName = fromFile ? this.getClassNameFromPath(fromFile) : 'unknown';
 
-                  const qualifiedFromName = shouldQualify && fromFile
-                    ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
-                    : fromName;
-
-                  const qualifiedToName = shouldQualify && toFile
+                  // For "to" field: keep original qualification logic for target symbol
+                  const shouldQualifyTo = fromName === toName && fromFile !== toFile;
+                  const qualifiedToName = shouldQualifyTo && toFile
                     ? `${this.getClassNameFromPath(toFile)}.${toName}`
                     : toName;
 
                   return {
-                    from: qualifiedFromName,
+                    from: fromName,
                     to: qualifiedToName,
                     type: dep.dependency_type,
                     line_number: dep.line_number,
