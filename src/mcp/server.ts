@@ -92,7 +92,6 @@ export class ClaudeCompassMCPServer {
   private setupHandlers(): void {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-
       return {
         tools: [
           {
@@ -307,7 +306,6 @@ export class ClaudeCompassMCPServer {
 
     // List available resources
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-
       return {
         resources: [
           {
@@ -323,7 +321,6 @@ export class ClaudeCompassMCPServer {
     // Handle tool calls with response optimization
     this.server.setRequestHandler(CallToolRequestSchema, async request => {
       const { name, arguments: args } = request.params;
-
 
       try {
         let response: any;
@@ -361,11 +358,10 @@ export class ClaudeCompassMCPServer {
         response = optimizeResponsePayload(response);
 
         // Apply compression if payload is large enough
-        const compressionEnabled = process.env.MCP_COMPRESSION_ENABLED !== 'false';
+        const compressionEnabled = false;
         if (compressionEnabled) {
           response = await compressResponsePayload(response, DEFAULT_COMPRESSION_CONFIG);
         }
-
 
         return response;
       } catch (error) {
@@ -380,7 +376,6 @@ export class ClaudeCompassMCPServer {
     // Handle resource reads
     this.server.setRequestHandler(ReadResourceRequestSchema, async request => {
       const { uri } = request.params;
-
 
       try {
         return await this.resources.readResource(uri);
