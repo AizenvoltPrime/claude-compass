@@ -348,4 +348,155 @@ namespace Company.Product.Module {
     // The fix ensures this still matches the symbol with name "MethodA"
     expect(methodBCall!.from_symbol).toContain('MethodA');
   });
+
+  it('should not create false transitive dependencies through interface implementations', async () => {
+    // This test verifies the fix for the bug where DeckController calls to CardManager.SetHandPositions
+    // were incorrectly attributed to HandManager.SetHandPositions, creating false transitive dependencies
+
+    const interfaceFilePath = path.join(tempDir, 'IHandManager.cs');
+    const cardManagerFilePath = path.join(tempDir, 'CardManagerTest.cs');
+    const handManagerFilePath = path.join(tempDir, 'HandManagerTest.cs');
+    const deckControllerFilePath = path.join(tempDir, 'DeckControllerTest.cs');
+
+    // Interface definition
+    await fs.writeFile(interfaceFilePath, `
+namespace GameCore.Interfaces {
+    public interface IHandManager {
+        void SetHandPositions(Vector3 playerPos, Vector3 opponentPos);
+    }
+}
+    `.trim());
+
+    // CardManager implements the interface and delegates to HandManager
+    await fs.writeFile(cardManagerFilePath, `
+namespace GameCore.Managers {
+    using GameCore.Interfaces;
+
+    public class CardManager : IHandManager {
+        private HandManager _handManager;
+
+        public void SetHandPositions(Vector3 playerPos, Vector3 opponentPos) {
+            // CardManager delegates to HandManager
+            _handManager.SetHandPositions(playerPos, opponentPos);
+        }
+    }
+}
+    `.trim());
+
+    // HandManager has its own implementation
+    await fs.writeFile(handManagerFilePath, `
+namespace GameCore.Managers {
+    using GameCore.Interfaces;
+
+    public class HandManager : IHandManager {
+        public void SetHandPositions(Vector3 playerPos, Vector3 opponentPos) {
+            // HandManager implementation
+        }
+    }
+}
+    `.trim());
+
+    // DeckController calls CardManager.SetHandPositions
+    await fs.writeFile(deckControllerFilePath, `
+namespace GameCore.Controllers {
+    using GameCore.Managers;
+
+    public class DeckController {
+        private CardManager _cardManager;
+        private Vector3 _handPosition;
+
+        public void InitializeDecks() {
+            // DeckController calls CardManager.SetHandPositions
+            // This should NOT create a dependency to HandManager.SetHandPositions
+            _cardManager.SetHandPositions(_handPosition, _handPosition);
+        }
+    }
+}
+    `.trim());
+
+    // Analyze the test project
+    const result = await builder.analyzeRepository(tempDir);
+    const testRepoId = result.repository.id;
+
+    try {
+      // Get all symbols
+      const symbols = await dbService.getSymbolsByRepository(testRepoId);
+
+      // Find the three SetHandPositions methods
+      const interfaceMethod = symbols.find(s =>
+        s.name === 'SetHandPositions' &&
+        s.symbol_type === 'method' &&
+        s.visibility === 'public'
+      );
+
+      const cardManagerMethods = symbols.filter(s =>
+        s.name === 'SetHandPositions' &&
+        s.symbol_type === 'method'
+      );
+
+      // Should have at least 2 SetHandPositions methods (CardManager and HandManager)
+      expect(cardManagerMethods.length).toBeGreaterThanOrEqual(2);
+
+      // Find DeckController.InitializeDecks
+      const initializeDecks = symbols.find(s =>
+        s.name === 'InitializeDecks' &&
+        s.symbol_type === 'method'
+      );
+      expect(initializeDecks).toBeDefined();
+
+      // Get all dependencies from InitializeDecks
+      const initializeDecksDeps = await knex('dependencies')
+        .where('from_symbol_id', initializeDecks!.id)
+        .where('dependency_type', 'calls');
+
+      // Get the symbol IDs of all SetHandPositions methods
+      const setHandPositionsIds = cardManagerMethods.map(m => m.id);
+
+      // Find which SetHandPositions methods InitializeDecks calls
+      const calledSetHandPositionsMethods = initializeDecksDeps.filter(d =>
+        setHandPositionsIds.includes(d.to_symbol_id)
+      );
+
+      // CRITICAL: DeckController should call ONLY ONE SetHandPositions implementation
+      // It should call CardManager.SetHandPositions, NOT HandManager.SetHandPositions
+      expect(calledSetHandPositionsMethods.length).toBe(1);
+
+      // Verify it's calling the CardManager implementation
+      // We can check this by looking at which file contains the called method
+      const calledSymbol = symbols.find(s => s.id === calledSetHandPositionsMethods[0].to_symbol_id);
+      expect(calledSymbol).toBeDefined();
+
+      const calledSymbolFile = await knex('files')
+        .where('id', calledSymbol!.file_id)
+        .first();
+
+      // The called method should be in CardManagerTest.cs, not HandManagerTest.cs
+      expect(calledSymbolFile.path).toContain('CardManagerTest.cs');
+      expect(calledSymbolFile.path).not.toContain('HandManagerTest.cs');
+
+      // Additional verification: HandManager.SetHandPositions should only be called by CardManager
+      const handManagerSetHandPositions = symbols.find(s =>
+        s.name === 'SetHandPositions' &&
+        s.symbol_type === 'method'
+      );
+
+      if (handManagerSetHandPositions) {
+        const handManagerCallers = await knex('dependencies')
+          .join('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+          .join('files as from_files', 'from_symbols.file_id', 'from_files.id')
+          .where('dependencies.to_symbol_id', handManagerSetHandPositions.id)
+          .where('dependencies.dependency_type', 'calls')
+          .select('from_symbols.name', 'from_files.path');
+
+        // HandManager.SetHandPositions should NOT be called by DeckController
+        const deckControllerCalls = handManagerCallers.filter(c =>
+          c.path.includes('DeckControllerTest.cs')
+        );
+        expect(deckControllerCalls.length).toBe(0);
+      }
+    } finally {
+      // Cleanup test repository
+      await dbService.cleanupRepositoryData(testRepoId);
+    }
+  }, 60000);
 });

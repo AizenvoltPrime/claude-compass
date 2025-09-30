@@ -107,6 +107,7 @@ export async function up(knex: Knex): Promise<void> {
     table.jsonb('parameter_types');
     table.text('calling_object');
     table.text('qualified_context');
+    table.text('resolved_class'); // C# resolved class name for disambiguation
     table.text('raw_text');
     table.jsonb('metadata').defaultTo('{}');
     table.timestamps(true, true);
@@ -119,6 +120,7 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['dependency_type', 'from_symbol_id', 'to_symbol_id'], 'deps_type_symbols_idx');
     table.index(['from_symbol_id', 'line_number'], 'deps_symbol_line_idx');
     table.index(['dependency_type']);
+    table.index(['resolved_class'], 'deps_resolved_class_idx');
   });
 
   await knex.schema.createTable('file_dependencies', table => {

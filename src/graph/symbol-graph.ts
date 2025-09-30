@@ -27,6 +27,7 @@ export interface SymbolEdge {
   parameter_types?: string[];
   calling_object?: string;
   qualified_context?: string;
+  resolved_class?: string; // C# resolved class name (e.g., "CardManager")
 }
 
 export interface SymbolGraphData {
@@ -60,13 +61,17 @@ export class SymbolGraphBuilder {
   ): Promise<SymbolGraphData> {
     const nodes = this.createSymbolNodes(symbols);
 
+    // Build file ID to path mapping for class name extraction
+    const fileIdToPath = new Map<number, string>();
+    files.forEach(f => fileIdToPath.set(f.id, f.path));
+
     // Initialize symbol resolver with file context if available
     if (files.length > 0) {
       this.symbolResolver.initialize(files, symbols, importsMap, exportsMap);
       this.symbolResolver.getResolutionStats();
     }
 
-    const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0);
+    const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0, fileIdToPath);
 
     return { nodes, edges };
   }
@@ -95,6 +100,7 @@ export class SymbolGraphBuilder {
         parameter_types: edge.parameter_types,
         calling_object: edge.calling_object,
         qualified_context: edge.qualified_context,
+        resolved_class: edge.resolved_class, // C# class resolution
       }));
   }
 
@@ -336,7 +342,8 @@ export class SymbolGraphBuilder {
     symbols: Symbol[],
     dependenciesMap: Map<number, ParsedDependency[]>,
     nodes: SymbolNode[],
-    useFileAwareResolution: boolean = false
+    useFileAwareResolution: boolean = false,
+    fileIdToPath: Map<number, string> = new Map()
   ): SymbolEdge[] {
     const edges: SymbolEdge[] = [];
 
@@ -394,6 +401,7 @@ export class SymbolGraphBuilder {
             parameter_types: resolution.originalDependency.parameter_types,
             calling_object: resolution.originalDependency.calling_object,
             qualified_context: resolution.originalDependency.qualified_context,
+            resolved_class: resolution.originalDependency.resolved_class,
           });
 
           // Mark this dependency as resolved (include line number to handle multiple calls on different lines)
@@ -416,8 +424,69 @@ export class SymbolGraphBuilder {
 
 
             if (targetSymbols.length > 0) {
+              // For method calls with multiple matches, try to disambiguate using context
+              let finalTargets = targetSymbols;
+              if (dep.dependency_type === DependencyType.CALLS && targetSymbols.length > 1) {
+                // Try to use resolved_class, qualified_context, or calling_object to pick the right implementation
+                const contextInfo = dep.resolved_class || dep.qualified_context;
+
+                if (contextInfo) {
+                  // resolved_class is "CardManager", qualified_context might be "field_call__cardManager"
+                  const contextMatch = targetSymbols.filter(ts => {
+                    // For resolved_class, it's already the class name
+                    let className = contextInfo;
+
+                    // For qualified_context patterns, extract class name
+                    if (contextInfo.includes('.')) {
+                      const qualifierParts = contextInfo.split('.');
+                      className = qualifierParts[0];
+                    }
+                    if (contextInfo.startsWith('field_call_')) {
+                      className = contextInfo.replace('field_call_', '').replace(/^_/, '');
+                      // Capitalize first letter (e.g., "cardManager" -> "CardManager")
+                      className = className.charAt(0).toUpperCase() + className.slice(1);
+                    }
+
+                    // Match by checking if the symbol belongs to this class
+                    const symbolClassName = this.getSymbolClassName(ts, nodes, fileIdToPath);
+                    const isMatch = symbolClassName.toLowerCase() === className.toLowerCase();
+
+                    return isMatch;
+                  });
+
+                  if (contextMatch.length > 0) {
+                    finalTargets = contextMatch;
+                  }
+                }
+
+                // If still ambiguous after context matching:
+                // - If we have context info (resolved_class), take the first match (most specific)
+                // - If we have NO context info, skip to avoid false positives
+                if (finalTargets.length > 1) {
+                  if (contextInfo) {
+                    // We tried to disambiguate with context but still have multiple matches
+                    // Take the first one as the best guess (most specific match)
+                    finalTargets = [finalTargets[0]];
+                    this.logger?.debug('Multiple matches after disambiguation, using first match', {
+                      from_symbol: symbol.name,
+                      to_symbol: dep.to_symbol,
+                      selected: finalTargets[0].name,
+                      resolved_class: dep.resolved_class
+                    });
+                  } else {
+                    // No context info and multiple matches - skip to avoid false positives
+                    this.logger?.warn('Skipping ambiguous method call dependency (no context)', {
+                      from_symbol: symbol.name,
+                      to_symbol: dep.to_symbol,
+                      matches: finalTargets.length
+                    });
+                    continue;
+                  }
+                }
+              }
+
               // Found target symbols, create edges
-              for (const targetSymbol of targetSymbols) {
+              for (const targetSymbol of finalTargets) {
                 if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
                   continue;
                 }
@@ -434,6 +503,7 @@ export class SymbolGraphBuilder {
                   parameter_types: dep.parameter_types,
                   calling_object: dep.calling_object,
                   qualified_context: dep.qualified_context,
+                  resolved_class: dep.resolved_class,
                 });
               }
             } else {
@@ -458,7 +528,60 @@ export class SymbolGraphBuilder {
         for (const dep of dependencies) {
           const targetSymbols = this.enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap);
 
-          for (const targetSymbol of targetSymbols) {
+          // For method calls with multiple matches, try to disambiguate using context
+          let finalTargets = targetSymbols;
+          if (dep.dependency_type === DependencyType.CALLS && targetSymbols.length > 1) {
+            // Try to use resolved_class, qualified_context, or calling_object to pick the right implementation
+            const contextInfo = dep.resolved_class || dep.qualified_context;
+
+            if (contextInfo) {
+              const contextMatch = targetSymbols.filter(ts => {
+                let className = contextInfo;
+
+                if (contextInfo.includes('.')) {
+                  const qualifierParts = contextInfo.split('.');
+                  className = qualifierParts[0];
+                }
+                if (contextInfo.startsWith('field_call_')) {
+                  className = contextInfo.replace('field_call_', '').replace(/^_/, '');
+                  className = className.charAt(0).toUpperCase() + className.slice(1);
+                }
+
+                const symbolClassName = this.getSymbolClassName(ts, nodes, fileIdToPath);
+                return symbolClassName.toLowerCase() === className.toLowerCase();
+              });
+
+              if (contextMatch.length > 0) {
+                finalTargets = contextMatch;
+              }
+            }
+
+            // If still ambiguous after context matching:
+            // - If we have context info, take the first match (most specific)
+            // - If we have NO context info, skip to avoid false positives
+            if (finalTargets.length > 1) {
+              if (contextInfo) {
+                // Take the first match as the best guess
+                finalTargets = [finalTargets[0]];
+                this.logger?.debug('Multiple matches after disambiguation (non-file-aware), using first match', {
+                  from_symbol: symbol.name,
+                  to_symbol: dep.to_symbol,
+                  selected: finalTargets[0].name,
+                  resolved_class: dep.resolved_class
+                });
+              } else {
+                // No context info and multiple matches - skip to avoid false positives
+                this.logger?.warn('Skipping ambiguous method call dependency (non-file-aware, no context)', {
+                  from_symbol: symbol.name,
+                  to_symbol: dep.to_symbol,
+                  matches: finalTargets.length
+                });
+                continue;
+              }
+            }
+          }
+
+          for (const targetSymbol of finalTargets) {
             if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
               continue;
             }
@@ -475,6 +598,7 @@ export class SymbolGraphBuilder {
               parameter_types: dep.parameter_types,
               calling_object: dep.calling_object,
               qualified_context: dep.qualified_context,
+              resolved_class: dep.resolved_class,
             });
           }
         }
@@ -524,6 +648,41 @@ export class SymbolGraphBuilder {
       qualifier: name.substring(0, lastDotIndex),
       memberName: name.substring(lastDotIndex + 1)
     };
+  }
+
+  /**
+   * Get the class name that a symbol belongs to by finding the class node in the same file
+   */
+  private getSymbolClassName(symbol: SymbolNode, allNodes: SymbolNode[], fileIdToPath: Map<number, string> = new Map()): string {
+    // Find class symbols in the same file that contain this symbol
+    const classNodes = allNodes.filter(n =>
+      n.type === 'class' &&
+      n.fileId === symbol.fileId &&
+      n.startLine <= symbol.startLine &&
+      n.endLine >= symbol.endLine
+    );
+
+
+    // Return the most specific (innermost) class
+    if (classNodes.length > 0) {
+      // Sort by line range (smaller range = more specific)
+      classNodes.sort((a, b) => (b.endLine - b.startLine) - (a.endLine - a.startLine));
+      return classNodes[classNodes.length - 1].name;
+    }
+
+    // FALLBACK: If no class node found, try to extract class name from file path
+    // This handles cases where the parser doesn't extract the main class as a symbol
+    // e.g., "CardManager.cs" => "CardManager"
+    const filePath = fileIdToPath.get(symbol.fileId);
+    if (filePath) {
+      const fileName = filePath.split('/').pop() || '';
+      const match = fileName.match(/^([A-Z][A-Za-z0-9_]*)\.(cs|php|ts|js)$/);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    return '';
   }
 
   /**
@@ -731,7 +890,7 @@ export class SymbolGraphBuilder {
   /**
    * Check if a member symbol's signature indicates it belongs to a specific class
    */
-  private isSignatureClassMember(memberSymbol: SymbolNode, className: string): boolean {
+  private isSignatureClassMember(memberSymbol: SymbolNode, _className: string): boolean {
     if (!memberSymbol.signature) {
       return false;
     }
