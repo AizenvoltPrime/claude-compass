@@ -264,11 +264,11 @@ export interface CreateDependency {
   parameter_types?: string[];
   calling_object?: string;
   qualified_context?: string;
+  resolved_class?: string; // C# resolved class name - moved from CreateEnhancedDependency
 }
 
 // Enhanced dependency creation interface with rich context for advanced C# analysis
 export interface CreateEnhancedDependency extends CreateDependency {
-  resolved_class?: string; // "CardManager", "UserService"
   method_signature?: string; // Full signature with parameters
   file_context?: string; // File path for cross-file analysis
   namespace_context?: string; // C# namespace information

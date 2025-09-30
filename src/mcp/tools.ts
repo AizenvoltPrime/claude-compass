@@ -900,7 +900,8 @@ export class McpTools {
       const skipTransitive =
         callers.length > 20 ||
         validatedArgs.include_cross_stack ||
-        !analysisSettings.includeIndirect;
+        !analysisSettings.includeIndirect ||
+        validatedArgs.dependency_type; // Skip transitive when user requests specific dependency type
 
       // Include indirect callers based on analysis_type
       if (!skipTransitive && analysisSettings.includeIndirect) {
