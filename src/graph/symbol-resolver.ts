@@ -365,38 +365,37 @@ export class SymbolResolver {
   }
 
   private resolveCSharpClassMethod(className: string, methodName: string): Symbol | null {
-    // Find all methods with the target name across all files
     const candidateMethods = this.symbolsByName.get(methodName) || [];
 
+    const expectedQualifiedNameEnding = `${className}.${methodName}`;
+
     for (const method of candidateMethods) {
-      // Check if this method belongs to a file that contains the specified class
-      const fileContext = this.fileContexts.get(method.file_id);
-      if (!fileContext) continue;
-
-      // Look for a class symbol with the matching name in the same file
-      const classSymbol = fileContext.symbols.find(
-        s => s.name === className && (s.symbol_type === 'class' || s.symbol_type === 'interface')
-      );
-
-      if (classSymbol) {
-        // Verify the method is within the class boundaries
-        const isMethodInClass =
-          method.start_line >= classSymbol.start_line && method.end_line <= classSymbol.end_line;
-
-        if (isMethodInClass) {
+      if (method.qualified_name) {
+        if (method.qualified_name.endsWith(expectedQualifiedNameEnding) ||
+            method.qualified_name === expectedQualifiedNameEnding) {
           return method;
         }
       }
     }
 
-    // Fallback: try to match interface patterns (IClassName -> ClassName)
-    if (className.length > 1 && !className.startsWith('I')) {
-      const interfaceName = `I${className}`;
+    for (const method of candidateMethods) {
+      if (!method.qualified_name) {
+        const fileContext = this.fileContexts.get(method.file_id);
+        if (!fileContext) continue;
 
-      // Recursively try with interface name
-      const interfaceMethod = this.resolveCSharpClassMethod(interfaceName, methodName);
-      if (interfaceMethod) {
-        return interfaceMethod;
+        const classSymbol = fileContext.symbols.find(
+          s => s.name === className && (s.symbol_type === 'class' || s.symbol_type === 'interface')
+        );
+
+        if (classSymbol) {
+          const isMethodInClass =
+            method.start_line >= classSymbol.start_line &&
+            method.end_line <= classSymbol.end_line;
+
+          if (isMethodInClass) {
+            return method;
+          }
+        }
       }
     }
 

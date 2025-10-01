@@ -66,9 +66,11 @@ export async function up(knex: Knex): Promise<void> {
     table.increments('id').primary();
     table.integer('file_id').notNullable().references('id').inTable('files').onDelete('CASCADE');
     table.string('name', 1000).notNullable();
+    table.text('qualified_name');
+    table.integer('parent_symbol_id').unsigned().references('id').inTable('symbols').onDelete('CASCADE');
     table.string('symbol_type', 500).notNullable();
     table.text('signature');
-    table.text('description'); // Added from start to avoid later migration
+    table.text('description');
     table.integer('start_line');
     table.integer('end_line');
     table.boolean('is_exported').defaultTo(false);
@@ -84,6 +86,8 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['file_id', 'is_exported'], 'symbols_file_exported_idx');
     table.index(['symbol_type', 'is_exported'], 'symbols_type_exported_idx');
     table.index(['name']);
+    table.index(['qualified_name'], 'symbols_qualified_name_idx');
+    table.index(['parent_symbol_id'], 'symbols_parent_id_idx');
     table.index(['symbol_type']);
     table.index(['is_exported']);
     table.index(['start_line']);

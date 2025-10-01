@@ -33,6 +33,8 @@ export interface Symbol {
   id: number;
   file_id: number;
   name: string;
+  qualified_name?: string;
+  parent_symbol_id?: number;
   symbol_type: SymbolType;
   start_line?: number;
   end_line?: number;
@@ -246,6 +248,8 @@ export interface CreateFile {
 export interface CreateSymbol {
   file_id: number;
   name: string;
+  qualified_name?: string;
+  parent_symbol_id?: number;
   symbol_type: SymbolType;
   start_line?: number;
   end_line?: number;

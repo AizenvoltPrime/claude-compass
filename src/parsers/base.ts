@@ -15,6 +15,7 @@ const logger = createComponentLogger('parser-base');
 // Parser result interfaces
 export interface ParsedSymbol {
   name: string;
+  qualified_name?: string;
   symbol_type: SymbolType;
   start_line: number;
   end_line: number;
@@ -22,6 +23,7 @@ export interface ParsedSymbol {
   visibility?: Visibility;
   signature?: string;
   file_id?: number;
+  parent_symbol_id?: number;
 }
 
 export interface ParsedDependency {

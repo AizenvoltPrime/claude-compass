@@ -454,6 +454,7 @@ export class CSharpParser extends ChunkedParser {
 
     const symbol: ParsedSymbol = {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.CLASS,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
@@ -510,8 +511,11 @@ export class CSharpParser extends ChunkedParser {
     }
     context.methodMap.get(name)!.push(methodInfo);
 
+    const methodQualifiedName = this.buildQualifiedName(context, name);
+
     const symbol: ParsedSymbol = {
       name,
+      qualified_name: methodQualifiedName,
       symbol_type: SymbolType.METHOD,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
