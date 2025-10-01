@@ -920,6 +920,8 @@ export class GraphBuilder {
         allSymbols.push({
           file_id: file.id,
           name: symbol.name,
+          qualified_name: symbol.qualified_name,
+          parent_symbol_id: symbol.parent_symbol_id,
           symbol_type: symbol.symbol_type,
           start_line: symbol.start_line,
           end_line: symbol.end_line,

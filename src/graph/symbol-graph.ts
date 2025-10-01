@@ -670,18 +670,6 @@ export class SymbolGraphBuilder {
       return classNodes[classNodes.length - 1].name;
     }
 
-    // FALLBACK: If no class node found, try to extract class name from file path
-    // This handles cases where the parser doesn't extract the main class as a symbol
-    // e.g., "CardManager.cs" => "CardManager"
-    const filePath = fileIdToPath.get(symbol.fileId);
-    if (filePath) {
-      const fileName = filePath.split('/').pop() || '';
-      const match = fileName.match(/^([A-Z][A-Za-z0-9_]*)\.(cs|php|ts|js)$/);
-      if (match) {
-        return match[1];
-      }
-    }
-
     return '';
   }
 
