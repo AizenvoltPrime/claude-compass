@@ -127,7 +127,7 @@ namespace Game {
         }
     }
 
-    ${generatePadding(25000)}
+    ${generatePadding(30000)}
 
     public partial class GameManager {
         private string playerName;
@@ -139,11 +139,14 @@ namespace Game {
 }`;
       const result = await parser.parseFile('partial.cs', content);
 
-      // Both partial class parts should be recognized
       const gameManagerSymbols = result.symbols.filter(s => s.name === 'GameManager');
-      expect(gameManagerSymbols.length).toBeGreaterThanOrEqual(1);
+      expect(gameManagerSymbols.length).toBe(1);
 
-      // Both methods should be found
+      expect(gameManagerSymbols[0].qualified_name).toBe('Game.GameManager');
+
+      expect(gameManagerSymbols[0].start_line).toBeLessThanOrEqual(122);
+      expect(gameManagerSymbols[0].end_line).toBeGreaterThanOrEqual(138);
+
       expect(result.symbols.find(s => s.name === 'UpdateScore')).toBeDefined();
       expect(result.symbols.find(s => s.name === 'SetPlayerName')).toBeDefined();
     });

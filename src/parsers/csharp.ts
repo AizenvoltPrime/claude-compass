@@ -193,6 +193,8 @@ export class CSharpParser extends ChunkedParser {
     '_PropertyCanRevert',
   ]);
 
+  private currentChunkNamespace?: string;
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(CSharp as any);
@@ -219,6 +221,95 @@ export class CSharpParser extends ChunkedParser {
     }
 
     return this.parseFileDirectly(filePath, content, chunkedOptions);
+  }
+
+  public async parseFileInChunks(
+    filePath: string,
+    content: string,
+    options?: ChunkedParseOptions
+  ): Promise<MergedParseResult> {
+    const chunkSize = options?.chunkSize || this.DEFAULT_CHUNK_SIZE;
+    const overlapLines = options?.chunkOverlapLines || this.DEFAULT_OVERLAP_LINES;
+
+    try {
+      const chunks = this.splitIntoChunks(content, chunkSize, overlapLines);
+      const chunkResults: ParseResult[] = [];
+      let extractedNamespace: string | undefined;
+
+      if (chunks.length > 0) {
+        const namespaceMatch = chunks[0].content.match(/^\s*namespace\s+([\w.]+)\s*\{/);
+        if (namespaceMatch) {
+          extractedNamespace = namespaceMatch[1];
+          for (let j = 0; j < chunks.length; j++) {
+            chunks[j].namespaceContext = extractedNamespace;
+          }
+        }
+      }
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+
+        try {
+          const chunkResult = await this.parseChunk(chunk, filePath, options);
+          chunkResults.push(chunkResult);
+        } catch (error) {
+          this.logger.warn(`Failed to parse chunk ${i + 1}`, {
+            error: (error as Error).message,
+            chunkIndex: i,
+          });
+
+          chunkResults.push({
+            symbols: [],
+            dependencies: [],
+            imports: [],
+            exports: [],
+            errors: [
+              {
+                message: `Chunk parsing failed: ${(error as Error).message}`,
+                line: chunk.startLine,
+                column: 1,
+                severity: 'error',
+              },
+            ],
+          });
+        }
+      }
+
+      const mergedResult = this.mergeChunkResults(chunkResults, chunks);
+      return mergedResult;
+    } catch (error) {
+      this.logger.error('Chunked parsing failed', {
+        filePath,
+        error: (error as Error).message,
+      });
+
+      return {
+        symbols: [],
+        dependencies: [],
+        imports: [],
+        exports: [],
+        errors: [
+          {
+            message: `Chunked parsing failed: ${(error as Error).message}`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
+        chunksProcessed: 0,
+      };
+    }
+  }
+
+  protected async parseChunk(
+    chunk: ChunkResult,
+    originalFilePath: string,
+    options?: ChunkedParseOptions
+  ): Promise<ParseResult> {
+    this.currentChunkNamespace = chunk.namespaceContext;
+    const result = await super.parseChunk(chunk, originalFilePath, options);
+    this.currentChunkNamespace = undefined;
+    return result;
   }
 
   /**
@@ -370,14 +461,23 @@ export class CSharpParser extends ChunkedParser {
    * Initialize AST context for efficient traversal
    */
   private initializeASTContext(): ASTContext {
+    const namespaceStack: string[] = [];
+    let currentNamespace: string | undefined;
+
+    if (this.currentChunkNamespace) {
+      namespaceStack.push(this.currentChunkNamespace);
+      currentNamespace = this.currentChunkNamespace;
+    }
+
     return {
       typeMap: new Map(),
       methodMap: new Map(),
-      namespaceStack: [],
+      namespaceStack,
       classStack: [],
       usingDirectives: new Set(),
       symbolCache: new Map(),
       nodeCache: new Map(),
+      currentNamespace,
     };
   }
 
@@ -594,8 +694,11 @@ export class CSharpParser extends ChunkedParser {
     godotContext: GodotContext,
     dependencies: ParsedDependency[]
   ): void {
-    const callerName = this.findContainingMethod(node, context);
-    if (!callerName) return;
+    const callerName = this.findContainingMethod(node, context, content);
+    if (!callerName || callerName.trim() === '') return;
+
+    const isClassOnly = context.currentClass && callerName === context.currentClass;
+    if (isClassOnly) return;
 
     let methodCall: MethodCall | null = null;
 
@@ -837,7 +940,7 @@ export class CSharpParser extends ChunkedParser {
 
       if (signalMatch) {
         const signalName = signalMatch[1];
-        const callerName = this.findContainingMethod(node, context);
+        const callerName = this.findContainingMethod(node, context, content);
 
         if (!godotContext.signals.has(signalName)) {
           godotContext.signals.set(signalName, {
@@ -1104,7 +1207,7 @@ export class CSharpParser extends ChunkedParser {
     if (!nameNode) return;
 
     const memberName = this.getNodeText(nameNode, content);
-    const callerName = this.findContainingMethod(node, context);
+    const callerName = this.findContainingMethod(node, context, content);
 
     dependencies.push({
       from_symbol: callerName,
@@ -1388,7 +1491,11 @@ export class CSharpParser extends ChunkedParser {
     return parts.join('.');
   }
 
-  private findContainingMethod(node: Parser.SyntaxNode, context: ASTContext): string {
+  private findContainingMethod(
+    node: Parser.SyntaxNode,
+    context: ASTContext,
+    content: string
+  ): string {
     let parent = node.parent;
 
     while (parent) {
@@ -1399,14 +1506,14 @@ export class CSharpParser extends ChunkedParser {
       ) {
         const nameNode = parent.childForFieldName('name');
         if (nameNode) {
-          const methodName = this.getNodeText(nameNode, parent.tree.rootNode.text);
+          const methodName = this.getNodeText(nameNode, content);
           return this.buildQualifiedName(context, methodName);
         }
       }
       parent = parent.parent;
     }
 
-    return context.currentClass || context.currentNamespace || '<global>';
+    return '';
   }
 
   private findParentDeclaration(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
@@ -1642,6 +1749,38 @@ export class CSharpParser extends ChunkedParser {
       exports: mergedResult.exports,
       errors: mergedResult.errors,
     };
+  }
+
+  protected removeDuplicateSymbols(symbols: ParsedSymbol[]): ParsedSymbol[] {
+    const seen = new Map<string, ParsedSymbol>();
+
+    for (const symbol of symbols) {
+      const key =
+        symbol.symbol_type === SymbolType.CLASS && symbol.signature?.includes('partial')
+          ? `${symbol.qualified_name}:CLASS:partial`
+          : `${symbol.qualified_name || symbol.name}:${symbol.symbol_type}`;
+
+      if (!seen.has(key)) {
+        seen.set(key, symbol);
+      } else {
+        const existing = seen.get(key)!;
+        if (symbol.symbol_type === SymbolType.CLASS && this.isPartialClass(symbol)) {
+          seen.set(key, {
+            ...existing,
+            start_line: Math.min(existing.start_line, symbol.start_line),
+            end_line: Math.max(existing.end_line, symbol.end_line),
+          });
+        } else if (this.isMoreCompleteSymbol(symbol, existing)) {
+          seen.set(key, symbol);
+        }
+      }
+    }
+
+    return Array.from(seen.values());
+  }
+
+  private isPartialClass(symbol: ParsedSymbol): boolean {
+    return symbol.symbol_type === SymbolType.CLASS && !!symbol.signature?.includes('partial');
   }
 
   // Required abstract method implementations

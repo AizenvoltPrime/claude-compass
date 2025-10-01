@@ -1608,14 +1608,26 @@ export class GraphBuilder {
             dependency.line_number >= symbol.start_line &&
             dependency.line_number <= symbol.end_line
           ) {
-            // For symbols that are methods, functions, or classes, prioritize those
-            // over properties or variables when the line matches
+            // Prioritize methods/functions over classes to avoid creating dependencies from the class
             if (
               symbol.symbol_type === SymbolType.METHOD ||
-              symbol.symbol_type === SymbolType.FUNCTION ||
-              symbol.symbol_type === SymbolType.CLASS
+              symbol.symbol_type === SymbolType.FUNCTION
             ) {
               return true;
+            }
+
+            // Only match class if no method/function contains this line
+            if (symbol.symbol_type === SymbolType.CLASS) {
+              const hasContainingMethod = fileSymbols.some(
+                s =>
+                  (s.symbol_type === SymbolType.METHOD || s.symbol_type === SymbolType.FUNCTION) &&
+                  dependency.line_number >= s.start_line &&
+                  dependency.line_number <= s.end_line
+              );
+              if (!hasContainingMethod) {
+                return true;
+              }
+              return false;
             }
 
             // Fallback: if no method/function/class contains this line,

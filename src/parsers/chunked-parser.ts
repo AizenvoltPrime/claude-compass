@@ -22,6 +22,7 @@ export interface ChunkResult {
   endLine: number;
   chunkIndex: number;
   isComplete: boolean;
+  namespaceContext?: string;
   metadata?: {
     originalStartLine: number;
     hasOverlapBefore: boolean;
@@ -375,7 +376,7 @@ export abstract class ChunkedParser extends BaseParser {
     const seen = new Map<string, ParsedSymbol>();
 
     for (const symbol of symbols) {
-      const key = `${symbol.name}:${symbol.symbol_type}:${symbol.start_line}`;
+      const key = `${symbol.qualified_name || symbol.name}:${symbol.symbol_type}`;
 
       if (!seen.has(key) || this.isMoreCompleteSymbol(symbol, seen.get(key)!)) {
         seen.set(key, symbol);
