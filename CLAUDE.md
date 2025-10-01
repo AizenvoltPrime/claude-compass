@@ -184,6 +184,7 @@ Setup file: `tests/setup.ts` initializes test database
 - Implement proper error handling instead of silent failures
 - Address root causes rather than symptoms
 - Maintain high code quality standards throughout development
+- Never write verbose comments
 
 ## Common Patterns
 
