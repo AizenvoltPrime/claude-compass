@@ -242,6 +242,29 @@ namespace Game.Cards {
       expect(call1!.calling_object).toBe('_cardManager');
       expect(call2!.calling_object).toBe('_cardManager');
     });
+
+    test('should not create duplicate dependencies for same method call', async () => {
+      const content = `
+namespace Game {
+    public class DeckController {
+        public void InitializeServices() {
+            var manager = new GameManager();
+            manager.SetHandPositions();
+        }
+    }
+}`;
+
+      const result = await parser.parseFile('test.cs', content);
+
+      const setHandPositionsCalls = result.dependencies.filter(d =>
+        d.to_symbol.includes('SetHandPositions')
+      );
+
+      expect(setHandPositionsCalls).toHaveLength(1);
+
+      expect(setHandPositionsCalls[0].from_symbol).toContain('InitializeServices');
+      expect(setHandPositionsCalls[0].from_symbol).not.toBe('DeckController');
+    });
   });
 
   describe('Edge Cases and Error Handling', () => {
