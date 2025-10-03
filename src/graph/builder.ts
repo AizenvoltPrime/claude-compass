@@ -1666,19 +1666,22 @@ export class GraphBuilder {
             dependency.line_number >= symbol.start_line &&
             dependency.line_number <= symbol.end_line
           ) {
-            // Prioritize methods/functions over classes to avoid creating dependencies from the class
+            // Prioritize methods/functions/properties over classes to avoid creating dependencies from the class
             if (
               symbol.symbol_type === SymbolType.METHOD ||
-              symbol.symbol_type === SymbolType.FUNCTION
+              symbol.symbol_type === SymbolType.FUNCTION ||
+              symbol.symbol_type === SymbolType.PROPERTY
             ) {
               return true;
             }
 
-            // Only match class if no method/function contains this line
+            // Only match class if no method/function/property contains this line
             if (symbol.symbol_type === SymbolType.CLASS) {
               const hasContainingMethod = fileSymbols.some(
                 s =>
-                  (s.symbol_type === SymbolType.METHOD || s.symbol_type === SymbolType.FUNCTION) &&
+                  (s.symbol_type === SymbolType.METHOD ||
+                   s.symbol_type === SymbolType.FUNCTION ||
+                   s.symbol_type === SymbolType.PROPERTY) &&
                   dependency.line_number >= s.start_line &&
                   dependency.line_number <= s.end_line
               );
@@ -1688,12 +1691,13 @@ export class GraphBuilder {
               return false;
             }
 
-            // Fallback: if no method/function/class contains this line,
+            // Fallback: if no method/function/property/class contains this line,
             // accept any symbol that contains it
             const hasMethodOrFunction = fileSymbols.some(
               s =>
                 (s.symbol_type === SymbolType.METHOD ||
                   s.symbol_type === SymbolType.FUNCTION ||
+                  s.symbol_type === SymbolType.PROPERTY ||
                   s.symbol_type === SymbolType.CLASS) &&
                 dependency.line_number >= s.start_line &&
                 dependency.line_number <= s.end_line

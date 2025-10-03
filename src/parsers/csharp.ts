@@ -1261,7 +1261,14 @@ export class CSharpParser extends ChunkedParser {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return;
 
-    const memberName = this.getNodeText(nameNode, content);
+    // Get the full qualified name (e.g., "GameConstants.CARD_BACK_PATH") instead of just the name part
+    let memberName = this.getNodeText(node, content);
+
+    // Strip "this." prefix as it's redundant for local class references
+    if (memberName.startsWith('this.')) {
+      memberName = memberName.substring(5);
+    }
+
     const callerName = this.findContainingMethod(node, context, content);
 
     dependencies.push({
