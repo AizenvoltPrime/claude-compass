@@ -96,6 +96,16 @@ interface ExportInfo {
   defaultValue?: any;
 }
 
+interface StructuralContext {
+  type: 'class' | 'interface' | 'namespace';
+  name: string;
+  qualifiedName: string;
+  startLine: number;
+  endLine: number;
+  namespace?: string;
+  parentClass?: string;
+}
+
 interface MethodCall {
   methodName: string;
   callingObject: string;
@@ -194,6 +204,11 @@ export class CSharpParser extends ChunkedParser {
   ]);
 
   private currentChunkNamespace?: string;
+  private currentChunkStructures?: {
+    namespace?: string;
+    classes?: string[];
+    qualifiedClassName?: string;
+  };
 
   constructor() {
     const parser = new Parser();
@@ -307,8 +322,10 @@ export class CSharpParser extends ChunkedParser {
     options?: ChunkedParseOptions
   ): Promise<ParseResult> {
     this.currentChunkNamespace = chunk.namespaceContext;
+    this.currentChunkStructures = chunk.metadata?.enclosingStructures;
     const result = await super.parseChunk(chunk, originalFilePath, options);
     this.currentChunkNamespace = undefined;
+    this.currentChunkStructures = undefined;
     return result;
   }
 
@@ -460,24 +477,47 @@ export class CSharpParser extends ChunkedParser {
   /**
    * Initialize AST context for efficient traversal
    */
-  private initializeASTContext(): ASTContext {
+  private initializeASTContext(enclosingStructures?: {
+    namespace?: string;
+    classes?: string[];
+    qualifiedClassName?: string;
+  }): ASTContext {
     const namespaceStack: string[] = [];
     let currentNamespace: string | undefined;
+    const classStack: string[] = [];
+    let currentClass: string | undefined;
 
     if (this.currentChunkNamespace) {
       namespaceStack.push(this.currentChunkNamespace);
       currentNamespace = this.currentChunkNamespace;
     }
 
+    const structures = enclosingStructures || this.currentChunkStructures;
+
+    if (structures) {
+      if (structures.namespace) {
+        if (!namespaceStack.includes(structures.namespace)) {
+          namespaceStack.push(structures.namespace);
+          currentNamespace = structures.namespace;
+        }
+      }
+
+      if (structures.classes && structures.classes.length > 0) {
+        classStack.push(...structures.classes);
+        currentClass = classStack[classStack.length - 1];
+      }
+    }
+
     return {
       typeMap: new Map(),
       methodMap: new Map(),
       namespaceStack,
-      classStack: [],
+      classStack,
+      currentNamespace,
+      currentClass,
       usingDirectives: new Set(),
       symbolCache: new Map(),
       nodeCache: new Map(),
-      currentNamespace,
     };
   }
 
@@ -999,7 +1039,7 @@ export class CSharpParser extends ChunkedParser {
   private processInterface(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext,
+    context: ASTContext,
     symbols: ParsedSymbol[],
     exports: ParsedExport[]
   ): void {
@@ -1011,15 +1051,30 @@ export class CSharpParser extends ChunkedParser {
     const visibility = this.getVisibility(modifiers);
     const baseTypes = this.extractBaseTypes(node, content);
 
-    symbols.push({
+    context.currentClass = name;
+    context.classStack.push(name);
+
+    const qualifiedName = this.buildQualifiedName(context, name);
+    context.typeMap.set(name, {
+      type: name,
+      fullQualifiedName: qualifiedName,
+      source: 'method',
+      namespace: context.currentNamespace,
+    });
+
+    const symbol: ParsedSymbol = {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.INTERFACE,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility,
       signature: this.buildInterfaceSignature(name, modifiers, baseTypes),
-    });
+    };
+
+    symbols.push(symbol);
+    context.symbolCache.set(qualifiedName, symbol);
 
     if (modifiers.includes('public')) {
       exports.push({
@@ -1703,6 +1758,148 @@ export class CSharpParser extends ChunkedParser {
     }
 
     return declarations.sort((a, b) => a.startIndex - b.startIndex);
+  }
+
+  private extractStructuralContext(content: string): StructuralContext[] {
+    const structures: StructuralContext[] = [];
+    const tree = this.parser.parse(content);
+
+    if (!tree?.rootNode) return structures;
+
+    const namespaceStack: string[] = [];
+    const classStack: string[] = [];
+
+    const traverse = (node: Parser.SyntaxNode) => {
+      switch (node.type) {
+        case 'namespace_declaration':
+        case 'file_scoped_namespace_declaration': {
+          const nameNode = node.childForFieldName('name');
+          if (nameNode) {
+            const name = this.getNodeText(nameNode, content);
+            namespaceStack.push(name);
+
+            structures.push({
+              type: 'namespace',
+              name,
+              qualifiedName: name,
+              startLine: node.startPosition.row + 1,
+              endLine: node.endPosition.row + 1,
+            });
+          }
+          break;
+        }
+
+        case 'class_declaration':
+        case 'interface_declaration': {
+          const nameNode = node.childForFieldName('name');
+          if (nameNode) {
+            const name = this.getNodeText(nameNode, content);
+            const namespace = namespaceStack.length > 0 ? namespaceStack.join('.') : undefined;
+            const parentClass = classStack.length > 0 ? classStack[classStack.length - 1] : undefined;
+
+            const qualifiedParts: string[] = [];
+            if (namespace) qualifiedParts.push(namespace);
+            if (parentClass) qualifiedParts.push(parentClass);
+            qualifiedParts.push(name);
+
+            const qualifiedName = qualifiedParts.join('.');
+
+            structures.push({
+              type: node.type === 'class_declaration' ? 'class' : 'interface',
+              name,
+              qualifiedName,
+              startLine: node.startPosition.row + 1,
+              endLine: node.endPosition.row + 1,
+              namespace,
+              parentClass,
+            });
+
+            classStack.push(name);
+          }
+          break;
+        }
+      }
+
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child) {
+          traverse(child);
+        }
+      }
+
+      if (node.type === 'class_declaration' || node.type === 'interface_declaration') {
+        classStack.pop();
+      }
+      if (node.type === 'namespace_declaration' || node.type === 'file_scoped_namespace_declaration') {
+        namespaceStack.pop();
+      }
+    };
+
+    traverse(tree.rootNode);
+    return structures;
+  }
+
+  protected override splitIntoChunks(
+    content: string,
+    maxChunkSize: number,
+    overlapLines: number
+  ): ChunkResult[] {
+    const structures = this.extractStructuralContext(content);
+    logger.debug('Extracted structural context', { count: structures.length, structures: structures.slice(0, 5) });
+    const baseChunks = super.splitIntoChunks(content, maxChunkSize, overlapLines);
+    logger.debug('Created base chunks', { count: baseChunks.length });
+
+    return baseChunks.map(chunk => {
+      const enclosingClasses: string[] = [];
+      let enclosingNamespace: string | undefined;
+      let qualifiedClassName: string | undefined;
+
+      for (const structure of structures) {
+        const chunkOverlapsStructure =
+          (chunk.startLine >= structure.startLine && chunk.startLine <= structure.endLine) ||
+          (chunk.endLine >= structure.startLine && chunk.endLine <= structure.endLine) ||
+          (chunk.startLine <= structure.startLine && chunk.endLine >= structure.endLine);
+
+        if (chunkOverlapsStructure) {
+          if (structure.type === 'namespace') {
+            enclosingNamespace = structure.qualifiedName;
+          } else if (structure.type === 'class' || structure.type === 'interface') {
+            enclosingClasses.push(structure.name);
+            if (!qualifiedClassName) {
+              qualifiedClassName = structure.qualifiedName;
+            }
+          }
+        }
+      }
+
+      if (!chunk.metadata) {
+        chunk.metadata = {
+          originalStartLine: chunk.startLine,
+          hasOverlapBefore: false,
+          hasOverlapAfter: false,
+          totalChunks: baseChunks.length,
+        };
+      }
+
+      chunk.metadata.enclosingStructures = {
+        namespace: enclosingNamespace,
+        classes: enclosingClasses.length > 0 ? enclosingClasses : undefined,
+        qualifiedClassName,
+      };
+
+      if (enclosingClasses.length > 0 || enclosingNamespace) {
+        logger.debug('Chunk enclosing structures', {
+          chunkIndex: chunk.chunkIndex,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          namespace: enclosingNamespace,
+          classes: enclosingClasses,
+          qualifiedClassName,
+        });
+      }
+
+      return chunk;
+    });
   }
 
   protected mergeChunkResults(
