@@ -1026,12 +1026,13 @@ export class GraphBuilder {
             }
 
             // Create symbol for the framework entity
+            const entityLine = (entity.metadata as any)?.line || 1;
             const syntheticSymbol = await this.dbService.createSymbol({
               file_id: matchingFile.id,
               name: entity.name,
               symbol_type: 'component' as any, // Vue components, React components etc.
-              start_line: 1, // Default to start of file
-              end_line: 1,
+              start_line: entityLine,
+              end_line: entityLine,
               is_exported: true, // Framework entities are typically exported
               signature: `${entity.type} ${entity.name}`,
             });

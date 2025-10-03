@@ -274,8 +274,10 @@ export class GodotParser extends BaseFrameworkParser {
       let currentSection: string | null = null;
       let currentNode: Partial<GodotNode> | null = null;
 
-      for (const line of lines) {
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
         const trimmed = line.trim();
+        const lineNumber = lineIndex + 1;
 
         // Parse section headers
         if (trimmed.startsWith('[')) {
@@ -294,7 +296,9 @@ export class GodotParser extends BaseFrameworkParser {
                 type: 'godot_node',
                 name: nodeParams.name || 'Unknown',
                 filePath,
-                metadata: {},
+                metadata: {
+                  line: lineNumber
+                },
                 nodeType: nodeParams.type || 'Node',
                 nodeName: nodeParams.name || 'Unknown',
                 parent: nodeParams.parent,
@@ -334,7 +338,8 @@ export class GodotParser extends BaseFrameworkParser {
         filePath,
         metadata: {
           nodeCount: nodes.length,
-          hasScript: nodes.some(node => node.script)
+          hasScript: nodes.some(node => node.script),
+          line: 1
         },
         scenePath: filePath,
         rootNode: nodes.find(node => !node.parent),
