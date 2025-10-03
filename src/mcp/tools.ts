@@ -874,7 +874,7 @@ export class McpTools {
 
     try {
       const symbol = (await Promise.race([
-        this.dbService.getSymbol(validatedArgs.symbol_id),
+        this.dbService.getSymbolWithFile(validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
       if (!symbol) {
@@ -890,6 +890,9 @@ export class McpTools {
         const depType = validatedArgs.dependency_type as DependencyType;
         callers = callers.filter(caller => caller.dependency_type === depType);
       }
+
+      // Save direct callers before adding transitive ones
+      const directCallers = [...callers];
 
       let transitiveResults: any[] = [];
 
@@ -973,14 +976,13 @@ export class McpTools {
             type: 'text',
             text: JSON.stringify(
               {
-                dependencies: callers.map(caller => {
+                dependencies: directCallers.map(caller => {
                   const toName = symbol.name;
                   const fromFile = caller.from_symbol?.file?.path;
                   const toFile = symbol.file?.path;
 
-                  // Always extract class name from file path for consistency
-                  // This handles cases where symbol name is just method name or fully qualified
-                  const fromName = fromFile ? this.getClassNameFromPath(fromFile) : 'unknown';
+                  // Use actual caller symbol name, not class from path
+                  const fromName = caller.from_symbol?.name || 'unknown';
 
                   // For "to" field: keep original qualification logic for target symbol
                   const shouldQualifyTo = fromName === toName && fromFile !== toFile;
@@ -996,7 +998,7 @@ export class McpTools {
                     file_path: fromFile,
                   };
                 }),
-                total_count: callers.length,
+                total_count: directCallers.length,
                 parameter_analysis: parameterAnalysis,
                 query_info: {
                   symbol: symbol.name,
