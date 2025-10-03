@@ -929,19 +929,19 @@ export class McpTools {
           if (true) {
             const transitiveDependencies = transitiveResult.results
               .map(result => {
-                const fromSymbol = result.dependencies[0]?.from_symbol;
-                if (!fromSymbol) return null;
+                const firstDep = result.dependencies[0];
+                if (!firstDep?.from_symbol) return null;
 
                 return {
                   id: result.symbolId,
                   from_symbol_id: result.symbolId,
-                  to_symbol_id: validatedArgs.symbol_id,
-                  dependency_type: result.dependencies[0]?.dependency_type || DependencyType.CALLS,
-                  line_number: result.dependencies[0]?.line_number,
+                  to_symbol_id: firstDep.to_symbol_id,
+                  dependency_type: firstDep.dependency_type || DependencyType.CALLS,
+                  line_number: firstDep.line_number,
                   created_at: new Date(),
                   updated_at: new Date(),
-                  from_symbol: fromSymbol,
-                  to_symbol: undefined,
+                  from_symbol: firstDep.from_symbol,
+                  to_symbol: firstDep.to_symbol,
                   call_chain: result.call_chain,
                   path: result.path,
                   depth: result.depth,
@@ -1117,20 +1117,19 @@ export class McpTools {
           if (true) {
             const transitiveDependencies = transitiveResult.results
               .map(result => {
-                const toSymbol = result.dependencies[0]?.to_symbol;
-                if (!toSymbol) return null;
+                const firstDep = result.dependencies[0];
+                if (!firstDep?.to_symbol) return null;
 
                 return {
                   id: result.symbolId,
-                  from_symbol_id: validatedArgs.symbol_id,
+                  from_symbol_id: firstDep.from_symbol_id,
                   to_symbol_id: result.symbolId,
-                  dependency_type: result.dependencies[0]?.dependency_type || DependencyType.CALLS,
-                  line_number: result.dependencies[0]?.line_number,
+                  dependency_type: firstDep.dependency_type || DependencyType.CALLS,
+                  line_number: firstDep.line_number,
                   created_at: new Date(),
                   updated_at: new Date(),
-                  from_symbol: undefined,
-                  to_symbol: toSymbol,
-                  // Enhanced context from TransitiveAnalyzer
+                  from_symbol: firstDep.from_symbol,
+                  to_symbol: firstDep.to_symbol,
                   call_chain: result.call_chain,
                   path: result.path,
                   depth: result.depth,
