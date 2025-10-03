@@ -1219,7 +1219,7 @@ export class GraphBuilder {
             // Store nodes for this scene
             if (sceneEntity.nodes && Array.isArray(sceneEntity.nodes)) {
               for (const node of sceneEntity.nodes) {
-                const storedNode = await this.dbService.storeGodotNode({
+                await this.dbService.storeGodotNode({
                   repo_id: repositoryId,
                   scene_id: storedScene.id,
                   node_name: node.nodeName || node.name,
@@ -1227,25 +1227,6 @@ export class GraphBuilder {
                   script_path: node.script,
                   properties: node.properties || {},
                 });
-
-                // Create scene-script relationship if node has script
-                if (node.script) {
-                  // Find the script entity and create relationship
-                  const scriptEntity = await this.dbService.findGodotScriptByPath(
-                    repositoryId,
-                    node.script
-                  );
-                  if (scriptEntity) {
-                    await this.dbService.createGodotRelationship({
-                      repo_id: repositoryId,
-                      relationship_type: 'scene_script_attachment' as any,
-                      from_entity_type: 'scene' as any,
-                      from_entity_id: storedScene.id,
-                      to_entity_type: 'script' as any,
-                      to_entity_id: scriptEntity.id,
-                    });
-                  }
-                }
               }
 
               // Update scene with root node reference
@@ -1375,6 +1356,82 @@ export class GraphBuilder {
       for (const scene of storedScenes) {
         const sceneNodes = await this.dbService.getGodotNodesByScene(scene.id);
         storedNodes.push(...sceneNodes);
+      }
+
+      // Create dependencies between nodes and their scripts (Second pass - symbols exist now)
+      this.logger.info('Creating node-script dependencies', {
+        totalNodes: storedNodes.length,
+        nodesWithScripts: storedNodes.filter((n: any) => n.script_path).length,
+      });
+
+      for (const node of storedNodes) {
+        if (!node.script_path) continue;
+
+        try {
+          // Find the scene this node belongs to
+          const scene = storedScenes.find((s: any) => s.id === node.scene_id);
+          if (!scene) continue;
+
+          // Get the scene file to find node symbol
+          const sceneFile = await this.dbService.getFileByPath(scene.scene_path);
+          if (!sceneFile) {
+            this.logger.warn('Scene file not found', { scenePath: scene.scene_path });
+            continue;
+          }
+
+          // Get all symbols in the scene file
+          const sceneSymbols = await this.dbService.getSymbolsByFile(sceneFile.id);
+          const nodeSymbol = sceneSymbols.find(s => s.name === node.node_name);
+
+          if (!nodeSymbol) {
+            this.logger.warn('Node symbol not found', {
+              nodeName: node.node_name,
+              scenePath: scene.scene_path,
+              totalSymbols: sceneSymbols.length,
+            });
+            continue;
+          }
+
+          // Get the script file
+          const scriptFile = await this.dbService.getFileByPath(node.script_path);
+          if (!scriptFile) {
+            this.logger.warn('Script file not found', { scriptPath: node.script_path });
+            continue;
+          }
+
+          // Get the class symbol in the script
+          const scriptSymbols = await this.dbService.getSymbolsByFile(scriptFile.id);
+          const scriptClassSymbol = scriptSymbols.find(s => s.symbol_type === 'class');
+
+          if (!scriptClassSymbol) {
+            this.logger.warn('Script class symbol not found', {
+              scriptPath: node.script_path,
+              totalSymbols: scriptSymbols.length,
+            });
+            continue;
+          }
+
+          // Create dependency from node to script class
+          await this.dbService.createDependency({
+            from_symbol_id: nodeSymbol.id,
+            to_symbol_id: scriptClassSymbol.id,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: (node.metadata as any)?.line || 1,
+          });
+
+          this.logger.info('Created node-script dependency', {
+            nodeSymbol: nodeSymbol.name,
+            scriptClass: scriptClassSymbol.name,
+            fromId: nodeSymbol.id,
+            toId: scriptClassSymbol.id,
+          });
+        } catch (error) {
+          this.logger.error('Failed to create node-script dependency', {
+            nodeName: node.node_name,
+            scriptPath: node.script_path,
+            error: (error as Error).message,
+          });
+        }
       }
 
       // Convert to framework entities format expected by the relationship builder
