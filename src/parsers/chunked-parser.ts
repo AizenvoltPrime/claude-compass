@@ -28,6 +28,11 @@ export interface ChunkResult {
     hasOverlapBefore: boolean;
     hasOverlapAfter: boolean;
     totalChunks: number;
+    enclosingStructures?: {
+      namespace?: string;
+      classes?: string[];
+      qualifiedClassName?: string;
+    };
   };
 }
 
