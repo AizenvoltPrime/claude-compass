@@ -269,6 +269,9 @@ export class GodotParser extends BaseFrameworkParser {
       const resources: GodotResource[] = [];
       const connections: GodotConnection[] = [];
 
+      const extResources = new Map<string, string>();
+      const projectRoot = await this.findGodotProjectRoot(filePath);
+
       // Parse scene file format
       const lines = content.split('\n');
       let currentSection: string | null = null;
@@ -290,7 +293,13 @@ export class GodotParser extends BaseFrameworkParser {
           if (sectionMatch) {
             currentSection = sectionMatch[1];
 
-            if (currentSection === 'node') {
+            if (currentSection === 'ext_resource') {
+              const extResourceMatch = trimmed.match(/\[ext_resource[^\]]*path="([^"]+)"[^\]]*id="([^"]+)"/);
+              if (extResourceMatch) {
+                const [, resourcePath, resourceId] = extResourceMatch;
+                extResources.set(resourceId, resourcePath);
+              }
+            } else if (currentSection === 'node') {
               const nodeParams = this.parseNodeParams(sectionMatch[2] || '');
               currentNode = {
                 type: 'godot_node',
@@ -318,7 +327,16 @@ export class GodotParser extends BaseFrameworkParser {
 
             // Handle script attachment
             if (key === 'script' && value.includes('ExtResource')) {
-              currentNode.script = this.extractResourcePath(value);
+              const resourceId = this.extractResourcePath(value);
+              const godotPath = extResources.get(resourceId);
+
+              if (godotPath && projectRoot) {
+                currentNode.script = this.convertGodotPathToAbsolute(godotPath, projectRoot);
+              } else if (godotPath) {
+                currentNode.script = godotPath;
+              } else {
+                currentNode.script = resourceId;
+              }
             }
           }
         }
@@ -595,6 +613,32 @@ export class GodotParser extends BaseFrameworkParser {
 
   private extractClassNameFromPath(scriptPath: string): string {
     return path.basename(scriptPath, '.cs');
+  }
+
+  private async findGodotProjectRoot(filePath: string): Promise<string | null> {
+    let currentDir = path.dirname(filePath);
+    const maxDepth = 10;
+    let depth = 0;
+
+    while (depth < maxDepth) {
+      try {
+        const projectGodotPath = path.join(currentDir, 'project.godot');
+        await fs.access(projectGodotPath);
+        return currentDir;
+      } catch {
+        const parentDir = path.dirname(currentDir);
+        if (parentDir === currentDir) break;
+        currentDir = parentDir;
+        depth++;
+      }
+    }
+
+    return null;
+  }
+
+  private convertGodotPathToAbsolute(godotPath: string, projectRoot: string): string {
+    const relativePath = godotPath.replace(/^res:\/\//, '');
+    return path.join(projectRoot, relativePath);
   }
 
   // Override parseFile to handle Godot-specific files
