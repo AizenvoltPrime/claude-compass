@@ -2657,7 +2657,7 @@ export class McpTools {
           to: qualifiedToName,
           type: impactType,
           line_number: originalDep.line_number || 0,
-          file_path: item.file_path,
+          file_path: originalDep.from_symbol?.file?.path || '',
           relationship_context: item.relationship_context,
         }));
       }
