@@ -1168,9 +1168,8 @@ export class McpTools {
                   const fromFile = dep.from_symbol?.file?.path;
                   const toFile = dep.to_symbol?.file?.path;
 
-                  // Always extract class name from file path for consistency
-                  // This handles cases where symbol name is just method name or fully qualified
-                  const fromName = fromFile ? this.getClassNameFromPath(fromFile) : 'unknown';
+                  // Use actual symbol name, not class from path
+                  const fromName = dep.from_symbol?.name || 'unknown';
 
                   // For "to" field: keep original qualification logic for target symbol
                   const shouldQualifyTo = fromName === toName && fromFile !== toFile;
@@ -1370,6 +1369,7 @@ export class McpTools {
       const directImpactDependencies = this.createImpactDependencies(
         deduplicatedDirectImpact,
         symbol.name,
+        symbol.file?.path || '',
         'impacts',
         [...directDependencies, ...directCallers]
       );
@@ -1377,6 +1377,7 @@ export class McpTools {
       const transitiveImpactDependencies = this.createImpactDependencies(
         deduplicatedTransitiveImpact,
         symbol.name,
+        symbol.file?.path || '',
         'impacts_indirect',
         []
       );
@@ -2625,12 +2626,13 @@ export class McpTools {
   private createImpactDependencies(
     impactItems: ImpactItem[],
     targetSymbolName: string,
+    targetFilePath: string,
     impactType: string,
     originalDependencies: any[]
   ): any[] {
-    return impactItems.map(item => {
-      // Enhanced dependency lookup with multiple matching strategies
-      const originalDep = originalDependencies.find(dep => {
+    return impactItems.flatMap(item => {
+      // Find ALL matching dependencies (not just the first one)
+      const matchingDeps = originalDependencies.filter(dep => {
         const symbolId = dep.to_symbol?.id || dep.from_symbol?.id;
         const symbolName = dep.to_symbol?.name || dep.from_symbol?.name;
         const filePath = dep.to_symbol?.file?.path || dep.from_symbol?.file?.path;
@@ -2639,15 +2641,36 @@ export class McpTools {
         return symbolId === item.id || (symbolName === item.name && filePath === item.file_path);
       });
 
-      return {
-        from: item.name,
-        to: targetSymbolName,
+      // Apply same qualification logic as who_calls:
+      // If from and to have same name but different files, qualify the "to" name
+      const fromName = item.name;
+      const shouldQualifyTo = fromName === targetSymbolName && item.file_path !== targetFilePath;
+      const qualifiedToName = shouldQualifyTo && targetFilePath
+        ? `${this.getClassNameFromPath(targetFilePath)}.${targetSymbolName}`
+        : targetSymbolName;
+
+      // Create one dependency entry for each matching original dependency
+      // This ensures multiple calls from the same caller at different lines are all captured
+      if (matchingDeps.length > 0) {
+        return matchingDeps.map(originalDep => ({
+          from: fromName,
+          to: qualifiedToName,
+          type: impactType,
+          line_number: originalDep.line_number || 0,
+          file_path: item.file_path,
+          relationship_context: item.relationship_context,
+        }));
+      }
+
+      // Fallback if no matching dependency found
+      return [{
+        from: fromName,
+        to: qualifiedToName,
         type: impactType,
-        line_number: originalDep?.line_number || 0,
+        line_number: 0,
         file_path: item.file_path,
-        // Preserve additional context for better analysis
         relationship_context: item.relationship_context,
-      };
+      }];
     });
   }
 
