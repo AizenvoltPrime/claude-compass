@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { execSync } from 'child_process';
+import pLimit from 'p-limit';
 import {
   Repository,
   File,
@@ -50,6 +51,7 @@ export interface BuildOptions {
   encodingFallback?: string;
   compassignorePath?: string;
   enableParallelParsing?: boolean;
+  maxConcurrency?: number;
   forceFullAnalysis?: boolean;
 
   // Phase 5 - Cross-stack analysis options
@@ -210,20 +212,21 @@ export class GraphBuilder {
       const exportsMap = this.createExportsMap(dbFiles, parseResults);
       const dependenciesMap = this.createDependenciesMap(symbols, parseResults, dbFiles);
 
-      const fileGraph = await this.fileGraphBuilder.buildFileGraph(
-        repository,
-        dbFiles,
-        importsMap,
-        exportsMap
-      );
-
-      const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
-        symbols,
-        dependenciesMap,
-        dbFiles,
-        importsMap,
-        exportsMap
-      );
+      const [fileGraph, symbolGraph] = await Promise.all([
+        this.fileGraphBuilder.buildFileGraph(
+          repository,
+          dbFiles,
+          importsMap,
+          exportsMap
+        ),
+        this.symbolGraphBuilder.buildSymbolGraph(
+          symbols,
+          dependenciesMap,
+          dbFiles,
+          importsMap,
+          exportsMap
+        )
+      ]);
 
       // Persist virtual framework symbols before creating dependencies
       await this.persistVirtualFrameworkSymbols(repository, symbolGraph, symbols);
@@ -232,26 +235,22 @@ export class GraphBuilder {
       const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
 
-      // Create cross-file dependencies from symbol dependencies
-
-      const crossFileFileDependencies = this.createCrossFileFileDependencies(
-        symbolDependencies,
-        symbols,
-        dbFiles
-      );
-
-      // Create file dependencies for unresolved external calls (e.g., Laravel model calls)
-      const externalCallFileDependencies = this.createExternalCallFileDependencies(
-        parseResults,
-        dbFiles,
-        symbols
-      );
-
-      // Create file dependencies for external imports (e.g., Laravel facades)
-      const externalImportFileDependencies = this.createExternalImportFileDependencies(
-        parseResults,
-        dbFiles
-      );
+      const [crossFileFileDependencies, externalCallFileDependencies, externalImportFileDependencies] = await Promise.all([
+        this.createCrossFileFileDependencies(
+          symbolDependencies,
+          symbols,
+          dbFiles
+        ),
+        this.createExternalCallFileDependencies(
+          parseResults,
+          dbFiles,
+          symbols
+        ),
+        this.createExternalImportFileDependencies(
+          parseResults,
+          dbFiles
+        )
+      ]);
 
       // Combine file dependencies
       const allFileDependencies = [
@@ -757,10 +756,12 @@ export class GraphBuilder {
 
           const entries = await fs.readdir(currentPath);
 
-          for (const entry of entries) {
-            const entryPath = path.join(currentPath, entry);
-            await traverse(entryPath);
-          }
+          await Promise.all(
+            entries.map(async (entry) => {
+              const entryPath = path.join(currentPath, entry);
+              await traverse(entryPath);
+            })
+          );
         } else if (stats.isFile()) {
           const relativePath = path.relative(repositoryPath, currentPath);
 
@@ -859,54 +860,64 @@ export class GraphBuilder {
     files: Array<{ path: string; relativePath?: string }>,
     options: BuildOptions
   ): Promise<Array<ParseResult & { filePath: string }>> {
-    const results: Array<ParseResult & { filePath: string }> = [];
     const multiParser = new MultiParser();
 
-    for (const file of files) {
-      try {
-        const content = await this.readFileWithEncodingRecovery(file.path, options);
-        if (!content) {
-          continue; // File was rejected due to encoding issues
+    const concurrency = options.maxConcurrency || 10;
+    const limit = pLimit(concurrency);
+
+    const parsePromises = files.map(file =>
+      limit(async () => {
+        try {
+          const content = await this.readFileWithEncodingRecovery(file.path, options);
+          if (!content) {
+            return null;
+          }
+
+          const parseResult = await this.processFileWithSizePolicyMultiParser(
+            file,
+            content,
+            multiParser,
+            options
+          );
+          if (!parseResult) {
+            return null;
+          }
+
+          return {
+            ...parseResult,
+            filePath: file.path,
+          };
+        } catch (error) {
+          this.logger.error('Failed to parse file', {
+            path: file.path,
+            error: (error as Error).message,
+          });
+
+          return {
+            filePath: file.path,
+            symbols: [],
+            dependencies: [],
+            imports: [],
+            exports: [],
+            errors: [
+              {
+                message: (error as Error).message,
+                line: 0,
+                column: 0,
+                severity: 'error',
+              },
+            ],
+            success: false,
+          };
         }
+      })
+    );
 
-        const parseResult = await this.processFileWithSizePolicyMultiParser(
-          file,
-          content,
-          multiParser,
-          options
-        );
-        if (!parseResult) {
-          continue; // File was rejected by size policy
-        }
+    const parsedResults = await Promise.all(parsePromises);
 
-        results.push({
-          ...parseResult,
-          filePath: file.path,
-        });
-      } catch (error) {
-        this.logger.error('Failed to parse file', {
-          path: file.path,
-          error: (error as Error).message,
-        });
-
-        results.push({
-          filePath: file.path,
-          symbols: [],
-          dependencies: [],
-          imports: [],
-          exports: [],
-          errors: [
-            {
-              message: (error as Error).message,
-              line: 0,
-              column: 0,
-              severity: 'error',
-            },
-          ],
-          success: false,
-        });
-      }
-    }
+    const results = parsedResults.filter(
+      (result): result is ParseResult & { filePath: string } => result !== null
+    );
 
     // Generate parsing statistics
     const parseStats = {
@@ -1049,14 +1060,14 @@ export class GraphBuilder {
           descriptionTexts
         );
 
-        for (let j = 0; j < batch.length; j++) {
-          await this.dbService.updateSymbolEmbeddings(
-            batch[j].id,
-            nameEmbeddings[j],
-            descriptionEmbeddings[j],
-            embeddingService.modelInfo.name
-          );
-        }
+        const updates = batch.map((symbol, j) => ({
+          id: symbol.id!,
+          nameEmbedding: nameEmbeddings[j],
+          descriptionEmbedding: descriptionEmbeddings[j],
+          embeddingModel: embeddingService.modelInfo.name,
+        }));
+
+        await this.dbService.batchUpdateSymbolEmbeddings(updates);
 
         processed += batch.length;
         this.logger.debug('Batch embeddings generated', {
@@ -1084,6 +1095,12 @@ export class GraphBuilder {
       repositoryId,
       parseResultsCount: parseResults.length,
     });
+
+    const allFiles = await this.dbService.getFilesByRepository(repositoryId);
+    const filesMap = new Map(allFiles.map(f => [f.path, f]));
+    const normalizedFilesMap = new Map(
+      allFiles.map(f => [path.normalize(f.path), f])
+    );
 
     for (const parseResult of parseResults) {
       // Skip if no framework entities
@@ -1113,29 +1130,19 @@ export class GraphBuilder {
           if (!matchingSymbol) {
             // Create a synthetic symbol for this framework entity
 
-            // First, get the file ID for this parse result
-            const files = await this.dbService.getFilesByRepository(repositoryId);
-
-            // Try multiple matching strategies to find the file
-            let matchingFile = files.find(f => f.path === parseResult.filePath);
+            let matchingFile = filesMap.get(parseResult.filePath);
 
             if (!matchingFile) {
-              // Try matching by normalized paths (handles different path separators)
-              const normalizedParseResultPath = path.normalize(parseResult.filePath);
-              matchingFile = files.find(f => path.normalize(f.path) === normalizedParseResultPath);
+              matchingFile = normalizedFilesMap.get(path.normalize(parseResult.filePath));
             }
 
             if (!matchingFile) {
-              // Try matching by relative path (in case one is absolute and other is relative)
               const parseResultBasename = path.basename(parseResult.filePath);
-              matchingFile = files.find(f => {
+              matchingFile = allFiles.find(f => {
                 const dbPathBasename = path.basename(f.path);
-                // Match if basenames are the same and the relative parts match
                 if (dbPathBasename === parseResultBasename) {
-                  // Extract relative path from the full parseResult path
                   const parseResultDir = path.dirname(parseResult.filePath);
                   const dbPathDir = path.dirname(f.path);
-                  // Check if the directory structures match (considering both might be partial paths)
                   return (
                     parseResultDir.endsWith(dbPathDir) ||
                     dbPathDir.endsWith(parseResultDir) ||
@@ -1152,8 +1159,8 @@ export class GraphBuilder {
                 normalizedFilePath: path.normalize(parseResult.filePath),
                 entityName: entity.name,
                 entityType: entity.type,
-                availableFilesCount: files.length,
-                sampleAvailableFiles: files
+                availableFilesCount: allFiles.length,
+                sampleAvailableFiles: allFiles
                   .map(f => ({
                     path: f.path,
                     normalized: path.normalize(f.path),
@@ -1314,12 +1321,10 @@ export class GraphBuilder {
               fields: ormSystemEntity.metadata?.fields || {},
             });
           } else if (this.isTestSystemEntity(entity)) {
-            // Handle test framework system entities
             const testSystemEntity = entity as any;
 
-            // First, get the file ID for this parse result
-            const files = await this.dbService.getFilesByRepository(repositoryId);
-            const matchingFile = files.find(f => f.path === parseResult.filePath);
+            const matchingFile = filesMap.get(parseResult.filePath) ||
+                                normalizedFilesMap.get(path.normalize(parseResult.filePath));
 
             if (matchingFile) {
               await this.dbService.createTestSuite({
@@ -2245,7 +2250,8 @@ export class GraphBuilder {
       chunkOverlapLines: options.chunkOverlapLines ?? 100,
       encodingFallback: options.encodingFallback ?? 'iso-8859-1',
       compassignorePath: options.compassignorePath,
-      enableParallelParsing: options.enableParallelParsing ?? false,
+      enableParallelParsing: options.enableParallelParsing ?? true,
+      maxConcurrency: options.maxConcurrency ?? 10,
       forceFullAnalysis: options.forceFullAnalysis ?? false,
 
       // Phase 5 - Cross-stack analysis options

@@ -1,4 +1,10 @@
-import { pipeline, Pipeline } from '@xenova/transformers';
+import { pipeline, Pipeline, env } from '@xenova/transformers';
+import os from 'os';
+import path from 'path';
+
+env.cacheDir = path.join(os.homedir(), '.cache', 'claude-compass', 'models');
+env.allowLocalModels = true;
+env.allowRemoteModels = true;
 
 /**
  * Service for generating vector embeddings using Nomic AI
@@ -100,18 +106,30 @@ export class EmbeddingService {
     }
 
     try {
-      // Process texts individually for better error handling
-      // This ensures one failed text doesn't break the entire batch
-      const results: number[][] = [];
+      const sanitizedTexts = texts.map(text => this.sanitizeTextForEmbedding(text));
 
-      for (const text of texts) {
-        try {
-          const embedding = await this.generateEmbedding(text);
-          results.push(embedding);
-        } catch (error) {
-          console.warn(`Failed to generate embedding for text: "${text.substring(0, 50)}..."`, error);
-          // Use zero vector as fallback
+      const processedTexts = sanitizedTexts.map(text =>
+        text.trim() || '[empty]'
+      );
+
+      const embeddings = await this.model(processedTexts, {
+        pooling: 'mean',
+        normalize: true
+      });
+
+      const results: number[][] = [];
+      const embeddingData = embeddings.data as Float32Array;
+      const embeddingDim = 768;
+
+      for (let i = 0; i < processedTexts.length; i++) {
+        const start = i * embeddingDim;
+        const end = start + embeddingDim;
+        const embedding = Array.from(embeddingData.slice(start, end));
+
+        if (sanitizedTexts[i].trim() === '') {
           results.push(new Array(768).fill(0));
+        } else {
+          results.push(embedding);
         }
       }
 
