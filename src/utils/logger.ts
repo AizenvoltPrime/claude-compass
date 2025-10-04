@@ -76,6 +76,7 @@ if (config.nodeEnv !== 'production') {
   logger.add(
     new winston.transports.Console({
       format: consoleFormat,
+      level: 'info', // Only show info and above in console, debug goes to file only
     })
   );
 }
@@ -83,4 +84,16 @@ if (config.nodeEnv !== 'production') {
 // Create child loggers for different components
 export const createComponentLogger = (component: string): winston.Logger => {
   return logger.child({ component });
+};
+
+export const flushLogs = async (): Promise<void> => {
+  return new Promise((resolve) => {
+    setImmediate(() => {
+      setImmediate(() => {
+        setImmediate(() => {
+          setTimeout(resolve, 200);
+        });
+      });
+    });
+  });
 };
