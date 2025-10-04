@@ -2,7 +2,7 @@
 
 > A dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases.
 
-Enhanced search with hybrid vector+lexical capabilities, tool consolidation from 12 to 6 focused core tools, comprehensive impact analysis, and streamlined CLI interface for production use.
+Enhanced search with hybrid vector+lexical capabilities, 6 focused core tools for comprehensive code analysis, powerful impact analysis, and streamlined CLI interface for production use.
 
 ## What is Claude Compass?
 
@@ -298,6 +298,124 @@ npm test
 ```
 
 **📚 For detailed setup instructions, troubleshooting, and advanced features, see [GETTING_STARTED.md](./GETTING_STARTED.md)**
+
+## MCP Tools
+
+Claude Compass exposes 6 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, and impact assessment.
+
+### Available Tools
+
+#### 1. `search_code`
+
+Enhanced search for code symbols with framework awareness and hybrid vector+lexical search capabilities.
+
+**Parameters:**
+- `query` (required): Search query (symbol name or pattern)
+- `repo_ids`: Array of repository IDs to search in
+- `entity_types`: Framework-aware entity types
+  - Options: `route`, `model`, `controller`, `component`, `job`, `function`, `class`, `interface`
+- `framework`: Filter by framework type
+  - Options: `laravel`, `vue`, `react`, `node`
+- `is_exported`: Filter by exported symbols only (boolean)
+- `search_mode`: Search strategy (default: `auto`)
+  - `auto`: Hybrid vector+lexical search
+  - `exact`: Lexical search only
+  - `semantic`: Vector search only
+  - `qualified`: Namespace-aware search
+
+**Returns:** List of matching symbols with framework context (limit: 100 results)
+
+#### 2. `get_file`
+
+Get detailed information about a specific file including its metadata and symbols.
+
+**Parameters:**
+- `file_id`: The ID of the file to retrieve (number)
+- `file_path`: The path of the file to retrieve (alternative to file_id)
+
+**Note:** Either `file_id` or `file_path` must be provided.
+
+**Returns:** File details with metadata and symbol list
+
+#### 3. `get_symbol`
+
+Get details about a specific symbol including its dependencies.
+
+**Parameters:**
+- `symbol_id` (required): The ID of the symbol to retrieve (number)
+
+**Returns:** Symbol details with dependencies and callers
+
+#### 4. `who_calls`
+
+Find all symbols that call or reference a specific symbol.
+
+**Parameters:**
+- `symbol_id` (required): The ID of the symbol to find callers for (number)
+- `dependency_type`: Type of dependency relationship (default: `calls`)
+  - Options: `calls`, `imports`, `inherits`, `implements`, `references`, `exports`, `api_call`, `shares_schema`, `frontend_backend`
+- `include_cross_stack`: Include cross-stack callers (Vue ↔ Laravel) (boolean, default: false)
+
+**Returns:** List of symbols that call or reference the target symbol
+
+#### 5. `list_dependencies`
+
+List all dependencies of a specific symbol.
+
+**Parameters:**
+- `symbol_id` (required): The ID of the symbol to list dependencies for (number)
+- `dependency_type`: Type of dependency relationship
+  - Options: `calls`, `imports`, `inherits`, `implements`, `references`, `exports`, `api_call`, `shares_schema`, `frontend_backend`
+- `include_cross_stack`: Include cross-stack dependencies (Vue ↔ Laravel) (boolean, default: false)
+
+**Returns:** List of dependencies with relationship information
+
+#### 6. `impact_of`
+
+Comprehensive impact analysis - calculate blast radius across all frameworks including routes, jobs, and tests.
+
+**Parameters:**
+- `symbol_id` (required): The ID of the symbol to analyze impact for (number)
+- `frameworks`: Multi-framework impact analysis (default: all detected frameworks)
+  - Options: `vue`, `laravel`, `react`, `node`
+- `max_depth`: Transitive analysis depth (default: 5, min: 1, max: 20)
+- `page_size`: Number of results per page (default: 1000, max: 5000)
+- `cursor`: Pagination cursor for next page
+- `detail_level`: Response detail level (default: `standard`)
+  - Options: `summary`, `standard`, `full`
+
+**Returns:** Comprehensive impact analysis with blast radius, affected symbols, routes, jobs, and tests
+
+### Usage Examples
+
+```typescript
+// Search for authentication-related code
+const results = await mcpClient.callTool('search_code', {
+  query: 'authenticate',
+  entity_types: ['function', 'class', 'route'],
+  framework: 'laravel',
+  search_mode: 'auto'
+});
+
+// Get comprehensive impact analysis
+const impact = await mcpClient.callTool('impact_of', {
+  symbol_id: 123,
+  frameworks: ['vue', 'laravel'],
+  max_depth: 10,
+  detail_level: 'full'
+});
+
+// Find who calls a specific function
+const callers = await mcpClient.callTool('who_calls', {
+  symbol_id: 456,
+  dependency_type: 'calls',
+  include_cross_stack: true
+});
+```
+
+### Resources Available
+
+**`repo://repositories`** - List of all analyzed repositories with metadata and framework detection results.
 
 ## Roadmap
 
