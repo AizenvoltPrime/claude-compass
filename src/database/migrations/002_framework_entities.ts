@@ -411,9 +411,9 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['composable_type']);
   });
 
-  // Add vector extension support for symbols table
-  await knex.raw('ALTER TABLE symbols ADD COLUMN name_embedding vector(768)');
-  await knex.raw('ALTER TABLE symbols ADD COLUMN description_embedding vector(768)');
+  // Add vector extension support for symbols table (BGE-M3: 1024 dimensions)
+  await knex.raw('ALTER TABLE symbols ADD COLUMN name_embedding vector(1024)');
+  await knex.raw('ALTER TABLE symbols ADD COLUMN description_embedding vector(1024)');
   await knex.raw('ALTER TABLE symbols ADD COLUMN embeddings_updated_at TIMESTAMP');
   await knex.raw('ALTER TABLE symbols ADD COLUMN embedding_model VARCHAR(100)');
 

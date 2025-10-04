@@ -76,9 +76,30 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
-- **Search**: Hybrid vector+lexical search (nomic-embed-text-v1.5 embeddings, 768-dim) with PostgreSQL full-text ranking
+- **Search**: Hybrid vector+lexical search with GPU acceleration
+  - **Model**: BGE-M3 (1024-dimensional embeddings, state-of-the-art)
+  - **Performance**: CUDA GPU acceleration via ONNX Runtime (2-3x faster)
+  - **Quality**: Multi-lingual support with superior semantic understanding
+  - **Fallback**: Automatic CPU mode if GPU unavailable
 - **Cache**: Redis for performance optimization
 - **MCP Server**: Node.js/TypeScript implementation
+
+### GPU Acceleration (Optional)
+
+**Performance Boost:**
+- **2-3x faster** embedding generation with NVIDIA GPUs
+- Automatic CUDA detection and configuration
+- Graceful fallback to CPU if GPU unavailable
+
+**Requirements:**
+- NVIDIA GPU with CUDA support (11.x or 12.x recommended)
+- ~1.2GB disk space for FP16 model
+- Download model: `node download-bge-m3.js`
+
+**Benefits:**
+- Faster analysis of large codebases (1000+ files)
+- Real-time semantic search with minimal latency
+- Optimized batch processing (500 symbols at once)
 
 ### Graph Types
 
@@ -98,6 +119,7 @@ The `analyze` command is the core of Claude Compass, performing deep multi-langu
 
 **Key Options:**
 - `--force-full` - Force complete re-analysis instead of incremental
+- `--skip-embeddings` - Skip embedding generation for faster analysis (semantic search disabled)
 - `--no-test-files` - Exclude test files from analysis
 - `--max-file-size <bytes>` - File size limit (default: 20MB)
 - `--extensions <list>` - File extensions to analyze (default: `.js,.jsx,.ts,.tsx,.vue,.php,.cs,.tscn`)
@@ -233,7 +255,8 @@ godot_scenes/nodes/scripts -- Game entities
 
 **Database Storage:**
 - All relationships stored with line numbers and metadata
-- Embeddings generated for semantic search (pgvector)
+- GPU-accelerated embeddings generated for semantic search (BGE-M3, 1024-dim, pgvector)
+- Parallel batch processing (500 symbols per batch)
 - Indexes created for fast MCP tool queries
 - Repository timestamp updated for incremental analysis
 
@@ -276,11 +299,16 @@ npm install
 npm run docker:up
 npm run migrate:latest
 
+# Download GPU-optimized embedding model (recommended, ~1.2GB)
+node download-bge-m3.js                        # Downloads FP16 model for GPU acceleration
+                                               # Automatically falls back to CPU if no GPU
+
 # Analyze your codebase (JavaScript/TypeScript, PHP/Laravel, or C#/Godot)
 npm run analyze .                              # Analyze current directory
 npm run analyze /path/to/your/project          # Analyze specific path
 npm run analyze /path/to/your/godot-project    # Analyze Godot game project
 npm run analyze . --force-full                 # Force full analysis (clears existing data)
+npm run analyze . --skip-embeddings            # Skip semantic search (faster, dependencies only)
 
 # Database management
 npm run migrate:status                         # Check migration status
