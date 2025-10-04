@@ -28,10 +28,15 @@ export class SymbolResolver {
   private symbolsByName: Map<string, Symbol[]> = new Map();
   private exportedSymbols: Map<string, { symbol: Symbol; fromFile: number }[]> = new Map();
   private fieldTypeMap: Map<string, string> = new Map(); // NEW: Field type mapping
+  private virtualSymbols: Map<number, Symbol> = new Map();
   private logger: any;
 
   constructor() {
     this.logger = logger;
+  }
+
+  getVirtualSymbols(): Symbol[] {
+    return Array.from(this.virtualSymbols.values());
   }
 
   /**
@@ -548,6 +553,8 @@ export class SymbolResolver {
       updated_at: new Date(),
     };
 
+    this.virtualSymbols.set(virtualSymbol.id, virtualSymbol);
+
     return virtualSymbol;
   }
 
@@ -835,6 +842,8 @@ export class SymbolResolver {
       created_at: new Date(),
       updated_at: new Date(),
     };
+
+    this.virtualSymbols.set(virtualSymbol.id, virtualSymbol);
 
     return virtualSymbol;
   }

@@ -26,6 +26,7 @@ export class FrameworkSymbolRegistry {
   private jsBuiltinSymbols: FrameworkSymbol[] = [];
   private domSymbols: FrameworkSymbol[] = [];
   private dotnetSymbols: FrameworkSymbol[] = [];
+  private godotSymbols: FrameworkSymbol[] = [];
 
   constructor() {
     this.initializePHPUnitSymbols();
@@ -35,6 +36,7 @@ export class FrameworkSymbolRegistry {
     this.initializeJavaScriptBuiltins();
     this.initializeDOMSymbols();
     this.initializeDotNetFrameworkSymbols();
+    this.initializeGodotSymbols();
     this.buildIndex();
   }
 
@@ -732,6 +734,197 @@ export class FrameworkSymbolRegistry {
   }
 
   /**
+   * Initialize Godot Engine framework symbols
+   */
+  private initializeGodotSymbols(): void {
+    const coreNodeTypes = [
+      'Node', 'Node2D', 'Node3D', 'RefCounted', 'Resource', 'Object'
+    ];
+
+    for (const type of coreNodeTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type}`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const node3DTypes = [
+      'Marker3D', 'Sprite3D', 'Label3D', 'Camera3D', 'MeshInstance3D',
+      'Light3D', 'DirectionalLight3D', 'SpotLight3D', 'OmniLight3D',
+      'VisibleOnScreenNotifier3D', 'Skeleton3D', 'BoneAttachment3D'
+    ];
+
+    for (const type of node3DTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type} : Node3D`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const physicsTypes = [
+      'CharacterBody3D', 'RigidBody3D', 'StaticBody3D', 'AnimatableBody3D',
+      'Area3D', 'CollisionShape3D', 'CollisionObject3D', 'CollisionPolygon3D',
+      'CharacterBody2D', 'RigidBody2D', 'StaticBody2D', 'AnimatableBody2D',
+      'Area2D', 'CollisionShape2D', 'CollisionObject2D', 'CollisionPolygon2D',
+      'PhysicsBody3D', 'PhysicsBody2D'
+    ];
+
+    for (const type of physicsTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type}`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const controlTypes = [
+      'Control', 'Button', 'Label', 'Panel', 'Container',
+      'VBoxContainer', 'HBoxContainer', 'GridContainer', 'MarginContainer',
+      'ScrollContainer', 'TextureRect', 'ColorRect', 'RichTextLabel',
+      'LineEdit', 'TextEdit', 'CheckBox', 'OptionButton', 'SpinBox',
+      'ProgressBar', 'Slider', 'TabContainer', 'Tree', 'ItemList',
+      'PanelContainer', 'CenterContainer', 'AspectRatioContainer',
+      'SplitContainer', 'HSplitContainer', 'VSplitContainer'
+    ];
+
+    for (const type of controlTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type} : Control`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const resourceTypes = [
+      'PackedScene', 'Texture2D', 'Material', 'Mesh', 'AudioStream',
+      'Animation', 'Theme', 'Font', 'Shader', 'Script', 'Texture',
+      'StandardMaterial3D', 'ShaderMaterial', 'ImageTexture', 'AtlasTexture',
+      'AnimationLibrary', 'StyleBox', 'StyleBoxFlat', 'StyleBoxTexture'
+    ];
+
+    for (const type of resourceTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type} : Resource`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const utilityNodeTypes = [
+      'Timer', 'Tween', 'AnimationPlayer', 'AudioStreamPlayer',
+      'AudioStreamPlayer2D', 'AudioStreamPlayer3D', 'HTTPRequest',
+      'CanvasLayer', 'ParallaxBackground', 'ParallaxLayer'
+    ];
+
+    for (const type of utilityNodeTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type} : Node`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const viewportTypes = [
+      'SubViewport', 'Viewport', 'Window'
+    ];
+
+    for (const type of viewportTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type}`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const valueTypes = [
+      'Vector2', 'Vector2I', 'Vector3', 'Vector3I', 'Vector4', 'Vector4I',
+      'Color', 'Rect2', 'Rect2I', 'Transform2D', 'Transform3D',
+      'Basis', 'Quaternion', 'Plane', 'AABB', 'Projection'
+    ];
+
+    for (const type of valueTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `struct ${type}`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const globalTypes = [
+      'GD', 'ResourceLoader', 'SceneTree', 'Input', 'Time', 'OS', 'Engine',
+      'ClassDB', 'EditorInterface', 'ProjectSettings'
+    ];
+
+    for (const type of globalTypes) {
+      this.godotSymbols.push({
+        name: type,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${type}`,
+        description: `Godot.${type}`
+      });
+    }
+
+    const commonMethods = [
+      'GetNode', 'GetNodeOrNull', 'QueueFree', 'AddChild', 'RemoveChild',
+      'Connect', 'Emit', 'EmitSignal', 'CallDeferred', 'SetDeferred',
+      'GetParent', 'GetChildren', 'GetChild', 'FindChild', 'IsInsideTree',
+      'GetTree', 'GetViewport', 'GetWindow', 'Print', 'PrintErr', 'PushError',
+      'PushWarning', 'Load', 'Instantiate'
+    ];
+
+    for (const method of commonMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `${method}()`,
+        description: `Godot framework method ${method}`
+      });
+    }
+
+    const colorConstants = ['Colors'];
+    for (const constant of colorConstants) {
+      this.godotSymbols.push({
+        name: constant,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class ${constant}`,
+        description: `Godot.${constant}`
+      });
+    }
+  }
+
+  /**
    * Build searchable index of all framework symbols
    */
   private buildIndex(): void {
@@ -783,6 +976,13 @@ export class FrameworkSymbolRegistry {
       existing.push(symbol);
       this.symbols.set(symbol.name, existing);
     }
+
+    // Index Godot symbols
+    for (const symbol of this.godotSymbols) {
+      const existing = this.symbols.get(symbol.name) || [];
+      existing.push(symbol);
+      this.symbols.set(symbol.name, existing);
+    }
   }
 
   /**
@@ -810,8 +1010,13 @@ export class FrameworkSymbolRegistry {
       }
     }
 
-    // For C# files, prioritize .NET symbols
+    // For C# files, prioritize Godot symbols first, then .NET symbols
     if (this.isCSharpFile(filePath)) {
+      const godotSymbol = candidates.find(s => s.framework === 'Godot');
+      if (godotSymbol) {
+        return godotSymbol;
+      }
+
       const dotnetSymbol = candidates.find(s =>
         s.framework.startsWith('System') || s.framework === '.NET'
       );
@@ -948,6 +1153,8 @@ export class FrameworkSymbolRegistry {
       case '.net':
       case 'system':
         return this.dotnetSymbols;
+      case 'godot':
+        return this.godotSymbols;
       default:
         return [];
     }

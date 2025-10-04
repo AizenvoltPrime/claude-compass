@@ -222,6 +222,9 @@ export class GraphBuilder {
         exportsMap
       );
 
+      // Persist virtual framework symbols before creating dependencies
+      await this.persistVirtualFrameworkSymbols(repository, symbolGraph, symbols);
+
       // Store dependencies
       const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
@@ -2283,5 +2286,83 @@ export class GraphBuilder {
     }
 
     return fileDependencies;
+  }
+
+  private async persistVirtualFrameworkSymbols(
+    repository: Repository,
+    symbolGraph: SymbolGraphData,
+    existingSymbols: Symbol[]
+  ): Promise<void> {
+    const virtualNodes = symbolGraph.nodes.filter(node => node.fileId < 0);
+
+    if (virtualNodes.length === 0) {
+      return;
+    }
+
+    this.logger.info('Persisting virtual framework symbols', { count: virtualNodes.length });
+
+    const symbolsByFramework = new Map<string, typeof virtualNodes>();
+
+    for (const node of virtualNodes) {
+      const existingSymbol = existingSymbols.find(s => s.id === node.id);
+      const framework = existingSymbol?.framework || 'unknown';
+
+      if (!symbolsByFramework.has(framework)) {
+        symbolsByFramework.set(framework, []);
+      }
+      symbolsByFramework.get(framework)!.push(node);
+    }
+
+    const idMapping = new Map<number, number>();
+
+    for (const [framework, nodes] of symbolsByFramework) {
+      const frameworkFile = await this.dbService.createFile({
+        repo_id: repository.id,
+        path: `[Framework:${framework}]`,
+        language: framework.toLowerCase(),
+        size: 0,
+        is_generated: true,
+      });
+
+      const symbolsToCreate: CreateSymbol[] = nodes.map(node => {
+        const createSymbol: CreateSymbol = {
+          file_id: frameworkFile.id,
+          name: node.name,
+          symbol_type: node.type,
+          start_line: node.startLine,
+          end_line: node.endLine,
+          is_exported: node.isExported,
+          signature: node.signature,
+        };
+
+        if (node.visibility) {
+          createSymbol.visibility = node.visibility as any;
+        }
+
+        return createSymbol;
+      });
+
+      const createdSymbols = await this.dbService.createSymbols(symbolsToCreate);
+
+      for (let i = 0; i < nodes.length; i++) {
+        idMapping.set(nodes[i].id, createdSymbols[i].id);
+        const originalNode = symbolGraph.nodes.find(n => n.id === nodes[i].id);
+        if (originalNode) {
+          originalNode.id = createdSymbols[i].id;
+          originalNode.fileId = createdSymbols[i].file_id;
+        }
+      }
+    }
+
+    for (const edge of symbolGraph.edges) {
+      if (idMapping.has(edge.from)) {
+        edge.from = idMapping.get(edge.from)!;
+      }
+      if (idMapping.has(edge.to)) {
+        edge.to = idMapping.get(edge.to)!;
+      }
+    }
+
+    this.logger.info('Virtual framework symbols persisted', { count: idMapping.size });
   }
 }
