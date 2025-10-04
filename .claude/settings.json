@@ -90,17 +90,5 @@
         ]
     },
     "outputStyle": "Explanatory",
-    "env": {
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        "DISABLE_TELEMETRY": "1",
-        "DISABLE_ERROR_REPORTING": "1",
-        "CLAUDE_CODE_ENABLE_TELEMETRY": "0",
-        "DISABLE_BUG_COMMAND": "1",
-        "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
-        "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL": "1",
-        "ENABLE_PLUGINS": "1",
-        "USE_BUILTIN_RIPGREP": "0",
-        "NODE_OPTIONS": "--max-old-space-size=4096"
-    },
     "alwaysThinkingEnabled": true
 }
