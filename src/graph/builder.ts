@@ -35,6 +35,7 @@ import { createComponentLogger } from '../utils/logger';
 import { FileSizeManager, FileSizePolicy, DEFAULT_POLICY } from '../config/file-size-policy';
 import { EncodingConverter } from '../utils/encoding-converter';
 import { CompassIgnore } from '../utils/compassignore';
+import { getEmbeddingService } from '../services/embedding-service';
 
 const logger = createComponentLogger('graph-builder');
 
@@ -198,6 +199,8 @@ export class GraphBuilder {
       // Store files and symbols in database
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
       const symbols = await this.storeSymbols(dbFiles, parseResults);
+
+      await this.generateSymbolEmbeddings(symbols);
 
       // Store framework entities
       await this.storeFrameworkEntities(repository.id, symbols, parseResults);
@@ -936,6 +939,60 @@ export class GraphBuilder {
     }
 
     return await this.dbService.createSymbols(allSymbols);
+  }
+
+  private async generateSymbolEmbeddings(symbols: Symbol[]): Promise<void> {
+    if (symbols.length === 0) return;
+
+    this.logger.info('Generating embeddings for symbols', { symbolCount: symbols.length });
+
+    const embeddingService = getEmbeddingService();
+    await embeddingService.initialize();
+
+    const BATCH_SIZE = 100;
+    let processed = 0;
+
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE);
+
+      try {
+        const nameTexts = batch.map(s => s.name || '');
+        const nameEmbeddings = await embeddingService.generateBatchEmbeddings(nameTexts);
+
+        const descriptionTexts = batch.map(s => {
+          const parts = [];
+          if (s.qualified_name) parts.push(s.qualified_name);
+          if (s.signature) parts.push(s.signature);
+          return parts.join(' ') || s.name || '';
+        });
+        const descriptionEmbeddings = await embeddingService.generateBatchEmbeddings(
+          descriptionTexts
+        );
+
+        for (let j = 0; j < batch.length; j++) {
+          await this.dbService.updateSymbolEmbeddings(
+            batch[j].id,
+            nameEmbeddings[j],
+            descriptionEmbeddings[j],
+            embeddingService.modelInfo.name
+          );
+        }
+
+        processed += batch.length;
+        this.logger.debug('Batch embeddings generated', {
+          processed,
+          total: symbols.length,
+          progress: `${Math.round((processed / symbols.length) * 100)}%`,
+        });
+      } catch (error) {
+        this.logger.error('Failed to generate embeddings for batch', {
+          batchStart: i,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    this.logger.info('Embedding generation completed', { symbolsProcessed: processed });
   }
 
   private async storeFrameworkEntities(

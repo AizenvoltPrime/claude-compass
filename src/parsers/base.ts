@@ -282,8 +282,8 @@ export abstract class BaseParser {
       // Normalize line endings to prevent parser issues
       const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-      // Check for Tree-sitter size limitation (28KB) unless bypassed
-      const TREE_SITTER_SIZE_LIMIT = 28000;
+      // Check for Tree-sitter size limitation (increased to 200KB) unless bypassed
+      const TREE_SITTER_SIZE_LIMIT = 200000;
 
       if (!options?.bypassSizeLimit && normalizedContent.length > TREE_SITTER_SIZE_LIMIT) {
         this.logger.error(

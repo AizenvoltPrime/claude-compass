@@ -76,7 +76,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
-- **Search**: PostgreSQL full-text search with ranking
+- **Search**: Hybrid vector+lexical search (nomic-embed-text-v1.5 embeddings, 768-dim) with PostgreSQL full-text ranking
 - **Cache**: Redis for performance optimization
 - **MCP Server**: Node.js/TypeScript implementation
 

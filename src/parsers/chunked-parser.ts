@@ -68,7 +68,7 @@ export interface ChunkedParseOptions extends ParseOptions {
  * Extends BaseParser to handle large files by splitting them into logical chunks
  */
 export abstract class ChunkedParser extends BaseParser {
-  protected readonly DEFAULT_CHUNK_SIZE = 28000; // 28KB - safe buffer under Tree-sitter limit
+  protected readonly DEFAULT_CHUNK_SIZE = 200000; // 200KB - Tree-sitter can handle large files efficiently
   protected readonly DEFAULT_OVERLAP_LINES = 100;
   declare protected readonly logger: any;
 
