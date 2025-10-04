@@ -52,6 +52,7 @@ export interface BuildOptions {
   compassignorePath?: string;
   enableParallelParsing?: boolean;
   maxConcurrency?: number;
+  skipEmbeddings?: boolean;
   forceFullAnalysis?: boolean;
 
   // Phase 5 - Cross-stack analysis options
@@ -202,7 +203,11 @@ export class GraphBuilder {
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
       const symbols = await this.storeSymbols(dbFiles, parseResults);
 
-      await this.generateSymbolEmbeddings(symbols);
+      if (!validatedOptions.skipEmbeddings) {
+        await this.generateSymbolEmbeddings(symbols);
+      } else {
+        this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
+      }
 
       // Store framework entities
       await this.storeFrameworkEntities(repository.id, symbols, parseResults);
@@ -590,7 +595,11 @@ export class GraphBuilder {
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
     const symbols = await this.storeSymbols(dbFiles, parseResults);
 
-    await this.generateSymbolEmbeddings(symbols);
+    if (!validatedOptions.skipEmbeddings) {
+      await this.generateSymbolEmbeddings(symbols);
+    } else {
+      this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
+    }
 
     await this.storeFrameworkEntities(repositoryId, symbols, parseResults);
 
@@ -1040,7 +1049,7 @@ export class GraphBuilder {
     const embeddingService = getEmbeddingService();
     await embeddingService.initialize();
 
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 500;
     let processed = 0;
 
     for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
@@ -1048,17 +1057,17 @@ export class GraphBuilder {
 
       try {
         const nameTexts = batch.map(s => s.name || '');
-        const nameEmbeddings = await embeddingService.generateBatchEmbeddings(nameTexts);
-
         const descriptionTexts = batch.map(s => {
           const parts = [];
           if (s.qualified_name) parts.push(s.qualified_name);
           if (s.signature) parts.push(s.signature);
           return parts.join(' ') || s.name || '';
         });
-        const descriptionEmbeddings = await embeddingService.generateBatchEmbeddings(
-          descriptionTexts
-        );
+
+        const [nameEmbeddings, descriptionEmbeddings] = await Promise.all([
+          embeddingService.generateBatchEmbeddings(nameTexts),
+          embeddingService.generateBatchEmbeddings(descriptionTexts)
+        ]);
 
         const updates = batch.map((symbol, j) => ({
           id: symbol.id!,
@@ -2252,6 +2261,7 @@ export class GraphBuilder {
       compassignorePath: options.compassignorePath,
       enableParallelParsing: options.enableParallelParsing ?? true,
       maxConcurrency: options.maxConcurrency ?? 10,
+      skipEmbeddings: options.skipEmbeddings ?? false,
       forceFullAnalysis: options.forceFullAnalysis ?? false,
 
       // Phase 5 - Cross-stack analysis options
