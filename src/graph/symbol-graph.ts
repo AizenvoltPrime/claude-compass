@@ -726,7 +726,11 @@ export class SymbolGraphBuilder {
     nameToSymbolMap: Map<string, SymbolNode[]>,
     interfaceMap: Map<string, SymbolNode[]>
   ): SymbolNode[] {
-    const parsed = this.parseQualifiedName(targetName);
+    const strippedName = this.stripGenericParameters(targetName);
+    const isExternal = this.isExternalReference(strippedName);
+    const isInstanceAccess = this.isInstanceMemberAccess(strippedName);
+
+    const parsed = this.parseQualifiedName(strippedName);
 
     // Handle qualified names (e.g., "IHandManager.SetHandPositions")
     if (parsed.qualifier) {
@@ -736,14 +740,14 @@ export class SymbolGraphBuilder {
         memberName: parsed.memberName
       });
 
-      // Step 1: Try exact qualified match by finding class and its members
+      // Step 1: Try exact qualified match by finding class/interface/enum and its members
       const qualifierSymbols = nameToSymbolMap.get(parsed.qualifier) || [];
       const memberSymbols = nameToSymbolMap.get(parsed.memberName) || [];
 
-      // Find member symbols that belong to the qualifier class/interface
+      // Find member symbols that belong to the qualifier class/interface/enum
       const qualifiedMatches: SymbolNode[] = [];
       for (const qualifierSymbol of qualifierSymbols) {
-        // Only consider class-type symbols as qualifiers
+        // Handle class and interface qualifiers
         if (qualifierSymbol.type === 'class' || qualifierSymbol.type === 'interface') {
           // Enhanced class-member association using multiple strategies
           const classMembers = this.findClassMembers(
@@ -752,7 +756,16 @@ export class SymbolGraphBuilder {
             parsed.memberName
           );
           qualifiedMatches.push(...classMembers);
+        }
 
+        // Handle enum qualifiers - find enum members by qualified_name
+        if (qualifierSymbol.type === 'enum') {
+          const enumMembers = this.findEnumMembers(
+            parsed.qualifier,
+            parsed.memberName,
+            memberSymbols
+          );
+          qualifiedMatches.push(...enumMembers);
         }
       }
 
@@ -803,24 +816,36 @@ export class SymbolGraphBuilder {
         }
       }
 
-      // Qualified name resolution failed - try fallback to simple name matching
-      this.logger.warn('Qualified name resolution failed, trying simple name fallback', {
+      const logLevel = isExternal || isInstanceAccess ? 'debug' : 'warn';
+      this.logger[logLevel]('Qualified name resolution failed, trying simple name fallback', {
         targetName,
         qualifier: parsed.qualifier,
-        memberName: parsed.memberName
+        memberName: parsed.memberName,
+        isExternal,
+        isInstanceAccess
       });
 
-      // Fallback: Try simple name matching as last resort
       const fallbackMatches = nameToSymbolMap.get(parsed.memberName) || [];
 
       if (fallbackMatches.length > 0) {
+        if (isExternal || isInstanceAccess) {
+          this.logger.debug('External/instance reference - skipping ambiguous fallback', {
+            targetName,
+            qualifier: parsed.qualifier,
+            memberName: parsed.memberName,
+            isExternal,
+            isInstanceAccess,
+            potentialMatches: fallbackMatches.length
+          });
+          return [];
+        }
+
         this.logger.info('Simple name fallback successful for qualified name', {
           targetName,
           qualifier: parsed.qualifier,
           memberName: parsed.memberName,
           fallbackMatchCount: fallbackMatches.length
         });
-
 
         return fallbackMatches;
       }
@@ -880,6 +905,33 @@ export class SymbolGraphBuilder {
   }
 
   /**
+   * Find enum members that belong to a specific enum
+   */
+  private findEnumMembers(
+    enumName: string,
+    memberName: string,
+    memberSymbols: SymbolNode[]
+  ): SymbolNode[] {
+    const matches: SymbolNode[] = [];
+    const expectedQualifiedName = `${enumName}.${memberName}`;
+
+    for (const memberSymbol of memberSymbols) {
+      // Match by qualified_name (primary method)
+      if (memberSymbol.signature === expectedQualifiedName) {
+        matches.push(memberSymbol);
+        continue;
+      }
+
+      // Also check if name matches and type is CONSTANT (enum members are stored as constants)
+      if (memberSymbol.name === memberName && memberSymbol.type === 'constant') {
+        matches.push(memberSymbol);
+      }
+    }
+
+    return matches;
+  }
+
+  /**
    * Check if a member symbol's signature indicates it belongs to a specific class
    */
   private isSignatureClassMember(memberSymbol: SymbolNode, _className: string): boolean {
@@ -918,6 +970,51 @@ export class SymbolGraphBuilder {
        memberSymbol.visibility === 'private' ||
        memberSymbol.visibility === 'protected')
     );
+  }
+
+  private stripGenericParameters(name: string): string {
+    const genericStart = name.indexOf('<');
+    if (genericStart === -1) {
+      return name;
+    }
+    return name.substring(0, genericStart);
+  }
+
+  private isInstanceMemberAccess(name: string): boolean {
+    if (!name.includes('.')) {
+      return false;
+    }
+
+    const dotIndex = name.indexOf('.');
+    const firstPart = name.substring(0, dotIndex);
+
+    return firstPart.length > 0 && (
+      firstPart[0] === firstPart[0].toLowerCase() ||
+      firstPart.startsWith('_')
+    );
+  }
+
+  private isExternalReference(name: string): boolean {
+    const externalNamespaces = [
+      'Godot', 'System', 'Variant', 'FileAccess', 'Json', 'Error',
+      'SceneTree', 'List', 'Dictionary', 'HashSet', 'Queue', 'Stack',
+      'Exception', 'ArgumentException', 'InvalidOperationException',
+      'DateTime', 'TimeSpan', 'Guid', 'Uri', 'Task', 'Thread',
+      'Node', 'Node2D', 'Node3D', 'Control', 'Resource', 'Object',
+      'Vector2', 'Vector3', 'Color', 'Transform2D', 'Transform3D'
+    ];
+
+    const strippedName = this.stripGenericParameters(name);
+
+    if (!strippedName.includes('.')) {
+      return externalNamespaces.includes(strippedName);
+    }
+
+    const parts = strippedName.split('.');
+    const firstPart = parts[0];
+
+    return externalNamespaces.includes(firstPart) ||
+           parts.some(part => part === 'Type' || part === 'ModeFlags' || part === 'SignalName');
   }
 
   private extractVirtualSymbolNodes(edges: SymbolEdge[], existingNodes: SymbolNode[]): SymbolNode[] {

@@ -1147,6 +1147,29 @@ export class CSharpParser extends ChunkedParser {
       visibility,
     });
 
+    const bodyNode = node.childForFieldName('body');
+    if (bodyNode) {
+      const memberNodes = this.findNodesOfType(bodyNode, 'enum_member_declaration');
+      for (const memberNode of memberNodes) {
+        const memberNameNode = memberNode.childForFieldName('name');
+        if (!memberNameNode) continue;
+
+        const memberName = this.getNodeText(memberNameNode, content);
+        const qualifiedName = `${name}.${memberName}`;
+
+        symbols.push({
+          name: memberName,
+          qualified_name: qualifiedName,
+          symbol_type: SymbolType.CONSTANT,
+          start_line: memberNode.startPosition.row + 1,
+          end_line: memberNode.endPosition.row + 1,
+          is_exported: modifiers.includes('public'),
+          visibility: Visibility.PUBLIC,
+          signature: qualifiedName,
+        });
+      }
+    }
+
     if (modifiers.includes('public')) {
       exports.push({
         exported_names: [name],

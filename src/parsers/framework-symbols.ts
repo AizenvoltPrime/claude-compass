@@ -671,7 +671,7 @@ export class FrameworkSymbolRegistry {
     // System namespace common types
     const systemTypes = [
       'Exception', 'ArgumentException', 'InvalidOperationException', 'NotSupportedException',
-      'IDisposable', 'IAsyncDisposable', 'DateTime', 'TimeSpan', 'Guid', 'Uri'
+      'IDisposable', 'IAsyncDisposable', 'EventArgs', 'DateTime', 'TimeSpan', 'Guid', 'Uri'
     ];
 
     for (const type of systemTypes) {
@@ -685,6 +685,22 @@ export class FrameworkSymbolRegistry {
       });
     }
 
+    const exceptionProperties = [
+      'Message', 'StackTrace', 'Source', 'HelpLink', 'HResult',
+      'InnerException', 'Data', 'TargetSite'
+    ];
+
+    for (const prop of exceptionProperties) {
+      this.dotnetSymbols.push({
+        name: prop,
+        symbol_type: SymbolType.PROPERTY,
+        visibility: Visibility.PUBLIC,
+        framework: 'System',
+        signature: `Exception.${prop}`,
+        description: `Exception.${prop} property`
+      });
+    }
+
     // System.Collections.Generic
     const collectionTypes = ['List', 'Dictionary', 'HashSet', 'Queue', 'Stack', 'IEnumerable', 'ICollection'];
     for (const type of collectionTypes) {
@@ -695,6 +711,57 @@ export class FrameworkSymbolRegistry {
         framework: 'System.Collections.Generic',
         signature: `class ${type}<T>`,
         description: `System.Collections.Generic.${type}`
+      });
+    }
+
+    const listMethods = [
+      'Add', 'AddRange', 'Clear', 'Contains', 'Remove', 'RemoveAt', 'RemoveAll',
+      'Insert', 'InsertRange', 'IndexOf', 'LastIndexOf', 'Find', 'FindAll',
+      'FindIndex', 'FindLast', 'FindLastIndex', 'Sort', 'Reverse', 'ToArray',
+      'CopyTo', 'GetRange', 'Count', 'ForEach', 'Exists', 'TrueForAll', 'constructor'
+    ];
+
+    for (const method of listMethods) {
+      this.dotnetSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'System.Collections.Generic',
+        signature: `List<T>.${method}()`,
+        description: `List<T>.${method} method`
+      });
+    }
+
+    const dictionaryMethods = [
+      'Add', 'Clear', 'ContainsKey', 'ContainsValue', 'Remove', 'TryGetValue',
+      'TryAdd', 'GetValueOrDefault', 'Keys', 'Values', 'Count', 'constructor'
+    ];
+
+    for (const method of dictionaryMethods) {
+      this.dotnetSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'System.Collections.Generic',
+        signature: `Dictionary<TKey,TValue>.${method}()`,
+        description: `Dictionary<TKey,TValue>.${method} method`
+      });
+    }
+
+    const hashSetMethods = [
+      'Add', 'Clear', 'Contains', 'Remove', 'RemoveWhere', 'UnionWith',
+      'IntersectWith', 'ExceptWith', 'SymmetricExceptWith', 'IsSubsetOf',
+      'IsSupersetOf', 'Overlaps', 'SetEquals', 'Count', 'constructor'
+    ];
+
+    for (const method of hashSetMethods) {
+      this.dotnetSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'System.Collections.Generic',
+        signature: `HashSet<T>.${method}()`,
+        description: `HashSet<T>.${method} method`
       });
     }
 
@@ -712,6 +779,27 @@ export class FrameworkSymbolRegistry {
         framework: 'System',
         signature: `${method}()`,
         description: `Framework method ${method}`
+      });
+    }
+
+    // System.Linq extension methods
+    const linqMethods = [
+      'Select', 'Where', 'OrderBy', 'OrderByDescending', 'GroupBy', 'Join',
+      'First', 'FirstOrDefault', 'Last', 'LastOrDefault', 'Single', 'SingleOrDefault',
+      'Any', 'All', 'Count', 'Sum', 'Average', 'Min', 'Max',
+      'ToList', 'ToArray', 'ToDictionary', 'ToHashSet',
+      'Skip', 'Take', 'Distinct', 'Union', 'Intersect', 'Except',
+      'Concat', 'Zip', 'Aggregate', 'Contains', 'SequenceEqual'
+    ];
+
+    for (const method of linqMethods) {
+      this.dotnetSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'System.Linq',
+        signature: `${method}()`,
+        description: `LINQ extension method ${method}`
       });
     }
 
@@ -920,6 +1008,313 @@ export class FrameworkSymbolRegistry {
         framework: 'Godot',
         signature: `class ${constant}`,
         description: `Godot.${constant}`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'Variant',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'struct Variant',
+      description: 'Godot.Variant'
+    });
+
+    const variantMethods = [
+      'AsString', 'AsInt', 'AsInt32', 'AsInt64', 'AsFloat', 'AsBool',
+      'AsGodotArray', 'AsGodotDictionary', 'AsVector2', 'AsVector3',
+      'AsNode', 'AsObject', 'AsStringName', 'AsNodePath',
+      'VariantType', 'Obj', 'constructor'
+    ];
+
+    for (const method of variantMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `Variant.${method}()`,
+        description: `Godot Variant method ${method}`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'Type',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'enum Variant.Type',
+      description: 'Godot Variant.Type enum'
+    });
+
+    const variantTypeMembers = [
+      'Nil', 'Bool', 'Int', 'Float', 'String', 'Vector2', 'Vector2I',
+      'Rect2', 'Rect2I', 'Vector3', 'Vector3I', 'Transform2D', 'Vector4',
+      'Vector4I', 'Plane', 'Quaternion', 'Aabb', 'Basis', 'Transform3D',
+      'Projection', 'Color', 'StringName', 'NodePath', 'Rid', 'Object',
+      'Callable', 'Signal', 'Dictionary', 'Array', 'PackedByteArray',
+      'PackedInt32Array', 'PackedInt64Array', 'PackedFloat32Array',
+      'PackedFloat64Array', 'PackedStringArray', 'PackedVector2Array',
+      'PackedVector3Array', 'PackedColorArray', 'Max'
+    ];
+
+    for (const member of variantTypeMembers) {
+      this.godotSymbols.push({
+        name: member,
+        symbol_type: SymbolType.VARIABLE,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `Variant.Type.${member}`,
+        description: `Godot Variant.Type.${member} enum value`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'FileAccess',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'class FileAccess',
+      description: 'Godot.FileAccess'
+    });
+
+    const fileAccessMethods = [
+      'Open', 'Close', 'GetAsText', 'GetAsJson', 'FileExists',
+      'GetLine', 'GetBuffer', 'GetLength', 'GetPosition', 'Seek',
+      'SeekEnd', 'IsOpen', 'GetError', 'StoreLine', 'StoreString',
+      'StoreBuffer', 'Store8', 'Store16', 'Store32', 'Store64',
+      'Get8', 'Get16', 'Get32', 'Get64', 'GetFloat', 'GetDouble'
+    ];
+
+    for (const method of fileAccessMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `FileAccess.${method}()`,
+        description: `Godot FileAccess method ${method}`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'ModeFlags',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'enum FileAccess.ModeFlags',
+      description: 'Godot FileAccess.ModeFlags enum'
+    });
+
+    const modeFlags = ['Read', 'Write', 'ReadWrite', 'WriteRead'];
+    for (const flag of modeFlags) {
+      this.godotSymbols.push({
+        name: flag,
+        symbol_type: SymbolType.VARIABLE,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `FileAccess.ModeFlags.${flag}`,
+        description: `Godot FileAccess.ModeFlags.${flag} enum value`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'Json',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'class Json',
+      description: 'Godot.Json'
+    });
+
+    const jsonMethods = [
+      'Parse', 'Stringify', 'GetData', 'GetErrorLine',
+      'GetErrorMessage', 'GetParsedText', 'constructor'
+    ];
+
+    for (const method of jsonMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `Json.${method}()`,
+        description: `Godot Json method ${method}`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'Error',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'enum Error',
+      description: 'Godot.Error enum'
+    });
+
+    const errorValues = [
+      'Ok', 'Failed', 'ErrUnavailable', 'ErrUnconfigured', 'ErrUnauthorized',
+      'ErrParameterRangeError', 'ErrOutOfMemory', 'ErrFileNotFound',
+      'ErrFileBadDrive', 'ErrFileBadPath', 'ErrFileNoPermission',
+      'ErrFileAlreadyInUse', 'ErrFileCantOpen', 'ErrFileCantWrite',
+      'ErrFileCantRead', 'ErrFileUnrecognized', 'ErrFileCorrupt',
+      'ErrFileMissingDependencies', 'ErrFileEof', 'ErrCantOpen', 'ErrCantCreate'
+    ];
+
+    for (const error of errorValues) {
+      this.godotSymbols.push({
+        name: error,
+        symbol_type: SymbolType.VARIABLE,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `Error.${error}`,
+        description: `Godot Error.${error} enum value`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'SignalName',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'class SceneTree.SignalName',
+      description: 'Godot SceneTree.SignalName'
+    });
+
+    const sceneTreeSignals = [
+      'ProcessFrame', 'PhysicsFrame', 'TreeChanged', 'TreeProcessModeChanged',
+      'NodeAdded', 'NodeRemoved', 'NodeRenamed', 'NodeConfigurationWarningChanged'
+    ];
+
+    for (const signal of sceneTreeSignals) {
+      this.godotSymbols.push({
+        name: signal,
+        symbol_type: SymbolType.VARIABLE,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `SceneTree.SignalName.${signal}`,
+        description: `Godot SceneTree.SignalName.${signal} signal`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'AudioStreamPlayer',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'class AudioStreamPlayer : Node',
+      description: 'Godot.AudioStreamPlayer'
+    });
+
+    const audioStreamPlayerMethods = ['Play', 'Stop', 'constructor'];
+    for (const method of audioStreamPlayerMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `AudioStreamPlayer.${method}()`,
+        description: `Godot AudioStreamPlayer method ${method}`
+      });
+    }
+
+    const audioStreamPlayerProperties = ['Stream', 'Bus', 'VolumeDb'];
+    for (const prop of audioStreamPlayerProperties) {
+      this.godotSymbols.push({
+        name: prop,
+        symbol_type: SymbolType.PROPERTY,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `AudioStreamPlayer.${prop}`,
+        description: `Godot AudioStreamPlayer property ${prop}`
+      });
+    }
+
+    this.godotSymbols.push({
+      name: 'SceneTreeTimer',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'class SceneTreeTimer : RefCounted',
+      description: 'Godot.SceneTreeTimer'
+    });
+
+    this.godotSymbols.push({
+      name: 'SignalName',
+      symbol_type: SymbolType.CLASS,
+      visibility: Visibility.PUBLIC,
+      framework: 'Godot',
+      signature: 'class SceneTreeTimer.SignalName',
+      description: 'Godot SceneTreeTimer.SignalName'
+    });
+
+    const sceneTreeTimerSignals = ['Timeout'];
+    for (const signal of sceneTreeTimerSignals) {
+      this.godotSymbols.push({
+        name: signal,
+        symbol_type: SymbolType.VARIABLE,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `SceneTreeTimer.SignalName.${signal}`,
+        description: `Godot SceneTreeTimer.SignalName.${signal} signal`
+      });
+    }
+
+    const godotUtilityMethods = [
+      'ToSignal', 'GetNodesInGroup', 'CreateTimer', 'FindChild',
+      'DirExistsAbsolute', 'ListDirBegin', 'GetNext', 'CurrentIsDir',
+      'EndsWith', 'GetBaseName', 'Clamp'
+    ];
+    for (const method of godotUtilityMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `${method}()`,
+        description: `Godot utility method ${method}`
+      });
+    }
+
+    const godotCollectionsTypes = [
+      { name: 'Dictionary', methods: ['Add', 'Clear', 'ContainsKey', 'Remove', 'TryGetValue', 'Keys', 'Values', 'Count', 'constructor'] },
+      { name: 'Array', methods: ['Add', 'Clear', 'Contains', 'Remove', 'Insert', 'Count', 'constructor'] }
+    ];
+
+    for (const { name, methods } of godotCollectionsTypes) {
+      this.godotSymbols.push({
+        name,
+        symbol_type: SymbolType.CLASS,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `class Godot.Collections.${name}`,
+        description: `Godot.Collections.${name}`
+      });
+
+      for (const method of methods) {
+        this.godotSymbols.push({
+          name: method,
+          symbol_type: SymbolType.METHOD,
+          visibility: Visibility.PUBLIC,
+          framework: 'Godot',
+          signature: `Godot.Collections.${name}.${method}()`,
+          description: `Godot.Collections.${name}.${method} method`
+        });
+      }
+    }
+
+    const additionalUtilityMethods = [
+      'ToSignal', 'Invoke', 'ToLower', 'ToUpper', 'Substring', 'setter'
+    ];
+
+    for (const method of additionalUtilityMethods) {
+      this.godotSymbols.push({
+        name: method,
+        symbol_type: SymbolType.METHOD,
+        visibility: Visibility.PUBLIC,
+        framework: 'Godot',
+        signature: `${method}()`,
+        description: `Godot utility method ${method}`
       });
     }
   }
