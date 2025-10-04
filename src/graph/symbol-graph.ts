@@ -73,6 +73,10 @@ export class SymbolGraphBuilder {
 
     const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0, fileIdToPath);
 
+    // Extract virtual framework symbols from edges and add them to nodes
+    const virtualSymbolNodes = this.extractVirtualSymbolNodes(edges, nodes);
+    nodes.push(...virtualSymbolNodes);
+
     return { nodes, edges };
   }
 
@@ -914,5 +918,29 @@ export class SymbolGraphBuilder {
        memberSymbol.visibility === 'private' ||
        memberSymbol.visibility === 'protected')
     );
+  }
+
+  private extractVirtualSymbolNodes(edges: SymbolEdge[], existingNodes: SymbolNode[]): SymbolNode[] {
+    const existingIds = new Set(existingNodes.map(n => n.id));
+    const virtualSymbols = this.symbolResolver.getVirtualSymbols();
+    const virtualNodes: SymbolNode[] = [];
+
+    for (const symbol of virtualSymbols) {
+      if (!existingIds.has(symbol.id)) {
+        virtualNodes.push({
+          id: symbol.id,
+          name: symbol.name,
+          type: symbol.symbol_type,
+          fileId: symbol.file_id,
+          startLine: symbol.start_line || 1,
+          endLine: symbol.end_line || 1,
+          isExported: symbol.is_exported || true,
+          visibility: symbol.visibility,
+          signature: symbol.signature,
+        });
+      }
+    }
+
+    return virtualNodes;
   }
 }
