@@ -3333,6 +3333,36 @@ export class DatabaseService {
       });
   }
 
+  async batchUpdateSymbolEmbeddings(
+    updates: Array<{
+      id: number;
+      nameEmbedding: number[];
+      descriptionEmbedding: number[];
+      embeddingModel: string;
+    }>
+  ): Promise<void> {
+    const BATCH_SIZE = 100;
+
+    for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+      const batch = updates.slice(i, i + BATCH_SIZE);
+
+      await this.db.transaction(async (trx) => {
+        const promises = batch.map(update =>
+          trx('symbols')
+            .where('id', update.id)
+            .update({
+              name_embedding: JSON.stringify(update.nameEmbedding),
+              description_embedding: JSON.stringify(update.descriptionEmbedding),
+              embeddings_updated_at: new Date(),
+              embedding_model: update.embeddingModel,
+            })
+        );
+
+        await Promise.all(promises);
+      });
+    }
+  }
+
   /**
    * Get dependencies with enhanced context information
    */

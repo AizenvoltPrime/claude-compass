@@ -164,7 +164,8 @@ program
   .option('--compassignore <path>', 'Path to .compassignore file', '.compassignore')
   .option('--chunk-overlap <lines>', 'Overlap lines between chunks', '100')
   .option('--encoding-fallback <encoding>', 'Fallback encoding for problematic files', 'iso-8859-1')
-  .option('--parallel-parsing', 'Enable parallel file parsing', false)
+  .option('--parallel-parsing', 'Enable parallel file parsing', true)
+  .option('--max-concurrency <number>', 'Maximum concurrent file parsing operations (default: 10)', '10')
   .option('--cross-stack', 'Enable cross-stack analysis for Vue ↔ Laravel projects', false)
   .option(
     '--vue-laravel',
@@ -206,7 +207,8 @@ program
         chunkOverlapLines: parseInt(options.chunkOverlap),
         encodingFallback: options.encodingFallback,
         compassignorePath: options.compassignore,
-        enableParallelParsing: options.parallelParsing === true,
+        enableParallelParsing: options.parallelParsing !== false,
+        maxConcurrency: options.maxConcurrency ? parseInt(options.maxConcurrency) : 10,
         forceFullAnalysis: options.forceFull === true,
 
         // Cross-stack analysis options
