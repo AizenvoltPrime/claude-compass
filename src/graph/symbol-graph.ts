@@ -43,10 +43,16 @@ export interface CallChain {
 export class SymbolGraphBuilder {
   private logger: any;
   private symbolResolver: SymbolResolver;
+  private seenExternalPatterns: Set<string>;
+  private suppressedExternalCount: number;
+  private suppressedAmbiguousCount: number;
 
   constructor() {
     this.logger = logger;
     this.symbolResolver = new SymbolResolver();
+    this.seenExternalPatterns = new Set();
+    this.suppressedExternalCount = 0;
+    this.suppressedAmbiguousCount = 0;
   }
 
   /**
@@ -59,6 +65,7 @@ export class SymbolGraphBuilder {
     importsMap: Map<number, ParsedImport[]> = new Map(),
     exportsMap: Map<number, ParsedExport[]> = new Map()
   ): Promise<SymbolGraphData> {
+    this.resetLogDeduplication();
     const nodes = this.createSymbolNodes(symbols);
 
     // Build file ID to path mapping for class name extraction
@@ -76,6 +83,8 @@ export class SymbolGraphBuilder {
     // Extract virtual framework symbols from edges and add them to nodes
     const virtualSymbolNodes = this.extractVirtualSymbolNodes(edges, nodes);
     nodes.push(...virtualSymbolNodes);
+
+    this.logResolutionSummary();
 
     return { nodes, edges };
   }
@@ -326,6 +335,22 @@ export class SymbolGraphBuilder {
     complexity += parents.length * 2;
 
     return complexity;
+  }
+
+  private resetLogDeduplication(): void {
+    this.seenExternalPatterns.clear();
+    this.suppressedExternalCount = 0;
+    this.suppressedAmbiguousCount = 0;
+  }
+
+  private logResolutionSummary(): void {
+    if (this.suppressedExternalCount > 0 || this.suppressedAmbiguousCount > 0) {
+      this.logger.info('Symbol resolution summary', {
+        uniqueExternalPatterns: this.seenExternalPatterns.size,
+        suppressedExternalLogs: this.suppressedExternalCount,
+        suppressedAmbiguousLogs: this.suppressedAmbiguousCount
+      });
+    }
   }
 
   private createSymbolNodes(symbols: Symbol[]): SymbolNode[] {
@@ -734,11 +759,17 @@ export class SymbolGraphBuilder {
 
     // Handle qualified names (e.g., "IHandManager.SetHandPositions")
     if (parsed.qualifier) {
-      this.logger.debug('Attempting qualified name resolution', {
-        targetName,
-        qualifier: parsed.qualifier,
-        memberName: parsed.memberName
-      });
+      const attemptKey = `attempt:${parsed.qualifier}.${parsed.memberName}`;
+      if (!this.seenExternalPatterns.has(attemptKey)) {
+        this.logger.debug('Attempting qualified name resolution', {
+          targetName,
+          qualifier: parsed.qualifier,
+          memberName: parsed.memberName
+        });
+        this.seenExternalPatterns.add(attemptKey);
+      } else {
+        this.suppressedExternalCount++;
+      }
 
       // Step 1: Try exact qualified match by finding class/interface/enum and its members
       const qualifierSymbols = nameToSymbolMap.get(parsed.qualifier) || [];
@@ -816,27 +847,39 @@ export class SymbolGraphBuilder {
         }
       }
 
-      const logLevel = isExternal || isInstanceAccess ? 'debug' : 'warn';
-      this.logger[logLevel]('Qualified name resolution failed, trying simple name fallback', {
-        targetName,
-        qualifier: parsed.qualifier,
-        memberName: parsed.memberName,
-        isExternal,
-        isInstanceAccess
-      });
+      const patternKey = `${parsed.qualifier}.${parsed.memberName}`;
+      const shouldLog = !this.seenExternalPatterns.has(patternKey);
+
+      if (shouldLog) {
+        const logLevel = isExternal || isInstanceAccess ? 'debug' : 'warn';
+        this.logger[logLevel]('Qualified name resolution failed, trying simple name fallback', {
+          targetName,
+          qualifier: parsed.qualifier,
+          memberName: parsed.memberName,
+          isExternal,
+          isInstanceAccess
+        });
+        this.seenExternalPatterns.add(patternKey);
+      } else {
+        this.suppressedExternalCount++;
+      }
 
       const fallbackMatches = nameToSymbolMap.get(parsed.memberName) || [];
 
       if (fallbackMatches.length > 0) {
         if (isExternal || isInstanceAccess) {
-          this.logger.debug('External/instance reference - skipping ambiguous fallback', {
-            targetName,
-            qualifier: parsed.qualifier,
-            memberName: parsed.memberName,
-            isExternal,
-            isInstanceAccess,
-            potentialMatches: fallbackMatches.length
-          });
+          if (shouldLog) {
+            this.logger.debug('External/instance reference - skipping ambiguous fallback', {
+              targetName,
+              qualifier: parsed.qualifier,
+              memberName: parsed.memberName,
+              isExternal,
+              isInstanceAccess,
+              potentialMatches: fallbackMatches.length
+            });
+          } else {
+            this.suppressedExternalCount++;
+          }
           return [];
         }
 

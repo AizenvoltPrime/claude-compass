@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import { GraphBuilder } from '../graph';
 import { DatabaseService, databaseService } from '../database';
 import { ClaudeCompassMCPServer } from '../mcp';
-import { logger, config } from '../utils';
+import { logger, config, flushLogs } from '../utils';
 import { FileSizeUtils, DEFAULT_POLICY } from '../config/file-size-policy';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -235,6 +235,8 @@ program
       const duration = Date.now() - startTime;
 
       spinner.succeed('Analysis completed');
+
+      await flushLogs();
 
       // Display results
       console.log(chalk.green(`\n${getEmoji('✅', '[OK]')} Analysis completed successfully!`));
