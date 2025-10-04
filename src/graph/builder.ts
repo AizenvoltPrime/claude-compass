@@ -468,28 +468,39 @@ export class GraphBuilder {
     if (changedFiles.length === 0) {
       this.logger.info('No changed files detected, skipping analysis');
 
-      // Return current graph state - need to fetch data from database
+      // Fetch current repository statistics from database
       const dbFiles = await this.dbService.getFilesByRepository(repository.id);
       const symbols = await this.dbService.getSymbolsByRepository(repository.id);
+      const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(repository.id);
+      const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(repository.id);
 
-      // Create empty maps for unchanged files (no new imports/exports)
-      const importsMap = new Map<number, any[]>();
-      const exportsMap = new Map<number, any[]>();
-      const dependenciesMap = new Map<number, any[]>();
+      // Create lightweight graph data structures for statistics
+      const fileGraph = {
+        nodes: dbFiles.map(f => ({
+          id: f.id,
+          path: f.path,
+          relativePath: path.relative(repository.path, f.path),
+          language: f.language,
+          isTest: f.is_test,
+          isGenerated: f.is_generated,
+        })),
+        edges: Array(fileDependencyCount).fill(null)
+      };
 
-      const fileGraph = await this.fileGraphBuilder.buildFileGraph(
-        repository,
-        dbFiles,
-        importsMap,
-        exportsMap
-      );
-      const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
-        symbols,
-        dependenciesMap,
-        dbFiles,
-        importsMap,
-        exportsMap
-      );
+      const symbolGraph = {
+        nodes: symbols.map(s => ({
+          id: s.id,
+          name: s.name,
+          type: s.symbol_type,
+          fileId: s.file_id,
+          startLine: s.start_line || 0,
+          endLine: s.end_line || 0,
+          isExported: s.is_exported,
+          visibility: s.visibility,
+          signature: s.signature,
+        })),
+        edges: Array(symbolDependencyCount).fill(null)
+      };
 
       return {
         repository,
@@ -509,28 +520,39 @@ export class GraphBuilder {
     // Re-analyze only changed files
     const partialResult = await this.reanalyzeFiles(repository.id, changedFiles, options);
 
-    // Rebuild graphs with updated data - fetch all current data from database
+    // Fetch current repository statistics from database
     const dbFiles = await this.dbService.getFilesByRepository(repository.id);
     const symbols = await this.dbService.getSymbolsByRepository(repository.id);
+    const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(repository.id);
+    const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(repository.id);
 
-    // Create empty maps for graph building (symbols/dependencies are in database)
-    const importsMap = new Map<number, any[]>();
-    const exportsMap = new Map<number, any[]>();
-    const dependenciesMap = new Map<number, any[]>();
+    // Create lightweight graph data structures for statistics
+    const fileGraph = {
+      nodes: dbFiles.map(f => ({
+        id: f.id,
+        path: f.path,
+        relativePath: path.relative(repository.path, f.path),
+        language: f.language,
+        isTest: f.is_test,
+        isGenerated: f.is_generated,
+      })),
+      edges: Array(fileDependencyCount).fill(null)
+    };
 
-    const fileGraph = await this.fileGraphBuilder.buildFileGraph(
-      repository,
-      dbFiles,
-      importsMap,
-      exportsMap
-    );
-    const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
-      symbols,
-      dependenciesMap,
-      dbFiles,
-      importsMap,
-      exportsMap
-    );
+    const symbolGraph = {
+      nodes: symbols.map(s => ({
+        id: s.id,
+        name: s.name,
+        type: s.symbol_type,
+        fileId: s.file_id,
+        startLine: s.start_line || 0,
+        endLine: s.end_line || 0,
+        isExported: s.is_exported,
+        visibility: s.visibility,
+        signature: s.signature,
+      })),
+      edges: Array(symbolDependencyCount).fill(null)
+    };
 
     // Update repository timestamp
     await this.dbService.updateRepository(repository.id, {
@@ -658,6 +680,10 @@ export class GraphBuilder {
     if (symbolDependencies.length > 0) {
       await this.dbService.createDependencies(symbolDependencies);
     }
+
+    // Re-resolve dependencies that reference changed symbols by qualified name
+    const resolvedCount = await this.dbService.resolveQualifiedNameDependencies(repositoryId);
+    this.logger.info('Re-resolved dependencies by qualified name', { resolvedCount });
 
     await this.buildGodotRelationships(repositoryId, parseResults);
 

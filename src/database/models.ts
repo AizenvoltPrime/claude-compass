@@ -50,7 +50,8 @@ export interface Symbol {
 export interface Dependency {
   id: number;
   from_symbol_id: number;
-  to_symbol_id: number;
+  to_symbol_id: number | null; // Nullable for unresolved qualified name references
+  to_qualified_name?: string; // Stable reference that survives symbol deletion/recreation
   dependency_type: DependencyType;
   line_number?: number;
   parameter_context?: string;
@@ -260,7 +261,8 @@ export interface CreateSymbol {
 
 export interface CreateDependency {
   from_symbol_id: number;
-  to_symbol_id: number;
+  to_symbol_id: number | null; // Nullable when only qualified name is known
+  to_qualified_name?: string; // Stable reference for incremental analysis
   dependency_type: DependencyType;
   line_number?: number;
   parameter_context?: string;

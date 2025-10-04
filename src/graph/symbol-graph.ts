@@ -8,6 +8,7 @@ const logger = createComponentLogger('symbol-graph');
 export interface SymbolNode {
   id: number;
   name: string;
+  qualifiedName?: string;
   type: SymbolType;
   fileId: number;
   startLine: number;
@@ -96,6 +97,12 @@ export class SymbolGraphBuilder {
     // Get all valid symbol IDs from the graph nodes
     const validSymbolIds = new Set(symbolGraph.nodes.map(node => node.id));
 
+    // Create a map from symbol ID to qualified name for stable references
+    const symbolIdToQualifiedName = new Map<number, string | undefined>();
+    symbolGraph.nodes.forEach(node => {
+      symbolIdToQualifiedName.set(node.id, node.qualifiedName);
+    });
+
     return symbolGraph.edges
       .filter(edge => {
         // Only include dependencies where both symbols exist in the graph
@@ -104,6 +111,7 @@ export class SymbolGraphBuilder {
       .map(edge => ({
         from_symbol_id: edge.from,
         to_symbol_id: edge.to,
+        to_qualified_name: symbolIdToQualifiedName.get(edge.to),
         dependency_type: edge.type,
         line_number: edge.lineNumber,
         // comprehensive relationship data (Phase 3)
@@ -357,6 +365,7 @@ export class SymbolGraphBuilder {
     return symbols.map(symbol => ({
       id: symbol.id,
       name: symbol.name,
+      qualifiedName: symbol.qualified_name,
       type: symbol.symbol_type,
       fileId: symbol.file_id,
       startLine: symbol.start_line || 0,

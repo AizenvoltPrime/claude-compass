@@ -1283,6 +1283,25 @@ export class DatabaseService {
     return dependencies as FileDependency[];
   }
 
+  async countFileDependenciesByRepository(repoId: number): Promise<number> {
+    const result = await this.db('file_dependencies')
+      .join('files as from_files', 'file_dependencies.from_file_id', 'from_files.id')
+      .where('from_files.repo_id', repoId)
+      .count('* as count')
+      .first();
+    return result ? Number(result.count) : 0;
+  }
+
+  async countSymbolDependenciesByRepository(repoId: number): Promise<number> {
+    const result = await this.db('dependencies')
+      .join('symbols', 'dependencies.from_symbol_id', 'symbols.id')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .count('* as count')
+      .first();
+    return result ? Number(result.count) : 0;
+  }
+
   async getDependenciesFrom(symbolId: number): Promise<DependencyWithSymbols[]> {
     const results = await this.db('dependencies')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
@@ -1406,9 +1425,10 @@ export class DatabaseService {
       const deletionResults: Record<string, number> = {};
 
       if (symbolIds.length > 0) {
+        // Only delete dependencies FROM changed files, not TO them
+        // Dependencies TO changed symbols use qualified names and will be re-resolved
         deletionResults.dependencies = await trx('dependencies')
           .whereIn('from_symbol_id', symbolIds)
-          .orWhereIn('to_symbol_id', symbolIds)
           .del();
 
         const hasRoutes = await trx.schema.hasTable('routes');
@@ -1541,6 +1561,27 @@ export class DatabaseService {
         ...deletionResults,
       });
     });
+  }
+
+  async resolveQualifiedNameDependencies(repositoryId: number): Promise<number> {
+    logger.info('Re-resolving dependencies by qualified name after incremental update', { repositoryId });
+
+    const result = await this.db.raw(`
+      UPDATE dependencies
+      SET to_symbol_id = symbols.id,
+          updated_at = NOW()
+      FROM symbols
+      JOIN files ON symbols.file_id = files.id
+      WHERE files.repo_id = ?
+        AND dependencies.to_qualified_name = symbols.qualified_name
+        AND dependencies.to_qualified_name IS NOT NULL
+        AND (dependencies.to_symbol_id IS NULL
+             OR dependencies.to_symbol_id != symbols.id)
+    `, [repositoryId]);
+
+    const updatedCount = result.rowCount || 0;
+    logger.info('Resolved dependencies by qualified name', { updatedCount });
+    return updatedCount;
   }
 
   async deleteRepositoryCompletely(repositoryId: number): Promise<boolean> {
