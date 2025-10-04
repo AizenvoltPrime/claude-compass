@@ -1391,6 +1391,158 @@ export class DatabaseService {
     });
   }
 
+  async cleanupFileData(fileIds: number[]): Promise<void> {
+    if (fileIds.length === 0) return;
+
+    logger.info('Cleaning up file data for incremental re-analysis', { fileIds, count: fileIds.length });
+
+    await this.db.transaction(async trx => {
+      const symbolIds = await trx('symbols')
+        .whereIn('file_id', fileIds)
+        .pluck('id');
+
+      logger.info('Found symbols to clean up', { symbolCount: symbolIds.length });
+
+      const deletionResults: Record<string, number> = {};
+
+      if (symbolIds.length > 0) {
+        deletionResults.dependencies = await trx('dependencies')
+          .whereIn('from_symbol_id', symbolIds)
+          .orWhereIn('to_symbol_id', symbolIds)
+          .del();
+
+        const hasRoutes = await trx.schema.hasTable('routes');
+        if (hasRoutes) {
+          deletionResults.routes = await trx('routes')
+            .whereIn('handler_symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasComponents = await trx.schema.hasTable('components');
+        if (hasComponents) {
+          deletionResults.components = await trx('components')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasComposables = await trx.schema.hasTable('composables');
+        if (hasComposables) {
+          deletionResults.composables = await trx('composables')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasOrmEntities = await trx.schema.hasTable('orm_entities');
+        if (hasOrmEntities) {
+          deletionResults.ormEntities = await trx('orm_entities')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasJobQueues = await trx.schema.hasTable('job_queues');
+        if (hasJobQueues) {
+          deletionResults.jobQueues = await trx('job_queues')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+      }
+
+      deletionResults.fileDependencies = await trx('file_dependencies')
+        .whereIn('from_file_id', fileIds)
+        .orWhereIn('to_file_id', fileIds)
+        .del();
+
+      const hasTestSuites = await trx.schema.hasTable('test_suites');
+      if (hasTestSuites) {
+        deletionResults.testSuites = await trx('test_suites')
+          .whereIn('file_id', fileIds)
+          .del();
+      }
+
+      const hasGodotScenes = await trx.schema.hasTable('godot_scenes');
+      if (hasGodotScenes) {
+        const filePaths = await trx('files')
+          .whereIn('id', fileIds)
+          .pluck('path');
+
+        const scenePaths = await trx('godot_scenes')
+          .whereIn('scene_path', filePaths)
+          .pluck('id');
+
+        if (scenePaths.length > 0) {
+          const hasGodotNodes = await trx.schema.hasTable('godot_nodes');
+          if (hasGodotNodes) {
+            deletionResults.godotNodes = await trx('godot_nodes')
+              .whereIn('scene_id', scenePaths)
+              .del();
+          }
+
+          const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
+          if (hasGodotRelationships) {
+            deletionResults.godotRelationships = await trx('godot_relationships')
+              .where(function() {
+                this.where('from_entity_type', 'scene').whereIn('from_entity_id', scenePaths)
+                  .orWhere('to_entity_type', 'scene').whereIn('to_entity_id', scenePaths);
+              })
+              .del();
+          }
+
+          deletionResults.godotScenes = await trx('godot_scenes')
+            .whereIn('id', scenePaths)
+            .del();
+        }
+      }
+
+      const hasGodotScripts = await trx.schema.hasTable('godot_scripts');
+      if (hasGodotScripts) {
+        const scriptPaths = await trx('files')
+          .whereIn('id', fileIds)
+          .where('language', 'csharp')
+          .pluck('path');
+
+        if (scriptPaths.length > 0) {
+          const scriptIds = await trx('godot_scripts')
+            .whereIn('script_path', scriptPaths)
+            .pluck('id');
+
+          if (scriptIds.length > 0) {
+            const hasGodotAutoloads = await trx.schema.hasTable('godot_autoloads');
+            if (hasGodotAutoloads) {
+              deletionResults.godotAutoloads = await trx('godot_autoloads')
+                .whereIn('script_id', scriptIds)
+                .del();
+            }
+
+            const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
+            if (hasGodotRelationships) {
+              deletionResults.godotScriptRelationships = await trx('godot_relationships')
+                .where(function() {
+                  this.where('from_entity_type', 'script').whereIn('from_entity_id', scriptIds)
+                    .orWhere('to_entity_type', 'script').whereIn('to_entity_id', scriptIds);
+                })
+                .del();
+            }
+
+            deletionResults.godotScripts = await trx('godot_scripts')
+              .whereIn('id', scriptIds)
+              .del();
+          }
+        }
+      }
+
+      if (symbolIds.length > 0) {
+        deletionResults.symbols = await trx('symbols')
+          .whereIn('id', symbolIds)
+          .del();
+      }
+
+      logger.info('File cleanup completed', {
+        fileCount: fileIds.length,
+        ...deletionResults,
+      });
+    });
+  }
+
   async deleteRepositoryCompletely(repositoryId: number): Promise<boolean> {
     logger.info('Completely deleting repository and all related data', { repositoryId });
 

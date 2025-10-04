@@ -536,6 +536,7 @@ export class GraphBuilder {
     this.logger.info('Incremental analysis completed', {
       filesProcessed: partialResult.filesProcessed || 0,
       symbolsExtracted: partialResult.symbolsExtracted || 0,
+      dependenciesCreated: partialResult.dependenciesCreated || 0,
       errors: partialResult.errors?.length || 0,
     });
 
@@ -543,7 +544,7 @@ export class GraphBuilder {
       repository,
       filesProcessed: partialResult.filesProcessed || 0,
       symbolsExtracted: partialResult.symbolsExtracted || 0,
-      dependenciesCreated: 0, // Will be calculated from graph
+      dependenciesCreated: partialResult.dependenciesCreated || 0,
       fileGraph,
       symbolGraph,
       errors: partialResult.errors || [],
@@ -575,16 +576,95 @@ export class GraphBuilder {
       throw new Error(`Repository with id ${repositoryId} not found`);
     }
 
-    // Update existing files or create new ones
+    const existingFiles = await this.dbService.getFilesByRepository(repositoryId);
+    const fileIdsToCleanup = existingFiles
+      .filter(f => filePaths.includes(f.path))
+      .map(f => f.id);
+
+    if (fileIdsToCleanup.length > 0) {
+      this.logger.info('Cleaning up old data for changed files', {
+        fileCount: fileIdsToCleanup.length,
+      });
+      await this.dbService.cleanupFileData(fileIdsToCleanup);
+    }
+
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
     const symbols = await this.storeSymbols(dbFiles, parseResults);
 
-    // Store framework entities for changed files
+    await this.generateSymbolEmbeddings(symbols);
+
     await this.storeFrameworkEntities(repositoryId, symbols, parseResults);
+
+    const importsMap = this.createImportsMap(dbFiles, parseResults);
+    const exportsMap = this.createExportsMap(dbFiles, parseResults);
+    const dependenciesMap = this.createDependenciesMap(symbols, parseResults, dbFiles);
+
+    const fileGraph = await this.fileGraphBuilder.buildFileGraph(
+      repository,
+      dbFiles,
+      importsMap,
+      exportsMap
+    );
+
+    const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
+      symbols,
+      dependenciesMap,
+      dbFiles,
+      importsMap,
+      exportsMap
+    );
+
+    await this.persistVirtualFrameworkSymbols(repository, symbolGraph, symbols);
+
+    const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
+    const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
+
+    const crossFileFileDependencies = this.createCrossFileFileDependencies(
+      symbolDependencies,
+      symbols,
+      dbFiles
+    );
+
+    const externalCallFileDependencies = this.createExternalCallFileDependencies(
+      parseResults,
+      dbFiles,
+      symbols
+    );
+
+    const externalImportFileDependencies = this.createExternalImportFileDependencies(
+      parseResults,
+      dbFiles
+    );
+
+    const allFileDependencies = [
+      ...fileDependencies,
+      ...crossFileFileDependencies,
+      ...externalCallFileDependencies,
+      ...externalImportFileDependencies,
+    ];
+
+    if (allFileDependencies.length > 0) {
+      await this.dbService.createFileDependencies(allFileDependencies);
+    }
+
+    if (symbolDependencies.length > 0) {
+      await this.dbService.createDependencies(symbolDependencies);
+    }
+
+    await this.buildGodotRelationships(repositoryId, parseResults);
+
+    const totalDependencies = allFileDependencies.length + symbolDependencies.length;
+
+    this.logger.info('File re-analysis completed', {
+      filesProcessed: files.length,
+      symbolsExtracted: symbols.length,
+      dependenciesCreated: totalDependencies,
+    });
 
     return {
       filesProcessed: files.length,
       symbolsExtracted: symbols.length,
+      dependenciesCreated: totalDependencies,
       errors: parseResults.flatMap(r =>
         r.errors.map(e => ({
           filePath: r.filePath,
