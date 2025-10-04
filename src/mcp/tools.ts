@@ -641,7 +641,7 @@ export class McpTools {
 
     // Build search options with improved defaults
     const searchOptions = {
-      limit: 100, // Fixed limit (limit parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+      limit: 30, // Fixed limit optimized for AI assistant cognitive load and response time
       symbolTypes: [],
       isExported: validatedArgs.is_exported,
       repoIds: repoIds,
@@ -786,8 +786,8 @@ export class McpTools {
       });
     }
 
-    // Apply default limit (limit parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-    const limit = 100;
+    // Apply default limit (optimized for AI assistant cognitive load and response time)
+    const limit = 30;
     if (filteredSymbols.length > limit) {
       filteredSymbols = filteredSymbols.slice(0, limit);
     }
@@ -2537,14 +2537,17 @@ export class McpTools {
   ) {
     switch (searchMode) {
       case 'semantic':
+        this.logger.info(`[VECTOR SEARCH] Attempting semantic search for query: "${query}"`);
         try {
-          return await this.dbService.vectorSearchSymbols(query, repoId, {
+          const vectorResults = await this.dbService.vectorSearchSymbols(query, repoId, {
             ...searchOptions,
-            similarityThreshold: 0.7,
+            similarityThreshold: 0.35,
           });
+          this.logger.info(`[VECTOR SEARCH] Success: returned ${vectorResults.length} results`);
+          return vectorResults;
         } catch (error) {
-          this.logger.warn('Vector search failed, falling back to fulltext:', error);
-          return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
+          this.logger.warn('[VECTOR SEARCH] Failed, falling back to lexical search:', error);
+          return await this.dbService.lexicalSearchSymbols(query, repoId, searchOptions);
         }
 
       case 'exact':
@@ -2555,24 +2558,29 @@ export class McpTools {
         try {
           return await this.dbService.searchQualifiedContext(query, undefined);
         } catch (error) {
-          this.logger.warn('Qualified search failed, falling back to fulltext:', error);
-          return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
+          this.logger.warn('Qualified search failed, falling back to lexical search:', error);
+          return await this.dbService.lexicalSearchSymbols(query, repoId, searchOptions);
         }
 
       case 'auto':
       default:
-        // Intelligent auto mode: try semantic first, fallback to fulltext
+        // Intelligent auto mode: try semantic first, fallback to lexical with token-ranking
+        this.logger.info(`[VECTOR SEARCH] Auto mode: attempting vector search for query: "${query}"`);
         try {
           const vectorResults = await this.dbService.vectorSearchSymbols(query, repoId, {
             ...searchOptions,
-            similarityThreshold: 0.6,
+            similarityThreshold: 0.35,
           });
           if (vectorResults.length > 0) {
+            this.logger.info(`[VECTOR SEARCH] Auto mode: vector search returned ${vectorResults.length} results`);
             return vectorResults;
           }
-        } catch (error) {}
+          this.logger.info('[VECTOR SEARCH] Auto mode: vector search returned 0 results, falling back to lexical');
+        } catch (error) {
+          this.logger.warn('[VECTOR SEARCH] Auto mode: vector search failed, falling back to lexical:', error);
+        }
 
-        return await this.dbService.fulltextSearchSymbols(query, repoId, searchOptions);
+        return await this.dbService.lexicalSearchSymbols(query, repoId, searchOptions);
     }
   }
 

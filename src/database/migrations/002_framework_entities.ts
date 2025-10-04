@@ -412,12 +412,21 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Add vector extension support for symbols table
-  await knex.raw('ALTER TABLE symbols ADD COLUMN embedding vector(1536)');
+  await knex.raw('ALTER TABLE symbols ADD COLUMN name_embedding vector(768)');
+  await knex.raw('ALTER TABLE symbols ADD COLUMN description_embedding vector(768)');
+  await knex.raw('ALTER TABLE symbols ADD COLUMN embeddings_updated_at TIMESTAMP');
+  await knex.raw('ALTER TABLE symbols ADD COLUMN embedding_model VARCHAR(100)');
 
-  // Create vector index for semantic search
+  // Create vector indexes for semantic search
   await knex.raw(`
-    CREATE INDEX IF NOT EXISTS symbols_embedding_idx
-    ON symbols USING ivfflat (embedding vector_cosine_ops)
+    CREATE INDEX IF NOT EXISTS symbols_name_embedding_idx
+    ON symbols USING ivfflat (name_embedding vector_cosine_ops)
+    WITH (lists = 100)
+  `);
+
+  await knex.raw(`
+    CREATE INDEX IF NOT EXISTS symbols_description_embedding_idx
+    ON symbols USING ivfflat (description_embedding vector_cosine_ops)
     WITH (lists = 100)
   `);
 
@@ -444,8 +453,11 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('cross_stack_calls');
   await knex.schema.dropTableIfExists('routes');
 
-  // Remove vector column from symbols
-  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS embedding');
+  // Remove vector columns from symbols
+  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS name_embedding');
+  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS description_embedding');
+  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS embeddings_updated_at');
+  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS embedding_model');
 
   console.log('✅ Framework entities dropped');
 }

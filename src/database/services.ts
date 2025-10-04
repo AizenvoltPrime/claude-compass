@@ -708,24 +708,56 @@ export class DatabaseService {
     repoIds: number[],
     options: SymbolSearchOptions
   ): Promise<SymbolWithFile[]> {
-    const { limit = 100, symbolTypes = [], isExported, framework } = options;
+    const { limit = 30, symbolTypes = [], isExported, framework } = options;
+
+    // Tokenize multi-word queries and search for any token
+    const tokens = query.trim().split(/\s+/).filter(t => t.length > 0);
+    const fuzzyTokens = tokens.map(t => t.replace(/[%_]/g, '\\$&'));
+
+    // Build token match score - count how many query tokens match each result
+    const tokenMatchCases = fuzzyTokens
+      .map(
+        token =>
+          `CASE WHEN (symbols.name ILIKE '%${token}%' OR symbols.signature ILIKE '%${token}%' OR (symbols.description IS NOT NULL AND symbols.description ILIKE '%${token}%')) THEN 1 ELSE 0 END`
+      )
+      .join(' + ');
+
+    // Build exact match boost for first token (primary term)
+    const primaryToken = fuzzyTokens[0] || '';
+    const exactMatchBoost = `
+      CASE
+        WHEN symbols.name ILIKE '${primaryToken}' THEN 1000
+        WHEN symbols.name ILIKE '${primaryToken}%' THEN 100
+        WHEN symbols.name ILIKE '%${primaryToken}%' THEN 10
+        ELSE 0
+      END
+    `;
 
     let queryBuilder = this.db('symbols')
       .leftJoin('files', 'symbols.file_id', 'files.id')
-      .select('symbols.*', 'files.path as file_path', 'files.language as file_language');
+      .select(
+        'symbols.*',
+        'files.path as file_path',
+        'files.language as file_language',
+        this.db.raw(`(${tokenMatchCases}) as token_match_score`),
+        this.db.raw(`(${exactMatchBoost}) as exact_match_boost`)
+      );
 
-    // Basic lexical matching with multiple strategies
-    const fuzzyQuery = query.replace(/[%_]/g, '\\$&');
+    // WHERE clause: match at least one token
     queryBuilder = queryBuilder.where(function () {
-      this.where('symbols.name', 'ilike', `%${fuzzyQuery}%`)
-        .orWhere('symbols.signature', 'ilike', `%${fuzzyQuery}%`)
-        .orWhere(function () {
-          this.whereNotNull('symbols.description').andWhere(
-            'symbols.description',
-            'ilike',
-            `%${fuzzyQuery}%`
-          );
+      fuzzyTokens.forEach(token => {
+        this.orWhere(function () {
+          this.where('symbols.name', 'ilike', `%${token}%`)
+            .orWhere('symbols.signature', 'ilike', `%${token}%`)
+            .orWhere(function () {
+              this.whereNotNull('symbols.description').andWhere(
+                'symbols.description',
+                'ilike',
+                `%${token}%`
+              );
+            });
         });
+      });
     });
 
     // Apply filters
@@ -742,7 +774,6 @@ export class DatabaseService {
     }
 
     if (framework) {
-      // Map framework to appropriate file language/path patterns
       switch (framework.toLowerCase()) {
         case 'laravel':
           queryBuilder = queryBuilder.where(function () {
@@ -773,24 +804,14 @@ export class DatabaseService {
           });
           break;
         default:
-          // Fallback to the original behavior for unknown frameworks
           queryBuilder = queryBuilder.where('files.language', 'ilike', `%${framework}%`);
       }
     }
 
-    // Enhanced ordering with relevance
+    // Order by: token match count DESC, exact match boost DESC, name
     const results = await queryBuilder
-      .orderByRaw(
-        `
-        CASE
-          WHEN symbols.name ILIKE ? THEN 1
-          WHEN symbols.name ILIKE ? THEN 2
-          WHEN symbols.signature ILIKE ? THEN 3
-          ELSE 4
-        END
-      `,
-        [`${fuzzyQuery}`, `%${fuzzyQuery}%`, `%${fuzzyQuery}%`]
-      )
+      .orderBy('token_match_score', 'desc')
+      .orderBy('exact_match_boost', 'desc')
       .orderBy('symbols.name')
       .limit(limit);
 
@@ -921,33 +942,44 @@ export class DatabaseService {
     repoIds: number[],
     options: VectorSearchOptions = {}
   ): Promise<SymbolWithFile[]> {
+    logger.info(`[VECTOR SEARCH DB] Starting vector search for query: "${query}"`);
+    logger.info(`[VECTOR SEARCH DB] Repo IDs: ${JSON.stringify(repoIds)}`);
+
     // Fail fast if vector search isn't ready
-    if (!(await this.isVectorSearchReady())) {
+    const isReady = await this.isVectorSearchReady();
+    logger.info(`[VECTOR SEARCH DB] Vector search ready: ${isReady}`);
+    if (!isReady) {
       throw new Error(
         'Vector search unavailable: No embeddings found in database. Run embedding population first.'
       );
     }
 
-    if (!(await this.embeddingService.initialized)) {
+    const isInitialized = await this.embeddingService.initialized;
+    logger.info(`[VECTOR SEARCH DB] Embedding service initialized: ${isInitialized}`);
+    if (!isInitialized) {
+      logger.info('[VECTOR SEARCH DB] Initializing embedding service...');
       await this.embeddingService.initialize();
     }
 
     // Generate embedding for the query (with caching)
+    logger.info('[VECTOR SEARCH DB] Generating query embedding...');
     const queryEmbedding = await this.getCachedEmbedding(query);
 
-    if (!queryEmbedding || queryEmbedding.length !== 384) {
+    if (!queryEmbedding || queryEmbedding.length !== 768) {
+      logger.error(`[VECTOR SEARCH DB] Invalid query embedding: length=${queryEmbedding?.length}`);
       throw new Error('Failed to generate valid query embedding');
     }
+    logger.info('[VECTOR SEARCH DB] Query embedding generated successfully');
 
-    const { limit = 100, symbolTypes, isExported, similarityThreshold = 0.7 } = options;
+    const { limit = 100, symbolTypes, isExported, similarityThreshold = 0.5 } = options;
+    logger.info(`[VECTOR SEARCH DB] Search parameters: limit=${limit}, threshold=${similarityThreshold}`);
 
     // Build the base query
     const baseQuery = this.db('symbols as s')
       .select([
         's.*',
         'f.path as file_path',
-        'f.relative_path as file_relative_path',
-        'f.type as file_type',
+        'f.language as file_language',
         'r.name as repo_name',
         // Calculate cosine similarity scores
         this.db.raw('(1 - (s.name_embedding <=> ?)) as name_similarity', [
@@ -988,8 +1020,15 @@ export class DatabaseService {
       baseQuery.where('s.is_exported', true);
     }
 
+    logger.info('[VECTOR SEARCH DB] Executing vector search query...');
     const results = await baseQuery;
 
+    logger.info(`[VECTOR SEARCH DB] Query returned ${results.length} results`);
+    if (results.length > 0) {
+      const topScore = (results[0] as any)?.vector_score || 0;
+      const bottomScore = (results[results.length - 1] as any)?.vector_score || 0;
+      logger.info(`[VECTOR SEARCH DB] Score range: ${topScore.toFixed(3)} to ${bottomScore.toFixed(3)}`);
+    }
 
     return results.map((result: any) => ({
       ...result,
@@ -3124,6 +3163,22 @@ export class DatabaseService {
       logger.error('Batch embedding generation failed:', error);
       throw error;
     }
+  }
+
+  async updateSymbolEmbeddings(
+    symbolId: number,
+    nameEmbedding: number[],
+    descriptionEmbedding: number[],
+    modelName: string
+  ): Promise<void> {
+    await this.db('symbols')
+      .where({ id: symbolId })
+      .update({
+        name_embedding: JSON.stringify(nameEmbedding),
+        description_embedding: JSON.stringify(descriptionEmbedding),
+        embeddings_updated_at: new Date(),
+        embedding_model: modelName,
+      });
   }
 
   /**

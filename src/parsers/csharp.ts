@@ -227,10 +227,36 @@ export class CSharpParser extends ChunkedParser {
     const validatedOptions = this.validateOptions(options);
     const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
-    // Check file size and determine parsing strategy
+    try {
+      const tree = this.parseContent(content, { ...chunkedOptions, bypassSizeLimit: true });
+
+      if (tree?.rootNode) {
+        const result = await this.parseFileDirectly(filePath, content, {
+          ...chunkedOptions,
+          bypassSizeLimit: true,
+        });
+
+        if (result.symbols.length > 0 || result.errors.length === 0) {
+          this.logger.debug('Successfully parsed file directly', {
+            filePath,
+            size: content.length,
+            symbols: result.symbols.length,
+          });
+          return result;
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Direct parsing failed, falling back to chunked parsing', {
+        filePath,
+        size: content.length,
+        error: (error as Error).message,
+      });
+    }
+
     const shouldChunk = this.shouldUseChunking(content, chunkedOptions);
 
     if (shouldChunk) {
+      this.logger.info('Using chunked parsing', { filePath, size: content.length });
       const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
       return this.convertMergedResult(chunkedResult);
     }

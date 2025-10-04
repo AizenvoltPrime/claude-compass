@@ -1,12 +1,13 @@
 import { pipeline, Pipeline } from '@xenova/transformers';
 
 /**
- * Service for generating vector embeddings using sentence-transformers
- * Uses all-MiniLM-L6-v2 model for 384-dimensional embeddings
+ * Service for generating vector embeddings using Nomic AI
+ * Uses nomic-embed-text-v1.5 model for 768-dimensional embeddings
+ * Designed for retrieval with 8192 token context window and formal Matryoshka Representation Learning
  */
 export class EmbeddingService {
   private model: any | null = null;
-  private readonly modelName = 'sentence-transformers/all-MiniLM-L6-v2';
+  private readonly modelName = 'nomic-ai/nomic-embed-text-v1.5';
   private initializationPromise: Promise<void> | null = null;
   private isInitialized = false;
 
@@ -43,7 +44,7 @@ export class EmbeddingService {
   /**
    * Generate embedding for a single text string
    * @param text Input text to embed
-   * @returns 384-dimensional embedding vector
+   * @returns 768-dimensional embedding vector
    */
   async generateEmbedding(text: string): Promise<number[]> {
     if (!this.isInitialized) {
@@ -58,7 +59,7 @@ export class EmbeddingService {
       const sanitizedText = this.sanitizeTextForEmbedding(text);
       if (!sanitizedText.trim()) {
         // Return zero vector for empty text
-        return new Array(384).fill(0);
+        return new Array(768).fill(0);
       }
 
       const embeddings = await this.model(sanitizedText, {
@@ -69,8 +70,8 @@ export class EmbeddingService {
       // Extract the embedding data and ensure it's a proper array
       const embeddingArray = Array.from(embeddings.data as Float32Array);
 
-      if (embeddingArray.length !== 384) {
-        throw new Error(`Expected 384-dimensional embedding, got ${embeddingArray.length}`);
+      if (embeddingArray.length !== 768) {
+        throw new Error(`Expected 768-dimensional embedding, got ${embeddingArray.length}`);
       }
 
       return embeddingArray;
@@ -83,7 +84,7 @@ export class EmbeddingService {
   /**
    * Generate embeddings for multiple texts in batch
    * @param texts Array of input texts
-   * @returns Array of 384-dimensional embedding vectors
+   * @returns Array of 768-dimensional embedding vectors
    */
   async generateBatchEmbeddings(texts: string[]): Promise<number[][]> {
     if (!this.isInitialized) {
@@ -110,7 +111,7 @@ export class EmbeddingService {
         } catch (error) {
           console.warn(`Failed to generate embedding for text: "${text.substring(0, 50)}..."`, error);
           // Use zero vector as fallback
-          results.push(new Array(384).fill(0));
+          results.push(new Array(768).fill(0));
         }
       }
 
@@ -138,8 +139,8 @@ export class EmbeddingService {
       .replace(/\s+/g, ' ')
       // Trim whitespace
       .trim()
-      // Limit length to prevent model overload (512 tokens is roughly 2048 characters)
-      .substring(0, 512);
+      // Limit length to prevent model overload (8192 tokens is roughly 32768 characters)
+      .substring(0, 8192);
   }
 
   /**
@@ -155,7 +156,7 @@ export class EmbeddingService {
   get modelInfo(): { name: string; dimensions: number } {
     return {
       name: this.modelName,
-      dimensions: 384
+      dimensions: 768
     };
   }
 
