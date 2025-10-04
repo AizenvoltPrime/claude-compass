@@ -103,7 +103,8 @@ export async function up(knex: Knex): Promise<void> {
       .references('id')
       .inTable('symbols')
       .onDelete('CASCADE');
-    table.integer('to_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
+    table.integer('to_symbol_id'); // Will add foreign key with SET NULL below
+    table.text('to_qualified_name'); // Stable reference for incremental analysis
     table.string('dependency_type').notNullable();
     table.integer('line_number');
     table.text('parameter_context');
@@ -121,11 +122,21 @@ export async function up(knex: Knex): Promise<void> {
 
     table.index(['from_symbol_id', 'dependency_type'], 'deps_from_symbol_type_idx');
     table.index(['to_symbol_id', 'dependency_type'], 'deps_to_symbol_type_idx');
+    table.index(['to_qualified_name'], 'deps_to_qualified_name_idx');
     table.index(['dependency_type', 'from_symbol_id', 'to_symbol_id'], 'deps_type_symbols_idx');
     table.index(['from_symbol_id', 'line_number'], 'deps_symbol_line_idx');
     table.index(['dependency_type']);
     table.index(['resolved_class'], 'deps_resolved_class_idx');
   });
+
+  // Add foreign key with SET NULL for stable references during incremental analysis
+  await knex.raw(`
+    ALTER TABLE dependencies
+    ADD CONSTRAINT dependencies_to_symbol_id_foreign
+    FOREIGN KEY (to_symbol_id)
+    REFERENCES symbols(id)
+    ON DELETE SET NULL
+  `);
 
   await knex.schema.createTable('file_dependencies', table => {
     table.increments('id').primary();
