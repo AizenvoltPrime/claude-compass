@@ -3513,6 +3513,7 @@ export class DatabaseService {
         file_path: string;
         line_number: number;
       }>;
+      parameter_types?: string[];
     }>;
   }> {
 
@@ -3548,6 +3549,9 @@ export class DatabaseService {
           call_count: 0,
           line_numbers: [],
           callers: [],
+          parameter_types: call.parameter_types
+            ? this.safeParseParameterTypes(call.parameter_types)
+            : undefined,
         });
       }
 

@@ -996,6 +996,12 @@ export class McpTools {
                     type: caller.dependency_type,
                     line_number: caller.line_number,
                     file_path: fromFile,
+                    qualified_context: caller.qualified_context,
+                    parameter_types: caller.parameter_types,
+                    call_instance_id: caller.call_instance_id,
+                    calling_object: caller.calling_object,
+                    resolved_class: caller.resolved_class,
+                    parameter_context: caller.parameter_context,
                   };
                 }),
                 total_count: directCallers.length,
@@ -1069,7 +1075,7 @@ export class McpTools {
       }
 
       let dependencies = (await Promise.race([
-        this.dbService.getDependenciesFrom(validatedArgs.symbol_id),
+        this.dbService.getDependenciesFromWithContext(validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
 
@@ -1182,6 +1188,12 @@ export class McpTools {
                     type: dep.dependency_type,
                     line_number: dep.line_number,
                     file_path: fromFile,
+                    qualified_context: dep.qualified_context,
+                    parameter_types: dep.parameter_types,
+                    call_instance_id: dep.call_instance_id,
+                    calling_object: dep.calling_object,
+                    resolved_class: dep.resolved_class,
+                    parameter_context: dep.parameter_context,
                   };
                 }),
                 total_count: dependencies.length,
@@ -1252,8 +1264,8 @@ export class McpTools {
       const frameworksAffected = new Set<string>();
 
       // Direct impact analysis
-      const directDependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
-      const directCallers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
+      const directDependencies = await this.dbService.getDependenciesFromWithContext(validatedArgs.symbol_id);
+      const directCallers = await this.dbService.getDependenciesToWithContext(validatedArgs.symbol_id);
 
       // Process direct dependencies and callers
       for (const dep of directDependencies) {
@@ -2413,6 +2425,7 @@ export class McpTools {
             line: caller.line_number,
           })),
           call_instance_ids: variation.call_instance_ids,
+          parameter_types: variation.parameter_types,
         })),
         insights: this.generateParameterInsights(analysis.parameterVariations),
       };
@@ -2666,6 +2679,12 @@ export class McpTools {
           line_number: originalDep.line_number || 0,
           file_path: originalDep.from_symbol?.file?.path || '',
           relationship_context: item.relationship_context,
+          qualified_context: originalDep.qualified_context,
+          parameter_types: originalDep.parameter_types,
+          call_instance_id: originalDep.call_instance_id,
+          calling_object: originalDep.calling_object,
+          resolved_class: originalDep.resolved_class,
+          parameter_context: originalDep.parameter_context,
         }));
       }
 
@@ -2677,6 +2696,12 @@ export class McpTools {
         line_number: 0,
         file_path: item.file_path,
         relationship_context: item.relationship_context,
+        qualified_context: undefined,
+        parameter_types: undefined,
+        call_instance_id: undefined,
+        calling_object: undefined,
+        resolved_class: undefined,
+        parameter_context: undefined,
       }];
     });
   }

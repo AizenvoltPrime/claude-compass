@@ -9,58 +9,92 @@ describe('C# Field Resolution', () => {
     parser = new CSharpParser();
   });
 
-  describe('extractFieldDeclarations', () => {
-    test('should extract field declarations correctly', () => {
+  describe('field type resolution', () => {
+    test('should extract and resolve field types through dependencies', async () => {
       const content = `
         public class CardManager {
           private IHandManager _handManager;
           private GameState gameState;
           public string PlayerName;
+
+          public void TestMethod() {
+            _handManager?.SetPositions();
+            gameState?.Reset();
+          }
         }
       `;
 
-      const tree = (parser as any).parser.parse(content);
-      // Access the private method using type assertion
-      const fieldMap = (parser as any).extractFieldDeclarations(tree.rootNode);
+      const result = await parser.parseFile('test.cs', content);
 
-      expect(fieldMap.size).toBe(3);
-      expect(fieldMap.get('_handManager')).toBe('HandManager'); // Interface converted to class
-      expect(fieldMap.get('gameState')).toBe('GameState');
-      expect(fieldMap.get('PlayerName')).toBe('string');
+      const handManagerDep = result.dependencies.find(d =>
+        d.to_symbol.includes('HandManager.SetPositions')
+      );
+      const gameStateDep = result.dependencies.find(d =>
+        d.to_symbol.includes('GameState.Reset')
+      );
+
+      expect(handManagerDep).toBeDefined();
+      expect(handManagerDep?.resolved_class).toBe('HandManager');
+      expect(gameStateDep).toBeDefined();
+      expect(gameStateDep?.resolved_class).toBe('GameState');
     });
 
-    test('should handle interface to class mapping', () => {
+    test('should handle interface to class mapping in resolved types', async () => {
       const content = `
         public class ServiceManager {
           private IUserService _userService;
           private ILogService _logService;
           private DataManager dataManager;
+
+          public void Initialize() {
+            _userService?.LoadUsers();
+            _logService?.Log();
+            dataManager?.Initialize();
+          }
         }
       `;
 
-      const tree = (parser as any).parser.parse(content);
-      const fieldMap = (parser as any).extractFieldDeclarations(tree.rootNode);
+      const result = await parser.parseFile('test.cs', content);
 
-      expect(fieldMap.size).toBe(3);
-      expect(fieldMap.get('_userService')).toBe('UserService');
-      expect(fieldMap.get('_logService')).toBe('LogService');
-      expect(fieldMap.get('dataManager')).toBe('DataManager');
+      const userServiceDep = result.dependencies.find(d =>
+        d.to_symbol.includes('UserService.LoadUsers')
+      );
+      const logServiceDep = result.dependencies.find(d =>
+        d.to_symbol.includes('LogService.Log')
+      );
+      const dataManagerDep = result.dependencies.find(d =>
+        d.to_symbol.includes('DataManager.Initialize')
+      );
+
+      expect(userServiceDep?.resolved_class).toBe('UserService');
+      expect(logServiceDep?.resolved_class).toBe('LogService');
+      expect(dataManagerDep?.resolved_class).toBe('DataManager');
     });
 
-    test('should handle generic types', () => {
+    test('should handle generic field types', async () => {
       const content = `
         public class GenericManager {
           private List<string> _items;
           private Dictionary<int, User> _userMap;
+
+          public void Process() {
+            _items?.Add("test");
+            _userMap?.Clear();
+          }
         }
       `;
 
-      const tree = (parser as any).parser.parse(content);
-      const fieldMap = (parser as any).extractFieldDeclarations(tree.rootNode);
+      const result = await parser.parseFile('test.cs', content);
 
-      expect(fieldMap.size).toBe(2);
-      expect(fieldMap.get('_items')).toBe('List<string>');
-      expect(fieldMap.get('_userMap')).toBe('Dictionary<int, User>');
+      const itemsDep = result.dependencies.find(d =>
+        d.to_symbol.includes('List') && d.to_symbol.includes('Add')
+      );
+      const userMapDep = result.dependencies.find(d =>
+        d.to_symbol.includes('Dictionary') && d.to_symbol.includes('Clear')
+      );
+
+      expect(itemsDep).toBeDefined();
+      expect(userMapDep).toBeDefined();
     });
   });
 
@@ -78,15 +112,16 @@ describe('C# Field Resolution', () => {
 
       const result = await parser.parseFile('test.cs', content);
 
-      // Look for the field-based dependency
       const fieldBasedDep = result.dependencies.find(d =>
-        d.to_symbol.includes('HandManager.SetHandPositions') &&
-        d.qualified_context === 'field_call__handManager'
+        d.to_symbol.includes('HandManager.SetHandPositions')
       );
 
       expect(fieldBasedDep).toBeDefined();
-      expect(fieldBasedDep?.from_symbol).toBe('CardManager.SetHandPositions'); // From qualified method name
+      expect(fieldBasedDep?.from_symbol).toBe('CardManager.SetHandPositions');
       expect(fieldBasedDep?.dependency_type).toBe(DependencyType.CALLS);
+      expect(fieldBasedDep?.calling_object).toBe('_handManager');
+      expect(fieldBasedDep?.resolved_class).toBe('HandManager');
+      expect(fieldBasedDep?.qualified_context).toBe('HandManager._handManager->SetHandPositions');
     });
 
     test('should handle chained conditional access calls', async () => {
@@ -154,7 +189,6 @@ describe('C# Field Resolution', () => {
 
       const result = await parser.parseFile('test.cs', content);
 
-      // Check for field-based dependencies
       const handManagerDep = result.dependencies.find(d =>
         d.to_symbol.includes('HandManager.SetHandPositions')
       );
@@ -163,13 +197,17 @@ describe('C# Field Resolution', () => {
       );
 
       expect(handManagerDep).toBeDefined();
-      expect(handManagerDep?.qualified_context).toBe('field_call__handManager');
+      expect(handManagerDep?.qualified_context).toBe('HandManager._handManager->SetHandPositions');
+      expect(handManagerDep?.calling_object).toBe('_handManager');
+      expect(handManagerDep?.resolved_class).toBe('HandManager');
+
       expect(gameStateDep).toBeDefined();
-      expect(gameStateDep?.qualified_context).toBe('field_call_gameState');
+      expect(gameStateDep?.qualified_context).toBe('GameState.gameState->Reset');
+      expect(gameStateDep?.calling_object).toBe('gameState');
+      expect(gameStateDep?.resolved_class).toBe('GameState');
     });
 
     test('should handle the specific reported CardManager -> HandManager issue', async () => {
-      // This is the exact pattern from the issue report
       const content = `
         public class CardManager {
           private IHandManager _handManager;
@@ -182,16 +220,19 @@ describe('C# Field Resolution', () => {
 
       const result = await parser.parseFile('CardManager.cs', content);
 
-      // Should find the field-based dependency
       const targetDep = result.dependencies.find(d =>
         d.from_symbol === 'CardManager.SetHandPositions' &&
-        d.to_symbol.includes('HandManager.SetHandPositions') &&
-        d.qualified_context === 'field_call__handManager'
+        d.to_symbol.includes('HandManager.SetHandPositions')
       );
 
       expect(targetDep).toBeDefined();
       expect(targetDep?.dependency_type).toBe(DependencyType.CALLS);
       expect(targetDep?.line_number).toBeGreaterThan(0);
+      expect(targetDep?.calling_object).toBe('_handManager');
+      expect(targetDep?.resolved_class).toBe('HandManager');
+      expect(targetDep?.qualified_context).toBe('HandManager._handManager->SetHandPositions');
+      expect(targetDep?.parameter_context).toBe('playerHandPosition, opponentHandPosition');
+      expect(targetDep?.parameter_types).toEqual(['Vector3', 'Vector3']);
     });
   });
 });

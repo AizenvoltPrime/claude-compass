@@ -70,6 +70,9 @@ interface ASTContext {
   usingDirectives: Set<string>;
   symbolCache: Map<string, ParsedSymbol>;
   nodeCache: Map<string, Parser.SyntaxNode[]>;
+  partialClassFields: Map<string, Map<string, TypeInfo>>;
+  isPartialClass: boolean;
+  currentMethodParameters: Map<string, string>;
 }
 
 /**
@@ -111,6 +114,7 @@ interface MethodCall {
   callingObject: string;
   resolvedClass?: string;
   parameters: string[];
+  parameterTypes: string[];
   fullyQualifiedName: string;
 }
 
@@ -209,6 +213,7 @@ export class CSharpParser extends ChunkedParser {
     classes?: string[];
     qualifiedClassName?: string;
   };
+  private callInstanceCounters: Map<string, number> = new Map();
 
   constructor() {
     const parser = new Parser();
@@ -404,6 +409,8 @@ export class CSharpParser extends ChunkedParser {
     context: ASTContext,
     godotContext: GodotContext
   ): ParseResult {
+    this.callInstanceCounters.clear();
+
     const symbols: ParsedSymbol[] = [];
     const dependencies: ParsedDependency[] = [];
     const imports: ParsedImport[] = [];
@@ -412,6 +419,10 @@ export class CSharpParser extends ChunkedParser {
 
     // Single traversal function
     const traverse = (node: Parser.SyntaxNode, depth: number = 0) => {
+      if (node.type === 'ERROR') {
+        this.captureParseError(node, content, errors);
+      }
+
       // Cache node by type for efficient lookup
       if (!context.nodeCache.has(node.type)) {
         context.nodeCache.set(node.type, []);
@@ -444,12 +455,34 @@ export class CSharpParser extends ChunkedParser {
           break;
 
         // Members
-        case 'method_declaration':
+        case 'method_declaration': {
+          const methodParams = this.extractParameters(node, content);
+          context.currentMethodParameters.clear();
+          for (const param of methodParams) {
+            context.currentMethodParameters.set(param.name, param.type);
+          }
           this.processMethod(node, content, context, godotContext, symbols);
-          break;
-        case 'constructor_declaration':
+          for (let i = 0; i < node.namedChildCount; i++) {
+            const child = node.namedChild(i);
+            if (child) traverse(child, depth + 1);
+          }
+          context.currentMethodParameters.clear();
+          return;
+        }
+        case 'constructor_declaration': {
+          const ctorParams = this.extractParameters(node, content);
+          context.currentMethodParameters.clear();
+          for (const param of ctorParams) {
+            context.currentMethodParameters.set(param.name, param.type);
+          }
           this.processConstructor(node, content, context, symbols);
-          break;
+          for (let i = 0; i < node.namedChildCount; i++) {
+            const child = node.namedChild(i);
+            if (child) traverse(child, depth + 1);
+          }
+          context.currentMethodParameters.clear();
+          return;
+        }
         case 'property_declaration':
           this.processProperty(node, content, context, godotContext, symbols);
           break;
@@ -544,6 +577,9 @@ export class CSharpParser extends ChunkedParser {
       usingDirectives: new Set(),
       symbolCache: new Map(),
       nodeCache: new Map(),
+      partialClassFields: new Map(),
+      isPartialClass: false,
+      currentMethodParameters: new Map(),
     };
   }
 
@@ -605,9 +641,11 @@ export class CSharpParser extends ChunkedParser {
     const visibility = this.getVisibility(modifiers);
     const baseTypes = this.extractBaseTypes(node, content);
     const isGodotClass = this.isGodotClass(baseTypes);
+    const isPartial = modifiers.includes('partial');
 
     context.currentClass = name;
     context.classStack.push(name);
+    context.isPartialClass = isPartial;
 
     // Add to type map for resolution
     const qualifiedName = this.buildQualifiedName(context, name);
@@ -722,13 +760,24 @@ export class CSharpParser extends ChunkedParser {
 
       const fieldName = this.getNodeText(nameNode, content);
 
-      // Add to type map for resolution
-      context.typeMap.set(fieldName, {
+      const typeInfo: TypeInfo = {
         type: this.resolveType(fieldType),
         fullQualifiedName: fieldType,
         source: 'field',
         namespace: context.currentNamespace,
-      });
+      };
+
+      // Add to type map for resolution
+      context.typeMap.set(fieldName, typeInfo);
+
+      // If this is a partial class, also store in partialClassFields
+      if (context.isPartialClass && context.currentClass) {
+        const qualifiedClassName = this.buildQualifiedName(context, context.currentClass);
+        if (!context.partialClassFields.has(qualifiedClassName)) {
+          context.partialClassFields.set(qualifiedClassName, new Map());
+        }
+        context.partialClassFields.get(qualifiedClassName)!.set(fieldName, typeInfo);
+      }
 
       // Track Godot exports
       if (hasExportAttribute) {
@@ -792,6 +841,12 @@ export class CSharpParser extends ChunkedParser {
       dependencies
     );
 
+    const callInstanceId = this.generateCallInstanceId(
+      methodCall.methodName,
+      node.startPosition.row + 1
+    );
+    const qualifiedContext = this.buildQualifiedContext(methodCall);
+
     // Create dependency entry
     dependencies.push({
       from_symbol: callerName,
@@ -802,6 +857,10 @@ export class CSharpParser extends ChunkedParser {
       resolved_class: methodCall.resolvedClass,
       parameter_context:
         methodCall.parameters.length > 0 ? methodCall.parameters.join(', ') : undefined,
+      parameter_types:
+        methodCall.parameterTypes.length > 0 ? methodCall.parameterTypes : undefined,
+      call_instance_id: callInstanceId,
+      qualified_context: qualifiedContext,
     });
   }
 
@@ -838,7 +897,11 @@ export class CSharpParser extends ChunkedParser {
       return this.extractConditionalCall(functionNode, content, context);
     }
 
-    const parameters = this.extractCallParameters(node, content);
+    const { values: parameters, types: parameterTypes } = this.extractCallParameters(
+      node,
+      content,
+      context
+    );
     const fullyQualifiedName = resolvedClass ? `${resolvedClass}.${methodName}` : methodName;
 
     return {
@@ -846,6 +909,7 @@ export class CSharpParser extends ChunkedParser {
       callingObject,
       resolvedClass,
       parameters,
+      parameterTypes,
       fullyQualifiedName,
     };
   }
@@ -884,10 +948,12 @@ export class CSharpParser extends ChunkedParser {
 
     const resolvedClass = this.resolveObjectType(callingObject, context);
 
-    // For conditional access in invocation, get parameters from parent invocation
-    const parameters: string[] = [];
+    let parameters: string[] = [];
+    let parameterTypes: string[] = [];
     if (node.parent?.type === 'invocation_expression') {
-      parameters.push(...this.extractCallParameters(node.parent, content));
+      const extracted = this.extractCallParameters(node.parent, content, context);
+      parameters = extracted.values;
+      parameterTypes = extracted.types;
     }
 
     const fullyQualifiedName = resolvedClass ? `${resolvedClass}.${methodName}` : methodName;
@@ -897,6 +963,7 @@ export class CSharpParser extends ChunkedParser {
       callingObject,
       resolvedClass,
       parameters,
+      parameterTypes,
       fullyQualifiedName,
     };
   }
@@ -907,13 +974,17 @@ export class CSharpParser extends ChunkedParser {
   private extractConstructorCall(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext
+    context: ASTContext
   ): MethodCall | null {
     const typeNode = node.childForFieldName('type');
     if (!typeNode) return null;
 
     const typeName = this.getNodeText(typeNode, content);
-    const parameters = this.extractCallParameters(node, content);
+    const { values: parameters, types: parameterTypes } = this.extractCallParameters(
+      node,
+      content,
+      context
+    );
     const resolvedClass = this.resolveType(typeName);
 
     return {
@@ -921,6 +992,7 @@ export class CSharpParser extends ChunkedParser {
       callingObject: '',
       resolvedClass,
       parameters,
+      parameterTypes,
       fullyQualifiedName: `${resolvedClass}.constructor`,
     };
   }
@@ -952,6 +1024,44 @@ export class CSharpParser extends ChunkedParser {
     // Try parameter resolution (TODO: Add parameter type tracking)
 
     return typeInfo?.type;
+  }
+
+  private generateCallInstanceId(methodName: string, lineNumber: number): string {
+    const key = `${methodName}_${lineNumber}`;
+    const counter = this.callInstanceCounters.get(key) || 0;
+    this.callInstanceCounters.set(key, counter + 1);
+    return `${methodName}_${lineNumber}_${counter + 1}`;
+  }
+
+  private buildQualifiedContext(methodCall: MethodCall): string | undefined {
+    if (!methodCall.resolvedClass) return undefined;
+    if (!methodCall.callingObject) {
+      return `${methodCall.resolvedClass}.${methodCall.methodName}`;
+    }
+    return `${methodCall.resolvedClass}.${methodCall.callingObject}->${methodCall.methodName}`;
+  }
+
+  private captureParseError(
+    node: Parser.SyntaxNode,
+    content: string,
+    errors: ParseError[]
+  ): void {
+    const errorType = node.type === 'ERROR' ? 'Syntax error' : 'Parse error';
+    const context = this.getErrorContext(node, content);
+
+    errors.push({
+      message: `${errorType} detected: ${context}`,
+      line: node.startPosition.row + 1,
+      column: node.startPosition.column,
+      severity: 'error',
+    });
+  }
+
+  private getErrorContext(node: Parser.SyntaxNode, content: string): string {
+    const lines = content.split('\n');
+    const errorLine = node.startPosition.row;
+    const line = lines[errorLine] || '';
+    return line.substring(0, 100);
   }
 
   /**
@@ -1242,7 +1352,7 @@ export class CSharpParser extends ChunkedParser {
   private processConstructor(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext,
+    context: ASTContext,
     symbols: ParsedSymbol[]
   ): void {
     const nameNode = node.childForFieldName('name');
@@ -1554,8 +1664,13 @@ export class CSharpParser extends ChunkedParser {
     return parameters;
   }
 
-  private extractCallParameters(node: Parser.SyntaxNode, content: string): string[] {
-    const parameters: string[] = [];
+  private extractCallParameters(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: ASTContext
+  ): { values: string[]; types: string[] } {
+    const values: string[] = [];
+    const types: string[] = [];
     const argumentList = this.findNodeOfType(node, 'argument_list');
 
     if (argumentList) {
@@ -1563,24 +1678,52 @@ export class CSharpParser extends ChunkedParser {
         const child = argumentList.child(i);
         if (child?.type === 'argument') {
           const text = this.getNodeText(child, content).trim();
-          if (text) parameters.push(text);
+          if (text) {
+            values.push(text);
+            types.push(this.inferParameterType(text, context));
+          }
         }
       }
     }
 
-    return parameters;
+    return { values, types };
+  }
+
+  private inferParameterType(paramText: string, context: ASTContext): string {
+    const cleanParam = paramText
+      .replace(/^(ref|out|in)\s+/, '')
+      .replace(/^.*:\s*/, '')
+      .trim();
+
+    if (cleanParam === 'null') return 'null';
+    if (cleanParam === 'true' || cleanParam === 'false') return 'bool';
+    if (/^".*"$/.test(cleanParam) || /^'.*'$/.test(cleanParam)) return 'string';
+    if (/^\d+\.\d+[fFdDmM]?$/.test(cleanParam)) return 'float';
+    if (/^\d+[uUlL]*$/.test(cleanParam)) return 'int';
+
+    const methodParamType = context.currentMethodParameters.get(cleanParam);
+    if (methodParamType) return methodParamType;
+
+    const typeInfo = context.typeMap.get(cleanParam);
+    if (typeInfo) return typeInfo.type;
+
+    const dotIndex = cleanParam.indexOf('.');
+    if (dotIndex > 0) {
+      const objectName = cleanParam.substring(0, dotIndex);
+      const methodParamTypeFromObject = context.currentMethodParameters.get(objectName);
+      if (methodParamTypeFromObject) return methodParamTypeFromObject;
+
+      const objectType = context.typeMap.get(objectName);
+      if (objectType) return objectType.type;
+    }
+
+    return 'unknown';
   }
 
   private resolveType(typeString: string): string {
-    // Remove interface prefix
     if (PATTERNS.interfacePrefix.test(typeString)) {
-      return typeString.substring(1);
-    }
-
-    // Extract base type from generics
-    const genericMatch = typeString.match(PATTERNS.genericType);
-    if (genericMatch) {
-      return genericMatch[1];
+      const withoutPrefix = typeString.substring(1);
+      return withoutPrefix;
     }
 
     return typeString;
