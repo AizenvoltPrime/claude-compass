@@ -9,16 +9,34 @@ process.env.NODE_ENV = 'test';
 // Mock @xenova/transformers to avoid ES module issues in Jest
 jest.mock('@xenova/transformers', () => ({
   pipeline: jest.fn().mockImplementation((task: string, model: string) => {
-    // Return a mock pipeline function that acts as a callable model
     const mockModel = jest.fn().mockImplementation((text: string, options?: any) => {
-      // Return a mock embedding array of 384 dimensions
       return Promise.resolve({
-        data: new Float32Array(384).fill(0.1) // Use small non-zero values for testing
+        data: new Float32Array(384).fill(0.1)
       });
     });
     return Promise.resolve(mockModel);
-  })
+  }),
+  AutoTokenizer: {
+    from_pretrained: jest.fn().mockImplementation((modelName: string, options?: any) => {
+      return Promise.resolve({
+        encode: jest.fn().mockReturnValue([1, 2, 3]),
+        decode: jest.fn().mockReturnValue('test'),
+      });
+    })
+  },
+  env: {
+    cacheDir: '',
+    allowLocalModels: true,
+    allowRemoteModels: true,
+  }
 }));
+
+// Mock p-limit to avoid ES module issues in Jest
+jest.mock('p-limit', () => {
+  return jest.fn().mockImplementation((concurrency: number) => {
+    return (fn: () => Promise<any>) => fn();
+  });
+});
 
 // Increase test timeout for database operations
 jest.setTimeout(30000);

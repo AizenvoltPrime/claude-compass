@@ -47,7 +47,7 @@ ParserFactory.registerParser('csharp', () => new CSharpParser());
 import Parser from 'tree-sitter';
 import JavaScript from 'tree-sitter-javascript';
 import { php as PHP } from 'tree-sitter-php';
-import * as CSharp from 'tree-sitter-c-sharp';
+const CSharp: Parser.Language = require('tree-sitter-c-sharp');
 
 ParserFactory.registerParser('vue', () => {
   const parser = new Parser();
@@ -90,7 +90,7 @@ ParserFactory.registerParser('laravel', () => {
 });
 ParserFactory.registerParser('godot', () => {
   const parser = new Parser();
-  parser.setLanguage(CSharp as any);
+  parser.setLanguage(CSharp);
   return new GodotParser(parser);
 });
 

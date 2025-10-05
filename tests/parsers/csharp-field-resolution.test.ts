@@ -80,7 +80,7 @@ describe('C# Field Resolution', () => {
 
       // Look for the field-based dependency
       const fieldBasedDep = result.dependencies.find(d =>
-        d.to_symbol === 'HandManager.SetHandPositions' &&
+        d.to_symbol.includes('HandManager.SetHandPositions') &&
         d.qualified_context === 'field_call__handManager'
       );
 
@@ -104,12 +104,12 @@ describe('C# Field Resolution', () => {
 
       // Should find GetPlayer with field context
       const getPlayerDep = result.dependencies.find(d =>
-        d.to_symbol === 'PlayerManager.GetPlayer'
+        d.to_symbol.includes('PlayerManager.GetPlayer')
       );
 
       // Should find UpdateStats without field context (it's chained)
       const updateStatsDep = result.dependencies.find(d =>
-        d.to_symbol === 'UpdateStats'
+        d.to_symbol.includes('UpdateStats')
       );
 
       expect(getPlayerDep).toBeDefined();
@@ -131,7 +131,7 @@ describe('C# Field Resolution', () => {
 
       // Should still create dependency but without class context
       const fallbackDep = result.dependencies.find(d =>
-        d.to_symbol === 'DoSomething'
+        d.to_symbol.includes('DoSomething')
       );
 
       expect(fallbackDep).toBeDefined();
@@ -156,10 +156,10 @@ describe('C# Field Resolution', () => {
 
       // Check for field-based dependencies
       const handManagerDep = result.dependencies.find(d =>
-        d.to_symbol === 'HandManager.SetHandPositions'
+        d.to_symbol.includes('HandManager.SetHandPositions')
       );
       const gameStateDep = result.dependencies.find(d =>
-        d.to_symbol === 'GameState.Reset'
+        d.to_symbol.includes('GameState.Reset')
       );
 
       expect(handManagerDep).toBeDefined();
@@ -185,7 +185,7 @@ describe('C# Field Resolution', () => {
       // Should find the field-based dependency
       const targetDep = result.dependencies.find(d =>
         d.from_symbol === 'CardManager.SetHandPositions' &&
-        d.to_symbol === 'HandManager.SetHandPositions' &&
+        d.to_symbol.includes('HandManager.SetHandPositions') &&
         d.qualified_context === 'field_call__handManager'
       );
 

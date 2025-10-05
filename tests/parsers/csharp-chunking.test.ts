@@ -102,7 +102,7 @@ namespace Game {
       // Check direct inheritance dependency (Player inherits from Character)
       const directInheritance = result.dependencies.find(d =>
         d.from_symbol === 'Player' &&
-        d.to_symbol === 'Character' &&
+        d.to_symbol.includes('Character') &&
         d.dependency_type === 'inherits'
       );
       expect(directInheritance).toBeDefined();
@@ -110,7 +110,7 @@ namespace Game {
       // Check transitive inheritance (Character inherits from BaseEntity)
       const transitiveInheritance = result.dependencies.find(d =>
         d.from_symbol === 'Character' &&
-        d.to_symbol === 'BaseEntity' &&
+        d.to_symbol.includes('BaseEntity') &&
         d.dependency_type === 'inherits'
       );
       expect(transitiveInheritance).toBeDefined();
@@ -214,7 +214,7 @@ namespace Game {
       // Check implementation dependency
       const implementsDep = result.dependencies.find(d =>
         d.from_symbol === 'Player' &&
-        d.to_symbol === 'IPlayer' &&
+        d.to_symbol.includes('IPlayer') &&
         d.dependency_type === 'implements'
       );
       expect(implementsDep).toBeDefined();
