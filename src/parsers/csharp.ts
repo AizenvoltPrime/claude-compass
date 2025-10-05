@@ -1,5 +1,5 @@
 import Parser from 'tree-sitter';
-import * as CSharp from 'tree-sitter-c-sharp';
+const CSharp: Parser.Language = require('tree-sitter-c-sharp');
 import {
   ParsedSymbol,
   ParsedDependency,
@@ -212,7 +212,7 @@ export class CSharpParser extends ChunkedParser {
 
   constructor() {
     const parser = new Parser();
-    parser.setLanguage(CSharp as any);
+    parser.setLanguage(CSharp);
     super(parser, 'csharp');
   }
 

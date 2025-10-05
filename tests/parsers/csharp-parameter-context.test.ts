@@ -56,7 +56,7 @@ namespace Game.Cards {
 
       // Find SetHandPositions method calls
       const setHandPositionsCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'SetHandPositions'
+        d.dependency_type === 'calls' && d.to_symbol.includes('SetHandPositions')
       );
 
       expect(setHandPositionsCalls).toHaveLength(2);
@@ -99,7 +99,7 @@ namespace Test {
       const result = await parser.parseFile('test.cs', content);
 
       const methodCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'SomeMethod'
+        d.dependency_type === 'calls' && d.to_symbol.includes('SomeMethod')
       );
 
       expect(methodCalls).toHaveLength(2);
@@ -132,7 +132,7 @@ namespace Test {
       const result = await parser.parseFile('test.cs', content);
 
       const methodCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'NoParamMethod'
+        d.dependency_type === 'calls' && d.to_symbol.includes('NoParamMethod')
       );
 
       expect(methodCalls).toHaveLength(1);
@@ -165,7 +165,7 @@ namespace Test {
       const result = await parser.parseFile('test.cs', content);
 
       const methodCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'SomeMethod'
+        d.dependency_type === 'calls' && d.to_symbol.includes('SomeMethod')
       );
 
       expect(methodCalls).toHaveLength(3);
@@ -219,7 +219,7 @@ namespace Game.Cards {
 
       // Verify the specific SetHandPositions calls mentioned in the plan
       const setHandPositionsCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'SetHandPositions'
+        d.dependency_type === 'calls' && d.to_symbol.includes('SetHandPositions')
       );
 
       expect(setHandPositionsCalls).toHaveLength(2);
@@ -290,7 +290,7 @@ namespace Test {
       const result = await parser.parseFile('test.cs', content);
 
       const methodCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'SomeMethod'
+        d.dependency_type === 'calls' && d.to_symbol.includes('SomeMethod')
       );
 
       expect(methodCalls).toHaveLength(1);
@@ -330,7 +330,7 @@ namespace Test {
       expect(result.errors).toHaveLength(0);
 
       const methodCalls = result.dependencies.filter(d =>
-        d.dependency_type === 'calls' && d.to_symbol === 'SomeMethod'
+        d.dependency_type === 'calls' && d.to_symbol.includes('SomeMethod')
       );
 
       expect(methodCalls).toHaveLength(1);

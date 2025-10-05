@@ -1,5 +1,5 @@
 import Parser from 'tree-sitter';
-import * as CSharp from 'tree-sitter-c-sharp';
+const CSharp: Parser.Language = require('tree-sitter-c-sharp');
 import {
   BaseFrameworkParser,
   FrameworkParseOptions,
