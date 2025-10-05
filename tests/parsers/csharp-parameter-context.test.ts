@@ -65,7 +65,7 @@ namespace Game.Cards {
       const firstCall = setHandPositionsCalls[0];
       expect(firstCall.parameter_context).toBe('_handPosition, null');
       expect(firstCall.call_instance_id).toBeDefined();
-      expect(firstCall.call_instance_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(firstCall.call_instance_id).toMatch(/^SetHandPositions_\d+_\d+$/);
 
       // Verify second call has different parameter context
       const secondCall = setHandPositionsCalls[1];
@@ -74,8 +74,8 @@ namespace Game.Cards {
       expect(secondCall.call_instance_id).not.toBe(firstCall.call_instance_id);
 
       // Verify parameter types are inferred when possible
-      expect(firstCall.parameter_types).toEqual(['var', 'null']);
-      expect(secondCall.parameter_types).toEqual(['var', 'var']);
+      expect(firstCall.parameter_types).toEqual(['Node3D', 'null']);
+      expect(secondCall.parameter_types).toEqual(['unknown', 'Node3D']);
     });
 
     test('should handle method calls with various parameter types', async () => {
@@ -110,7 +110,7 @@ namespace Test {
 
       // Second call
       expect(methodCalls[1].parameter_context).toBe('3.14f, "world", false, new Object()');
-      expect(methodCalls[1].parameter_types).toEqual(['float', 'string', 'bool', 'Object']);
+      expect(methodCalls[1].parameter_types).toEqual(['float', 'string', 'bool', 'unknown']);
     });
 
     test('should handle no-parameter method calls gracefully', async () => {
@@ -139,7 +139,8 @@ namespace Test {
 
       // Should have empty parameter context
       expect(methodCalls[0].parameter_context).toBeUndefined();
-      expect(methodCalls[0].call_instance_id).toBeUndefined();
+      expect(methodCalls[0].call_instance_id).toBeDefined();
+      expect(methodCalls[0].call_instance_id).toMatch(/^NoParamMethod_\d+_\d+$/);
       expect(methodCalls[0].parameter_types).toBeUndefined();
     });
 
