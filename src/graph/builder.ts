@@ -203,6 +203,13 @@ export class GraphBuilder {
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
       const symbols = await this.storeSymbols(dbFiles, parseResults);
 
+      // Generate embeddings for symbols
+      if (!validatedOptions.skipEmbeddings) {
+        await this.generateSymbolEmbeddings(repository.id);
+      } else {
+        this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
+      }
+
       // Store framework entities
       await this.storeFrameworkEntities(repository.id, symbols, parseResults);
 
@@ -604,6 +611,13 @@ export class GraphBuilder {
 
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
     const symbols = await this.storeSymbols(dbFiles, parseResults);
+
+    // Generate embeddings for symbols
+    if (!validatedOptions.skipEmbeddings) {
+      await this.generateSymbolEmbeddings(repositoryId);
+    } else {
+      this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
+    }
 
     await this.storeFrameworkEntities(repositoryId, symbols, parseResults);
 
