@@ -203,12 +203,6 @@ export class GraphBuilder {
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
       const symbols = await this.storeSymbols(dbFiles, parseResults);
 
-      if (!validatedOptions.skipEmbeddings) {
-        await this.generateSymbolEmbeddings(symbols);
-      } else {
-        this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
-      }
-
       // Store framework entities
       await this.storeFrameworkEntities(repository.id, symbols, parseResults);
 
@@ -610,12 +604,6 @@ export class GraphBuilder {
 
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
     const symbols = await this.storeSymbols(dbFiles, parseResults);
-
-    if (!validatedOptions.skipEmbeddings) {
-      await this.generateSymbolEmbeddings(symbols);
-    } else {
-      this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
-    }
 
     await this.storeFrameworkEntities(repositoryId, symbols, parseResults);
 
@@ -1061,57 +1049,102 @@ export class GraphBuilder {
     return await this.dbService.createSymbols(allSymbols);
   }
 
-  private async generateSymbolEmbeddings(symbols: Symbol[]): Promise<void> {
-    if (symbols.length === 0) return;
+  async generateSymbolEmbeddings(repositoryId: number): Promise<void> {
+    // Count total symbols needing embeddings
+    const totalSymbols = await this.dbService.countSymbolsNeedingEmbeddings(repositoryId);
+    if (totalSymbols === 0) return;
 
-    this.logger.info('Generating embeddings for symbols', { symbolCount: symbols.length });
+    this.logger.info('Generating embeddings for symbols', {
+      repositoryId,
+      symbolCount: totalSymbols
+    });
 
     const embeddingService = getEmbeddingService();
     await embeddingService.initialize();
 
     const isGPU = embeddingService.modelInfo.gpu;
-    let BATCH_SIZE = isGPU ? 64 : 32;
+
+    // Read batch size configuration from environment with smart defaults
+    const largeRepoThreshold = parseInt(process.env.EMBEDDING_LARGE_REPO_THRESHOLD || '5000');
+    const isLargeRepo = totalSymbols > largeRepoThreshold;
+
+    const defaultSmallGPU = 128;
+    const defaultLargeGPU = 64;
+    const defaultSmallCPU = 64;
+    const defaultLargeCPU = 32;
+
+    let BATCH_SIZE: number;
+    if (isGPU) {
+      BATCH_SIZE = isLargeRepo
+        ? parseInt(process.env.EMBEDDING_BATCH_SIZE_GPU_LARGE || String(defaultLargeGPU))
+        : parseInt(process.env.EMBEDDING_BATCH_SIZE_GPU_SMALL || String(defaultSmallGPU));
+    } else {
+      BATCH_SIZE = isLargeRepo
+        ? parseInt(process.env.EMBEDDING_BATCH_SIZE_CPU_LARGE || String(defaultLargeCPU))
+        : parseInt(process.env.EMBEDDING_BATCH_SIZE_CPU_SMALL || String(defaultSmallCPU));
+    }
+
+    // Stream from database in chunks to avoid loading all symbols in memory
+    const CHUNK_SIZE = 1000; // Fetch 1000 symbols at a time
+    let lastProcessedId = 0;
     let processed = 0;
+    let hasMore = true;
 
-    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-      const batch = symbols.slice(i, i + BATCH_SIZE);
-      let currentBatchSize = batch.length;
-      let batchProcessed = false;
+    while (hasMore) {
+      // Fetch chunk from database using cursor-based pagination
+      const symbols = await this.dbService.getSymbolsForEmbedding(
+        repositoryId,
+        CHUNK_SIZE,
+        lastProcessedId
+      );
 
-      while (!batchProcessed && currentBatchSize > 0) {
-        try {
-          const currentBatch = batch.slice(0, currentBatchSize);
-          const nameTexts = currentBatch.map(s => s.name || '');
-          const descriptionTexts = currentBatch.map(s => {
-            const parts = [];
-            if (s.qualified_name) parts.push(s.qualified_name);
-            if (s.signature) parts.push(s.signature);
-            return parts.join(' ') || s.name || '';
-          });
+      if (symbols.length === 0) break;
 
-          const [nameEmbeddings, descriptionEmbeddings] = await Promise.all([
-            embeddingService.generateBatchEmbeddings(nameTexts),
-            embeddingService.generateBatchEmbeddings(descriptionTexts),
-          ]);
+      // Process chunk in batches
+      for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+        const batch = symbols.slice(i, i + BATCH_SIZE);
+        let currentBatchSize = batch.length;
+        let batchProcessed = false;
 
-          const updates = currentBatch.map((symbol, j) => ({
-            id: symbol.id!,
-            nameEmbedding: nameEmbeddings[j],
-            descriptionEmbedding: descriptionEmbeddings[j],
-            embeddingModel: embeddingService.modelInfo.name,
-          }));
+        while (!batchProcessed && currentBatchSize > 0) {
+          try {
+            const currentBatch = batch.slice(0, currentBatchSize);
+            const nameTexts = currentBatch.map(s => s.name || '');
+            const descriptionTexts = currentBatch.map(s => {
+              const parts = [];
+              if (s.qualified_name) parts.push(s.qualified_name);
+              if (s.signature) parts.push(s.signature);
+              return parts.join(' ') || s.name || '';
+            });
 
-          await this.dbService.batchUpdateSymbolEmbeddings(updates);
+            const [nameEmbeddings, descriptionEmbeddings] = await Promise.all([
+              embeddingService.generateBatchEmbeddings(nameTexts),
+              embeddingService.generateBatchEmbeddings(descriptionTexts),
+            ]);
 
-          processed += currentBatch.length;
-          batchProcessed = true;
+            const updates = currentBatch.map((symbol, j) => ({
+              id: symbol.id!,
+              nameEmbedding: nameEmbeddings[j],
+              descriptionEmbedding: descriptionEmbeddings[j],
+              embeddingModel: embeddingService.modelInfo.name,
+            }));
 
-          this.logger.debug('Batch embeddings generated', {
-            processed,
-            total: symbols.length,
-            batchSize: currentBatchSize,
-            progress: `${Math.round((processed / symbols.length) * 100)}%`,
-          });
+            await this.dbService.batchUpdateSymbolEmbeddings(updates);
+
+            // Clear references immediately after write to free memory
+            updates.length = 0;
+            nameEmbeddings.length = 0;
+            descriptionEmbeddings.length = 0;
+
+            processed += currentBatch.length;
+            batchProcessed = true;
+
+            this.logger.debug('Batch embeddings generated', {
+              processed,
+              total: totalSymbols,
+              batchSize: currentBatchSize,
+              progress: `${Math.round((processed / totalSymbols) * 100)}%`,
+            });
         } catch (error) {
           const errorMessage = (error as Error).message;
 
@@ -1145,7 +1178,14 @@ export class GraphBuilder {
             batchProcessed = true;
           }
         }
+      }  // end while loop
+      }  // end for loop (batches)
+
+      // Update cursor position and check if there are more symbols
+      if (symbols.length > 0) {
+        lastProcessedId = Math.max(...symbols.map(s => s.id!));
       }
+      hasMore = symbols.length === CHUNK_SIZE;
     }
 
     this.logger.info('Embedding generation completed', { symbolsProcessed: processed });
