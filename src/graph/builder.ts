@@ -218,19 +218,14 @@ export class GraphBuilder {
       const dependenciesMap = this.createDependenciesMap(symbols, parseResults, dbFiles);
 
       const [fileGraph, symbolGraph] = await Promise.all([
-        this.fileGraphBuilder.buildFileGraph(
-          repository,
-          dbFiles,
-          importsMap,
-          exportsMap
-        ),
+        this.fileGraphBuilder.buildFileGraph(repository, dbFiles, importsMap, exportsMap),
         this.symbolGraphBuilder.buildSymbolGraph(
           symbols,
           dependenciesMap,
           dbFiles,
           importsMap,
           exportsMap
-        )
+        ),
       ]);
 
       // Persist virtual framework symbols before creating dependencies
@@ -240,21 +235,14 @@ export class GraphBuilder {
       const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
 
-      const [crossFileFileDependencies, externalCallFileDependencies, externalImportFileDependencies] = await Promise.all([
-        this.createCrossFileFileDependencies(
-          symbolDependencies,
-          symbols,
-          dbFiles
-        ),
-        this.createExternalCallFileDependencies(
-          parseResults,
-          dbFiles,
-          symbols
-        ),
-        this.createExternalImportFileDependencies(
-          parseResults,
-          dbFiles
-        )
+      const [
+        crossFileFileDependencies,
+        externalCallFileDependencies,
+        externalImportFileDependencies,
+      ] = await Promise.all([
+        this.createCrossFileFileDependencies(symbolDependencies, symbols, dbFiles),
+        this.createExternalCallFileDependencies(parseResults, dbFiles, symbols),
+        this.createExternalImportFileDependencies(parseResults, dbFiles),
       ]);
 
       // Combine file dependencies
@@ -471,8 +459,12 @@ export class GraphBuilder {
       // Fetch current repository statistics from database
       const dbFiles = await this.dbService.getFilesByRepository(repository.id);
       const symbols = await this.dbService.getSymbolsByRepository(repository.id);
-      const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(repository.id);
-      const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(repository.id);
+      const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(
+        repository.id
+      );
+      const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(
+        repository.id
+      );
 
       // Create lightweight graph data structures for statistics
       const fileGraph = {
@@ -484,7 +476,7 @@ export class GraphBuilder {
           isTest: f.is_test,
           isGenerated: f.is_generated,
         })),
-        edges: Array(fileDependencyCount).fill(null)
+        edges: Array(fileDependencyCount).fill(null),
       };
 
       const symbolGraph = {
@@ -499,7 +491,7 @@ export class GraphBuilder {
           visibility: s.visibility,
           signature: s.signature,
         })),
-        edges: Array(symbolDependencyCount).fill(null)
+        edges: Array(symbolDependencyCount).fill(null),
       };
 
       return {
@@ -523,8 +515,12 @@ export class GraphBuilder {
     // Fetch current repository statistics from database
     const dbFiles = await this.dbService.getFilesByRepository(repository.id);
     const symbols = await this.dbService.getSymbolsByRepository(repository.id);
-    const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(repository.id);
-    const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(repository.id);
+    const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(
+      repository.id
+    );
+    const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(
+      repository.id
+    );
 
     // Create lightweight graph data structures for statistics
     const fileGraph = {
@@ -536,7 +532,7 @@ export class GraphBuilder {
         isTest: f.is_test,
         isGenerated: f.is_generated,
       })),
-      edges: Array(fileDependencyCount).fill(null)
+      edges: Array(fileDependencyCount).fill(null),
     };
 
     const symbolGraph = {
@@ -551,7 +547,7 @@ export class GraphBuilder {
         visibility: s.visibility,
         signature: s.signature,
       })),
-      edges: Array(symbolDependencyCount).fill(null)
+      edges: Array(symbolDependencyCount).fill(null),
     };
 
     // Update repository timestamp
@@ -603,9 +599,7 @@ export class GraphBuilder {
     }
 
     const existingFiles = await this.dbService.getFilesByRepository(repositoryId);
-    const fileIdsToCleanup = existingFiles
-      .filter(f => filePaths.includes(f.path))
-      .map(f => f.id);
+    const fileIdsToCleanup = existingFiles.filter(f => filePaths.includes(f.path)).map(f => f.id);
 
     if (fileIdsToCleanup.length > 0) {
       this.logger.info('Cleaning up old data for changed files', {
@@ -792,7 +786,7 @@ export class GraphBuilder {
           const entries = await fs.readdir(currentPath);
 
           await Promise.all(
-            entries.map(async (entry) => {
+            entries.map(async entry => {
               const entryPath = path.join(currentPath, entry);
               await traverse(entryPath);
             })
@@ -1075,46 +1069,82 @@ export class GraphBuilder {
     const embeddingService = getEmbeddingService();
     await embeddingService.initialize();
 
-    const BATCH_SIZE = 500;
+    const isGPU = embeddingService.modelInfo.gpu;
+    let BATCH_SIZE = isGPU ? 64 : 32;
     let processed = 0;
 
     for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
       const batch = symbols.slice(i, i + BATCH_SIZE);
+      let currentBatchSize = batch.length;
+      let batchProcessed = false;
 
-      try {
-        const nameTexts = batch.map(s => s.name || '');
-        const descriptionTexts = batch.map(s => {
-          const parts = [];
-          if (s.qualified_name) parts.push(s.qualified_name);
-          if (s.signature) parts.push(s.signature);
-          return parts.join(' ') || s.name || '';
-        });
+      while (!batchProcessed && currentBatchSize > 0) {
+        try {
+          const currentBatch = batch.slice(0, currentBatchSize);
+          const nameTexts = currentBatch.map(s => s.name || '');
+          const descriptionTexts = currentBatch.map(s => {
+            const parts = [];
+            if (s.qualified_name) parts.push(s.qualified_name);
+            if (s.signature) parts.push(s.signature);
+            return parts.join(' ') || s.name || '';
+          });
 
-        const [nameEmbeddings, descriptionEmbeddings] = await Promise.all([
-          embeddingService.generateBatchEmbeddings(nameTexts),
-          embeddingService.generateBatchEmbeddings(descriptionTexts)
-        ]);
+          const [nameEmbeddings, descriptionEmbeddings] = await Promise.all([
+            embeddingService.generateBatchEmbeddings(nameTexts),
+            embeddingService.generateBatchEmbeddings(descriptionTexts),
+          ]);
 
-        const updates = batch.map((symbol, j) => ({
-          id: symbol.id!,
-          nameEmbedding: nameEmbeddings[j],
-          descriptionEmbedding: descriptionEmbeddings[j],
-          embeddingModel: embeddingService.modelInfo.name,
-        }));
+          const updates = currentBatch.map((symbol, j) => ({
+            id: symbol.id!,
+            nameEmbedding: nameEmbeddings[j],
+            descriptionEmbedding: descriptionEmbeddings[j],
+            embeddingModel: embeddingService.modelInfo.name,
+          }));
 
-        await this.dbService.batchUpdateSymbolEmbeddings(updates);
+          await this.dbService.batchUpdateSymbolEmbeddings(updates);
 
-        processed += batch.length;
-        this.logger.debug('Batch embeddings generated', {
-          processed,
-          total: symbols.length,
-          progress: `${Math.round((processed / symbols.length) * 100)}%`,
-        });
-      } catch (error) {
-        this.logger.error('Failed to generate embeddings for batch', {
-          batchStart: i,
-          error: (error as Error).message,
-        });
+          processed += currentBatch.length;
+          batchProcessed = true;
+
+          this.logger.debug('Batch embeddings generated', {
+            processed,
+            total: symbols.length,
+            batchSize: currentBatchSize,
+            progress: `${Math.round((processed / symbols.length) * 100)}%`,
+          });
+        } catch (error) {
+          const errorMessage = (error as Error).message;
+
+          if (
+            errorMessage.includes('Failed to allocate memory') ||
+            errorMessage.includes('FusedMatMul')
+          ) {
+            currentBatchSize = Math.floor(currentBatchSize / 2);
+
+            if (currentBatchSize === 0) {
+              this.logger.error('Failed to generate embeddings even with batch size 1', {
+                batchStart: i,
+                error: errorMessage,
+              });
+              batchProcessed = true;
+            } else {
+              this.logger.warn('GPU OOM detected, reducing batch size', {
+                previousBatchSize: currentBatchSize * 2,
+                newBatchSize: currentBatchSize,
+                batchStart: i,
+              });
+
+              BATCH_SIZE = Math.min(BATCH_SIZE, currentBatchSize);
+            }
+          } else {
+            this.logger.error('Failed to generate embeddings for batch', {
+              batchStart: i,
+              batchSize: currentBatchSize,
+              error: errorMessage,
+            });
+            batchProcessed = true;
+          }
+        }
       }
     }
 
@@ -1133,9 +1163,7 @@ export class GraphBuilder {
 
     const allFiles = await this.dbService.getFilesByRepository(repositoryId);
     const filesMap = new Map(allFiles.map(f => [f.path, f]));
-    const normalizedFilesMap = new Map(
-      allFiles.map(f => [path.normalize(f.path), f])
-    );
+    const normalizedFilesMap = new Map(allFiles.map(f => [path.normalize(f.path), f]));
 
     for (const parseResult of parseResults) {
       // Skip if no framework entities
@@ -1358,8 +1386,9 @@ export class GraphBuilder {
           } else if (this.isTestSystemEntity(entity)) {
             const testSystemEntity = entity as any;
 
-            const matchingFile = filesMap.get(parseResult.filePath) ||
-                                normalizedFilesMap.get(path.normalize(parseResult.filePath));
+            const matchingFile =
+              filesMap.get(parseResult.filePath) ||
+              normalizedFilesMap.get(path.normalize(parseResult.filePath));
 
             if (matchingFile) {
               await this.dbService.createTestSuite({
@@ -1619,7 +1648,7 @@ export class GraphBuilder {
         ...storedScenes.map((scene: any) => ({ ...scene, type: 'godot_scene' })),
         ...storedNodes.map((node: any) => ({ ...node, type: 'godot_node' })),
         ...storedScripts.map((script: any) => ({ ...script, type: 'godot_script' })),
-        ...storedAutoloads.map((autoload: any) => ({ ...autoload, type: 'godot_autoload' }))
+        ...storedAutoloads.map((autoload: any) => ({ ...autoload, type: 'godot_autoload' })),
       ];
 
       // Use the GodotRelationshipBuilder to create relationships with stored entities
@@ -1860,8 +1889,8 @@ export class GraphBuilder {
               const hasContainingMethod = fileSymbols.some(
                 s =>
                   (s.symbol_type === SymbolType.METHOD ||
-                   s.symbol_type === SymbolType.FUNCTION ||
-                   s.symbol_type === SymbolType.PROPERTY) &&
+                    s.symbol_type === SymbolType.FUNCTION ||
+                    s.symbol_type === SymbolType.PROPERTY) &&
                   dependency.line_number >= s.start_line &&
                   dependency.line_number <= s.end_line
               );
@@ -1943,7 +1972,6 @@ export class GraphBuilder {
       '.php',
       '.cs',
     ];
-
 
     if (!allowedExtensions.includes(ext)) {
       return false;
