@@ -317,6 +317,69 @@ export class VueParser extends BaseFrameworkParser {
     };
   }
 
+  private analyzeScriptInSinglePass(
+    scriptContent: string,
+    filePath: string,
+    isTypeScript: boolean
+  ): {
+    apiCalls: VueApiCall[];
+    typeInterfaces: VueTypeInterface[];
+  } {
+    const apiCalls: VueApiCall[] = [];
+    const typeInterfaces: VueTypeInterface[] = [];
+
+    try {
+      const tree = this.parseScriptContent(scriptContent, isTypeScript);
+
+      if (!tree?.rootNode) {
+        return { apiCalls, typeInterfaces };
+      }
+
+      const traverse = (node: Parser.SyntaxNode) => {
+        switch (node.type) {
+          case 'call_expression': {
+            const apiCall = this.parseApiCallExpression(node, scriptContent, filePath);
+            if (apiCall) {
+              apiCalls.push(apiCall);
+            }
+            break;
+          }
+          case 'interface_declaration': {
+            if (isTypeScript) {
+              const interfaceEntity = this.parseInterfaceDeclaration(node, scriptContent, filePath);
+              if (interfaceEntity) {
+                typeInterfaces.push(interfaceEntity);
+              }
+            }
+            break;
+          }
+          case 'type_alias_declaration': {
+            if (isTypeScript) {
+              const typeEntity = this.parseTypeAliasDeclaration(node, scriptContent, filePath);
+              if (typeEntity) {
+                typeInterfaces.push(typeEntity);
+              }
+            }
+            break;
+          }
+        }
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            traverse(child);
+          }
+        }
+      };
+
+      traverse(tree.rootNode);
+    } catch (error) {
+      logger.warn(`Failed to analyze script in single pass for ${filePath}`, { error });
+    }
+
+    return { apiCalls, typeInterfaces };
+  }
+
   /**
    * Extract API calls from Vue component script content
    */
@@ -831,18 +894,20 @@ export class VueParser extends BaseFrameworkParser {
       const scriptContent = sections.scriptSetup || sections.script;
 
       if (scriptContent) {
-        // Extract API calls
-        const apiCalls = this.extractApiCalls(scriptContent, filePath);
-        entities.push(...apiCalls);
-
-        // Extract TypeScript interfaces (only for TypeScript files or scripts)
         const isTypeScript =
           sections.scriptLang === 'ts' ||
           filePath.includes('.ts') ||
           scriptContent.includes('interface ') ||
           scriptContent.includes('type ');
+
+        const { apiCalls, typeInterfaces } = this.analyzeScriptInSinglePass(
+          scriptContent,
+          filePath,
+          isTypeScript
+        );
+
+        entities.push(...apiCalls);
         if (isTypeScript) {
-          const typeInterfaces = this.parseTypeScriptInterfaces(scriptContent, filePath);
           entities.push(...typeInterfaces);
         }
       }

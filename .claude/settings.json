@@ -83,7 +83,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "uv run .claude/hooks/tool-validator.py",
+                        "command": "uv run /home/astefanopoulos/Documents/claude-compass/.claude/hooks/tool-validator.py",
                         "timeout": 5
                     }
                 ]

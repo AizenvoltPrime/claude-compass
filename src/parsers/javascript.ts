@@ -25,6 +25,19 @@ const logger = createComponentLogger('javascript-parser');
  * JavaScript-specific parser using Tree-sitter with chunked parsing support
  */
 export class JavaScriptParser extends ChunkedParser {
+  private static readonly BOUNDARY_PATTERNS = [
+    /}\s*(?:;)?\s*(?:\n\s*\n|\n\s*\/\/|\n\s*\/\*)/g,
+    /export\s+(?:default\s+)?(?:function|class|const|let|var)\s+\w+[^}]*}\s*(?:;)?\s*\n/g,
+    /function\s+\w+\s*\([^)]*\)\s*{[^}]*}\s*(?:;)?\s*\n/g,
+    /(?:const|let|var)\s+\w+\s*=\s*\([^)]*\)\s*=>\s*{[^}]*}\s*(?:;)?\s*\n/g,
+    /class\s+\w+(?:\s+extends\s+\w+)?\s*{[^}]*}\s*\n/g,
+    /(?:const|let|var)\s+\w+\s*=\s*{[^}]*}\s*(?:;)?\s*\n/g,
+    /\}\s*\)\s*\(\s*[^)]*\s*\)\s*(?:;)?\s*\n/g,
+    /\w+\s*:\s*function\s*\([^)]*\)\s*{[^}]*}\s*,?\s*\n/g,
+    /;\s*\n\s*\n/g,
+    /}\s*\n/g,
+  ];
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(JavaScript);
@@ -99,24 +112,159 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     try {
-      const symbols = this.extractSymbols(tree.rootNode, content);
-      const dependencies = this.extractDependencies(tree.rootNode, content);
-      const imports = this.extractImports(tree.rootNode, content);
-      const exports = this.extractExports(tree.rootNode, content);
+      this.clearNodeCache();
+      const result = this.performSinglePassExtraction(tree.rootNode, content);
 
       return {
         symbols: validatedOptions.includePrivateSymbols
-          ? symbols
-          : symbols.filter(s => s.visibility !== 'private'),
-        dependencies,
-        imports,
-        exports,
+          ? result.symbols
+          : result.symbols.filter(s => s.visibility !== 'private'),
+        dependencies: result.dependencies,
+        imports: result.imports,
+        exports: result.exports,
         errors: [],
       };
     } finally {
-      // Tree-sitter trees are automatically garbage collected in Node.js
-      // No explicit disposal needed
+      this.clearNodeCache();
     }
+  }
+
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string): {
+    symbols: ParsedSymbol[];
+    dependencies: ParsedDependency[];
+    imports: ParsedImport[];
+    exports: ParsedExport[];
+  } {
+    const symbols: ParsedSymbol[] = [];
+    const dependencies: ParsedDependency[] = [];
+    const imports: ParsedImport[] = [];
+    const exports: ParsedExport[] = [];
+
+    const processedArrowFunctions = new Set<Parser.SyntaxNode>();
+
+    const traverse = (node: Parser.SyntaxNode): void => {
+      this.cacheNode(node.type, node);
+
+      switch (node.type) {
+        case 'function_declaration': {
+          const symbol = this.extractFunctionSymbol(node, content);
+          if (symbol) symbols.push(symbol);
+          break;
+        }
+        case 'variable_declarator': {
+          const symbol = this.extractVariableSymbol(node, content);
+          if (symbol) symbols.push(symbol);
+          const valueNode = node.childForFieldName('value');
+          if (valueNode?.type === 'arrow_function') {
+            processedArrowFunctions.add(valueNode);
+          }
+          break;
+        }
+        case 'class_declaration': {
+          const symbol = this.extractClassSymbol(node, content);
+          if (symbol) symbols.push(symbol);
+          break;
+        }
+        case 'method_definition': {
+          const symbol = this.extractMethodSymbol(node, content);
+          if (symbol) symbols.push(symbol);
+          break;
+        }
+        case 'arrow_function': {
+          if (
+            !processedArrowFunctions.has(node) &&
+            node.parent?.type !== 'variable_declarator' &&
+            node.parent?.type !== 'assignment_expression'
+          ) {
+            const symbol = this.extractArrowFunctionSymbol(node, content);
+            if (symbol) symbols.push(symbol);
+          }
+          break;
+        }
+        case 'call_expression': {
+          const dependency = this.extractCallDependency(node, content);
+          if (dependency) dependencies.push(dependency);
+          const calleeText = node.childForFieldName('function')
+            ? this.getNodeText(node.childForFieldName('function')!, content)
+            : '';
+          if (calleeText === 'require' || calleeText === 'import') {
+            const importInfo = this.extractRequireOrDynamicImport(node, content, calleeText);
+            if (importInfo) imports.push(importInfo);
+          }
+          break;
+        }
+        case 'import_statement': {
+          const importInfo = this.extractImportStatement(node, content);
+          if (importInfo) imports.push(importInfo);
+          break;
+        }
+        case 'export_statement': {
+          const exportInfo = this.extractExportStatement(node, content);
+          if (exportInfo) exports.push(exportInfo);
+          const nodeText = this.getNodeText(node, content);
+          if (nodeText.includes('default')) {
+            const defaultExport = this.extractDefaultExport(node, content);
+            if (defaultExport && defaultExport !== exportInfo) exports.push(defaultExport);
+          }
+          break;
+        }
+        case 'assignment_expression': {
+          const leftNode = node.childForFieldName('left');
+          if (leftNode) {
+            const leftText = this.getNodeText(leftNode, content);
+            if (leftText.startsWith('module.exports') || leftText.startsWith('exports.')) {
+              const commonJSExport = this.extractCommonJSExport(node, content);
+              if (commonJSExport) exports.push(commonJSExport);
+            }
+          }
+          break;
+        }
+      }
+
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child) traverse(child);
+      }
+    };
+
+    traverse(rootNode);
+
+    return { symbols, dependencies, imports, exports };
+  }
+
+  private extractRequireOrDynamicImport(
+    node: Parser.SyntaxNode,
+    content: string,
+    calleeText: string
+  ): ParsedImport | null {
+    const args = node.childForFieldName('arguments');
+    if (!args || args.namedChildCount === 0) return null;
+
+    const firstArg = args.namedChild(0);
+    if (!firstArg || firstArg.type !== 'string') return null;
+
+    const source = this.getNodeText(firstArg, content).replace(/['"]/g, '');
+
+    return {
+      source,
+      imported_names: [],
+      import_type: 'default',
+      line_number: node.startPosition.row + 1,
+      is_dynamic: calleeText === 'import',
+    };
+  }
+
+  private extractCommonJSExport(node: Parser.SyntaxNode, content: string): ParsedExport | null {
+    const leftNode = node.childForFieldName('left');
+    if (!leftNode) return null;
+
+    const leftText = this.getNodeText(leftNode, content);
+
+    return {
+      exported_names: [leftText],
+      export_type: 'named',
+      line_number: node.startPosition.row + 1,
+    };
   }
 
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
@@ -610,40 +758,8 @@ export class JavaScriptParser extends ChunkedParser {
     const searchLimit = Math.floor(maxChunkSize * 0.85);
     const searchContent = content.substring(0, Math.min(searchLimit, content.length));
 
-    // JavaScript-specific boundary patterns in order of preference
-    const boundaryPatterns = [
-      // End of function/class/interface definitions with proper closure
-      /}\s*(?:;)?\s*(?:\n\s*\n|\n\s*\/\/|\n\s*\/\*)/g, // Closing brace with semicolon and spacing
+    const boundaryPatterns = JavaScriptParser.BOUNDARY_PATTERNS;
 
-      // End of export statements
-      /export\s+(?:default\s+)?(?:function|class|const|let|var)\s+\w+[^}]*}\s*(?:;)?\s*\n/g,
-
-      // End of complete function declarations
-      /function\s+\w+\s*\([^)]*\)\s*{[^}]*}\s*(?:;)?\s*\n/g,
-
-      // End of arrow function assignments
-      /(?:const|let|var)\s+\w+\s*=\s*\([^)]*\)\s*=>\s*{[^}]*}\s*(?:;)?\s*\n/g,
-
-      // End of class definitions
-      /class\s+\w+(?:\s+extends\s+\w+)?\s*{[^}]*}\s*\n/g,
-
-      // End of complete variable declarations with complex objects
-      /(?:const|let|var)\s+\w+\s*=\s*{[^}]*}\s*(?:;)?\s*\n/g,
-
-      // End of IIFE (Immediately Invoked Function Expression)
-      /\}\s*\)\s*\(\s*[^)]*\s*\)\s*(?:;)?\s*\n/g,
-
-      // End of object method definitions
-      /\w+\s*:\s*function\s*\([^)]*\)\s*{[^}]*}\s*,?\s*\n/g,
-
-      // End of complete statements with semicolons
-      /;\s*\n\s*\n/g,
-
-      // Simple closing braces with newlines
-      /}\s*\n/g,
-    ];
-
-    // Find all potential boundaries
     for (const pattern of boundaryPatterns) {
       let match;
       while ((match = pattern.exec(searchContent)) !== null) {

@@ -217,11 +217,27 @@ export abstract class BaseParser {
   protected language: string;
   protected logger: any;
   private syntaxErrorCount = 0;
+  protected nodeCache: Map<string, Parser.SyntaxNode[]> = new Map();
 
   constructor(parser: Parser, language: string) {
     this.parser = parser;
     this.language = language;
     this.logger = createComponentLogger(`parser-${language}`);
+  }
+
+  protected cacheNode(type: string, node: Parser.SyntaxNode): void {
+    if (!this.nodeCache.has(type)) {
+      this.nodeCache.set(type, []);
+    }
+    this.nodeCache.get(type)!.push(node);
+  }
+
+  protected getCachedNodes(type: string): Parser.SyntaxNode[] {
+    return this.nodeCache.get(type) || [];
+  }
+
+  protected clearNodeCache(): void {
+    this.nodeCache.clear();
   }
 
   /**
