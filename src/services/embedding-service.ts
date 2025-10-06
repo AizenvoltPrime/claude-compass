@@ -209,17 +209,39 @@ export class EmbeddingService {
       return [];
     }
 
+    const MAX_BATCH_SIZE = this.useGPU ? 32 : 16;
+
+    if (texts.length > MAX_BATCH_SIZE) {
+      const results: number[][] = [];
+      for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
+        const chunk = texts.slice(i, i + MAX_BATCH_SIZE);
+        const chunkEmbeddings = await this.generateBatchEmbeddingsChunk(chunk);
+        results.push(...chunkEmbeddings);
+      }
+      return results;
+    }
+
+    return this.generateBatchEmbeddingsChunk(texts);
+  }
+
+  /**
+   * Generate embeddings for a single chunk of texts (internal method)
+   */
+  private async generateBatchEmbeddingsChunk(texts: string[]): Promise<number[][]> {
+    if (!this.session || !this.tokenizer) {
+      throw new Error('Embedding model not initialized');
+    }
+
     try {
       const sanitizedTexts = texts.map(text => this.sanitizeTextForEmbedding(text));
       const processedTexts = sanitizedTexts.map(text => text.trim() || '[empty]');
 
-      // Tokenize batch
       const encoded = await this.tokenizer(processedTexts, {
         padding: true,
-        truncation: true
+        truncation: true,
+        max_length: 256
       });
 
-      // Convert to ONNX Runtime tensors manually
       const inputIds = encoded.input_ids.data;
       const attentionMask = encoded.attention_mask.data;
       const dims = encoded.input_ids.dims;
@@ -232,31 +254,26 @@ export class EmbeddingService {
       const outputs = await this.session.run(feeds);
       const lastHiddenState = outputs.last_hidden_state;
 
-      // Extract embeddings for each text in batch
       const results: number[][] = [];
       const batchSize = (lastHiddenState.dims as number[])[0];
       const seqLength = (lastHiddenState.dims as number[])[1];
       const hiddenSize = (lastHiddenState.dims as number[])[2];
 
       for (let i = 0; i < batchSize; i++) {
-        // Extract embeddings for this item
         const start = i * seqLength * hiddenSize;
         const end = start + seqLength * hiddenSize;
         const itemHiddenStates = (lastHiddenState.data as Float32Array).slice(start, end);
 
-        // Extract attention mask for this item
         const maskStart = i * seqLength;
         const maskEnd = maskStart + seqLength;
         const itemMask = (encoded.attention_mask.data as BigInt64Array).slice(maskStart, maskEnd);
 
-        // Mean pooling for this item
         const pooled = this.meanPooling(
           itemHiddenStates,
           itemMask,
           [1, seqLength, hiddenSize]
         );
 
-        // Normalize
         const normalized = this.normalize(pooled);
 
         if (sanitizedTexts[i].trim() === '') {
