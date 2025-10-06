@@ -56,6 +56,35 @@ interface PhpParseState {
 export class PHPParser extends ChunkedParser {
   private wasChunked: boolean = false;
 
+  private static readonly CLASS_PATTERNS = [
+    /\b(?:class|interface|trait)\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
+    /\b(?:abstract\s+)?class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
+    /\bfinal\s+class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
+  ];
+
+  private static readonly CLASS_BRACE_PATTERNS = [
+    /\b(?:class|interface|trait)\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
+    /\b(?:abstract\s+)?class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
+    /\bfinal\s+class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
+  ];
+
+  private static readonly FUNCTION_PATTERNS = [
+    /\bfunction\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+    /\b(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+    /\b(?:public|private|protected)\s+static\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+    /\bstatic\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+    /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
+    /\babstract\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?;?\s*$/m,
+  ];
+
+  private static readonly FUNCTION_BRACE_PATTERNS = [
+    /\bfunction\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+    /\b(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+    /\b(?:public|private|protected)\s+static\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+    /\bstatic\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+    /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
+  ];
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(PHP);
@@ -137,23 +166,142 @@ export class PHPParser extends ChunkedParser {
     }
 
     try {
-      const symbols = this.extractSymbols(tree.rootNode, content);
-      const dependencies = this.extractDependencies(tree.rootNode, content);
-      const imports = this.extractImports(tree.rootNode, content);
-      const exports = this.extractExports(tree.rootNode, content);
+      this.clearNodeCache();
+      const result = this.performSinglePassExtraction(tree.rootNode, content);
       const errors = this.extractErrors(tree.rootNode, content, tree);
 
       return {
-        symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== 'private'),
-        dependencies,
-        imports,
-        exports,
-        errors
+        symbols: validatedOptions.includePrivateSymbols
+          ? result.symbols
+          : result.symbols.filter(s => s.visibility !== 'private'),
+        dependencies: result.dependencies,
+        imports: result.imports,
+        exports: result.exports,
+        errors,
       };
     } finally {
-      // Tree-sitter trees are automatically garbage collected in Node.js
-      // No explicit disposal needed
+      this.clearNodeCache();
     }
+  }
+
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string): {
+    symbols: ParsedSymbol[];
+    dependencies: ParsedDependency[];
+    imports: ParsedImport[];
+    exports: ParsedExport[];
+  } {
+    const symbols: ParsedSymbol[] = [];
+    const dependencies: ParsedDependency[] = [];
+    const imports: ParsedImport[] = [];
+    const exports: ParsedExport[] = [];
+
+    const context = {
+      currentNamespace: null as string | null,
+      currentClass: null as string | null,
+    };
+
+    const traverse = (node: Parser.SyntaxNode): void => {
+      this.cacheNode(node.type, node);
+
+      switch (node.type) {
+        case 'namespace_definition': {
+          const symbol = this.extractNamespaceSymbol(node, content);
+          if (symbol) {
+            symbols.push(symbol);
+            context.currentNamespace = symbol.name;
+          }
+          break;
+        }
+        case 'class_declaration': {
+          const symbol = this.extractClassSymbol(node, content);
+          if (symbol) {
+            symbols.push(symbol);
+            const exportInfo = this.extractClassExport(node, content);
+            if (exportInfo) exports.push(exportInfo);
+          }
+          break;
+        }
+        case 'interface_declaration': {
+          const symbol = this.extractInterfaceSymbol(node, content);
+          if (symbol) {
+            symbols.push(symbol);
+            const exportInfo = this.extractInterfaceExport(node, content);
+            if (exportInfo) exports.push(exportInfo);
+          }
+          break;
+        }
+        case 'trait_declaration': {
+          const symbol = this.extractTraitSymbol(node, content);
+          if (symbol) {
+            symbols.push(symbol);
+            const exportInfo = this.extractTraitExport(node, content);
+            if (exportInfo) exports.push(exportInfo);
+          }
+          break;
+        }
+        case 'function_definition': {
+          const symbol = this.extractFunctionSymbol(node, content);
+          if (symbol) {
+            symbols.push(symbol);
+            const exportInfo = this.extractFunctionExport(node, content);
+            if (exportInfo) exports.push(exportInfo);
+          }
+          break;
+        }
+        case 'method_declaration': {
+          const symbol = this.extractMethodSymbol(node, content);
+          if (symbol) symbols.push(symbol);
+          break;
+        }
+        case 'property_declaration': {
+          const propertySymbols = this.extractPropertySymbols(node, content);
+          symbols.push(...propertySymbols);
+          break;
+        }
+        case 'const_declaration': {
+          const constSymbols = this.extractConstantSymbols(node, content);
+          symbols.push(...constSymbols);
+          break;
+        }
+        case 'function_call_expression': {
+          const dependency = this.extractCallDependency(node, content);
+          if (dependency) dependencies.push(dependency);
+          break;
+        }
+        case 'member_call_expression': {
+          const dependency = this.extractMethodCallDependency(node, content);
+          if (dependency) dependencies.push(dependency);
+          break;
+        }
+        case 'scoped_call_expression': {
+          const dependency = this.extractScopedCallDependency(node, content);
+          if (dependency) dependencies.push(dependency);
+          break;
+        }
+        case 'object_creation_expression': {
+          const dependency = this.extractNewDependency(node, content);
+          if (dependency) dependencies.push(dependency);
+          break;
+        }
+        case 'namespace_use_declaration': {
+          const importInfo = this.extractUseStatement(node, content);
+          if (importInfo) imports.push(importInfo);
+          break;
+        }
+      }
+
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child) traverse(child);
+      }
+    };
+
+    traverse(rootNode);
+
+    const includeNodes = this.findIncludeStatements(rootNode, content);
+    imports.push(...includeNodes);
+
+    return { symbols, dependencies, imports, exports };
   }
 
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
@@ -1016,26 +1164,14 @@ export class PHPParser extends ChunkedParser {
   private isAtStartOfClassOrInterface(content: string, position: number, state: PhpParseState): boolean {
     if (!this.canCreateBoundaryAt(state, position)) return false;
 
-    // Look backwards to find the class/interface/trait declaration
-    let searchStart = Math.max(0, position - 300); // Look back up to 300 chars
+    let searchStart = Math.max(0, position - 300);
     const searchText = content.substring(searchStart, position + 1);
 
-    // Patterns to match class/interface/trait declarations
-    const classPatterns = [
-      /\b(?:class|interface|trait)\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
-      /\b(?:abstract\s+)?class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m,
-      /\bfinal\s+class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*(?:\{|\s*$)/m
-    ];
+    const classPatterns = PHPParser.CLASS_PATTERNS;
 
-    // Check if we're at a brace that follows a class declaration
     if (content[position] === '{') {
-      // Look for class declaration ending just before this brace
       const beforeBrace = content.substring(searchStart, position).replace(/\s+$/, '');
-      const bracePatterns = [
-        /\b(?:class|interface|trait)\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
-        /\b(?:abstract\s+)?class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/,
-        /\bfinal\s+class\s+\w+(?:\s+extends\s+[\w\\]+)?(?:\s+implements\s+[\w\\,\s]+)?\s*$/
-      ];
+      const bracePatterns = PHPParser.CLASS_BRACE_PATTERNS;
 
       if (bracePatterns.some(pattern => pattern.test(beforeBrace))) {
         return true;
@@ -1051,32 +1187,14 @@ export class PHPParser extends ChunkedParser {
   private isAtStartOfMethodOrFunction(content: string, position: number, state: PhpParseState): boolean {
     if (!this.canCreateBoundaryAt(state, position)) return false;
 
-    // Look backwards to find the method/function declaration
-    let searchStart = Math.max(0, position - 500); // Look back up to 500 chars
+    let searchStart = Math.max(0, position - 500);
     const searchText = content.substring(searchStart, position + 1);
 
-    // Patterns to match function declarations (with or without the opening brace)
-    const functionPatterns = [
-      // Standard function patterns - look for the declaration, opening brace may be on next line
-      /\bfunction\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
-      /\b(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
-      /\b(?:public|private|protected)\s+static\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
-      /\bstatic\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
-      /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*(?:\{|\s*$)/m,
-      /\babstract\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?;?\s*$/m
-    ];
+    const functionPatterns = PHPParser.FUNCTION_PATTERNS;
 
-    // Check if we're at a brace that follows a function declaration
     if (content[position] === '{') {
-      // Look for function declaration ending just before this brace
       const beforeBrace = content.substring(searchStart, position).replace(/\s+$/, '');
-      const bracePatterns = [
-        /\bfunction\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
-        /\b(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
-        /\b(?:public|private|protected)\s+static\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
-        /\bstatic\s+(?:public|private|protected)\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
-        /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/
-      ];
+      const bracePatterns = PHPParser.FUNCTION_BRACE_PATTERNS;
 
       if (bracePatterns.some(pattern => pattern.test(beforeBrace))) {
         return true;

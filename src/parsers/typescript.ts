@@ -3,6 +3,9 @@ import { typescript as TypeScript } from 'tree-sitter-typescript';
 import { JavaScriptParser } from './javascript';
 import {
   ParsedSymbol,
+  ParsedDependency,
+  ParsedImport,
+  ParsedExport,
   ParseResult,
   ParseOptions
 } from './base';
@@ -13,9 +16,23 @@ import { SymbolType, Visibility } from '../database/models';
  * TypeScript-specific parser extending JavaScript parser
  */
 export class TypeScriptParser extends JavaScriptParser {
+  private static readonly TS_BOUNDARY_PATTERNS = [
+    /interface\s+\w+(?:\s*<[^>]*>)?(?:\s+extends\s+[^{]+)?\s*{[^}]*}\s*\n/g,
+    /type\s+\w+(?:\s*<[^>]*>)?\s*=\s*[^;]+;\s*\n/g,
+    /namespace\s+\w+\s*{[^}]*}\s*\n/g,
+    /enum\s+\w+\s*{[^}]*}\s*\n/g,
+    /abstract\s+class\s+\w+(?:\s+extends\s+\w+)?(?:\s+implements\s+[^{]+)?\s*{[^}]*}\s*\n/g,
+    /@\w+(?:\([^)]*\))?\s*\n(?=(?:export\s+)?(?:class|function|interface|type))/g,
+    /function\s+\w+\s*<[^>]*>\s*\([^)]*\)\s*:\s*[^{]+\s*{[^}]*}\s*\n/g,
+    /\w+\s*\([^)]*\)\s*:\s*[^;]+;\s*\n/g,
+    /(?:readonly\s+)?\w+\s*:\s*[^;=]+(?:;|=\s*[^;]+;)\s*\n/g,
+    /(?:import|export)\s+(?:type\s+)?{[^}]*}\s+from\s+['"][^'"]+['"];\s*\n/g,
+    /declare\s+module\s+['"][^'"]+['"]\s*{[^}]*}\s*\n/g,
+    /declare\s+(?:const|let|var|function|class|interface|namespace)\s+[^;]+;?\s*\n/g,
+  ];
+
   constructor() {
     super();
-    // Override the parser with TypeScript language
     this.parser = new Parser();
     this.parser.setLanguage(TypeScript);
     this.language = 'typescript';
@@ -25,6 +42,83 @@ export class TypeScriptParser extends JavaScriptParser {
     return ['.ts', '.tsx'];
   }
 
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string): {
+    symbols: ParsedSymbol[];
+    dependencies: ParsedDependency[];
+    imports: ParsedImport[];
+    exports: ParsedExport[];
+  } {
+    const result = super.performSinglePassExtraction(rootNode, content);
+
+    const tsSymbols: ParsedSymbol[] = [];
+
+    const traverse = (node: Parser.SyntaxNode): void => {
+      switch (node.type) {
+        case 'interface_declaration': {
+          const symbol = this.extractInterfaceSymbol(node, content);
+          if (symbol) tsSymbols.push(symbol);
+          break;
+        }
+        case 'type_alias_declaration': {
+          const symbol = this.extractTypeAliasSymbol(node, content);
+          if (symbol) tsSymbols.push(symbol);
+          break;
+        }
+        case 'enum_declaration': {
+          const symbol = this.extractEnumSymbol(node, content);
+          if (symbol) tsSymbols.push(symbol);
+          break;
+        }
+        case 'class_declaration': {
+          const modifiers = this.extractModifiers(node, content);
+          if (modifiers.includes('abstract')) {
+            const nameNode = node.childForFieldName('name');
+            if (nameNode) {
+              const name = this.getNodeText(nameNode, content);
+              tsSymbols.push({
+                name,
+                symbol_type: SymbolType.CLASS,
+                start_line: node.startPosition.row + 1,
+                end_line: node.endPosition.row + 1,
+                is_exported: this.isSymbolExported(node, name, content),
+                visibility: this.getVisibilityFromModifiers(modifiers),
+              });
+            }
+          }
+          break;
+        }
+        case 'method_signature': {
+          const nameNode = node.childForFieldName('name');
+          if (nameNode) {
+            const name = this.getNodeText(nameNode, content);
+            tsSymbols.push({
+              name,
+              symbol_type: SymbolType.METHOD,
+              start_line: node.startPosition.row + 1,
+              end_line: node.endPosition.row + 1,
+              is_exported: false,
+              signature: this.getNodeText(node, content),
+            });
+          }
+          break;
+        }
+      }
+
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child) traverse(child);
+      }
+    };
+
+    traverse(rootNode);
+
+    return {
+      symbols: [...result.symbols, ...tsSymbols],
+      dependencies: result.dependencies,
+      imports: result.imports,
+      exports: result.exports,
+    };
+  }
 
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
     const symbols = super.extractSymbols(rootNode, content);
@@ -238,52 +332,12 @@ export class TypeScriptParser extends JavaScriptParser {
     // Get JavaScript boundaries first
     const jsChunks = super.getChunkBoundaries(content, maxChunkSize);
 
-    // Search within 85% of max size for safe boundaries
     const searchLimit = Math.floor(maxChunkSize * 0.85);
     const searchContent = content.substring(0, Math.min(searchLimit, content.length));
 
-    // Additional TypeScript-specific boundary patterns
-    const tsPatterns = [
-      // End of interface declarations
-      /interface\s+\w+(?:\s*<[^>]*>)?(?:\s+extends\s+[^{]+)?\s*{[^}]*}\s*\n/g,
-
-      // End of type alias declarations
-      /type\s+\w+(?:\s*<[^>]*>)?\s*=\s*[^;]+;\s*\n/g,
-
-      // End of namespace declarations
-      /namespace\s+\w+\s*{[^}]*}\s*\n/g,
-
-      // End of enum declarations
-      /enum\s+\w+\s*{[^}]*}\s*\n/g,
-
-      // End of abstract class declarations
-      /abstract\s+class\s+\w+(?:\s+extends\s+\w+)?(?:\s+implements\s+[^{]+)?\s*{[^}]*}\s*\n/g,
-
-      // End of decorator statements
-      /@\w+(?:\([^)]*\))?\s*\n(?=(?:export\s+)?(?:class|function|interface|type))/g,
-
-      // End of generic function declarations
-      /function\s+\w+\s*<[^>]*>\s*\([^)]*\)\s*:\s*[^{]+\s*{[^}]*}\s*\n/g,
-
-      // End of method signatures in interfaces
-      /\w+\s*\([^)]*\)\s*:\s*[^;]+;\s*\n/g,
-
-      // End of property declarations with types
-      /(?:readonly\s+)?\w+\s*:\s*[^;=]+(?:;|=\s*[^;]+;)\s*\n/g,
-
-      // End of import/export with type annotations
-      /(?:import|export)\s+(?:type\s+)?{[^}]*}\s+from\s+['"][^'"]+['"];\s*\n/g,
-
-      // End of module declarations
-      /declare\s+module\s+['"][^'"]+['"]\s*{[^}]*}\s*\n/g,
-
-      // End of ambient declarations
-      /declare\s+(?:const|let|var|function|class|interface|namespace)\s+[^;]+;?\s*\n/g
-    ];
-
+    const tsPatterns = TypeScriptParser.TS_BOUNDARY_PATTERNS;
     const tsBoundaries: number[] = [];
 
-    // Find TypeScript-specific boundaries
     for (const pattern of tsPatterns) {
       let match;
       while ((match = pattern.exec(searchContent)) !== null) {
