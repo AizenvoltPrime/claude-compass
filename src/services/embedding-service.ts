@@ -159,32 +159,50 @@ export class EmbeddingService {
       const attentionMask = encoded.attention_mask.data;
       const dims = encoded.input_ids.dims;
 
-      const feeds = {
-        input_ids: new ort.Tensor('int64', BigInt64Array.from(inputIds, BigInt), dims),
-        attention_mask: new ort.Tensor('int64', BigInt64Array.from(attentionMask, BigInt), dims)
-      };
+      const inputIdsTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds, BigInt), dims);
+      const attentionMaskTensor = new ort.Tensor('int64', BigInt64Array.from(attentionMask, BigInt), dims);
 
-      const outputs = await this.session.run(feeds);
+      try {
+        const feeds = {
+          input_ids: inputIdsTensor,
+          attention_mask: attentionMaskTensor
+        };
 
-      // Extract embeddings from last_hidden_state
-      // Shape: [batch_size, sequence_length, hidden_size]
-      const lastHiddenState = outputs.last_hidden_state;
+        const outputs = await this.session.run(feeds);
 
-      // Perform mean pooling
-      const embeddings = this.meanPooling(
-        lastHiddenState.data as Float32Array,
-        encoded.attention_mask.data as BigInt64Array,
-        lastHiddenState.dims as number[]
-      );
+        try {
+          // Extract embeddings from last_hidden_state
+          // Shape: [batch_size, sequence_length, hidden_size]
+          const lastHiddenState = outputs.last_hidden_state;
 
-      // Normalize
-      const normalized = this.normalize(embeddings);
+          // Perform mean pooling
+          const embeddings = this.meanPooling(
+            lastHiddenState.data as Float32Array,
+            encoded.attention_mask.data as BigInt64Array,
+            lastHiddenState.dims as number[]
+          );
 
-      if (normalized.length !== 1024) {
-        throw new Error(`Expected 1024-dimensional embedding, got ${normalized.length}`);
+          // Normalize
+          const normalized = this.normalize(embeddings);
+
+          if (normalized.length !== 1024) {
+            throw new Error(`Expected 1024-dimensional embedding, got ${normalized.length}`);
+          }
+
+          return normalized;
+        } finally {
+          // Dispose output tensors to free native memory
+          for (const key in outputs) {
+            if (outputs[key] && typeof outputs[key].dispose === 'function') {
+              outputs[key].dispose();
+            }
+          }
+        }
+      } finally {
+        // Dispose input tensors to free native memory
+        inputIdsTensor.dispose();
+        attentionMaskTensor.dispose();
       }
-
-      return normalized;
     } catch (error) {
       console.error('Failed to generate embedding:', error);
       throw new Error(`Embedding generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -209,9 +227,14 @@ export class EmbeddingService {
       return [];
     }
 
+    // Smart chunking: only chunk if batch significantly exceeds safe single-call size
+    // Builder batch 256 for small repos → service receives 256 texts → should NOT chunk (fast path)
+    // But if somehow we get huge batches (> 256), chunk for safety
+    const SAFE_THRESHOLD = 256; // Don't chunk builder batches, only abnormally large calls
     const MAX_BATCH_SIZE = this.useGPU ? 32 : 16;
 
-    if (texts.length > MAX_BATCH_SIZE) {
+    if (texts.length > SAFE_THRESHOLD) {
+      // Large batch - chunk to prevent OOM
       const results: number[][] = [];
       for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
         const chunk = texts.slice(i, i + MAX_BATCH_SIZE);
@@ -221,12 +244,10 @@ export class EmbeddingService {
       return results;
     }
 
+    // Small batch - process directly without chunking overhead
     return this.generateBatchEmbeddingsChunk(texts);
   }
 
-  /**
-   * Generate embeddings for a single chunk of texts (internal method)
-   */
   private async generateBatchEmbeddingsChunk(texts: string[]): Promise<number[][]> {
     if (!this.session || !this.tokenizer) {
       throw new Error('Embedding model not initialized');
@@ -238,52 +259,70 @@ export class EmbeddingService {
 
       const encoded = await this.tokenizer(processedTexts, {
         padding: true,
-        truncation: true,
-        max_length: 256
+        truncation: true
       });
 
       const inputIds = encoded.input_ids.data;
       const attentionMask = encoded.attention_mask.data;
       const dims = encoded.input_ids.dims;
 
-      const feeds = {
-        input_ids: new ort.Tensor('int64', BigInt64Array.from(inputIds, BigInt), dims),
-        attention_mask: new ort.Tensor('int64', BigInt64Array.from(attentionMask, BigInt), dims)
-      };
+      const inputIdsTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds, BigInt), dims);
+      const attentionMaskTensor = new ort.Tensor('int64', BigInt64Array.from(attentionMask, BigInt), dims);
 
-      const outputs = await this.session.run(feeds);
-      const lastHiddenState = outputs.last_hidden_state;
+      try {
+        const feeds = {
+          input_ids: inputIdsTensor,
+          attention_mask: attentionMaskTensor
+        };
 
-      const results: number[][] = [];
-      const batchSize = (lastHiddenState.dims as number[])[0];
-      const seqLength = (lastHiddenState.dims as number[])[1];
-      const hiddenSize = (lastHiddenState.dims as number[])[2];
+        const outputs = await this.session.run(feeds);
 
-      for (let i = 0; i < batchSize; i++) {
-        const start = i * seqLength * hiddenSize;
-        const end = start + seqLength * hiddenSize;
-        const itemHiddenStates = (lastHiddenState.data as Float32Array).slice(start, end);
+        try {
+          const lastHiddenState = outputs.last_hidden_state;
 
-        const maskStart = i * seqLength;
-        const maskEnd = maskStart + seqLength;
-        const itemMask = (encoded.attention_mask.data as BigInt64Array).slice(maskStart, maskEnd);
+          const results: number[][] = [];
+          const batchSize = (lastHiddenState.dims as number[])[0];
+          const seqLength = (lastHiddenState.dims as number[])[1];
+          const hiddenSize = (lastHiddenState.dims as number[])[2];
 
-        const pooled = this.meanPooling(
-          itemHiddenStates,
-          itemMask,
-          [1, seqLength, hiddenSize]
-        );
+          for (let i = 0; i < batchSize; i++) {
+            const start = i * seqLength * hiddenSize;
+            const end = start + seqLength * hiddenSize;
+            const itemHiddenStates = (lastHiddenState.data as Float32Array).slice(start, end);
 
-        const normalized = this.normalize(pooled);
+            const maskStart = i * seqLength;
+            const maskEnd = maskStart + seqLength;
+            const itemMask = (encoded.attention_mask.data as BigInt64Array).slice(maskStart, maskEnd);
 
-        if (sanitizedTexts[i].trim() === '') {
-          results.push(new Array(1024).fill(0));
-        } else {
-          results.push(normalized);
+            const pooled = this.meanPooling(
+              itemHiddenStates,
+              itemMask,
+              [1, seqLength, hiddenSize]
+            );
+
+            const normalized = this.normalize(pooled);
+
+            if (sanitizedTexts[i].trim() === '') {
+              results.push(new Array(1024).fill(0));
+            } else {
+              results.push(normalized);
+            }
+          }
+
+          return results;
+        } finally {
+          // Dispose output tensors to free native memory
+          for (const key in outputs) {
+            if (outputs[key] && typeof outputs[key].dispose === 'function') {
+              outputs[key].dispose();
+            }
+          }
         }
+      } finally {
+        // Dispose input tensors to free native memory
+        inputIdsTensor.dispose();
+        attentionMaskTensor.dispose();
       }
-
-      return results;
     } catch (error) {
       console.error('Failed to generate batch embeddings:', error);
       throw new Error(`Batch embedding generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

@@ -431,6 +431,32 @@ export class DatabaseService {
     return symbols as Symbol[];
   }
 
+  async getSymbolsForEmbedding(
+    repoId: number,
+    limit: number,
+    afterId: number = 0
+  ): Promise<Symbol[]> {
+    const symbols = await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .where('symbols.id', '>', afterId)
+      .whereNull('symbols.name_embedding')
+      .select('symbols.*')
+      .orderBy('symbols.id')
+      .limit(limit);
+    return symbols as Symbol[];
+  }
+
+  async countSymbolsNeedingEmbeddings(repoId: number): Promise<number> {
+    const result = await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .whereNull('symbols.name_embedding')
+      .count('* as count')
+      .first();
+    return Number(result?.count || 0);
+  }
+
   async createSymbol(data: CreateSymbol): Promise<Symbol> {
     const [symbol] = await this.db('symbols').insert(data).returning('*');
 
@@ -3382,24 +3408,30 @@ export class DatabaseService {
       embeddingModel: string;
     }>
   ): Promise<void> {
-    const BATCH_SIZE = 100;
+    // Reduce batch size to minimize JSON string memory pressure
+    // Each symbol: 2 embeddings × 1024 numbers → ~12KB JSON strings
+    const BATCH_SIZE = 20;
 
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const batch = updates.slice(i, i + BATCH_SIZE);
 
       await this.db.transaction(async (trx) => {
-        const promises = batch.map(update =>
-          trx('symbols')
+        // Process serially to avoid holding all JSON strings in memory
+        for (const update of batch) {
+          const nameEmbStr = JSON.stringify(update.nameEmbedding);
+          const descEmbStr = JSON.stringify(update.descriptionEmbedding);
+
+          await trx('symbols')
             .where('id', update.id)
             .update({
-              name_embedding: JSON.stringify(update.nameEmbedding),
-              description_embedding: JSON.stringify(update.descriptionEmbedding),
+              name_embedding: nameEmbStr,
+              description_embedding: descEmbStr,
               embeddings_updated_at: new Date(),
               embedding_model: update.embeddingModel,
-            })
-        );
+            });
 
-        await Promise.all(promises);
+          // Strings go out of scope here and can be freed
+        }
       });
     }
   }
