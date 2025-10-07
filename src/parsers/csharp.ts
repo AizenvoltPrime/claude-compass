@@ -492,6 +492,9 @@ export class CSharpParser extends ChunkedParser {
         case 'event_declaration':
           this.processEvent(node, content, context, symbols);
           break;
+        case 'local_declaration_statement':
+          this.processLocalDeclaration(node, content, context);
+          break;
 
         // Dependencies - unified dependency detection
         case 'invocation_expression':
@@ -857,8 +860,7 @@ export class CSharpParser extends ChunkedParser {
       resolved_class: methodCall.resolvedClass,
       parameter_context:
         methodCall.parameters.length > 0 ? methodCall.parameters.join(', ') : undefined,
-      parameter_types:
-        methodCall.parameterTypes.length > 0 ? methodCall.parameterTypes : undefined,
+      parameter_types: methodCall.parameterTypes.length > 0 ? methodCall.parameterTypes : undefined,
       call_instance_id: callInstanceId,
       qualified_context: qualifiedContext,
     });
@@ -1041,11 +1043,7 @@ export class CSharpParser extends ChunkedParser {
     return `${methodCall.resolvedClass}.${methodCall.callingObject}->${methodCall.methodName}`;
   }
 
-  private captureParseError(
-    node: Parser.SyntaxNode,
-    content: string,
-    errors: ParseError[]
-  ): void {
+  private captureParseError(node: Parser.SyntaxNode, content: string, errors: ParseError[]): void {
     const errorType = node.type === 'ERROR' ? 'Syntax error' : 'Parse error';
     const context = this.getErrorContext(node, content);
 
@@ -1167,6 +1165,263 @@ export class CSharpParser extends ChunkedParser {
       visibility,
       signature: `${modifiers.join(' ')} ${propertyType} ${name}`.trim(),
     });
+  }
+
+  private processLocalDeclaration(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: ASTContext
+  ): void {
+    const variableDeclaration = node.children.find(child => child.type === 'variable_declaration');
+    if (!variableDeclaration) return;
+
+    const typeNode = variableDeclaration.childForFieldName('type');
+    const declaredType = typeNode ? this.getNodeText(typeNode, content) : null;
+
+    // Process each variable declarator
+    const declaratorNodes = this.findNodesOfType(variableDeclaration, 'variable_declarator');
+    for (const declarator of declaratorNodes) {
+      const nameNode = declarator.childForFieldName('name');
+      if (!nameNode) continue;
+
+      const varName = this.getNodeText(nameNode, content);
+      let inferredType: string | null = null;
+
+      // If type is explicitly declared (not 'var')
+      if (declaredType && declaredType !== 'var') {
+        inferredType = this.resolveType(declaredType);
+      } else {
+        // Type is 'var' - try to infer from initializer
+        // Grammar: variable_declarator: seq(name, optional(bracketed_argument_list), optional(seq('=', $.expression)))
+        // Find the expression child (last named child after '=' token)
+        const initializerNode = declarator.namedChildren.find(
+          child =>
+            child !== nameNode && // Skip the name identifier
+            child.type !== 'bracketed_argument_list' // Skip array brackets if present
+        );
+
+        if (initializerNode) {
+          inferredType = this.inferTypeFromExpression(initializerNode, content, context);
+        }
+      }
+
+      // Add to type map if we have a type
+      if (inferredType) {
+        const resolvedType = this.resolveType(inferredType);
+        context.typeMap.set(varName, {
+          type: resolvedType,
+          fullQualifiedName: inferredType,
+          source: 'variable',
+          namespace: context.currentNamespace,
+        });
+      }
+    }
+  }
+
+  private inferTypeFromExpression(
+    expressionNode: Parser.SyntaxNode,
+    content: string,
+    context: ASTContext
+  ): string | null {
+    switch (expressionNode.type) {
+      // Generic method invocation: GetNode<Node3D>()
+      case 'invocation_expression': {
+        const genericType = this.extractGenericTypeParameter(expressionNode, content);
+        if (genericType) return genericType;
+        // TODO: Could infer return type from method signature lookup
+        return null;
+      }
+
+      // Object creation: new List<string>() or new Node3D()
+      case 'object_creation_expression':
+      case 'implicit_object_creation_expression': {
+        const typeNode = expressionNode.childForFieldName('type');
+        if (typeNode) {
+          return this.getNodeText(typeNode, content);
+        }
+        return null;
+      }
+
+      // Array creation: new int[10] or new[] { 1, 2, 3 }
+      case 'array_creation_expression': {
+        const typeNode = expressionNode.childForFieldName('type');
+        if (typeNode) {
+          return this.getNodeText(typeNode, content);
+        }
+        return null;
+      }
+
+      case 'implicit_array_creation_expression': {
+        // new[] { ... } - would need to infer from elements
+        return null;
+      }
+
+      // Literals
+      case 'string_literal':
+      case 'verbatim_string_literal':
+      case 'raw_string_literal':
+      case 'interpolated_string_expression':
+        return 'string';
+
+      case 'integer_literal':
+        return 'int';
+
+      case 'real_literal':
+        return 'float';
+
+      case 'boolean_literal':
+        return 'bool';
+
+      case 'null_literal':
+        return 'null';
+
+      case 'character_literal':
+        return 'char';
+
+      // Member access: GameConstants.PLAYER_HAND_PATH
+      case 'member_access_expression': {
+        // Try to infer type from the member being accessed
+        const nameNode = expressionNode.childForFieldName('name');
+        if (nameNode) {
+          const memberName = this.getNodeText(nameNode, content);
+          // Check if we have type information for this member
+          const typeInfo = context.typeMap.get(memberName);
+          if (typeInfo) return typeInfo.type;
+        }
+        return null;
+      }
+
+      // Identifier: just a variable reference
+      case 'identifier': {
+        const varName = this.getNodeText(expressionNode, content);
+        const typeInfo = context.typeMap.get(varName);
+        if (typeInfo) return typeInfo.type;
+        return null;
+      }
+
+      // Conditional expression: condition ? trueExpr : falseExpr
+      case 'conditional_expression': {
+        // Infer from the true branch (both branches should have same type)
+        const trueExpr = expressionNode.children.find(
+          c => c.type !== '?' && c.type !== ':' && c.type !== 'expression'
+        );
+        if (trueExpr) {
+          return this.inferTypeFromExpression(trueExpr, content, context);
+        }
+        return null;
+      }
+
+      // Binary expressions: a + b, a * b, etc.
+      case 'binary_expression': {
+        const operatorNode = expressionNode.children.find(c =>
+          ['+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>', '&&', '||'].includes(c.type)
+        );
+
+        if (!operatorNode) return null;
+
+        const operator = operatorNode.type;
+
+        // Comparison operators return bool
+        if (['==', '!=', '<', '>', '<=', '>=', '&&', '||'].includes(operator)) {
+          return 'bool';
+        }
+
+        // Arithmetic operators - infer from left operand
+        const leftNode = expressionNode.childForFieldName('left');
+        if (leftNode) {
+          return this.inferTypeFromExpression(leftNode, content, context);
+        }
+
+        return null;
+      }
+
+      // Cast expression: (Type)value
+      case 'cast_expression': {
+        const typeNode = expressionNode.childForFieldName('type');
+        if (typeNode) {
+          return this.getNodeText(typeNode, content);
+        }
+        return null;
+      }
+
+      // As expression: value as Type
+      case 'as_expression': {
+        const typeNode = expressionNode.childForFieldName('right');
+        if (typeNode) {
+          return this.getNodeText(typeNode, content);
+        }
+        return null;
+      }
+
+      // Default expression: default(Type) or default
+      case 'default_expression': {
+        const typeNode = expressionNode.childForFieldName('type');
+        if (typeNode) {
+          return this.getNodeText(typeNode, content);
+        }
+        return null;
+      }
+
+      // Parenthesized expression: (expression)
+      case 'parenthesized_expression': {
+        const innerExpr = expressionNode.namedChildren[0];
+        if (innerExpr) {
+          return this.inferTypeFromExpression(innerExpr, content, context);
+        }
+        return null;
+      }
+
+      // Lambda expressions, anonymous methods, etc. - can't easily infer
+      case 'lambda_expression':
+      case 'anonymous_method_expression':
+      case 'anonymous_object_creation_expression':
+        return null;
+
+      // For any other expression type, we can't infer
+      default:
+        return null;
+    }
+  }
+
+  private extractGenericTypeParameter(
+    invocationNode: Parser.SyntaxNode,
+    content: string
+  ): string | null {
+    // The type_argument_list is inside generic_name, not directly under invocation_expression
+    // Structure: invocation_expression -> generic_name -> type_argument_list -> type_argument
+
+    // First, look for generic_name or member_access_expression that contains generic_name
+    let genericNameNode: Parser.SyntaxNode | null = null;
+
+    for (const child of invocationNode.children) {
+      if (child.type === 'generic_name') {
+        genericNameNode = child;
+        break;
+      } else if (child.type === 'member_access_expression') {
+        // The generic_name might be nested in member_access_expression
+        // e.g., obj.GetNode<T>() -> member_access_expression contains generic_name
+        const nestedGeneric = child.children.find(c => c.type === 'generic_name');
+        if (nestedGeneric) {
+          genericNameNode = nestedGeneric;
+          break;
+        }
+      }
+    }
+
+    if (!genericNameNode) return null;
+
+    // Now find the type_argument_list within generic_name
+    const typeArgList = genericNameNode.children.find(child => child.type === 'type_argument_list');
+
+    if (!typeArgList) return null;
+
+    // Get the first type argument (most common case)
+    // The type_argument_list contains direct type nodes, not wrapped in 'type_argument'
+    const typeArgNodes = typeArgList.namedChildren;
+    if (typeArgNodes.length === 0) return null;
+
+    // Get the text of the first type argument
+    return this.getNodeText(typeArgNodes[0], content);
   }
 
   /**
@@ -1994,7 +2249,8 @@ export class CSharpParser extends ChunkedParser {
           if (nameNode) {
             const name = this.getNodeText(nameNode, content);
             const namespace = namespaceStack.length > 0 ? namespaceStack.join('.') : undefined;
-            const parentClass = classStack.length > 0 ? classStack[classStack.length - 1] : undefined;
+            const parentClass =
+              classStack.length > 0 ? classStack[classStack.length - 1] : undefined;
 
             const qualifiedParts: string[] = [];
             if (namespace) qualifiedParts.push(namespace);
@@ -2029,7 +2285,10 @@ export class CSharpParser extends ChunkedParser {
       if (node.type === 'class_declaration' || node.type === 'interface_declaration') {
         classStack.pop();
       }
-      if (node.type === 'namespace_declaration' || node.type === 'file_scoped_namespace_declaration') {
+      if (
+        node.type === 'namespace_declaration' ||
+        node.type === 'file_scoped_namespace_declaration'
+      ) {
         namespaceStack.pop();
       }
     };
@@ -2044,7 +2303,10 @@ export class CSharpParser extends ChunkedParser {
     overlapLines: number
   ): ChunkResult[] {
     const structures = this.extractStructuralContext(content);
-    logger.debug('Extracted structural context', { count: structures.length, structures: structures.slice(0, 5) });
+    logger.debug('Extracted structural context', {
+      count: structures.length,
+      structures: structures.slice(0, 5),
+    });
     const baseChunks = super.splitIntoChunks(content, maxChunkSize, overlapLines);
     logger.debug('Created base chunks', { count: baseChunks.length });
 
