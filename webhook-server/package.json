@@ -8,9 +8,15 @@
     "start": "ts-node webhook-server.ts",
     "dev": "nodemon webhook-server.ts",
     "build": "tsc webhook-server.ts",
+    "tunnel:start": "bash scripts/start-tunnel.sh",
+    "tunnel:stop": "bash scripts/stop-tunnel.sh",
+    "tunnel:status": "bash scripts/check-tunnel.sh",
+    "prepm2:start": "npm run tunnel:start",
     "pm2:start": "pm2 start webhook-server.ts --interpreter ts-node --name compass-webhook",
+    "postpm2:stop": "npm run tunnel:stop",
     "pm2:stop": "pm2 stop compass-webhook",
     "pm2:restart": "pm2 restart compass-webhook",
+    "pm2:restart:full": "npm run pm2:stop && npm run pm2:start",
     "pm2:logs": "pm2 logs compass-webhook"
   },
   "dependencies": {

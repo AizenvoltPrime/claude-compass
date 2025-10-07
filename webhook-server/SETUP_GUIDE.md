@@ -131,16 +131,29 @@ npm install
 npm install -g pm2
 ```
 
-### 3.3 Setup SSH Reverse Tunnel
+### 3.3 Start Webhook Server (Tunnel Auto-Managed)
+
+The SSH tunnel is now **automatically managed** by PM2 commands - no need to start/stop it separately!
 
 ```bash
-# Create tunnel (routes webhooks from Hetzner to WSL)
-# This uses passwordless SSH keys set up in Part 1
-autossh -M 0 -N -f -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -R 3456:localhost:3456 username@HETZNER_IP
+cd ~/Documents/claude-compass/webhook-server
 
-# Verify tunnel is running
-ps aux | grep '[a]utossh'
+# This automatically starts the tunnel, then the webhook server
+npm run pm2:start
+
+# Check status (both PM2 and tunnel)
+pm2 status
+npm run tunnel:status
+
+# Check logs
+pm2 logs compass-webhook --lines 20
 ```
+
+**What happens:**
+1. `npm run pm2:start` automatically runs `prepm2:start` hook
+2. Pre-hook starts SSH tunnel via `scripts/start-tunnel.sh`
+3. PM2 starts the webhook server
+4. Everything runs together seamlessly!
 
 **Test tunnel on Hetzner:**
 
@@ -151,19 +164,15 @@ ss -tlnp | grep 3456
 # Should show port listening on localhost:3456
 ```
 
-### 3.4 Start Webhook Server
+### 3.4 Stop Webhook Server (Tunnel Auto-Stopped)
 
 ```bash
-cd ~/Documents/claude-compass/webhook-server
+# This automatically stops the webhook server, then the tunnel
+npm run pm2:stop
 
-# Start with PM2
-npm run pm2:start
-
-# Check status
-pm2 status
-
-# Check logs
-pm2 logs compass-webhook --lines 20
+# Verify tunnel stopped
+npm run tunnel:status
+# Should show: ✗ SSH tunnel is NOT running
 ```
 
 ### 3.5 Test Setup
@@ -506,23 +515,22 @@ curl -X POST http://localhost:3456/trigger/sync \
 
 ## Part 6: Auto-Start Configuration
 
-### 6.1 Auto-Start Tunnel on WSL Boot
+### 6.1 Auto-Start on WSL Boot (Optional)
+
+Since the tunnel is now integrated with PM2, you only need to auto-start PM2:
 
 ```bash
 # Add to ~/.bashrc
 nano ~/.bashrc
 
-# Add these lines at the end:
-# Auto-start rsync webhook server
+# Add this line at the end:
+# Auto-start webhook server (tunnel starts automatically)
 if ! pm2 show compass-webhook > /dev/null 2>&1; then
   cd ~/Documents/claude-compass/webhook-server && npm run pm2:start
 fi
-
-# Auto-start SSH tunnel (if not using autossh)
-if ! ps aux | grep -q "[a]utossh.*3456"; then
-  autossh -M 0 -N -f -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -R 3456:localhost:3456 username@HETZNER_IP
-fi
 ```
+
+**Note:** The tunnel is automatically managed by `pm2:start` and `pm2:stop`, so you don't need separate tunnel management in bashrc!
 
 ### 6.2 Windows Task Scheduler (Optional)
 
@@ -555,22 +563,26 @@ wsl -d Ubuntu -u YOUR_USERNAME -- bash -c "autossh -M 0 -N -f -o 'ServerAliveInt
 # Check webhook server status
 pm2 status
 
+# Check tunnel status
+npm run tunnel:status
+
 # View logs
 pm2 logs compass-webhook
 pm2 logs compass-webhook --lines 100
 
-# Restart server
+# Restart server only (keeps tunnel running - FAST)
 pm2 restart compass-webhook
+# OR
+npm run pm2:restart
 
-# Stop server
-pm2 stop compass-webhook
+# Full restart (server + tunnel - use for tunnel issues)
+npm run pm2:restart:full
 
-# Check tunnel status
-ps aux | grep '[a]utossh'
+# Stop server and tunnel
+npm run pm2:stop
 
-# Restart tunnel
-pkill autossh
-autossh -M 0 -N -f -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -R 3456:localhost:3456 username@HETZNER_IP
+# Start server and tunnel
+npm run pm2:start
 
 # Check local project size
 du -sh ~/Documents/project_name
@@ -885,15 +897,16 @@ After setup with optimized exclusions, you should see:
 ```bash
 # Status
 pm2 status
-ps aux | grep '[a]utossh'
+npm run tunnel:status
 
 # Logs
 pm2 logs compass-webhook
 tail -f /tmp/compass-webhook.log
 
 # Restart
-pm2 restart compass-webhook
-pkill autossh && autossh -M 0 -N -f -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -R 3456:localhost:3456 username@HETZNER_IP
+npm run pm2:restart              # Quick restart (server only)
+npm run pm2:restart:full         # Full restart (server + tunnel)
+npm run pm2:stop && npm run pm2:start  # Manual full restart
 
 # Test
 curl http://localhost:3456/health
