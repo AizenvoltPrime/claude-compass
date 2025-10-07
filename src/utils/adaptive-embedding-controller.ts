@@ -32,8 +32,10 @@ export class AdaptiveEmbeddingController {
   private isGPU: boolean;
   private lastMemoryCheck: GPUMemoryInfo | null = null;
   private baselineProcessingTime: number | null = null;
+  private gpuMemoryCache: { info: GPUMemoryInfo; timestamp: number } | null = null;
 
   // Thresholds for adaptive decisions
+  private readonly GPU_MEMORY_CACHE_TTL_MS = 2000; // Cache GPU memory for 2 seconds
   private readonly SLOW_BATCH_THRESHOLD_MS = 5000;
   private readonly MEMORY_DANGER_THRESHOLD = 0.90; // 90% GPU memory usage
   private readonly MEMORY_WARNING_THRESHOLD = 0.80; // 80% GPU memory usage
@@ -49,10 +51,16 @@ export class AdaptiveEmbeddingController {
   }
 
   /**
-   * Get current GPU memory usage (CUDA only)
+   * Get current GPU memory usage (CUDA only) with 2-second caching
    */
   private async getGPUMemory(): Promise<GPUMemoryInfo | null> {
     if (!this.isGPU) return null;
+
+    // Return cached value if fresh
+    const now = Date.now();
+    if (this.gpuMemoryCache && now - this.gpuMemoryCache.timestamp < this.GPU_MEMORY_CACHE_TTL_MS) {
+      return this.gpuMemoryCache.info;
+    }
 
     try {
       const { stdout } = await execAsync(
@@ -61,8 +69,12 @@ export class AdaptiveEmbeddingController {
 
       const [used, total, free] = stdout.trim().split(',').map(s => parseInt(s.trim()));
       const utilizationPercent = (used / total) * 100;
+      const info = { used, total, free, utilizationPercent };
 
-      return { used, total, free, utilizationPercent };
+      // Update cache
+      this.gpuMemoryCache = { info, timestamp: now };
+
+      return info;
     } catch (error) {
       // nvidia-smi not available or failed
       return null;
@@ -107,6 +119,58 @@ export class AdaptiveEmbeddingController {
 
     // Short sequences - use current batch size
     return this.currentBatchSize;
+  }
+
+  /**
+   * Single-pass batch preparation: extract texts AND decide batch size in one iteration
+   * Replaces multiple separate map/reduce operations for better performance
+   */
+  public prepareBatch(symbols: any[]): {
+    nameTexts: string[];
+    descriptionTexts: string[];
+    decidedBatchSize: number;
+    finalBatch: any[];
+  } {
+    let sumLength = 0;
+    let maxLength = 0;
+    const maxSymbols = Math.min(symbols.length, this.currentBatchSize);
+
+    const nameTexts: string[] = [];
+    const descriptionTexts: string[] = [];
+
+    // Single pass: extract texts AND calculate statistics
+    for (let i = 0; i < maxSymbols; i++) {
+      const s = symbols[i];
+      nameTexts.push(s.name || '');
+
+      const parts = [];
+      if (s.qualified_name) parts.push(s.qualified_name);
+      if (s.signature) parts.push(s.signature);
+      const desc = parts.join(' ') || s.name || '';
+      descriptionTexts.push(desc);
+
+      const len = desc.length;
+      sumLength += len;
+      if (len > maxLength) maxLength = len;
+    }
+
+    // Decide batch size based on statistics
+    const avgLength = sumLength / nameTexts.length;
+    let decidedBatchSize = this.currentBatchSize;
+
+    if (avgLength > 500 || maxLength > 1500) decidedBatchSize = Math.min(decidedBatchSize, 4);
+    else if (avgLength > 300 || maxLength > 1000) decidedBatchSize = Math.min(decidedBatchSize, 8);
+    else if (avgLength > 150 || maxLength > 500) decidedBatchSize = Math.min(decidedBatchSize, 12);
+
+    // Trim to decided size
+    if (decidedBatchSize < nameTexts.length) {
+      nameTexts.length = decidedBatchSize;
+      descriptionTexts.length = decidedBatchSize;
+    }
+
+    const finalBatch = symbols.slice(0, decidedBatchSize);
+
+    return { nameTexts, descriptionTexts, decidedBatchSize, finalBatch };
   }
 
   /**
@@ -216,6 +280,7 @@ export class AdaptiveEmbeddingController {
     this.metrics.lastResetBatch = this.metrics.totalBatches;
     this.metrics.consecutiveSlowBatches = 0;
     this.lastMemoryCheck = null; // Reset memory baseline
+    this.gpuMemoryCache = null; // Invalidate cache after session reset
   }
 
   /**

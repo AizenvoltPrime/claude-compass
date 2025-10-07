@@ -1096,22 +1096,33 @@ export class GraphBuilder {
       mode: 'adaptive (zero-config: adjusts batch size and session resets based on runtime conditions)',
     });
 
-    // Stream from database in chunks to avoid loading all symbols in memory
+    // Stream from database in chunks with pre-fetching pipeline
     const CHUNK_SIZE = 1000; // Fetch 1000 symbols at a time
     let lastProcessedId = 0;
     let processed = 0;
-    let hasMore = true;
     let chunkIndex = 0;
+    let pendingAdjustment: Promise<any> | null = null;
 
-    while (hasMore) {
-      // Fetch chunk from database using cursor-based pagination
-      const symbols = await this.dbService.getSymbolsForEmbedding(
-        repositoryId,
-        CHUNK_SIZE,
-        lastProcessedId
-      );
+    // Pre-fetch first chunk
+    let currentChunk = await this.dbService.getSymbolsForEmbedding(
+      repositoryId,
+      CHUNK_SIZE,
+      lastProcessedId
+    );
 
-      if (symbols.length === 0) break;
+    while (currentChunk.length > 0) {
+      const symbols = currentChunk;
+
+      // Start pre-fetching NEXT chunk while processing CURRENT chunk
+      let nextChunkPromise: Promise<any[]> | null = null;
+      if (symbols.length === CHUNK_SIZE) {
+        const nextLastProcessedId = Math.max(...symbols.map(s => s.id!));
+        nextChunkPromise = this.dbService.getSymbolsForEmbedding(
+          repositoryId,
+          CHUNK_SIZE,
+          nextLastProcessedId
+        );
+      }
 
       this.logger.info(`Processing chunk ${chunkIndex + 1}`, {
         symbolsInChunk: symbols.length,
@@ -1122,35 +1133,29 @@ export class GraphBuilder {
       // Process chunk in adaptive batches
       let i = 0;
       while (i < symbols.length) {
-        // Check if adaptive adjustment is needed (every 10 batches)
-        if (adaptiveController.getState().totalBatches % 10 === 0) {
-          const adjustment = await adaptiveController.adjustBatchSize();
-          if (adjustment.changed) {
-            this.logger.info('Adaptive batch size adjustment', {
-              oldSize: adaptiveController.getState().currentBatchSize,
-              newSize: adjustment.newBatchSize,
-              reason: adjustment.reason,
-            });
-          }
+        // Non-blocking adaptive adjustment check (every 10 batches)
+        const batchNum = adaptiveController.getState().totalBatches;
+        if (batchNum % 10 === 0 && !pendingAdjustment) {
+          pendingAdjustment = adaptiveController.adjustBatchSize().then(adjustment => {
+            if (adjustment.changed) {
+              this.logger.info('Adaptive batch size adjustment', {
+                newSize: adjustment.newBatchSize,
+                reason: adjustment.reason,
+              });
+            }
+            pendingAdjustment = null;
+            return adjustment;
+          });
         }
 
-        // Get current batch size from adaptive controller
-        const currentAdaptiveBatchSize = adaptiveController.getState().currentBatchSize;
-        const batch = symbols.slice(i, i + currentAdaptiveBatchSize);
+        // Await pending adjustment every 20 batches to apply changes
+        if (pendingAdjustment && batchNum % 20 === 0) {
+          await pendingAdjustment;
+        }
 
-        const nameTexts = batch.map(s => s.name || '');
-        const descriptionTexts = batch.map(s => {
-          const parts = [];
-          if (s.qualified_name) parts.push(s.qualified_name);
-          if (s.signature) parts.push(s.signature);
-          return parts.join(' ') || s.name || '';
-        });
-
-        // Let adaptive controller decide batch size based on text characteristics
-        const decidedBatchSize = adaptiveController.decideBatchSize(descriptionTexts);
-        const finalBatch = batch.slice(0, decidedBatchSize);
-        const finalNameTexts = nameTexts.slice(0, decidedBatchSize);
-        const finalDescriptionTexts = descriptionTexts.slice(0, decidedBatchSize);
+        // Single-pass batch preparation (optimization: 7 operations → 1)
+        const prepared = adaptiveController.prepareBatch(symbols.slice(i));
+        const { nameTexts, descriptionTexts, decidedBatchSize, finalBatch } = prepared;
 
         let batchProcessed = false;
         let retryCount = 0;
@@ -1160,8 +1165,8 @@ export class GraphBuilder {
           try {
             // Generate embeddings sequentially to reduce peak GPU memory usage
             const batchStart = Date.now();
-            const nameEmbeddings = await embeddingService.generateBatchEmbeddings(finalNameTexts);
-            const descriptionEmbeddings = await embeddingService.generateBatchEmbeddings(finalDescriptionTexts);
+            const nameEmbeddings = await embeddingService.generateBatchEmbeddings(nameTexts);
+            const descriptionEmbeddings = await embeddingService.generateBatchEmbeddings(descriptionTexts);
             const batchDuration = Date.now() - batchStart;
 
             // Record processing time for adaptive learning
@@ -1264,11 +1269,12 @@ export class GraphBuilder {
         }  // end retry while loop
       }  // end batch while loop
 
-      // Update cursor position and check if there are more symbols
-      if (symbols.length > 0) {
-        lastProcessedId = Math.max(...symbols.map(s => s.id!));
+      // Fetch next chunk (or wait for pre-fetched chunk)
+      if (nextChunkPromise) {
+        currentChunk = await nextChunkPromise;
+      } else {
+        currentChunk = [];
       }
-      hasMore = symbols.length === CHUNK_SIZE;
       chunkIndex++;
     }
 
