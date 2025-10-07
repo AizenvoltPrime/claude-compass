@@ -458,7 +458,7 @@ For analyzing projects hosted on remote servers (e.g., Hetzner, AWS, VPS), Claud
 ### Architecture
 
 ```
-Remote Server (file changes) → Webhook → SSH Tunnel → WSL → rsync sync → Local Analysis (FAST!)
+Remote Server (file changes) → Webhook → SSH Tunnel (auto-managed) → WSL → rsync sync → Local Analysis (FAST!)
 ```
 
 ### Key Features
@@ -466,6 +466,7 @@ Remote Server (file changes) → Webhook → SSH Tunnel → WSL → rsync sync �
 - ✅ **Real-time file change detection** using inotify on remote server
 - ✅ **Incremental syncing** - only changed files, not entire project
 - ✅ **Optimized exclusions** - skips dependencies, builds, uploads (70-95% smaller sync)
+- ✅ **Integrated tunnel management** - SSH tunnel auto-starts/stops with PM2
 - ✅ **Secure SSH tunneling** - webhooks routed through reverse SSH tunnel
 - ✅ **Automatic analysis** - triggers Claude Compass on file changes
 - ✅ **Production-ready** - systemd services, PM2 process management, security hardening
@@ -473,19 +474,24 @@ Remote Server (file changes) → Webhook → SSH Tunnel → WSL → rsync sync �
 ### Quick Setup
 
 ```bash
-# On WSL: Start webhook server
+# On WSL: Configure and start webhook server (tunnel auto-managed)
 cd webhook-server
 cp .env.example .env
-# Edit .env with your details
+nano .env  # Edit with your remote server details and webhook secret
 npm install
+
+# Start everything (webhook server + SSH tunnel integrated)
 npm run pm2:start
 
-# Setup SSH reverse tunnel
-autossh -M 0 -N -f -o "ServerAliveInterval 30" -R 3456:localhost:3456 user@remote-server
+# Check status
+pm2 status
+npm run tunnel:status
 
 # On Remote Server: Install file watcher
 # See webhook-server/SETUP_GUIDE.md for complete instructions
 ```
+
+**Note:** The SSH tunnel is now automatically managed by PM2 - no need to start/stop it separately!
 
 ### Performance Comparison
 
@@ -522,7 +528,7 @@ We welcome contributions! Please follow these guidelines:
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/your-username/claude-compass.git`
-3. Install dependencies: `npm install --force` (required due to Tree-sitter dependencies)
+3. Install dependencies: `npm install --legacy-peer-deps` (required due to Tree-sitter dependencies)
 4. Set up the database: `npm run docker:up && npm run migrate:latest`
 
 ### Development Workflow
