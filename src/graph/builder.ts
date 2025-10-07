@@ -37,6 +37,7 @@ import { FileSizeManager, FileSizePolicy, DEFAULT_POLICY } from '../config/file-
 import { EncodingConverter } from '../utils/encoding-converter';
 import { CompassIgnore } from '../utils/compassignore';
 import { getEmbeddingService } from '../services/embedding-service';
+import { AdaptiveEmbeddingController } from '../utils/adaptive-embedding-controller';
 
 const logger = createComponentLogger('graph-builder');
 
@@ -1078,31 +1079,29 @@ export class GraphBuilder {
 
     const isGPU = embeddingService.modelInfo.gpu;
 
-    // Read batch size configuration from environment with smart defaults
-    const largeRepoThreshold = parseInt(process.env.EMBEDDING_LARGE_REPO_THRESHOLD || '5000');
-    const isLargeRepo = totalSymbols > largeRepoThreshold;
+    // Initialize adaptive controller with universal safe defaults
+    // The adaptive system will automatically adjust based on runtime conditions:
+    //   - Starts conservative (16 for GPU, 32 for CPU)
+    //   - Increases if memory < 60% and performance is good
+    //   - Decreases if memory > 80% or processing slows down
+    const initialBatchSize = isGPU ? 16 : 32;
+    const adaptiveController = new AdaptiveEmbeddingController(initialBatchSize, isGPU);
 
-    const defaultSmallGPU = 128;
-    const defaultLargeGPU = 64;
-    const defaultSmallCPU = 64;
-    const defaultLargeCPU = 32;
-
-    let BATCH_SIZE: number;
-    if (isGPU) {
-      BATCH_SIZE = isLargeRepo
-        ? parseInt(process.env.EMBEDDING_BATCH_SIZE_GPU_LARGE || String(defaultLargeGPU))
-        : parseInt(process.env.EMBEDDING_BATCH_SIZE_GPU_SMALL || String(defaultSmallGPU));
-    } else {
-      BATCH_SIZE = isLargeRepo
-        ? parseInt(process.env.EMBEDDING_BATCH_SIZE_CPU_LARGE || String(defaultLargeCPU))
-        : parseInt(process.env.EMBEDDING_BATCH_SIZE_CPU_SMALL || String(defaultSmallCPU));
-    }
+    this.logger.info('Starting adaptive embedding generation', {
+      totalSymbols,
+      isGPU,
+      initialBatchSize,
+      modelName: embeddingService.modelInfo.name,
+      modelDimensions: embeddingService.modelInfo.dimensions,
+      mode: 'adaptive (zero-config: adjusts batch size and session resets based on runtime conditions)',
+    });
 
     // Stream from database in chunks to avoid loading all symbols in memory
     const CHUNK_SIZE = 1000; // Fetch 1000 symbols at a time
     let lastProcessedId = 0;
     let processed = 0;
     let hasMore = true;
+    let chunkIndex = 0;
 
     while (hasMore) {
       // Fetch chunk from database using cursor-based pagination
@@ -1114,29 +1113,62 @@ export class GraphBuilder {
 
       if (symbols.length === 0) break;
 
-      // Process chunk in batches
-      for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-        const batch = symbols.slice(i, i + BATCH_SIZE);
-        let currentBatchSize = batch.length;
-        let batchProcessed = false;
+      this.logger.info(`Processing chunk ${chunkIndex + 1}`, {
+        symbolsInChunk: symbols.length,
+        processed,
+        total: totalSymbols,
+      });
 
-        while (!batchProcessed && currentBatchSize > 0) {
-          try {
-            const currentBatch = batch.slice(0, currentBatchSize);
-            const nameTexts = currentBatch.map(s => s.name || '');
-            const descriptionTexts = currentBatch.map(s => {
-              const parts = [];
-              if (s.qualified_name) parts.push(s.qualified_name);
-              if (s.signature) parts.push(s.signature);
-              return parts.join(' ') || s.name || '';
+      // Process chunk in adaptive batches
+      let i = 0;
+      while (i < symbols.length) {
+        // Check if adaptive adjustment is needed (every 10 batches)
+        if (adaptiveController.getState().totalBatches % 10 === 0) {
+          const adjustment = await adaptiveController.adjustBatchSize();
+          if (adjustment.changed) {
+            this.logger.info('Adaptive batch size adjustment', {
+              oldSize: adaptiveController.getState().currentBatchSize,
+              newSize: adjustment.newBatchSize,
+              reason: adjustment.reason,
             });
+          }
+        }
 
-            const [nameEmbeddings, descriptionEmbeddings] = await Promise.all([
-              embeddingService.generateBatchEmbeddings(nameTexts),
-              embeddingService.generateBatchEmbeddings(descriptionTexts),
-            ]);
+        // Get current batch size from adaptive controller
+        const currentAdaptiveBatchSize = adaptiveController.getState().currentBatchSize;
+        const batch = symbols.slice(i, i + currentAdaptiveBatchSize);
 
-            const updates = currentBatch.map((symbol, j) => ({
+        const nameTexts = batch.map(s => s.name || '');
+        const descriptionTexts = batch.map(s => {
+          const parts = [];
+          if (s.qualified_name) parts.push(s.qualified_name);
+          if (s.signature) parts.push(s.signature);
+          return parts.join(' ') || s.name || '';
+        });
+
+        // Let adaptive controller decide batch size based on text characteristics
+        const decidedBatchSize = adaptiveController.decideBatchSize(descriptionTexts);
+        const finalBatch = batch.slice(0, decidedBatchSize);
+        const finalNameTexts = nameTexts.slice(0, decidedBatchSize);
+        const finalDescriptionTexts = descriptionTexts.slice(0, decidedBatchSize);
+
+        let batchProcessed = false;
+        let retryCount = 0;
+        const maxRetries = 3;
+
+        while (!batchProcessed && retryCount < maxRetries) {
+          try {
+            // Generate embeddings sequentially to reduce peak GPU memory usage
+            const batchStart = Date.now();
+            const nameEmbeddings = await embeddingService.generateBatchEmbeddings(finalNameTexts);
+            const descriptionEmbeddings = await embeddingService.generateBatchEmbeddings(finalDescriptionTexts);
+            const batchDuration = Date.now() - batchStart;
+
+            // Record processing time for adaptive learning
+            // Pass actual batch size so controller knows if it was text-reduced
+            adaptiveController.recordBatchTime(batchDuration, decidedBatchSize);
+
+            const updates = finalBatch.map((symbol, j) => ({
               id: symbol.id!,
               nameEmbedding: nameEmbeddings[j],
               descriptionEmbedding: descriptionEmbeddings[j],
@@ -1150,59 +1182,106 @@ export class GraphBuilder {
             nameEmbeddings.length = 0;
             descriptionEmbeddings.length = 0;
 
-            processed += currentBatch.length;
+            processed += finalBatch.length;
+            i += decidedBatchSize;
             batchProcessed = true;
 
+            // Log progress with adaptive state
+            const controllerState = adaptiveController.getState();
             this.logger.debug('Batch embeddings generated', {
               processed,
               total: totalSymbols,
-              batchSize: currentBatchSize,
+              batchSize: decidedBatchSize,
               progress: `${Math.round((processed / totalSymbols) * 100)}%`,
+              adaptiveBatchSize: controllerState.currentBatchSize,
+              batchDurationMs: batchDuration,
             });
-        } catch (error) {
-          const errorMessage = (error as Error).message;
 
-          if (
-            errorMessage.includes('Failed to allocate memory') ||
-            errorMessage.includes('FusedMatMul')
-          ) {
-            currentBatchSize = Math.floor(currentBatchSize / 2);
+            // Adaptive session reset based on runtime conditions
+            const resetDecision = await adaptiveController.shouldResetSession();
+            if (resetDecision.shouldReset && processed < totalSymbols) {
+              const percentComplete = Math.round((processed / totalSymbols) * 100);
+              this.logger.info('Adaptive ONNX session reset triggered', {
+                processed,
+                total: totalSymbols,
+                progress: `${percentComplete}%`,
+                reason: resetDecision.reason,
+                gpuMemory: resetDecision.memoryInfo ? {
+                  used: `${resetDecision.memoryInfo.used}MB`,
+                  total: `${resetDecision.memoryInfo.total}MB`,
+                  utilization: `${resetDecision.memoryInfo.utilizationPercent.toFixed(1)}%`,
+                } : undefined,
+              });
 
-            if (currentBatchSize === 0) {
-              this.logger.error('Failed to generate embeddings even with batch size 1', {
+              const resetStart = Date.now();
+              await embeddingService.dispose();
+              await embeddingService.initialize();
+              adaptiveController.recordSessionReset();
+
+              const resetDuration = Date.now() - resetStart;
+              this.logger.info('ONNX session reset complete', {
+                durationMs: resetDuration,
+              });
+            }
+          } catch (error) {
+            retryCount++;
+            const errorMessage = (error as Error).message;
+
+            if (
+              errorMessage.includes('Failed to allocate memory') ||
+              errorMessage.includes('FusedMatMul')
+            ) {
+              this.logger.warn('GPU OOM detected - adaptive controller will handle', {
+                error: errorMessage,
+                retry: retryCount,
+                maxRetries,
+              });
+
+              // Force immediate session reset to clear GPU memory
+              await embeddingService.dispose();
+              await embeddingService.initialize();
+              adaptiveController.recordSessionReset();
+
+              // Adaptive controller will reduce batch size on next iteration
+              if (retryCount >= maxRetries) {
+                this.logger.error('Failed after retries, skipping batch', {
+                  batchStart: i,
+                  decidedBatchSize,
+                });
+                i += decidedBatchSize; // Skip this batch
+                batchProcessed = true;
+              }
+            } else {
+              this.logger.error('Failed to generate embeddings for batch', {
                 batchStart: i,
+                batchSize: decidedBatchSize,
                 error: errorMessage,
               });
+              i += decidedBatchSize; // Skip this batch
               batchProcessed = true;
-            } else {
-              this.logger.warn('GPU OOM detected, reducing batch size', {
-                previousBatchSize: currentBatchSize * 2,
-                newBatchSize: currentBatchSize,
-                batchStart: i,
-              });
-
-              BATCH_SIZE = Math.min(BATCH_SIZE, currentBatchSize);
             }
-          } else {
-            this.logger.error('Failed to generate embeddings for batch', {
-              batchStart: i,
-              batchSize: currentBatchSize,
-              error: errorMessage,
-            });
-            batchProcessed = true;
           }
-        }
-      }  // end while loop
-      }  // end for loop (batches)
+        }  // end retry while loop
+      }  // end batch while loop
 
       // Update cursor position and check if there are more symbols
       if (symbols.length > 0) {
         lastProcessedId = Math.max(...symbols.map(s => s.id!));
       }
       hasMore = symbols.length === CHUNK_SIZE;
+      chunkIndex++;
     }
 
-    this.logger.info('Embedding generation completed', { symbolsProcessed: processed });
+    // Log final adaptive statistics
+    const finalState = adaptiveController.getState();
+    this.logger.info('Embedding generation completed', {
+      symbolsProcessed: processed,
+      totalBatches: finalState.totalBatches,
+      finalBatchSize: finalState.currentBatchSize,
+      initialBatchSize: finalState.initialBatchSize,
+      baselineProcessingTime: finalState.baselineProcessingTime ? `${Math.round(finalState.baselineProcessingTime)}ms` : 'N/A',
+      recentAvgProcessingTime: finalState.recentAvgProcessingTime ? `${Math.round(finalState.recentAvgProcessingTime)}ms` : 'N/A',
+    });
   }
 
   private async storeFrameworkEntities(
