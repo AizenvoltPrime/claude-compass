@@ -7,7 +7,8 @@
   "scripts": {
     "start": "ts-node webhook-server.ts",
     "dev": "nodemon webhook-server.ts",
-    "build": "tsc webhook-server.ts",
+    "build": "tsc",
+    "sync": "bash scripts/sync-files.sh",
     "tunnel:start": "bash scripts/start-tunnel.sh",
     "tunnel:stop": "bash scripts/stop-tunnel.sh",
     "tunnel:status": "bash scripts/check-tunnel.sh",

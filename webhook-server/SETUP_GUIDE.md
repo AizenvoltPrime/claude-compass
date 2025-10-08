@@ -102,7 +102,7 @@ cp .env.example .env
 nano .env
 ```
 
-**Update these values:**
+**Update these required values:**
 
 ```bash
 WEBHOOK_SECRET=your-super-secret-key-change-this  # Must match Hetzner!
@@ -110,7 +110,34 @@ COMPASS_PATH=/home/YOUR_USERNAME/Documents/claude-compass
 LOCAL_PROJECT_PATH=/home/YOUR_USERNAME/Documents/project_name
 REMOTE_HOST=username@HETZNER_IP
 REMOTE_PROJECT_PATH=/var/www/project_name
-SYNC_STRATEGY=incremental  # Use 'full' for full sync every time (slower but safer)
+```
+
+**Optional configurations:**
+
+```bash
+# File sync strategy (incremental = faster, full = safer)
+SYNC_STRATEGY=incremental
+
+# Analysis configuration
+ENABLE_ANALYSIS=true                    # Set to 'false' to sync files only (no analysis)
+ANALYSIS_FLAGS=--verbose                # Add --skip-embeddings, --force-full, --no-test-files, etc.
+BATCH_DELAY_MS=3000                     # Wait time before processing batched changes (ms)
+```
+
+**Common analysis flag combinations:**
+
+```bash
+# Fast mode (skip semantic search embeddings, 5-10x faster analysis)
+ANALYSIS_FLAGS="--verbose --skip-embeddings"
+
+# Force full re-analysis every time (clears existing data)
+ANALYSIS_FLAGS="--verbose --force-full"
+
+# Skip test files (faster, smaller database)
+ANALYSIS_FLAGS="--verbose --no-test-files"
+
+# Only sync files, no analysis
+ENABLE_ANALYSIS=false
 ```
 
 **IMPORTANT:** Generate a strong webhook secret:
@@ -793,17 +820,26 @@ ssh-add ~/.ssh/id_ed25519
 
 **Result:** 70-95% smaller sync + 10x faster!
 
-### Adjust Batch Delay
+### Adjust Batch Delay and Analysis Settings
 
 ```bash
 # Edit .env
 nano ~/Documents/claude-compass/webhook-server/.env
 
-# Add this line (default is 3000ms):
+# Batch delay (default is 3000ms):
 BATCH_DELAY_MS=10000  # Wait 10 seconds to batch more changes
+
+# Analysis optimization flags:
+ANALYSIS_FLAGS="--verbose --skip-embeddings"  # Skip semantic search (5-10x faster analysis)
+
+# Or disable analysis entirely (sync only):
+ENABLE_ANALYSIS=false  # Only sync files, no analysis
 ```
 
-Restart webhook server after changes.
+Restart webhook server after changes:
+```bash
+npm run pm2:restart:full
+```
 
 ### Add Custom Exclusions
 
