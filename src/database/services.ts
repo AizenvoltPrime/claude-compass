@@ -316,6 +316,31 @@ export class DatabaseService {
     }
   }
 
+  async createFilesBatch(files: CreateFile[]): Promise<File[]> {
+    return await this.db.transaction(async (trx) => {
+      const results: File[] = [];
+
+      for (const data of files) {
+        const existingFile = await trx('files')
+          .where({ repo_id: data.repo_id, path: data.path })
+          .first();
+
+        if (existingFile) {
+          const [file] = await trx('files')
+            .where({ id: existingFile.id })
+            .update({ ...data, updated_at: new Date() })
+            .returning('*');
+          results.push(file as File);
+        } else {
+          const [file] = await trx('files').insert(data).returning('*');
+          results.push(file as File);
+        }
+      }
+
+      return results;
+    });
+  }
+
   async getFile(id: number): Promise<File | null> {
     const file = await this.db('files').where({ id }).first();
     return (file as File) || null;
