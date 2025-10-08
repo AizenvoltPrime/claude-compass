@@ -21,6 +21,8 @@ export interface LoggingConfig {
 export interface McpServerConfig {
   port: number;
   host: string;
+  authToken?: string;
+  defaultRepoName?: string;
 }
 
 export interface Config {
@@ -64,6 +66,8 @@ export const config: Config = {
   mcpServer: {
     port: getEnvVarAsNumber('MCP_SERVER_PORT', 3000),
     host: getEnvVar('MCP_SERVER_HOST', 'localhost'),
+    authToken: process.env.MCP_AUTH_TOKEN,
+    defaultRepoName: process.env.DEFAULT_REPO_NAME,
   },
   nodeEnv: getEnvVar('NODE_ENV', 'development'),
 };
