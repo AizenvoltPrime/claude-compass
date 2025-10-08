@@ -815,20 +815,25 @@ export class LaravelParser extends BaseFrameworkParser {
           // Process routes inside the group
           this.traverseNode(node, innerNode => {
             if (this.isRouteDefinition(innerNode)) {
-              processedNodes.add(innerNode); // Mark as processed to avoid double processing
-              const route = this.parseRouteDefinition(innerNode, filePath, content);
-              if (route) {
-                // Apply group middleware to the route
-                route.middleware = [...groupMiddleware, ...route.middleware];
-                routes.push(route);
+              processedNodes.add(innerNode);
+              const routeDef = this.parseRouteDefinition(innerNode, filePath, content);
+              if (Array.isArray(routeDef)) {
+                routeDef.forEach(route => {
+                  route.middleware = [...groupMiddleware, ...route.middleware];
+                  routes.push(route);
+                });
+              } else if (routeDef) {
+                routeDef.middleware = [...groupMiddleware, ...routeDef.middleware];
+                routes.push(routeDef);
               }
             }
           });
         } else if (this.isRouteDefinition(node) && !processedNodes.has(node)) {
-          // Regular route (not in a group and not already processed)
-          const route = this.parseRouteDefinition(node, filePath, content);
-          if (route) {
-            routes.push(route);
+          const routeDef = this.parseRouteDefinition(node, filePath, content);
+          if (Array.isArray(routeDef)) {
+            routes.push(...routeDef);
+          } else if (routeDef) {
+            routes.push(routeDef);
           }
         }
       });
@@ -879,7 +884,7 @@ export class LaravelParser extends BaseFrameworkParser {
     node: SyntaxNode,
     filePath: string,
     content: string
-  ): LaravelRoute | null {
+  ): LaravelRoute | LaravelRoute[] | null {
     try {
       const method = this.getRouteMethod(node);
       const path = this.getRoutePath(node, content);
@@ -889,7 +894,7 @@ export class LaravelParser extends BaseFrameworkParser {
 
       if (!method || !path) return null;
 
-      return {
+      const route: LaravelRoute = {
         type: 'route',
         name: routeName || `${method.toUpperCase()} ${path}`,
         filePath,
@@ -910,10 +915,66 @@ export class LaravelParser extends BaseFrameworkParser {
           column: node.startPosition.column,
         },
       };
+
+      if (route.metadata.isResource) {
+        return this.expandResourceRoute(route, method);
+      }
+
+      return route;
     } catch (error) {
       logger.warn(`Failed to parse route definition`, { error: error.message });
       return null;
     }
+  }
+
+  private expandResourceRoute(
+    resourceRoute: LaravelRoute,
+    resourceType: string
+  ): LaravelRoute[] {
+    const routes: LaravelRoute[] = [];
+    const basePath = resourceRoute.path;
+    const controller = resourceRoute.controller;
+    const isApiResource = resourceType === 'apiResource';
+
+    const resourceMethods = isApiResource
+      ? ['index', 'store', 'show', 'update', 'destroy']
+      : ['index', 'create', 'store', 'show', 'edit', 'update', 'destroy'];
+
+    const methodMap: Record<string, { method: string; path: string }> = {
+      index: { method: 'GET', path: basePath },
+      create: { method: 'GET', path: `${basePath}/create` },
+      store: { method: 'POST', path: basePath },
+      show: { method: 'GET', path: `${basePath}/{id}` },
+      edit: { method: 'GET', path: `${basePath}/{id}/edit` },
+      update: { method: 'PUT', path: `${basePath}/{id}` },
+      destroy: { method: 'DELETE', path: `${basePath}/{id}` },
+    };
+
+    for (const action of resourceMethods) {
+      const config = methodMap[action];
+      routes.push({
+        type: 'route',
+        name: resourceRoute.routeName ? `${resourceRoute.routeName}.${action}` : null,
+        filePath: resourceRoute.filePath,
+        framework: 'laravel',
+        path: config.path,
+        method: config.method,
+        controller: controller,
+        action: action,
+        middleware: resourceRoute.middleware,
+        routeGroup: resourceRoute.routeGroup,
+        routeName: resourceRoute.routeName ? `${resourceRoute.routeName}.${action}` : null,
+        metadata: {
+          ...resourceRoute.metadata,
+          isResource: false,
+          resourceAction: action,
+          expandedFrom: resourceType,
+          parameters: this.extractRouteParameters(config.path),
+        },
+      });
+    }
+
+    return routes;
   }
 
   // Controller extraction methods
