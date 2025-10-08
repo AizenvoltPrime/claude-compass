@@ -1,4 +1,5 @@
 import Parser from 'tree-sitter';
+import pLimit from 'p-limit';
 import {
   BaseParser,
   ParseResult,
@@ -60,6 +61,7 @@ export interface ChunkedParseOptions extends ParseOptions {
   enableChunking?: boolean;
   chunkSize?: number;
   chunkOverlapLines?: number;
+  chunkConcurrency?: number;
   preserveContext?: boolean;
 }
 
@@ -92,37 +94,39 @@ export abstract class ChunkedParser extends BaseParser {
       // Split content into chunks
       const chunks = this.splitIntoChunks(content, chunkSize, overlapLines);
 
-      // Parse each chunk
-      const chunkResults: ParseResult[] = [];
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+      // Parse each chunk in parallel
+      const concurrency = options?.chunkConcurrency || 5;
+      const limit = pLimit(concurrency);
 
-        try {
-          const chunkResult = await this.parseChunk(chunk, filePath, options);
-          chunkResults.push(chunkResult);
-        } catch (error) {
-          this.logger.warn(`Failed to parse chunk ${i + 1}`, {
-            error: (error as Error).message,
-            chunkIndex: i,
-          });
+      const parsePromises = chunks.map((chunk, i) =>
+        limit(async () => {
+          try {
+            return await this.parseChunk(chunk, filePath, options);
+          } catch (error) {
+            this.logger.warn(`Failed to parse chunk ${i + 1}`, {
+              error: (error as Error).message,
+              chunkIndex: i,
+            });
 
-          // Add error to results but continue with other chunks
-          chunkResults.push({
-            symbols: [],
-            dependencies: [],
-            imports: [],
-            exports: [],
-            errors: [
-              {
-                message: `Chunk parsing failed: ${(error as Error).message}`,
-                line: chunk.startLine,
-                column: 1,
-                severity: 'error',
-              },
-            ],
-          });
-        }
-      }
+            return {
+              symbols: [],
+              dependencies: [],
+              imports: [],
+              exports: [],
+              errors: [
+                {
+                  message: `Chunk parsing failed: ${(error as Error).message}`,
+                  line: chunk.startLine,
+                  column: 1,
+                  severity: 'error' as const,
+                },
+              ],
+            };
+          }
+        })
+      );
+
+      const chunkResults = await Promise.all(parsePromises);
 
       // Merge results from all chunks
       const mergedResult = this.mergeChunkResults(chunkResults, chunks);

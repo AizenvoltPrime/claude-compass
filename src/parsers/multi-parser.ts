@@ -30,6 +30,7 @@ export interface MultiParseOptions extends FrameworkParseOptions {
  */
 export class MultiParser {
   private detector: FrameworkDetector;
+  private frameworkCache: Map<string, FrameworkDetectionResult> = new Map();
 
   constructor() {
     this.detector = new FrameworkDetector();
@@ -51,19 +52,26 @@ export class MultiParser {
       // Get framework detection if not provided
       if (!detectionResult && !options.frameworks) {
         const projectRoot = options.frameworkContext?.projectRoot || this.findProjectRoot(filePath);
-        try {
-          detectionResult = await this.detector.detectFrameworks(projectRoot);
-        } catch (error) {
-          logger.warn(`Framework detection failed for ${filePath}`, { error: error.message });
-          detectionResult = {
-            frameworks: [],
-            metadata: {
-              hasPackageJson: false,
-              hasComposerJson: false,
-              hasConfigFiles: false,
-              directoryStructure: [],
-            },
-          };
+
+        if (this.frameworkCache.has(projectRoot)) {
+          detectionResult = this.frameworkCache.get(projectRoot)!;
+        } else {
+          try {
+            detectionResult = await this.detector.detectFrameworks(projectRoot);
+            this.frameworkCache.set(projectRoot, detectionResult);
+          } catch (error) {
+            logger.warn(`Framework detection failed for ${filePath}`, { error: error.message });
+            detectionResult = {
+              frameworks: [],
+              metadata: {
+                hasPackageJson: false,
+                hasComposerJson: false,
+                hasConfigFiles: false,
+                directoryStructure: [],
+              },
+            };
+            this.frameworkCache.set(projectRoot, detectionResult);
+          }
         }
       }
 
@@ -101,24 +109,22 @@ export class MultiParser {
         return this.createEmptyResult(filePath, []);
       }
 
-      // Parse with each applicable parser
-      const parseResults: { parser: string; result: ParseFileResult }[] = [];
-      const collectedErrors: any[] = [];
-      let primaryResult: ParseFileResult | null = null;
-      let primaryParser = '';
-
-      for (const parserName of applicableParsers) {
+      // Parse with each applicable parser in parallel
+      const parsePromises = applicableParsers.map(async (parserName) => {
         try {
           const parser = ParserFactory.getParser(parserName);
           if (!parser) {
             logger.warn(`Parser not found: ${parserName}`);
-            collectedErrors.push({
-              message: `Parser not found: ${parserName}`,
-              line: 0,
-              column: 0,
-              severity: 'error',
-            });
-            continue;
+            return {
+              parser: parserName,
+              result: null,
+              error: {
+                message: `Parser not found: ${parserName}`,
+                line: 0,
+                column: 0,
+                severity: 'error',
+              },
+            };
           }
 
           let result: ParseFileResult;
@@ -138,34 +144,60 @@ export class MultiParser {
             };
           } else {
             logger.warn(`Unsupported parser type: ${parserName}`);
-            collectedErrors.push({
-              message: `Unsupported parser type: ${parserName}`,
-              line: 0,
-              column: 0,
-              severity: 'warning',
-            });
-            continue;
+            return {
+              parser: parserName,
+              result: null,
+              error: {
+                message: `Unsupported parser type: ${parserName}`,
+                line: 0,
+                column: 0,
+                severity: 'warning',
+              },
+            };
           }
 
-          parseResults.push({ parser: parserName, result });
-
-          // Set primary result (first framework parser or most comprehensive)
-          if (
-            !primaryResult ||
-            this.shouldBePrimary(parserName, result, primaryParser, primaryResult)
-          ) {
-            primaryResult = result;
-            primaryParser = parserName;
-          }
+          return {
+            parser: parserName,
+            result,
+            error: null,
+          };
         } catch (error) {
           const errorMessage = `Parser ${parserName} failed: ${error.message}`;
           logger.error(errorMessage, { filePath, error });
-          collectedErrors.push({
-            message: errorMessage,
-            line: 0,
-            column: 0,
-            severity: 'error',
-          });
+          return {
+            parser: parserName,
+            result: null,
+            error: {
+              message: errorMessage,
+              line: 0,
+              column: 0,
+              severity: 'error',
+            },
+          };
+        }
+      });
+
+      const allResults = await Promise.all(parsePromises);
+
+      const parseResults: { parser: string; result: ParseFileResult }[] = [];
+      const collectedErrors: any[] = [];
+
+      for (const { parser: parserName, result, error } of allResults) {
+        if (error) {
+          collectedErrors.push(error);
+        }
+        if (result) {
+          parseResults.push({ parser: parserName, result });
+        }
+      }
+
+      let primaryResult: ParseFileResult | null = null;
+      let primaryParser = '';
+
+      for (const { parser: parserName, result } of parseResults) {
+        if (!primaryResult || this.shouldBePrimary(parserName, result, primaryParser, primaryResult)) {
+          primaryResult = result;
+          primaryParser = parserName;
         }
       }
 
@@ -421,91 +453,109 @@ export class MultiParser {
   private async mergeParseResults(
     primaryResult: ParseFileResult,
     allResults: Array<{ parser: string; result: ParseFileResult }>,
-    primaryParser: string
+    _primaryParser: string
   ): Promise<ParseFileResult> {
-    const mergedResult = { ...primaryResult };
+    const symbolsMap = new Map<string, any>();
+    const dependenciesMap = new Map<string, any>();
+    const importsMap = new Map<string, any>();
+    const exportsMap = new Map<string, any>();
+    const frameworkEntitiesMap = new Map<string, any>();
 
-    // Collect all symbols, dependencies, imports, exports from all parsers
-    const allSymbols = [...primaryResult.symbols];
-    const allDependencies = [...primaryResult.dependencies];
-    const allImports = [...primaryResult.imports];
-    const allExports = [...primaryResult.exports];
+    const symbolKey = (s: any): string =>
+      `${s.name}:${s.symbol_type}:${s.start_line}:${s.end_line}`;
+
+    const depKey = (d: any): string =>
+      `${d.from_symbol}:${d.to_symbol}:${d.dependency_type}:${d.line_number}`;
+
+    const impKey = (i: any): string => {
+      const names = (i.imported_names || []).slice().sort().join(',');
+      return `${i.source}:${i.import_type}:${i.line_number}:${i.is_dynamic}:${names}`;
+    };
+
+    const expKey = (e: any): string => {
+      const names = (e.exported_names || []).slice().sort().join(',');
+      return `${e.export_type}:${e.source}:${e.line_number}:${names}`;
+    };
+
+    const entityKey = (e: any): string => `${e.type}:${e.name}:${e.filePath}`;
+
+    primaryResult.symbols.forEach(s => symbolsMap.set(symbolKey(s), s));
+    primaryResult.dependencies.forEach(d => dependenciesMap.set(depKey(d), d));
+    primaryResult.imports.forEach(i => importsMap.set(impKey(i), i));
+    primaryResult.exports.forEach(e => exportsMap.set(expKey(e), e));
+    (primaryResult.frameworkEntities || []).forEach(e => frameworkEntitiesMap.set(entityKey(e), e));
+
     const allErrors = [
       ...this.deduplicateErrors(this.filterFalsePositiveErrors(primaryResult.errors)),
     ];
-    const allFrameworkEntities = [...(primaryResult.frameworkEntities || [])];
 
     for (const { result } of allResults) {
-      // Add unique symbols
-      for (const symbol of result.symbols) {
-        if (!allSymbols.some(s => this.symbolsEqual(s, symbol))) {
-          allSymbols.push(symbol);
+      result.symbols.forEach(s => {
+        const key = symbolKey(s);
+        if (!symbolsMap.has(key)) {
+          symbolsMap.set(key, s);
         }
-      }
+      });
 
-      // Add unique dependencies
-      for (const dep of result.dependencies) {
-        if (!allDependencies.some(d => this.dependenciesEqual(d, dep))) {
-          allDependencies.push(dep);
+      result.dependencies.forEach(d => {
+        const key = depKey(d);
+        if (!dependenciesMap.has(key)) {
+          dependenciesMap.set(key, d);
         }
-      }
+      });
 
-      // Add unique imports
-      for (const imp of result.imports) {
-        if (!allImports.some(i => this.importsEqual(i, imp))) {
-          allImports.push(imp);
+      result.imports.forEach(i => {
+        const key = impKey(i);
+        if (!importsMap.has(key)) {
+          importsMap.set(key, i);
         }
-      }
+      });
 
-      // Add unique exports
-      for (const exp of result.exports) {
-        if (!allExports.some(e => this.exportsEqual(e, exp))) {
-          allExports.push(exp);
+      result.exports.forEach(e => {
+        const key = expKey(e);
+        if (!exportsMap.has(key)) {
+          exportsMap.set(key, e);
         }
-      }
+      });
 
-      // Add all errors after filtering false positives and deduplicating
       const filteredErrors = this.deduplicateErrors(this.filterFalsePositiveErrors(result.errors));
       allErrors.push(...filteredErrors);
 
-      // Add framework entities (avoid duplicates)
       if (result.frameworkEntities) {
-        for (const entity of result.frameworkEntities) {
-          if (!allFrameworkEntities.some(e => this.frameworkEntitiesEqual(e, entity))) {
-            allFrameworkEntities.push(entity);
+        result.frameworkEntities.forEach(e => {
+          const key = entityKey(e);
+          if (!frameworkEntitiesMap.has(key)) {
+            frameworkEntitiesMap.set(key, e);
           }
-        }
+        });
       }
     }
 
-    // NEW: Cross-stack relationship detection
     const crossStackRelationships = await this.detectCrossStackRelationships(allResults);
     if (crossStackRelationships.length > 0) {
-      // Add cross-stack dependencies to the merged dependencies array
       for (const relationship of crossStackRelationships) {
-        if (!allDependencies.some(d => this.dependenciesEqual(d, relationship.dependency))) {
-          allDependencies.push(relationship.dependency);
+        const key = depKey(relationship.dependency);
+        if (!dependenciesMap.has(key)) {
+          dependenciesMap.set(key, relationship.dependency);
         }
       }
 
-      // Add cross-stack metadata to frameworkEntities
       for (const relationship of crossStackRelationships) {
-        if (
-          !allFrameworkEntities.some(e => this.frameworkEntitiesEqual(e, relationship.metadata))
-        ) {
-          allFrameworkEntities.push(relationship.metadata);
+        const key = entityKey(relationship.metadata);
+        if (!frameworkEntitiesMap.has(key)) {
+          frameworkEntitiesMap.set(key, relationship.metadata);
         }
       }
     }
 
     return {
       filePath: primaryResult.filePath,
-      symbols: allSymbols,
-      dependencies: allDependencies,
-      imports: allImports,
-      exports: allExports,
-      errors: this.deduplicateErrors(allErrors), // Final deduplication of all collected errors
-      frameworkEntities: allFrameworkEntities,
+      symbols: Array.from(symbolsMap.values()),
+      dependencies: Array.from(dependenciesMap.values()),
+      imports: Array.from(importsMap.values()),
+      exports: Array.from(exportsMap.values()),
+      errors: this.deduplicateErrors(allErrors),
+      frameworkEntities: Array.from(frameworkEntitiesMap.values()),
       metadata: {
         ...primaryResult.metadata,
         ...(crossStackRelationships.length > 0 && {
@@ -592,49 +642,94 @@ export class MultiParser {
     return this.detector.getApplicableFrameworks(filePath, detectionResult);
   }
 
-  /**
-   * Efficient comparison methods for deduplication
-   */
-  private symbolsEqual(a: any, b: any): boolean {
-    return (
-      a.name === b.name &&
-      a.symbol_type === b.symbol_type &&
-      a.start_line === b.start_line &&
-      a.end_line === b.end_line
-    );
-  }
-
-  private dependenciesEqual(a: any, b: any): boolean {
-    return (
-      a.from_symbol === b.from_symbol &&
-      a.to_symbol === b.to_symbol &&
-      a.dependency_type === b.dependency_type &&
-      a.line_number === b.line_number
-    );
-  }
-
-  private importsEqual(a: any, b: any): boolean {
-    return (
-      a.source === b.source &&
-      a.import_type === b.import_type &&
-      a.line_number === b.line_number &&
-      a.is_dynamic === b.is_dynamic &&
-      JSON.stringify(a.imported_names?.sort()) === JSON.stringify(b.imported_names?.sort())
-    );
-  }
-
-  private exportsEqual(a: any, b: any): boolean {
-    return (
-      a.export_type === b.export_type &&
-      a.source === b.source &&
-      a.line_number === b.line_number &&
-      JSON.stringify(a.exported_names?.sort()) === JSON.stringify(b.exported_names?.sort())
-    );
-  }
-
-  private frameworkEntitiesEqual(a: any, b: any): boolean {
-    return a.type === b.type && a.name === b.name && a.filePath === b.filePath;
-  }
+  private static readonly FALSE_POSITIVE_REGEX = new RegExp(
+    [
+      'google\\.maps',
+      'google\\.analytics',
+      'microsoft\\.maps',
+      'parsing error in error: interface',
+      'parsing error in labeled_statement',
+      'parsing error in expression_statement',
+      'parsing error in subscript_expression',
+      'parsing error in identifier:',
+      'syntax errors in vue script section',
+      'parsing error in program',
+      'parsing error in statement_block',
+      'parsing error in sequence_expression',
+      'parsing error in ternary_expression',
+      'parsing error in export_statement',
+      'parsing error in lexical_declaration',
+      'parsing error in variable_declarator',
+      'parsing error in call_expression',
+      'parsing error in arguments',
+      'parsing error in object',
+      'parsing error in pair',
+      'parsing error in member_expression',
+      'parsing error in assignment_expression',
+      'parsing error in arrow_function',
+      'parsing error in function_declaration',
+      'parsing error in template_literal',
+      'parsing error in property_identifier',
+      'parsing error in formal_parameters',
+      'parsing error in parameter',
+      'parsing error in method_definition',
+      'parsing error in class_declaration',
+      'parsing error in if_statement',
+      'parsing error in for_statement',
+      'parsing error in while_statement',
+      'parsing error in try_statement',
+      'parsing error in parenthesized_expression',
+      'parsing error in await_expression',
+      'parsing error in return_statement',
+      'parsing error in binary_expression',
+      'parsing error in unary_expression',
+      'parsing error in update_expression',
+      'parsing error in new_expression',
+      'parsing error in switch_statement',
+      'parsing error in case_clause',
+      'parsing error in default_clause',
+      'parsing error in break_statement',
+      'parsing error in continue_statement',
+      'parsing error in throw_statement',
+      'parsing error in catch_clause',
+      'parsing error in finally_clause',
+      'parsing error in type_annotation',
+      'parsing error in type_arguments',
+      'parsing error in generic_type',
+      'parsing error in union_type',
+      'parsing error in intersection_type',
+      'parsing error in predicate_type',
+      'parsing error in conditional_type',
+      'parsing error in mapped_type_clause',
+      'parsing error in import_statement',
+      'parsing error in import_clause',
+      'parsing error in named_imports',
+      'parsing error in import_specifier',
+      'parsing error in \\):',
+      'parsing error in }: ',
+      'parsing error in ]; ',
+      'parsing error in >:',
+      'parsing error in ,:',
+      'parsing error in ;:',
+      'parsing error in assignment_pattern',
+      'parsing error in array:',
+      'parsing error in array_pattern',
+      'parsing error in object_pattern',
+      'parsing error in rest_pattern',
+      'parsing error in destructuring_pattern',
+      'parsing error in jsx_expression',
+      'parsing error in jsx_element',
+      'parsing error in jsx_fragment',
+      'content too large',
+      'file content too large',
+      'parsing error in error:',
+      'parsing error in error ',
+      'parsing error in identifier: \\n',
+      'parsing error in identifier: ',
+      'parsing error in identifier:\\n',
+    ].join('|'),
+    'i'
+  );
 
   /**
    * Filter out known false positive parsing errors
@@ -642,123 +737,7 @@ export class MultiParser {
   private filterFalsePositiveErrors(errors: any[]): any[] {
     return errors.filter(error => {
       const message = error.message?.toLowerCase() || '';
-
-      // Filter out common false positive patterns
-      const falsePositivePatterns = [
-        // External type definition errors
-        'google.maps',
-        'google.analytics',
-        'microsoft.maps',
-
-        // TypeScript interface parsing issues
-        'parsing error in error: interface',
-        'parsing error in labeled_statement',
-        'parsing error in expression_statement',
-        'parsing error in subscript_expression',
-        'parsing error in identifier:',
-
-        // Vue script section false positives
-        'syntax errors in vue script section',
-
-        // Generic type errors
-        'parsing error in program',
-        'parsing error in statement_block',
-
-        // Complex TypeScript/Vue parsing errors (false positives)
-        'parsing error in sequence_expression',
-        'parsing error in ternary_expression',
-        'parsing error in export_statement',
-        'parsing error in lexical_declaration',
-        'parsing error in variable_declarator',
-        'parsing error in call_expression',
-        'parsing error in arguments',
-        'parsing error in object',
-        'parsing error in pair',
-        'parsing error in member_expression',
-        'parsing error in assignment_expression',
-        'parsing error in arrow_function',
-        'parsing error in function_declaration',
-        'parsing error in template_literal',
-        'parsing error in property_identifier',
-        'parsing error in formal_parameters',
-        'parsing error in parameter',
-        'parsing error in method_definition',
-        'parsing error in class_declaration',
-        'parsing error in if_statement',
-        'parsing error in for_statement',
-        'parsing error in while_statement',
-        'parsing error in try_statement',
-
-        // Final remaining patterns to achieve zero errors
-        'parsing error in parenthesized_expression',
-        'parsing error in await_expression',
-        'parsing error in return_statement',
-        'parsing error in binary_expression',
-        'parsing error in unary_expression',
-        'parsing error in update_expression',
-        'parsing error in new_expression',
-        'parsing error in switch_statement',
-        'parsing error in case_clause',
-        'parsing error in default_clause',
-        'parsing error in break_statement',
-        'parsing error in continue_statement',
-        'parsing error in throw_statement',
-        'parsing error in catch_clause',
-        'parsing error in finally_clause',
-        'parsing error in type_annotation',
-        'parsing error in type_arguments',
-        'parsing error in generic_type',
-        'parsing error in union_type',
-        'parsing error in intersection_type',
-        'parsing error in predicate_type',
-        'parsing error in conditional_type',
-        'parsing error in mapped_type_clause',
-        'parsing error in import_statement',
-        'parsing error in import_clause',
-        'parsing error in named_imports',
-        'parsing error in import_specifier',
-
-        // Single character or minimal parsing errors
-        'parsing error in ):',
-        'parsing error in }: ',
-        'parsing error in ]; ',
-        'parsing error in >:',
-        'parsing error in ,:',
-        'parsing error in ;:',
-
-        // Final TypeScript-specific patterns
-        'parsing error in assignment_pattern',
-        'parsing error in array:',
-        'parsing error in array_pattern',
-        'parsing error in object_pattern',
-        'parsing error in rest_pattern',
-        'parsing error in destructuring_pattern',
-        'parsing error in jsx_expression',
-        'parsing error in jsx_element',
-        'parsing error in jsx_fragment',
-
-        // Size-related errors that are actually defensive warnings
-        'content too large',
-        'file content too large',
-
-        // Generic parsing errors that are likely false positives
-        'parsing error in error:',
-        'parsing error in error ',
-
-        // Empty or minimal errors that provide no value
-        'parsing error in identifier: \n',
-        'parsing error in identifier: ',
-        'parsing error in identifier:\n',
-      ];
-
-      // Check if error message contains any false positive pattern
-      const isFalsePositive = falsePositivePatterns.some(pattern => message.includes(pattern));
-
-      if (isFalsePositive) {
-        return false;
-      }
-
-      return true;
+      return !MultiParser.FALSE_POSITIVE_REGEX.test(message);
     });
   }
 

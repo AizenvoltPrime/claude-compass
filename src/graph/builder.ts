@@ -994,42 +994,48 @@ export class GraphBuilder {
     files: Array<{ path: string }>,
     parseResults: Array<ParseResult & { filePath: string }>
   ): Promise<File[]> {
-    const dbFiles: File[] = [];
+    const statsPromises = files.map((file, i) => {
+      if (!parseResults[i]) return Promise.resolve(null);
+
+      return fs.stat(file.path).catch(error => {
+        this.logger.error('Failed to stat file', {
+          path: file.path,
+          error: (error as Error).message
+        });
+        return null;
+      });
+    });
+
+    const allStats = await Promise.all(statsPromises);
+
+    const createFiles: CreateFile[] = [];
+    const validIndices: number[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      const stats = allStats[i];
       const parseResult = parseResults[i];
 
-      // Skip files only if no parse result exists, but allow files with parsing errors
-      // to be stored (especially framework-specific files like .prisma, .vue, etc.)
-      if (!parseResult) {
+      if (!parseResult || !stats) {
         continue;
       }
 
-      try {
-        const stats = await fs.stat(file.path);
-        const language = this.detectLanguageFromPath(file.path);
+      const language = this.detectLanguageFromPath(file.path);
 
-        const createFile: CreateFile = {
-          repo_id: repositoryId,
-          path: file.path,
-          language,
-          size: stats.size,
-          last_modified: stats.mtime,
-          is_generated: this.isGeneratedFile(file.path),
-          is_test: this.isTestFile(file.path),
-        };
+      createFiles.push({
+        repo_id: repositoryId,
+        path: file.path,
+        language,
+        size: stats.size,
+        last_modified: stats.mtime,
+        is_generated: this.isGeneratedFile(file.path),
+        is_test: this.isTestFile(file.path),
+      });
 
-        const dbFile = await this.dbService.createFile(createFile);
-        dbFiles.push(dbFile);
-      } catch (error) {
-        this.logger.error('Failed to store file', {
-          path: file.path,
-          error: (error as Error).message,
-        });
-      }
+      validIndices.push(i);
     }
 
+    const dbFiles = await this.dbService.createFilesBatch(createFiles);
     return dbFiles;
   }
 

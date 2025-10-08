@@ -304,149 +304,20 @@ export class PHPParser extends ChunkedParser {
     return { symbols, dependencies, imports, exports };
   }
 
-  protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
-    const symbols: ParsedSymbol[] = [];
-
-    // Extract namespace declarations
-    const namespaceNodes = this.findNodesOfType(rootNode, 'namespace_definition');
-    for (const node of namespaceNodes) {
-      const symbol = this.extractNamespaceSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract class declarations
-    const classNodes = this.findNodesOfType(rootNode, 'class_declaration');
-    for (const node of classNodes) {
-      const symbol = this.extractClassSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract interface declarations
-    const interfaceNodes = this.findNodesOfType(rootNode, 'interface_declaration');
-    for (const node of interfaceNodes) {
-      const symbol = this.extractInterfaceSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract trait declarations
-    const traitNodes = this.findNodesOfType(rootNode, 'trait_declaration');
-    for (const node of traitNodes) {
-      const symbol = this.extractTraitSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract function declarations
-    const functionNodes = this.findNodesOfType(rootNode, 'function_definition');
-    for (const node of functionNodes) {
-      const symbol = this.extractFunctionSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract method declarations
-    const methodNodes = this.findNodesOfType(rootNode, 'method_declaration');
-    for (const node of methodNodes) {
-      const symbol = this.extractMethodSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract property declarations
-    const propertyNodes = this.findNodesOfType(rootNode, 'property_declaration');
-    for (const node of propertyNodes) {
-      const symbols_from_props = this.extractPropertySymbols(node, content);
-      symbols.push(...symbols_from_props);
-    }
-
-    // Extract constants
-    const constNodes = this.findNodesOfType(rootNode, 'const_declaration');
-    for (const node of constNodes) {
-      const symbols_from_consts = this.extractConstantSymbols(node, content);
-      symbols.push(...symbols_from_consts);
-    }
-
-    return symbols;
+  protected extractSymbols(_rootNode: Parser.SyntaxNode, _content: string): ParsedSymbol[] {
+    return [];
   }
 
-  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
-    const dependencies: ParsedDependency[] = [];
-
-    // Extract function calls
-    const callNodes = this.findNodesOfType(rootNode, 'function_call_expression');
-    for (const node of callNodes) {
-      const dependency = this.extractCallDependency(node, content);
-      if (dependency) dependencies.push(dependency);
-    }
-
-    // Extract method calls
-    const methodCallNodes = this.findNodesOfType(rootNode, 'member_call_expression');
-    for (const node of methodCallNodes) {
-      const dependency = this.extractMethodCallDependency(node, content);
-      if (dependency) dependencies.push(dependency);
-    }
-
-    // Extract static method calls (scoped_call_expression)
-    const scopedCallNodes = this.findNodesOfType(rootNode, 'scoped_call_expression');
-    for (const node of scopedCallNodes) {
-      const dependency = this.extractScopedCallDependency(node, content);
-      if (dependency) dependencies.push(dependency);
-    }
-
-    // Extract class instantiations (new expressions)
-    const newNodes = this.findNodesOfType(rootNode, 'object_creation_expression');
-    for (const node of newNodes) {
-      const dependency = this.extractNewDependency(node, content);
-      if (dependency) dependencies.push(dependency);
-    }
-
-    return dependencies;
+  protected extractDependencies(_rootNode: Parser.SyntaxNode, _content: string): ParsedDependency[] {
+    return [];
   }
 
-  protected extractImports(rootNode: Parser.SyntaxNode, content: string): ParsedImport[] {
-    const imports: ParsedImport[] = [];
-
-    // Extract use statements (namespace imports)
-    const useNodes = this.findNodesOfType(rootNode, 'namespace_use_declaration');
-    for (const node of useNodes) {
-      const importInfo = this.extractUseStatement(node, content);
-      if (importInfo) imports.push(importInfo);
-    }
-
-    // Extract require/include statements
-    const includeNodes = this.findIncludeStatements(rootNode, content);
-    imports.push(...includeNodes);
-
-    return imports;
+  protected extractImports(_rootNode: Parser.SyntaxNode, _content: string): ParsedImport[] {
+    return [];
   }
 
-  protected extractExports(rootNode: Parser.SyntaxNode, content: string): ParsedExport[] {
-    const exports: ParsedExport[] = [];
-
-    // In PHP, exports are typically class/function declarations that are publicly accessible
-    // We'll mark classes, interfaces, traits, and functions as exports if they're public
-    const classNodes = this.findNodesOfType(rootNode, 'class_declaration');
-    for (const node of classNodes) {
-      const exportInfo = this.extractClassExport(node, content);
-      if (exportInfo) exports.push(exportInfo);
-    }
-
-    const interfaceNodes = this.findNodesOfType(rootNode, 'interface_declaration');
-    for (const node of interfaceNodes) {
-      const exportInfo = this.extractInterfaceExport(node, content);
-      if (exportInfo) exports.push(exportInfo);
-    }
-
-    const traitNodes = this.findNodesOfType(rootNode, 'trait_declaration');
-    for (const node of traitNodes) {
-      const exportInfo = this.extractTraitExport(node, content);
-      if (exportInfo) exports.push(exportInfo);
-    }
-
-    const functionNodes = this.findNodesOfType(rootNode, 'function_definition');
-    for (const node of functionNodes) {
-      const exportInfo = this.extractFunctionExport(node, content);
-      if (exportInfo) exports.push(exportInfo);
-    }
-
-    return exports;
+  protected extractExports(_rootNode: Parser.SyntaxNode, _content: string): ParsedExport[] {
+    return [];
   }
 
   private extractNamespaceSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {

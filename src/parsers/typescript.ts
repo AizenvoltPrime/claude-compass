@@ -69,24 +69,6 @@ export class TypeScriptParser extends JavaScriptParser {
           if (symbol) tsSymbols.push(symbol);
           break;
         }
-        case 'class_declaration': {
-          const modifiers = this.extractModifiers(node, content);
-          if (modifiers.includes('abstract')) {
-            const nameNode = node.childForFieldName('name');
-            if (nameNode) {
-              const name = this.getNodeText(nameNode, content);
-              tsSymbols.push({
-                name,
-                symbol_type: SymbolType.CLASS,
-                start_line: node.startPosition.row + 1,
-                end_line: node.endPosition.row + 1,
-                is_exported: this.isSymbolExported(node, name, content),
-                visibility: this.getVisibilityFromModifiers(modifiers),
-              });
-            }
-          }
-          break;
-        }
         case 'method_signature': {
           const nameNode = node.childForFieldName('name');
           if (nameNode) {
@@ -120,52 +102,6 @@ export class TypeScriptParser extends JavaScriptParser {
     };
   }
 
-  protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
-    const symbols = super.extractSymbols(rootNode, content);
-
-    // Add TypeScript-specific symbols
-    symbols.push(...this.extractTypeScriptSymbols(rootNode, content));
-
-    return symbols;
-  }
-
-  private extractTypeScriptSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
-    const symbols: ParsedSymbol[] = [];
-
-    // Extract interfaces
-    const interfaceNodes = this.findNodesOfType(rootNode, 'interface_declaration');
-    for (const node of interfaceNodes) {
-      const symbol = this.extractInterfaceSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract type aliases
-    const typeNodes = this.findNodesOfType(rootNode, 'type_alias_declaration');
-    for (const node of typeNodes) {
-      const symbol = this.extractTypeAliasSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract enums
-    const enumNodes = this.findNodesOfType(rootNode, 'enum_declaration');
-    for (const node of enumNodes) {
-      const symbol = this.extractEnumSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract decorators
-    const decoratorNodes = this.findNodesOfType(rootNode, 'decorator');
-    for (const node of decoratorNodes) {
-      const symbol = this.extractDecoratorSymbol(node, content);
-      if (symbol) symbols.push(symbol);
-    }
-
-    // Extract abstract classes and methods
-    const abstractNodes = this.findAbstractSymbols(rootNode, content);
-    symbols.push(...abstractNodes);
-
-    return symbols;
-  }
 
   private extractInterfaceSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
@@ -215,54 +151,6 @@ export class TypeScriptParser extends JavaScriptParser {
     };
   }
 
-  private extractDecoratorSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
-    // Decorators are typically not symbols themselves, but they modify other symbols
-    // We might want to track them for dependency analysis
-    return null;
-  }
-
-  private findAbstractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
-    const symbols: ParsedSymbol[] = [];
-
-    // Find abstract classes
-    const classNodes = this.findNodesOfType(rootNode, 'class_declaration');
-    for (const node of classNodes) {
-      const modifiers = this.extractModifiers(node, content);
-      if (modifiers.includes('abstract')) {
-        const nameNode = node.childForFieldName('name');
-        if (nameNode) {
-          const name = this.getNodeText(nameNode, content);
-          symbols.push({
-            name,
-            symbol_type: SymbolType.CLASS,
-            start_line: node.startPosition.row + 1,
-            end_line: node.endPosition.row + 1,
-            is_exported: this.isSymbolExported(node, name, content),
-            visibility: this.getVisibilityFromModifiers(modifiers)
-          });
-        }
-      }
-    }
-
-    // Find abstract methods
-    const methodNodes = this.findNodesOfType(rootNode, 'method_signature');
-    for (const node of methodNodes) {
-      const nameNode = node.childForFieldName('name');
-      if (nameNode) {
-        const name = this.getNodeText(nameNode, content);
-        symbols.push({
-          name,
-          symbol_type: SymbolType.METHOD,
-          start_line: node.startPosition.row + 1,
-          end_line: node.endPosition.row + 1,
-          is_exported: false,
-          signature: this.getNodeText(node, content)
-        });
-      }
-    }
-
-    return symbols;
-  }
 
   private extractInterfaceSignature(node: Parser.SyntaxNode, content: string): string {
     const nameNode = node.childForFieldName('name');

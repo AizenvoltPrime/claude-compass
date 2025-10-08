@@ -68,6 +68,12 @@ export interface VueTypeInterface extends FrameworkEntity {
 export class VueParser extends BaseFrameworkParser {
   private typescriptParser: Parser;
   private extractedSymbols: ParsedSymbol[] = [];
+  private singlePassCache: {
+    symbols: ParsedSymbol[];
+    dependencies: ParsedDependency[];
+    imports: any[];
+  } | null = null;
+  private singlePassCacheKey: string = '';
 
   constructor(parser: Parser) {
     super(parser, 'vue');
@@ -4031,22 +4037,82 @@ export class VueParser extends BaseFrameworkParser {
     return ['.vue', '.js', '.ts'];
   }
 
-  /**
-   * Extract symbols from AST
-   */
-  protected extractSymbols(rootNode: any, content: string): any[] {
+  protected performSinglePassExtraction(rootNode: any, content: string): {
+    symbols: ParsedSymbol[];
+    dependencies: ParsedDependency[];
+    imports: any[];
+  } {
     const symbols: any[] = [];
+    const dependencies: ParsedDependency[] = [];
+    const imports: any[] = [];
 
-    if (!rootNode) return symbols;
+    if (!rootNode) return { symbols, dependencies, imports };
 
     const traverse = (node: any) => {
+      // Handle imports first
+      if (node.type === 'import_statement') {
+        let source = '';
+        const importedNames: string[] = [];
+        let importType: 'named' | 'default' | 'namespace' | 'side_effect' = 'side_effect';
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child?.type === 'string') {
+            const stringFragment = child.child(1);
+            if (stringFragment?.type === 'string_fragment') {
+              source = stringFragment.text;
+            } else {
+              source = child.text.replace(/^['"]|['"]$/g, '');
+            }
+          }
+          if (child?.type === 'import_clause') {
+            for (let j = 0; j < child.childCount; j++) {
+              const clauseChild = child.child(j);
+              if (clauseChild?.type === 'named_imports') {
+                importType = 'named';
+                for (let k = 0; k < clauseChild.childCount; k++) {
+                  const importSpecifier = clauseChild.child(k);
+                  if (importSpecifier?.type === 'import_specifier') {
+                    const nameNode = importSpecifier.child(0);
+                    if (nameNode?.type === 'identifier') {
+                      importedNames.push(nameNode.text);
+                    }
+                  }
+                }
+              } else if (clauseChild?.type === 'identifier') {
+                importType = 'default';
+                importedNames.push(clauseChild.text);
+              }
+            }
+          }
+        }
+
+        if (source) {
+          imports.push({
+            source,
+            import_type: importType,
+            line_number: node.startPosition?.row + 1 || 1,
+            is_dynamic: false,
+            imported_names: importedNames.length > 0 ? importedNames : undefined,
+          });
+        }
+      }
+
+      // Handle dependencies (call expressions)
+      if (node.type === 'call_expression') {
+        const dependency = this.extractCallDependency(node, content);
+        if (dependency) {
+          dependency.dependency_type = DependencyType.CALLS;
+          dependencies.push(dependency);
+        }
+      }
+
       // Variable declarations: const title = ref(...) or lexical_declaration containing variable_declarator
       if (node.type === 'variable_declarator') {
         const nameNode = node.child(0);
         const valueNode = node.child(2);
 
         if (nameNode?.text) {
-          // Check if the value is an arrow function
           if (valueNode?.type === 'arrow_function') {
             symbols.push({
               name: nameNode.text,
@@ -4093,7 +4159,6 @@ export class VueParser extends BaseFrameworkParser {
       }
 
       // Interface declarations: interface User {}
-      // Handle both proper interface_declaration and ERROR nodes from JS parser on TS
       if (
         node.type === 'interface_declaration' ||
         (node.type === 'ERROR' && node.text.startsWith('interface '))
@@ -4101,9 +4166,8 @@ export class VueParser extends BaseFrameworkParser {
         let nameNode = null;
 
         if (node.type === 'interface_declaration') {
-          nameNode = node.child(1); // interface keyword, then name
+          nameNode = node.child(1);
         } else if (node.type === 'ERROR') {
-          // Handle ERROR pattern: ERROR { identifier: "interface", identifier: "Name" }
           for (let i = 0; i < node.childCount; i++) {
             const child = node.child(i);
             if (child?.type === 'identifier' && child.text !== 'interface') {
@@ -4127,7 +4191,7 @@ export class VueParser extends BaseFrameworkParser {
 
       // Type alias declarations: type UserType = ...
       if (node.type === 'type_alias_declaration') {
-        const nameNode = node.child(1); // type keyword, then name
+        const nameNode = node.child(1);
         if (nameNode?.text) {
           symbols.push({
             name: nameNode.text,
@@ -4142,7 +4206,7 @@ export class VueParser extends BaseFrameworkParser {
 
       // Class declarations: class MyClass {}
       if (node.type === 'class_declaration') {
-        const nameNode = node.child(1); // class keyword, then name
+        const nameNode = node.child(1);
         if (nameNode?.text) {
           symbols.push({
             name: nameNode.text,
@@ -4155,13 +4219,12 @@ export class VueParser extends BaseFrameworkParser {
         }
       }
 
-      // Vue Composition API lifecycle hooks and callbacks: onMounted(() => {}), watch(() => {}), etc.
+      // Vue Composition API lifecycle hooks and callbacks
       if (node.type === 'call_expression') {
         const functionNode = node.childForFieldName('function');
         if (functionNode && functionNode.type === 'identifier') {
           const functionName = functionNode.text;
 
-          // Check if this is a Vue lifecycle hook or composable that takes a callback
           const vueCallbacks = [
             'onMounted',
             'onUnmounted',
@@ -4181,7 +4244,6 @@ export class VueParser extends BaseFrameworkParser {
           ];
 
           if (vueCallbacks.includes(functionName)) {
-            // Find callback function in arguments
             const argumentsNode = node.childForFieldName('arguments');
             if (argumentsNode) {
               for (let i = 0; i < argumentsNode.childCount; i++) {
@@ -4217,30 +4279,39 @@ export class VueParser extends BaseFrameworkParser {
 
     traverse(rootNode);
 
-    // Store extracted symbols for use in dependency extraction
     this.extractedSymbols = symbols;
 
-    return symbols;
+    return { symbols, dependencies, imports };
   }
 
   /**
-   * Extract dependencies from AST
+   * Extract symbols from AST - uses cached single-pass result
    */
-  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
-    const dependencies: ParsedDependency[] = [];
-
-    // Extract function calls including method calls on stores/composables
-    const callNodes = this.findNodesOfType(rootNode, 'call_expression');
-    for (const node of callNodes) {
-      const dependency = this.extractCallDependency(node, content);
-      if (dependency) {
-        // Override the dependency type to use proper enum
-        dependency.dependency_type = DependencyType.CALLS;
-        dependencies.push(dependency);
-      }
+  protected extractSymbols(rootNode: any, content: string): any[] {
+    const cacheKey = `${rootNode ? rootNode.id : 'null'}_${content.length}`;
+    if (this.singlePassCacheKey !== cacheKey || !this.singlePassCache) {
+      this.singlePassCache = this.performSinglePassExtraction(rootNode, content);
+      this.singlePassCacheKey = cacheKey;
     }
+    return this.singlePassCache.symbols;
+  }
 
-    return dependencies;
+  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
+    const cacheKey = `${rootNode ? rootNode.id : 'null'}_${content.length}`;
+    if (this.singlePassCacheKey !== cacheKey || !this.singlePassCache) {
+      this.singlePassCache = this.performSinglePassExtraction(rootNode, content);
+      this.singlePassCacheKey = cacheKey;
+    }
+    return this.singlePassCache.dependencies;
+  }
+
+  protected extractImports(rootNode: any, content: string): any[] {
+    const cacheKey = `${rootNode ? rootNode.id : 'null'}_${content.length}`;
+    if (this.singlePassCacheKey !== cacheKey || !this.singlePassCache) {
+      this.singlePassCache = this.performSinglePassExtraction(rootNode, content);
+      this.singlePassCacheKey = cacheKey;
+    }
+    return this.singlePassCache.imports;
   }
 
   /**
@@ -4321,124 +4392,7 @@ export class VueParser extends BaseFrameworkParser {
     return candidateSymbols[0].name;
   }
 
-  /**
-   * Extract imports from AST
-   */
-  protected extractImports(rootNode: any, content: string): any[] {
-    const imports: any[] = [];
-
-    if (!rootNode) return imports;
-
-    const traverse = (node: any) => {
-      // Import statements: import { ref, computed } from 'vue'
-      if (node.type === 'import_statement') {
-        let source = '';
-        const importedNames: string[] = [];
-        let importType: 'named' | 'default' | 'namespace' | 'side_effect' = 'side_effect';
-
-        // Find source (from 'vue')
-        for (let i = 0; i < node.childCount; i++) {
-          const child = node.child(i);
-          if (child?.type === 'string') {
-            // Extract text from string node (includes children: ', string_fragment, ')
-            const stringFragment = child.child(1);
-            if (stringFragment?.type === 'string_fragment') {
-              source = stringFragment.text;
-            } else {
-              source = child.text.replace(/['"]/g, '');
-            }
-            break;
-          }
-        }
-
-        // Find import clause and extract named imports
-        for (let i = 0; i < node.childCount; i++) {
-          const child = node.child(i);
-
-          if (child?.type === 'import_clause') {
-            // Look for named_imports inside import_clause
-            for (let j = 0; j < child.childCount; j++) {
-              const clauseChild = child.child(j);
-              if (clauseChild?.type === 'named_imports') {
-                importType = 'named';
-
-                // Extract import specifiers from named_imports
-                for (let k = 0; k < clauseChild.childCount; k++) {
-                  const specChild = clauseChild.child(k);
-                  if (specChild?.type === 'import_specifier') {
-                    // Get identifier from import_specifier
-                    for (let l = 0; l < specChild.childCount; l++) {
-                      const identChild = specChild.child(l);
-                      if (identChild?.type === 'identifier') {
-                        importedNames.push(identChild.text);
-                      }
-                    }
-                  }
-                }
-              } else if (clauseChild?.type === 'namespace_import') {
-                importType = 'namespace';
-                // Namespace import: * as Vue
-                const asNode = clauseChild.child(2);
-                if (asNode?.text) {
-                  importedNames.push(asNode.text);
-                }
-              } else if (clauseChild?.type === 'identifier') {
-                importType = 'default';
-                // Default import: import Vue
-                importedNames.push(clauseChild.text);
-              }
-            }
-          }
-        }
-
-        if (source) {
-          imports.push({
-            source,
-            imported_names: importedNames,
-            import_type: importType,
-            line_number: node.startPosition?.row + 1 || 1,
-            is_dynamic: false,
-          });
-        }
-      }
-
-      // Dynamic imports: import('vue')
-      if (node.type === 'call_expression') {
-        const functionNode = node.child(0);
-        if (functionNode?.text === 'import') {
-          const argsNode = node.child(1);
-          const sourceArg = argsNode?.child(1);
-          if (sourceArg?.type === 'string') {
-            const source = sourceArg.text.replace(/['"]/g, '');
-            imports.push({
-              source,
-              imported_names: [],
-              import_type: 'side_effect',
-              line_number: node.startPosition?.row + 1 || 1,
-              is_dynamic: true,
-            });
-          }
-        }
-      }
-
-      // Traverse children
-      for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (child) {
-          traverse(child);
-        }
-      }
-    };
-
-    traverse(rootNode);
-    return imports;
-  }
-
-  /**
-   * Extract exports from AST
-   */
-  protected extractExports(rootNode: any, content: string): any[] {
-    // For Vue, exports are handled in detectFrameworkEntities
+  protected extractExports(_rootNode: any, _content: string): any[] {
     return [];
   }
 
