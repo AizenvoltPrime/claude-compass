@@ -319,11 +319,18 @@ npm run db:clear:docker                       # Clear database with Docker reset
 ./dist/src/cli/index.js clear <repository-name> --yes
 
 # Start MCP server for AI integration
-npm run mcp-server
+npm run mcp-server                         # STDIO mode (for Claude Desktop)
+npm run mcp-http                           # HTTP mode (for remote access)
+npm run mcp-unified                        # Unified mode (webhook + MCP + auto SSH tunnel)
 
 # Test framework detection and parsing
 npm test
 ```
+
+**Server Modes:**
+- **`mcp-server`** - STDIO transport for local Claude Desktop integration
+- **`mcp-http`** - HTTP transport for remote MCP clients (manual tunnel setup)
+- **`mcp-unified`** - Combined webhook + MCP server with automatic SSH tunnel (recommended for remote development)
 
 **📚 For detailed setup instructions, troubleshooting, and advanced features, see [GETTING_STARTED.md](./GETTING_STARTED.md)**
 
@@ -447,71 +454,128 @@ const callers = await mcpClient.callTool('who_calls', {
 
 ## Remote Analysis Setup
 
-For analyzing projects hosted on remote servers (e.g., Hetzner, AWS, VPS), Claude Compass includes a webhook-based sync system that enables **real-time incremental analysis** with 10x performance improvement over network-mounted filesystems.
+For analyzing projects hosted on remote servers (e.g., Hetzner, AWS, VPS), Claude Compass includes a **unified server** that combines webhook-based file sync with MCP server functionality, enabling **real-time incremental analysis** with 10x performance improvement over network-mounted filesystems.
 
 ### Use Case
 
 **Problem:** Analyzing code over SSHFS or network mounts is slow (10-30 seconds per analysis) due to network I/O latency.
 
-**Solution:** The webhook server syncs only source files to local WSL using rsync, then analyzes locally for 10x faster performance (1-3 seconds per analysis).
+**Solution:** The unified server syncs only source files to local WSL using rsync, then analyzes locally for 10x faster performance (1-3 seconds per analysis). It also provides MCP tools for AI assistant integration - all on a single port.
 
 ### Architecture
 
 ```
-Remote Server (file changes) → Webhook → SSH Tunnel (auto-managed) → WSL → rsync sync → Local Analysis (FAST!)
+Remote Server (file changes) → Webhook → SSH Tunnel (auto-managed) → WSL Unified Server → rsync sync → Local Analysis (FAST!)
+                                                                      ↓
+                                                                   MCP Tools (AI Integration)
 ```
 
 ### Key Features
 
+- ✅ **Unified server** - Webhook + MCP on single port (3456)
+- ✅ **Automatic SSH tunnel** - Auto-creates reverse tunnel on startup
 - ✅ **Real-time file change detection** using inotify on remote server
 - ✅ **Incremental syncing** - only changed files, not entire project
-- ✅ **Manual sync recovery** - `npm run sync` for quick resync when out of sync
 - ✅ **Optimized exclusions** - skips dependencies, builds, uploads (70-95% smaller sync)
-- ✅ **Integrated tunnel management** - SSH tunnel auto-starts/stops with PM2
-- ✅ **Secure SSH tunneling** - webhooks routed through reverse SSH tunnel
+- ✅ **Auto-reconnect** - SSH tunnel reconnects automatically if dropped
 - ✅ **Automatic analysis** - triggers Claude Compass on file changes
-- ✅ **Production-ready** - systemd services, PM2 process management, security hardening
+- ✅ **MCP integration** - Expose code tools to AI assistants
+- ✅ **Dual authentication** - Webhook secret + Bearer token
+- ✅ **Production-ready** - Graceful shutdown, process management, security hardening
 
 ### Quick Setup
 
 ```bash
-# On WSL: Configure and start webhook server (tunnel auto-managed)
-cd webhook-server
+# Configure environment
 cp .env.example .env
-nano .env  # Edit with your remote server details and webhook secret
-npm install
+nano .env
 
-# Start everything (webhook server + SSH tunnel integrated)
-npm run pm2:start
+# Required configuration:
+# ENABLE_SSH_TUNNEL=true
+# SSH_REMOTE_HOST=user@server-ip
+# WEBHOOK_SECRET=<generate-with: openssl rand -hex 32>
+# MCP_AUTH_TOKEN=<generate-with: openssl rand -hex 32>
+# LOCAL_PROJECT_PATH=/home/user/Documents/project
+# REMOTE_PROJECT_PATH=/var/www/project
+# DEFAULT_REPO_NAME=project_name
 
-# Check status
-pm2 status
-npm run tunnel:status
-
-# On Remote Server: Install file watcher
-# See webhook-server/SETUP_GUIDE.md for complete instructions
+# Build and start unified server (handles everything!)
+npm run build
+npm run mcp-unified
 ```
 
-**Note:** The SSH tunnel is now automatically managed by PM2 - no need to start/stop it separately!
+**Output:**
+```
+🚀 Unified Server running on http://localhost:3456
+
+📡 Available Endpoints:
+   GET    /health                  - Health check
+   POST   /webhook/file-changed    - File change webhook
+   POST   /trigger/analyze         - Manual analysis trigger
+   POST   /mcp                     - MCP client requests
+
+   📁 Default repository: your_project
+
+🔐 Authentication:
+   ✅ Webhook: Secret configured
+   ✅ MCP: Bearer token required
+
+🔌 Starting SSH tunnel...
+   ✅ Tunnel: user@server → localhost:3456
+```
+
+**On Remote Server:** Install file watcher - see complete instructions in `webhook-server/SETUP_GUIDE.md`
 
 ### Common Commands
 
 ```bash
-# File synchronization
-npm run sync                    # Manual sync from remote to local (no analysis)
-                                # Useful when local copy is out of sync
+# Start unified server (auto-creates SSH tunnel)
+npm run mcp-unified
 
-# Process management
-npm run pm2:start              # Start webhook server + tunnel
-npm run pm2:stop               # Stop webhook server + tunnel
-npm run pm2:restart            # Quick restart (server only)
-npm run pm2:restart:full       # Full restart (server + tunnel)
-pm2 logs compass-webhook       # View logs
+# Manual triggers (from WSL)
+curl -X POST http://localhost:3456/trigger/sync \
+  -H "X-Webhook-Secret: your-secret"
 
-# Tunnel management
-npm run tunnel:status          # Check tunnel status
-npm run tunnel:start           # Start tunnel manually
-npm run tunnel:stop            # Stop tunnel manually
+curl -X POST http://localhost:3456/trigger/analyze \
+  -H "X-Webhook-Secret: your-secret"
+
+# Check health (from remote server via tunnel)
+curl http://localhost:3456/health
+
+# Test webhook (from remote server)
+curl -X POST http://localhost:3456/webhook/file-changed \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: your-secret" \
+  -d '{"event":"modified","file_path":"test.php",...}'
+```
+
+### MCP Client Integration
+
+Connect AI assistants from remote server:
+
+```typescript
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const transport = new StreamableHTTPClientTransport({
+  url: 'http://localhost:3456/mcp',  // via SSH tunnel
+  headers: {
+    'Authorization': 'Bearer your-mcp-token'
+  }
+});
+
+const client = new Client(
+  { name: 'remote-client', version: '1.0.0' },
+  { capabilities: {} }
+);
+
+await client.connect(transport);
+
+// Use MCP tools
+const result = await client.callTool({
+  name: 'search_code',
+  arguments: { query: 'authenticate' }
+});
 ```
 
 ### Performance Comparison

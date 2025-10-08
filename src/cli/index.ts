@@ -339,10 +339,10 @@ program
     }
   });
 
-// MCP Server command
+// MCP Server command (stdio transport)
 program
   .command('mcp-server')
-  .description('Start the MCP server for AI integration')
+  .description('Start the MCP server for AI integration (stdio transport)')
   .option('--port <port>', 'Port to listen on', config.mcpServer.port.toString())
   .option('--host <host>', 'Host to bind to', config.mcpServer.host)
   .option('--verbose', 'Enable verbose logging')
@@ -358,7 +358,7 @@ program
       await databaseService.runMigrations();
       spinner.succeed('Database connection established');
 
-      console.log(chalk.blue('\n🚀 Starting Claude Compass MCP Server...'));
+      console.log(chalk.blue('\n🚀 Starting Claude Compass MCP Server (stdio)...'));
       console.log(chalk.gray(`Host: ${options.host}`));
       console.log(chalk.gray(`Port: ${options.port}`));
 
@@ -371,6 +371,50 @@ program
     } catch (error) {
       spinner.fail('Failed to start MCP server');
       console.error(chalk.red('\n❌ Error starting server:'));
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// HTTP MCP Server command (HTTP/SSE transport)
+program
+  .command('http-server')
+  .description('Start the MCP server with HTTP/SSE transport')
+  .option('--port <port>', 'Port to listen on', '3000')
+  .option('--host <host>', 'Host to bind to', 'localhost')
+  .option('--allow-all-hosts', 'Disable DNS rebinding protection (allow connections from any host)', false)
+  .option('--verbose', 'Enable verbose logging')
+  .action(async options => {
+    if (options.verbose) {
+      logger.level = 'debug';
+    }
+
+    const spinner = ora('Starting HTTP MCP server...').start();
+
+    try {
+      // Initialize database connection
+      await databaseService.runMigrations();
+      spinner.succeed('Database connection established');
+
+      // Set environment variables for the HTTP server
+      process.env.MCP_HTTP_PORT = options.port;
+      process.env.MCP_HTTP_HOST = options.host;
+      process.env.MCP_ALLOW_ALL_HOSTS = options.allowAllHosts ? 'true' : 'false';
+
+      if (options.allowAllHosts) {
+        console.log(chalk.yellow('\n⚠️  WARNING: DNS rebinding protection disabled. Server will accept connections from any host.'));
+      }
+
+      spinner.text = 'Launching HTTP server...';
+
+      // Import and start the HTTP server
+      // This will run the http-server.ts file which sets up Express
+      await import('../mcp/examples/http-server.js');
+
+      spinner.succeed('HTTP MCP Server started');
+    } catch (error) {
+      spinner.fail('Failed to start HTTP MCP server');
+      console.error(chalk.red('\n❌ Error starting HTTP server:'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);
     }

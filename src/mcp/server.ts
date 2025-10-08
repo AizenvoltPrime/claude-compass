@@ -28,6 +28,7 @@ export class ClaudeCompassMCPServer {
   private tools: McpTools;
   private resources: McpResources;
   private sessionId?: string;
+  private defaultRepoId?: number;
 
   constructor(sessionId?: string) {
     this.sessionId = sessionId;
@@ -49,6 +50,36 @@ export class ClaudeCompassMCPServer {
     this.resources = new McpResources(this.dbService, this.sessionId);
 
     this.setupHandlers();
+  }
+
+  private async resolveDefaultRepository(): Promise<void> {
+    const defaultRepoName = process.env.DEFAULT_REPO_NAME;
+
+    if (!defaultRepoName || defaultRepoName.trim() === '') {
+      return;
+    }
+
+    try {
+      const repository = await this.dbService.getRepositoryByName(defaultRepoName);
+
+      if (repository) {
+        this.defaultRepoId = repository.id;
+        this.tools.setDefaultRepoId(repository.id);
+        logger.info('Default repository resolved', {
+          name: defaultRepoName,
+          id: repository.id
+        });
+      } else {
+        logger.warn('DEFAULT_REPO_NAME set but repository not found', {
+          name: defaultRepoName
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to resolve default repository', {
+        name: defaultRepoName,
+        error: (error as Error).message
+      });
+    }
   }
 
   private formatErrorResponse(code: number, message: string, data?: any) {
@@ -392,6 +423,8 @@ export class ClaudeCompassMCPServer {
   async start(transport?: any): Promise<void> {
     logger.info('Starting Claude Compass MCP Server', { sessionId: this.sessionId });
 
+    await this.resolveDefaultRepository();
+
     // Default to stdio transport if none provided
     // For future HTTP support, pass StreamableHTTPServerTransport or SSEServerTransport
     const serverTransport = transport || new StdioServerTransport();
@@ -400,6 +433,7 @@ export class ClaudeCompassMCPServer {
     logger.info('MCP Server started and listening', {
       transportType: transport ? 'custom' : 'stdio',
       sessionId: this.sessionId,
+      defaultRepoId: this.defaultRepoId,
     });
   }
 
