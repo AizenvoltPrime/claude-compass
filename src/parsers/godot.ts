@@ -160,7 +160,7 @@ export class GodotParser extends BaseFrameworkParser {
       },
       {
         name: 'godot-csharp-script',
-        pattern: /extends\s+(Node|Control|RigidBody|CharacterBody|Resource)|class\s+\w+\s*:\s*(Node|Control|RigidBody|CharacterBody|Resource)/,
+        pattern: /using\s+Godot|extends\s+(Node|Node2D|Node3D|Control|Area2D|Area3D|RigidBody2D|RigidBody3D|CharacterBody2D|CharacterBody3D|Resource|RefCounted)\b|class\s+\w+\s*:\s*(Node|Node2D|Node3D|Control|Area2D|Area3D|RigidBody2D|RigidBody3D|CharacterBody2D|CharacterBody3D|Resource|RefCounted)\b/,
         fileExtensions: ['.cs'],
         description: 'C# script extending Godot classes',
       },

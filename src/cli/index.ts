@@ -214,7 +214,7 @@ program
         forceFullAnalysis: options.forceFull === true,
 
         // Cross-stack analysis options
-        enableCrossStack: options.crossStack === true || options.vueLaravel === true,
+        enableCrossStackAnalysis: options.crossStack === true || options.vueLaravel === true,
         crossStackFrameworks: options.vueLaravel === true ? ['vue', 'laravel'] : undefined,
 
         // File size policy options (using aggressive preset)
@@ -274,7 +274,7 @@ program
       );
 
       // Display cross-stack results if enabled
-      if (buildOptions.enableCrossStack && result.crossStackGraph) {
+      if (buildOptions.enableCrossStackAnalysis && result.crossStackGraph) {
         console.log(chalk.magenta(`\n${getEmoji('🔀', 'Cross:')} Cross-Stack Analysis Results:`));
         console.log(
           chalk.magenta(
