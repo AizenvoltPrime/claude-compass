@@ -431,8 +431,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     const errors: ParseError[] = [];
 
     function traverse(node: Parser.SyntaxNode): void {
-      // Check for syntax error nodes
-      if (node.type === 'ERROR' || node.type === 'MISSING' || node.hasError) {
+      if (node.type === 'ERROR' || node.type === 'MISSING') {
         errors.push({
           message: `Parsing error in ${node.type}: ${node.text.slice(0, 50)}${node.text.length > 50 ? '...' : ''}`,
           line: node.startPosition.row + 1,
@@ -441,9 +440,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         });
       }
 
-      // Traverse child nodes
-      for (const child of node.children) {
-        traverse(child);
+      if (node.hasError && node.children) {
+        for (const child of node.children) {
+          traverse(child);
+        }
       }
     }
 

@@ -28,11 +28,15 @@ const CONFIG = {
   remoteHost: process.env.REMOTE_HOST,
   remoteProjectPath: process.env.REMOTE_PROJECT_PATH,
 
-  batchDelayMs: 3000, // 3 seconds (faster since rsync is quick)
+  batchDelayMs: parseInt(process.env.BATCH_DELAY_MS || '3000'),
   logFile: '/tmp/compass-webhook.log',
 
   // Sync strategy: 'incremental' or 'full'
   syncStrategy: process.env.SYNC_STRATEGY || 'incremental',
+
+  // Analysis configuration
+  enableAnalysis: process.env.ENABLE_ANALYSIS !== 'false', // true by default
+  analysisFlags: process.env.ANALYSIS_FLAGS || '--verbose', // e.g., '--verbose --skip-embeddings --force-full'
 };
 
 interface WebhookPayload {
@@ -144,11 +148,18 @@ async function syncFiles(changedFiles: string[]) {
 
 // Trigger analysis on LOCAL copy
 async function triggerAnalysis(changedFiles: string[]) {
+  if (!CONFIG.enableAnalysis) {
+    await log(`⏭️ Analysis disabled (ENABLE_ANALYSIS=false)`);
+    return;
+  }
+
   await log(`Triggering analysis on local copy for ${changedFiles.length} file(s)`);
+  await log(`Analysis flags: ${CONFIG.analysisFlags}`);
 
   try {
-    // Run Claude Compass analyze command on LOCAL path
-    const command = `cd ${CONFIG.compassPath} && npm run analyze ${CONFIG.localProjectPath} --verbose`;
+    // Run Claude Compass analyze command on LOCAL path with configured flags
+    // Note: -- is required to pass arguments through npm run
+    const command = `cd ${CONFIG.compassPath} && npm run analyze -- ${CONFIG.localProjectPath} ${CONFIG.analysisFlags}`;
     await log(`Executing: ${command}`);
 
     const { stdout, stderr } = await execAsync(command, {
@@ -211,6 +222,9 @@ app.get('/health', (_req: Request, res: Response) => {
       localProjectPath: CONFIG.localProjectPath,
       remoteHost: CONFIG.remoteHost,
       syncStrategy: CONFIG.syncStrategy,
+      enableAnalysis: CONFIG.enableAnalysis,
+      analysisFlags: CONFIG.analysisFlags,
+      batchDelayMs: CONFIG.batchDelayMs,
     },
   });
 });
@@ -284,6 +298,9 @@ app.listen(CONFIG.port, '0.0.0.0', () => {
   log(`🌐 Remote: ${CONFIG.remoteHost}:${CONFIG.remoteProjectPath}`);
   log(`🔒 Secret configured: ${CONFIG.webhookSecret.substring(0, 10)}...`);
   log(`⚙️  Sync strategy: ${CONFIG.syncStrategy}`);
+  log(`🔍 Analysis enabled: ${CONFIG.enableAnalysis}`);
+  log(`🚩 Analysis flags: ${CONFIG.analysisFlags}`);
+  log(`⏱️  Batch delay: ${CONFIG.batchDelayMs}ms`);
 });
 
 process.on('SIGTERM', async () => {

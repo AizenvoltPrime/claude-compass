@@ -465,6 +465,7 @@ Remote Server (file changes) → Webhook → SSH Tunnel (auto-managed) → WSL �
 
 - ✅ **Real-time file change detection** using inotify on remote server
 - ✅ **Incremental syncing** - only changed files, not entire project
+- ✅ **Manual sync recovery** - `npm run sync` for quick resync when out of sync
 - ✅ **Optimized exclusions** - skips dependencies, builds, uploads (70-95% smaller sync)
 - ✅ **Integrated tunnel management** - SSH tunnel auto-starts/stops with PM2
 - ✅ **Secure SSH tunneling** - webhooks routed through reverse SSH tunnel
@@ -492,6 +493,26 @@ npm run tunnel:status
 ```
 
 **Note:** The SSH tunnel is now automatically managed by PM2 - no need to start/stop it separately!
+
+### Common Commands
+
+```bash
+# File synchronization
+npm run sync                    # Manual sync from remote to local (no analysis)
+                                # Useful when local copy is out of sync
+
+# Process management
+npm run pm2:start              # Start webhook server + tunnel
+npm run pm2:stop               # Stop webhook server + tunnel
+npm run pm2:restart            # Quick restart (server only)
+npm run pm2:restart:full       # Full restart (server + tunnel)
+pm2 logs compass-webhook       # View logs
+
+# Tunnel management
+npm run tunnel:status          # Check tunnel status
+npm run tunnel:start           # Start tunnel manually
+npm run tunnel:stop            # Stop tunnel manually
+```
 
 ### Performance Comparison
 
