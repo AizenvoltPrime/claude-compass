@@ -1016,7 +1016,7 @@ export class DatabaseService {
     logger.info('[VECTOR SEARCH DB] Generating query embedding...');
     const queryEmbedding = await this.getCachedEmbedding(query);
 
-    if (!queryEmbedding || queryEmbedding.length !== 768) {
+    if (!queryEmbedding || queryEmbedding.length !== 1024) {
       logger.error(`[VECTOR SEARCH DB] Invalid query embedding: length=${queryEmbedding?.length}`);
       throw new Error('Failed to generate valid query embedding');
     }
@@ -2998,7 +2998,11 @@ export class DatabaseService {
       for (let i = 0; i < data.length; i += BATCH_SIZE) {
         const batch = data.slice(i, i + BATCH_SIZE);
 
-        const batchResults = await this.db('data_contracts').insert(batch).returning('*');
+        const batchResults = await this.db('data_contracts')
+          .insert(batch)
+          .onConflict(['frontend_type_id', 'backend_type_id', 'name'])
+          .merge(['schema_definition', 'drift_detected', 'updated_at'])
+          .returning('*');
 
         results.push(...(batchResults as DataContract[]));
       }
@@ -3009,7 +3013,7 @@ export class DatabaseService {
         error: error.message,
         stack: error.stack,
         count: data.length,
-        sampleData: data.slice(0, 2), // Show first 2 records for debugging
+        sampleData: data.slice(0, 2),
       });
       throw error;
     }

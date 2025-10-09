@@ -770,7 +770,18 @@ export class GraphBuilder {
 
     const traverse = async (currentPath: string): Promise<void> => {
       try {
-        const stats = await fs.stat(currentPath);
+        const lstats = await fs.lstat(currentPath);
+
+        if (lstats.isSymbolicLink()) {
+          try {
+            await fs.stat(currentPath);
+          } catch (symlinkError) {
+            this.logger.debug('Skipping broken symlink', { path: currentPath });
+            return;
+          }
+        }
+
+        const stats = lstats.isSymbolicLink() ? await fs.stat(currentPath) : lstats;
 
         if (stats.isDirectory()) {
           const dirName = path.basename(currentPath);
