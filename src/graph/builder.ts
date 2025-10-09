@@ -1296,6 +1296,38 @@ export class GraphBuilder {
     });
   }
 
+  private findFileForEntity(
+    filePath: string,
+    filesMap: Map<string, any>,
+    normalizedFilesMap: Map<string, any>,
+    allFiles: any[]
+  ): any | null {
+    let matchingFile = filesMap.get(filePath);
+
+    if (!matchingFile) {
+      matchingFile = normalizedFilesMap.get(path.normalize(filePath));
+    }
+
+    if (!matchingFile) {
+      const parseResultBasename = path.basename(filePath);
+      matchingFile = allFiles.find(f => {
+        const dbPathBasename = path.basename(f.path);
+        if (dbPathBasename === parseResultBasename) {
+          const parseResultDir = path.dirname(filePath);
+          const dbPathDir = path.dirname(f.path);
+          return (
+            parseResultDir.endsWith(dbPathDir) ||
+            dbPathDir.endsWith(parseResultDir) ||
+            path.basename(parseResultDir) === path.basename(dbPathDir)
+          );
+        }
+        return false;
+      });
+    }
+
+    return matchingFile || null;
+  }
+
   private async storeFrameworkEntities(
     repositoryId: number,
     symbols: Symbol[],
@@ -1311,16 +1343,11 @@ export class GraphBuilder {
     const normalizedFilesMap = new Map(allFiles.map(f => [path.normalize(f.path), f]));
 
     for (const parseResult of parseResults) {
-      // Skip if no framework entities
       if (!parseResult.frameworkEntities || parseResult.frameworkEntities.length === 0) {
         continue;
       }
 
-      // Find symbols for this parse result's file by matching the file path
-      // Note: symbols should have been stored with file_id pointing to files that match parseResult.filePath
       const fileSymbols = symbols.filter(s => {
-        // We need to find the file record that matches this symbol's file_id and see if its path matches parseResult.filePath
-        // Since we don't have direct access to files here, let's match by parse result symbols instead
         return parseResult.symbols.some(
           ps => ps.name === s.name && ps.symbol_type === s.symbol_type
         );
@@ -1328,38 +1355,64 @@ export class GraphBuilder {
 
       for (const entity of parseResult.frameworkEntities) {
         let matchingSymbol: Symbol | undefined;
+
         try {
-          // Find matching symbol for this entity
+          if (this.isLaravelRoute(entity)) {
+            const laravelRoute = entity as LaravelRoute;
+            let normalizedMethod = laravelRoute.method;
+            if (normalizedMethod === 'RESOURCE') {
+              normalizedMethod = 'ANY';
+            }
+
+            const matchingFile = this.findFileForEntity(
+              parseResult.filePath,
+              filesMap,
+              normalizedFilesMap,
+              allFiles
+            );
+
+            if (!matchingFile) {
+              this.logger.error('Cannot persist Laravel route: file not found in database', {
+                routePath: laravelRoute.path,
+                routeMethod: laravelRoute.method,
+                filePath: parseResult.filePath,
+                normalizedFilePath: path.normalize(parseResult.filePath),
+                entityName: entity.name,
+              });
+              continue;
+            }
+
+            await this.dbService.createRoute({
+              repo_id: repositoryId,
+              path: laravelRoute.path,
+              method: normalizedMethod,
+              handler_symbol_id: null,
+              framework_type: 'laravel',
+              middleware: laravelRoute.middleware || [],
+              dynamic_segments: [],
+              auth_required: false,
+              name: laravelRoute.routeName,
+              controller_class: laravelRoute.controller,
+              controller_method: this.extractControllerMethod(laravelRoute.action),
+              action: laravelRoute.action,
+              file_path: laravelRoute.filePath,
+              line_number: laravelRoute.metadata?.line || 1,
+            });
+            continue;
+          }
+
           matchingSymbol = fileSymbols.find(
             s =>
               s.name === entity.name || entity.name.includes(s.name) || s.name.includes(entity.name)
           );
 
           if (!matchingSymbol) {
-            // Create a synthetic symbol for this framework entity
-
-            let matchingFile = filesMap.get(parseResult.filePath);
-
-            if (!matchingFile) {
-              matchingFile = normalizedFilesMap.get(path.normalize(parseResult.filePath));
-            }
-
-            if (!matchingFile) {
-              const parseResultBasename = path.basename(parseResult.filePath);
-              matchingFile = allFiles.find(f => {
-                const dbPathBasename = path.basename(f.path);
-                if (dbPathBasename === parseResultBasename) {
-                  const parseResultDir = path.dirname(parseResult.filePath);
-                  const dbPathDir = path.dirname(f.path);
-                  return (
-                    parseResultDir.endsWith(dbPathDir) ||
-                    dbPathDir.endsWith(parseResultDir) ||
-                    path.basename(parseResultDir) === path.basename(dbPathDir)
-                  );
-                }
-                return false;
-              });
-            }
+            const matchingFile = this.findFileForEntity(
+              parseResult.filePath,
+              filesMap,
+              normalizedFilesMap,
+              allFiles
+            );
 
             if (!matchingFile) {
               this.logger.warn('Could not find file record for framework entity', {
@@ -1380,50 +1433,21 @@ export class GraphBuilder {
               continue;
             }
 
-            // Create symbol for the framework entity
             const entityLine = (entity.metadata as any)?.line || 1;
             const syntheticSymbol = await this.dbService.createSymbol({
               file_id: matchingFile.id,
               name: entity.name,
-              symbol_type: 'component' as any, // Vue components, React components etc.
+              symbol_type: 'component' as any,
               start_line: entityLine,
               end_line: entityLine,
-              is_exported: true, // Framework entities are typically exported
+              is_exported: true,
               signature: `${entity.type} ${entity.name}`,
             });
 
             matchingSymbol = syntheticSymbol;
           }
 
-          // Store different types of framework entities based on specific interfaces
-          // Handle Laravel entities first
-          if (this.isLaravelRoute(entity)) {
-            const laravelRoute = entity as LaravelRoute;
-            // Normalize HTTP method - convert Laravel-specific methods to standard HTTP methods
-            let normalizedMethod = laravelRoute.method;
-            if (normalizedMethod === 'RESOURCE') {
-              normalizedMethod = 'ANY'; // Resource routes handle multiple methods
-            }
-
-            await this.dbService.createRoute({
-              repo_id: repositoryId,
-              path: laravelRoute.path,
-              method: normalizedMethod,
-              handler_symbol_id: matchingSymbol.id,
-              framework_type: 'laravel',
-              middleware: laravelRoute.middleware || [],
-              dynamic_segments: [], // Laravel dynamic segments would need parsing
-              auth_required: false, // Could be enhanced to check middleware for auth
-
-              // Laravel-specific fields
-              name: laravelRoute.routeName,
-              controller_class: laravelRoute.controller,
-              controller_method: this.extractControllerMethod(laravelRoute.action),
-              action: laravelRoute.action,
-              file_path: laravelRoute.filePath,
-              line_number: laravelRoute.metadata?.line || 1,
-            });
-          } else if (this.isLaravelController(entity)) {
+          if (this.isLaravelController(entity)) {
             // Laravel controllers don't map directly to our component table
             // Store as metadata for now
             await this.dbService.storeFrameworkMetadata({
@@ -1456,11 +1480,11 @@ export class GraphBuilder {
               repo_id: repositoryId,
               path: routeEntity.path || '/',
               method: (routeEntity as any).method || 'GET',
-              handler_symbol_id: matchingSymbol.id,
+              handler_symbol_id: matchingSymbol?.id || null,
               framework_type: (routeEntity as any).framework || 'unknown',
               middleware: (routeEntity as any).middleware || [],
               dynamic_segments: (routeEntity as any).dynamicSegments || [],
-              auth_required: false, // Not available in current interfaces
+              auth_required: false,
             });
           } else if (this.isVueComponent(entity)) {
             const vueEntity = entity as VueComponent;

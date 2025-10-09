@@ -805,12 +805,16 @@ export class LaravelParser extends BaseFrameworkParser {
   ): Promise<LaravelRoute[]> {
     const routes: LaravelRoute[] = [];
     const processedNodes = new Set<SyntaxNode>();
+    let groupCount = 0;
+    let routeCount = 0;
 
     try {
       this.traverseNode(rootNode, node => {
         if (this.isRouteGroup(node)) {
+          groupCount++;
           this.processRouteGroup(node, [], routes, processedNodes, filePath, content);
         } else if (this.isRouteDefinition(node) && !processedNodes.has(node)) {
+          routeCount++;
           const routeDef = this.parseRouteDefinition(node, filePath, content);
           if (Array.isArray(routeDef)) {
             routes.push(...routeDef);
@@ -2731,7 +2735,6 @@ export class LaravelParser extends BaseFrameworkParser {
    * Get middleware from route group definition
    */
   private getRouteGroupMiddleware(node: SyntaxNode, content: string): string[] {
-    // Look for Route::middleware(['...'])->group() pattern
     let statementNode = node;
     while (statementNode.parent && statementNode.parent.type !== 'program') {
       statementNode = statementNode.parent;
@@ -2739,15 +2742,21 @@ export class LaravelParser extends BaseFrameworkParser {
 
     const statementContent = content.slice(statementNode.startIndex, statementNode.endIndex);
 
-    // Look for middleware calls before group()
-    const middlewareMatches = statementContent.match(/Route::middleware\(\s*\[(.*?)\]\s*\)->group/);
-    if (middlewareMatches) {
-      const middlewareList = middlewareMatches[1];
+    // Try array notation: Route::middleware(['web', 'auth'])->group()
+    const arrayMatches = statementContent.match(/Route::middleware\(\s*\[(.*?)\]\s*\)->group/);
+    if (arrayMatches) {
+      const middlewareList = arrayMatches[1];
       const items = middlewareList
         .split(',')
         .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
         .filter(item => item.length > 0);
       return items;
+    }
+
+    // Try string notation: Route::middleware('web')->group()
+    const stringMatches = statementContent.match(/Route::middleware\(\s*['"]([^'"]+)['"]\s*\)->group/);
+    if (stringMatches) {
+      return [stringMatches[1]];
     }
 
     return [];
