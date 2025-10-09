@@ -808,26 +808,8 @@ export class LaravelParser extends BaseFrameworkParser {
 
     try {
       this.traverseNode(rootNode, node => {
-        // Check for route groups
         if (this.isRouteGroup(node)) {
-          const groupMiddleware = this.getRouteGroupMiddleware(node, content);
-
-          // Process routes inside the group
-          this.traverseNode(node, innerNode => {
-            if (this.isRouteDefinition(innerNode)) {
-              processedNodes.add(innerNode);
-              const routeDef = this.parseRouteDefinition(innerNode, filePath, content);
-              if (Array.isArray(routeDef)) {
-                routeDef.forEach(route => {
-                  route.middleware = [...groupMiddleware, ...route.middleware];
-                  routes.push(route);
-                });
-              } else if (routeDef) {
-                routeDef.middleware = [...groupMiddleware, ...routeDef.middleware];
-                routes.push(routeDef);
-              }
-            }
-          });
+          this.processRouteGroup(node, [], routes, processedNodes, filePath, content);
         } else if (this.isRouteDefinition(node) && !processedNodes.has(node)) {
           const routeDef = this.parseRouteDefinition(node, filePath, content);
           if (Array.isArray(routeDef)) {
@@ -842,6 +824,41 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     return routes;
+  }
+
+  private processRouteGroup(
+    groupNode: SyntaxNode,
+    parentMiddleware: string[],
+    routes: LaravelRoute[],
+    processedNodes: Set<SyntaxNode>,
+    filePath: string,
+    content: string
+  ): void {
+    processedNodes.add(groupNode);
+    const groupMiddleware = this.getRouteGroupMiddleware(groupNode, content);
+    const accumulatedMiddleware = [...parentMiddleware, ...groupMiddleware];
+
+    this.traverseNode(groupNode, innerNode => {
+      if (innerNode === groupNode) {
+        return;
+      }
+
+      if (this.isRouteGroup(innerNode) && !processedNodes.has(innerNode)) {
+        this.processRouteGroup(innerNode, accumulatedMiddleware, routes, processedNodes, filePath, content);
+      } else if (this.isRouteDefinition(innerNode) && !processedNodes.has(innerNode)) {
+        processedNodes.add(innerNode);
+        const routeDef = this.parseRouteDefinition(innerNode, filePath, content);
+        if (Array.isArray(routeDef)) {
+          routeDef.forEach(route => {
+            route.middleware = [...accumulatedMiddleware, ...route.middleware];
+            routes.push(route);
+          });
+        } else if (routeDef) {
+          routeDef.middleware = [...accumulatedMiddleware, ...routeDef.middleware];
+          routes.push(routeDef);
+        }
+      }
+    });
   }
 
   /**
@@ -892,7 +909,18 @@ export class LaravelParser extends BaseFrameworkParser {
       const middleware = this.getRouteMiddleware(node, content);
       const routeName = this.getRouteName(node, content);
 
-      if (!method || !path) return null;
+      if (!method || !path) {
+        logger.warn('Route definition missing method or path', {
+          filePath,
+          line: node.startPosition.row + 1,
+          column: node.startPosition.column,
+          nodeType: node.type,
+          nodeText: node.text.substring(0, 100),
+          method: method || 'MISSING',
+          path: path || 'MISSING',
+        });
+        return null;
+      }
 
       const route: LaravelRoute = {
         type: 'route',

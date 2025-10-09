@@ -556,11 +556,25 @@ export class CrossStackGraphBuilder {
           // Extract API calls from Vue components by reading their source files
           const vueApiCalls = await this.extractApiCallsFromComponents(repoId, vueComponents);
 
+          this.logger.info('Extracted API calls from Vue components', {
+            count: vueApiCalls.length,
+            sampleUrls: vueApiCalls.slice(0, 5).map(call => ({ url: call.url, method: call.method })),
+          });
+
           // Extract route information from Laravel routes
           const laravelRouteInfo = await this.extractRouteInfoFromRoutes(repoId, laravelRoutes);
 
+          this.logger.info('Extracted Laravel route information', {
+            count: laravelRouteInfo.length,
+            samplePaths: laravelRouteInfo.slice(0, 5).map(r => ({ path: r.path, method: r.method })),
+          });
+
           // Use simple URL pattern matching to detect relationships
           const relationships = this.matchApiCallsToRoutes(vueApiCalls, laravelRouteInfo);
+
+          this.logger.info('Matched API calls to routes', {
+            relationshipsCount: relationships.length,
+          });
 
           // Store new relationships in database
           await this.storeDetectedRelationships(repoId, relationships);
@@ -998,6 +1012,7 @@ export class CrossStackGraphBuilder {
         const fileContent = await fs.readFile(component.filePath, 'utf-8');
 
         // Use Vue parser to properly extract API calls
+        let astApiCalls: any[] = [];
         try {
           const parseResult = await vueParser.parseFile(component.filePath, fileContent);
           if (parseResult.frameworkEntities) {
@@ -1005,27 +1020,70 @@ export class CrossStackGraphBuilder {
               (entity): entity is any => entity.type === 'api_call'
             );
 
+            if (vueApiCalls.length > 0) {
+              this.logger.info('Found API calls in component via AST', {
+                componentName: component.name,
+                apiCallCount: vueApiCalls.length,
+                urls: vueApiCalls.map(c => c.url),
+              });
+            }
+
             // Ensure API calls have the componentName field
             const apiCallsWithComponentName = vueApiCalls.map(call => ({
               ...call,
               componentName: component.name,
             }));
 
-            apiCalls.push(...apiCallsWithComponentName);
+            const validApiCalls = apiCallsWithComponentName.filter(call => {
+              const isValid =
+                call.url &&
+                call.url.startsWith('/') &&
+                (!call.url.includes('.') || call.url.includes('://'));
+
+              if (!isValid) {
+                this.logger.debug('Filtered invalid API call URL', {
+                  url: call.url,
+                  component: call.componentName,
+                  filePath: component.filePath,
+                });
+              }
+
+              return isValid;
+            });
+
+            astApiCalls = validApiCalls;
           }
         } catch (parseError) {
-          // Fallback to regex extraction if Vue parser fails
-          this.logger.warn('Vue parser failed, falling back to regex extraction', {
+          this.logger.warn('Vue parser threw error', {
             componentName: component.name,
             error: parseError.message,
           });
-          const fetchCalls = this.extractFetchCallsFromContent(
-            fileContent,
-            component.filePath,
-            component.name
-          );
-          apiCalls.push(...fetchCalls);
         }
+
+        // Always run regex extraction to catch variable-based API calls
+        const regexApiCalls = this.extractFetchCallsFromContent(
+          fileContent,
+          component.filePath,
+          component.name
+        );
+
+        // Merge AST and regex results, deduplicating by URL+method
+        const existingUrls = new Set(astApiCalls.map(c => `${c.url}|${c.method}`));
+        const newRegexCalls = regexApiCalls.filter(
+          c => !existingUrls.has(`${c.url}|${c.method}`)
+        );
+
+        if (newRegexCalls.length > 0) {
+          this.logger.info('Regex extraction found additional API calls', {
+            componentName: component.name,
+            astCallCount: astApiCalls.length,
+            regexCallCount: newRegexCalls.length,
+            newUrls: newRegexCalls.map(c => c.url),
+          });
+        }
+
+        // Add all API calls (AST + unique regex calls)
+        apiCalls.push(...astApiCalls, ...newRegexCalls);
       } catch (error) {
         this.logger.warn('Failed to extract API calls from component', {
           componentName: component.name,
@@ -1050,16 +1108,24 @@ export class CrossStackGraphBuilder {
 
     // Enhanced regex patterns to match all fetch call variations
     const fetchPatterns = [
-      // Simple fetch calls with string literals
+      // Standard fetch with string literals
       /(?:await\s+)?fetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
-      // Fetch calls with template literals
       /(?:await\s+)?fetch\s*\(\s*`([^`]+)`/g,
-      // Fetch calls with method specified (flexible - allows other properties before method)
+      // Fetch with method in options
       /(?:await\s+)?fetch\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
-      // Fetch calls with template literals and method (flexible - allows other properties before method)
       /(?:await\s+)?fetch\s*\(\s*`([^`]+)`\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
-      // Axios calls
+      // $fetch (Nuxt 3)
+      /(?:await\s+)?\$fetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
+      /(?:await\s+)?\$fetch\s*\(\s*`([^`]+)`/g,
+      /(?:await\s+)?\$fetch\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
+      // useFetch (Nuxt 3)
+      /useFetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
+      /useFetch\s*\(\s*`([^`]+)`/g,
+      // useAsyncData with fetch
+      /useAsyncData\s*\([^,]+,\s*\(\)\s*=>\s*\$?fetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
+      // Axios methods
       /axios\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+      /axios\.(get|post|put|delete|patch)\s*\(\s*`([^`]+)`/g,
     ];
 
     for (const pattern of fetchPatterns) {
@@ -1086,8 +1152,8 @@ export class CrossStackGraphBuilder {
           url = url.replace(/\$\{[^}]+\}/g, '{id}');
         }
 
-        // Only process valid API URLs
-        if (url && url.startsWith('/api/')) {
+        // Only process absolute path URLs
+        if (url && url.startsWith('/')) {
           // Create unique key for deduplication
           const uniqueKey = `${url}|${method}`;
 
@@ -1254,8 +1320,21 @@ export class CrossStackGraphBuilder {
 
     // Normalize both URLs for comparison
     const normalizeUrl = (url: string) => {
-      // Replace specific parameter names with generic placeholder
-      return url.replace(/\{[^}]+\}/g, '{param}');
+      let normalized = url;
+
+      // Remove trailing slashes
+      normalized = normalized.replace(/\/+$/, '');
+
+      // Remove query parameters
+      normalized = normalized.split('?')[0];
+
+      // Normalize to lowercase for case-insensitive comparison
+      normalized = normalized.toLowerCase();
+
+      // Replace all parameter placeholders with generic {param}
+      normalized = normalized.replace(/\{[^}]+\}/g, '{param}');
+
+      return normalized;
     };
 
     const normalizedVue = normalizeUrl(vueUrl);
