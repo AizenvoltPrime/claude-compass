@@ -22,6 +22,7 @@ export interface ParsedSymbol {
   is_exported: boolean;
   visibility?: Visibility;
   signature?: string;
+  description?: string;
   file_id?: number;
   parent_symbol_id?: number;
 }

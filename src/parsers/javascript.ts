@@ -12,6 +12,10 @@ import {
 } from './base';
 import { createComponentLogger } from '../utils/logger';
 import {
+  extractJSDocComment as extractJSDoc,
+  cleanJSDocComment as cleanJSDoc,
+} from './utils/jsdoc-extractor';
+import {
   ChunkedParser,
   MergedParseResult,
   ChunkedParseOptions,
@@ -375,12 +379,21 @@ export class JavaScriptParser extends ChunkedParser {
     return exports;
   }
 
+  protected extractJSDocComment(node: Parser.SyntaxNode, content: string): string | undefined {
+    return extractJSDoc(node, content);
+  }
+
+  protected cleanJSDocComment(commentText: string): string {
+    return cleanJSDoc(commentText);
+  }
+
   private extractFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
     const signature = this.extractFunctionSignature(node, content);
+    const description = this.extractJSDocComment(node, content);
 
     return {
       name,
@@ -389,6 +402,7 @@ export class JavaScriptParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
       signature,
+      description,
     };
   }
 
@@ -418,6 +432,8 @@ export class JavaScriptParser extends ChunkedParser {
       }
     }
 
+    const description = this.extractJSDocComment(node, content);
+
     return {
       name,
       symbol_type: symbolType,
@@ -425,6 +441,7 @@ export class JavaScriptParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
       signature: valueNode ? this.getNodeText(valueNode, content) : undefined,
+      description,
     };
   }
 
@@ -433,6 +450,7 @@ export class JavaScriptParser extends ChunkedParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractJSDocComment(node, content);
 
     return {
       name,
@@ -440,6 +458,7 @@ export class JavaScriptParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
+      description,
     };
   }
 
@@ -455,6 +474,7 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     const signature = this.extractFunctionSignature(node, content);
+    const description = this.extractJSDocComment(node, content);
 
     // Determine visibility
     let visibility: Visibility | undefined;
@@ -472,6 +492,7 @@ export class JavaScriptParser extends ChunkedParser {
       is_exported: false, // Methods are not directly exported
       visibility,
       signature,
+      description,
     };
   }
 
