@@ -477,7 +477,12 @@ export class MultiParser {
       return `${e.export_type}:${e.source}:${e.line_number}:${names}`;
     };
 
-    const entityKey = (e: any): string => `${e.type}:${e.name}:${e.filePath}`;
+    const entityKey = (e: any): string => {
+      if (e.type === 'route') {
+        return `${e.type}:${e.method}:${e.path}:${e.filePath}`;
+      }
+      return `${e.type}:${e.name}:${e.filePath}`;
+    };
 
     primaryResult.symbols.forEach(s => symbolsMap.set(symbolKey(s), s));
     primaryResult.dependencies.forEach(d => dependenciesMap.set(depKey(d), d));
