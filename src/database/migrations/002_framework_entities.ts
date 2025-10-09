@@ -485,22 +485,18 @@ export async function up(knex: Knex): Promise<void> {
   });
 
   // Add vector extension support for symbols table (BGE-M3: 1024 dimensions)
-  await knex.raw('ALTER TABLE symbols ADD COLUMN name_embedding vector(1024)');
-  await knex.raw('ALTER TABLE symbols ADD COLUMN description_embedding vector(1024)');
+  // Uses combined_embedding: embedding(name + description) for optimal speed and quality
+  await knex.raw('ALTER TABLE symbols ADD COLUMN combined_embedding vector(1024)');
   await knex.raw('ALTER TABLE symbols ADD COLUMN embeddings_updated_at TIMESTAMP');
   await knex.raw('ALTER TABLE symbols ADD COLUMN embedding_model VARCHAR(100)');
 
-  // Create vector indexes for semantic search
+  // Create HNSW vector index for semantic search
+  // m = 16: connections per layer (good balance of speed/accuracy)
+  // ef_construction = 64: index build quality
   await knex.raw(`
-    CREATE INDEX IF NOT EXISTS symbols_name_embedding_idx
-    ON symbols USING ivfflat (name_embedding vector_cosine_ops)
-    WITH (lists = 100)
-  `);
-
-  await knex.raw(`
-    CREATE INDEX IF NOT EXISTS symbols_description_embedding_idx
-    ON symbols USING ivfflat (description_embedding vector_cosine_ops)
-    WITH (lists = 100)
+    CREATE INDEX IF NOT EXISTS symbols_combined_embedding_idx
+    ON symbols USING hnsw (combined_embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
   `);
 
   console.log('✅ Framework entities created');
@@ -529,8 +525,7 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('routes');
 
   // Remove vector columns from symbols
-  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS name_embedding');
-  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS description_embedding');
+  await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS combined_embedding');
   await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS embeddings_updated_at');
   await knex.raw('ALTER TABLE symbols DROP COLUMN IF EXISTS embedding_model');
 

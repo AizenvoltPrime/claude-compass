@@ -1180,10 +1180,14 @@ export class GraphBuilder {
 
         while (!batchProcessed && retryCount < maxRetries) {
           try {
-            // Generate embeddings sequentially to reduce peak GPU memory usage
+            // Generate combined embeddings (name + description)
             const batchStart = Date.now();
-            const nameEmbeddings = await embeddingService.generateBatchEmbeddings(nameTexts);
-            const descriptionEmbeddings = await embeddingService.generateBatchEmbeddings(descriptionTexts);
+            const combinedTexts = nameTexts.map((name, idx) => {
+              const desc = descriptionTexts[idx];
+              return desc ? `${name} ${desc}` : name;
+            });
+            const combinedEmbeddings = await embeddingService.generateBatchEmbeddings(combinedTexts);
+
             const batchDuration = Date.now() - batchStart;
 
             // Record processing time for adaptive learning
@@ -1192,17 +1196,15 @@ export class GraphBuilder {
 
             const updates = finalBatch.map((symbol, j) => ({
               id: symbol.id!,
-              nameEmbedding: nameEmbeddings[j],
-              descriptionEmbedding: descriptionEmbeddings[j],
-              embeddingModel: embeddingService.modelInfo.name,
+              combinedEmbedding: combinedEmbeddings[j],
+              embeddingModel: 'bge-m3',
             }));
 
             await this.dbService.batchUpdateSymbolEmbeddings(updates);
 
             // Clear references immediately after write to free memory
             updates.length = 0;
-            nameEmbeddings.length = 0;
-            descriptionEmbeddings.length = 0;
+            combinedEmbeddings.length = 0;
 
             processed += finalBatch.length;
             i += decidedBatchSize;

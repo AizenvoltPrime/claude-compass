@@ -465,7 +465,7 @@ export class DatabaseService {
       .join('files', 'symbols.file_id', 'files.id')
       .where('files.repo_id', repoId)
       .where('symbols.id', '>', afterId)
-      .whereNull('symbols.name_embedding')
+      .whereNull('symbols.combined_embedding')
       .select('symbols.*')
       .orderBy('symbols.id')
       .limit(limit);
@@ -476,7 +476,7 @@ export class DatabaseService {
     const result = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
       .where('files.repo_id', repoId)
-      .whereNull('symbols.name_embedding')
+      .whereNull('symbols.combined_embedding')
       .count('* as count')
       .first();
     return Number(result?.count || 0);
@@ -978,7 +978,7 @@ export class DatabaseService {
    */
   private async isVectorSearchReady(): Promise<boolean> {
     try {
-      const result = await this.db('symbols').whereNotNull('name_embedding').first();
+      const result = await this.db('symbols').whereNotNull('combined_embedding').first();
       return !!result;
     } catch (error) {
       return false;
@@ -1025,40 +1025,29 @@ export class DatabaseService {
     const { limit = 100, symbolTypes, isExported, similarityThreshold = 0.5 } = options;
     logger.info(`[VECTOR SEARCH DB] Search parameters: limit=${limit}, threshold=${similarityThreshold}`);
 
-    // Build the base query
+    // Build the base query using combined_embedding (2x faster than double similarity)
     const baseQuery = this.db('symbols as s')
       .select([
         's.*',
         'f.path as file_path',
         'f.language as file_language',
         'r.name as repo_name',
-        // Calculate cosine similarity scores
-        this.db.raw('(1 - (s.name_embedding <=> ?)) as name_similarity', [
+        // Use combined embedding for optimal speed and quality
+        this.db.raw('(1 - (s.combined_embedding <=> ?)) as vector_score', [
           JSON.stringify(queryEmbedding),
         ]),
-        this.db.raw('(1 - (s.description_embedding <=> ?)) as desc_similarity', [
-          JSON.stringify(queryEmbedding),
-        ]),
-        // Use the best similarity score between name and description
-        this.db.raw(
-          'GREATEST(1 - COALESCE(s.name_embedding <=> ?, 1), 1 - COALESCE(s.description_embedding <=> ?, 1)) as vector_score',
-          [JSON.stringify(queryEmbedding), JSON.stringify(queryEmbedding)]
-        ),
       ])
       .join('files as f', 's.file_id', 'f.id')
       .join('repositories as r', 'f.repo_id', 'r.id')
       .whereIn('f.repo_id', repoIds)
-      .where(function () {
-        // Only include symbols that have at least one embedding
-        this.whereNotNull('s.name_embedding').orWhereNotNull('s.description_embedding');
-      })
+      .whereNotNull('s.combined_embedding')
       .whereRaw(
-        'GREATEST(1 - COALESCE(s.name_embedding <=> ?, 1), 1 - COALESCE(s.description_embedding <=> ?, 1)) >= ?',
-        [JSON.stringify(queryEmbedding), JSON.stringify(queryEmbedding), similarityThreshold]
+        '(1 - (s.combined_embedding <=> ?)) >= ?',
+        [JSON.stringify(queryEmbedding), similarityThreshold]
       )
       .orderByRaw(
-        'GREATEST(1 - COALESCE(s.name_embedding <=> ?, 1), 1 - COALESCE(s.description_embedding <=> ?, 1)) DESC',
-        [JSON.stringify(queryEmbedding), JSON.stringify(queryEmbedding)]
+        '(1 - (s.combined_embedding <=> ?)) DESC',
+        [JSON.stringify(queryEmbedding)]
       )
       .limit(limit);
 
@@ -3364,19 +3353,16 @@ export class DatabaseService {
     description?: string
   ): Promise<void> {
     try {
-
-      const nameEmbedding = await this.embeddingService.generateEmbedding(name);
-      const descEmbedding = description
-        ? await this.embeddingService.generateEmbedding(description)
-        : null;
+      // Generate combined embedding (name + description)
+      const combinedText = description ? `${name} ${description}` : name;
+      const combinedEmbedding = await this.embeddingService.generateEmbedding(combinedText);
 
       await this.db('symbols')
         .where('id', symbolId)
         .update({
-          name_embedding: JSON.stringify(nameEmbedding),
-          description_embedding: descEmbedding ? JSON.stringify(descEmbedding) : null,
+          combined_embedding: JSON.stringify(combinedEmbedding),
           embeddings_updated_at: new Date(),
-          embedding_model: 'all-MiniLM-L6-v2',
+          embedding_model: 'bge-m3',
         });
 
     } catch (error) {
@@ -3415,15 +3401,13 @@ export class DatabaseService {
 
   async updateSymbolEmbeddings(
     symbolId: number,
-    nameEmbedding: number[],
-    descriptionEmbedding: number[],
+    combinedEmbedding: number[],
     modelName: string
   ): Promise<void> {
     await this.db('symbols')
       .where({ id: symbolId })
       .update({
-        name_embedding: JSON.stringify(nameEmbedding),
-        description_embedding: JSON.stringify(descriptionEmbedding),
+        combined_embedding: JSON.stringify(combinedEmbedding),
         embeddings_updated_at: new Date(),
         embedding_model: modelName,
       });
@@ -3432,14 +3416,13 @@ export class DatabaseService {
   async batchUpdateSymbolEmbeddings(
     updates: Array<{
       id: number;
-      nameEmbedding: number[];
-      descriptionEmbedding: number[];
+      combinedEmbedding: number[];
       embeddingModel: string;
     }>
   ): Promise<void> {
     // Reduce batch size to minimize JSON string memory pressure
-    // Each symbol: 2 embeddings × 1024 numbers → ~12KB JSON strings
-    const BATCH_SIZE = 20;
+    // Each symbol: 1 embedding × 1024 numbers → ~6KB JSON strings
+    const BATCH_SIZE = 50;
 
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const batch = updates.slice(i, i + BATCH_SIZE);
@@ -3447,19 +3430,17 @@ export class DatabaseService {
       await this.db.transaction(async (trx) => {
         // Process serially to avoid holding all JSON strings in memory
         for (const update of batch) {
-          const nameEmbStr = JSON.stringify(update.nameEmbedding);
-          const descEmbStr = JSON.stringify(update.descriptionEmbedding);
+          const combinedEmbStr = JSON.stringify(update.combinedEmbedding);
 
           await trx('symbols')
             .where('id', update.id)
             .update({
-              name_embedding: nameEmbStr,
-              description_embedding: descEmbStr,
+              combined_embedding: combinedEmbStr,
               embeddings_updated_at: new Date(),
               embedding_model: update.embeddingModel,
             });
 
-          // Strings go out of scope here and can be freed
+          // String goes out of scope here and can be freed
         }
       });
     }
