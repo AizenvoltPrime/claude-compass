@@ -13,6 +13,105 @@ import ora from 'ora';
 import fs from 'fs/promises';
 import { CSharpParser } from '../parsers/csharp';
 
+// Framework detection helper
+async function detectFrameworksEarly(repositoryPath: string): Promise<string[]> {
+  const frameworks: string[] = [];
+
+  try {
+    const packageJsonPath = path.join(repositoryPath, 'package.json');
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+    const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+
+    if (deps.vue || deps['@vue/cli-service']) frameworks.push('vue');
+    if (deps.react) frameworks.push('react');
+    if (deps.next) frameworks.push('nextjs');
+    if (deps.nuxt) frameworks.push('nuxt');
+  } catch {
+    // Ignore errors
+  }
+
+  try {
+    const composerJsonPath = path.join(repositoryPath, 'composer.json');
+    const composerJson = JSON.parse(await fs.readFile(composerJsonPath, 'utf-8'));
+    const deps = { ...composerJson.require, ...composerJson['require-dev'] };
+
+    if (deps['laravel/framework']) frameworks.push('laravel');
+    if (deps['symfony/framework-bundle']) frameworks.push('symfony');
+  } catch {
+    // Ignore errors
+  }
+
+  try {
+    const projectGodotPath = path.join(repositoryPath, 'project.godot');
+    await fs.access(projectGodotPath);
+    frameworks.push('godot');
+  } catch {
+    // Ignore errors
+  }
+
+  return frameworks;
+}
+
+// Check if project uses external API configuration
+async function hasExternalApiConfig(repositoryPath: string): Promise<boolean> {
+  try {
+    const envPath = path.join(repositoryPath, '.env');
+    const envContent = await fs.readFile(envPath, 'utf-8');
+
+    // Check for common external API URL patterns
+    const externalApiPatterns = [
+      /API_URL=.*:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/i,
+      /VUE_APP_API_URL=.*:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/i,
+      /VITE_API_URL=.*:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/i,
+      /NEXT_PUBLIC_API_URL=.*:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/i,
+      /BACKEND_URL=.*:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/i,
+    ];
+
+    return externalApiPatterns.some(pattern => pattern.test(envContent));
+  } catch {
+    // If .env doesn't exist or can't be read, assume no external API
+    return false;
+  }
+}
+
+// Determine if cross-stack analysis should be auto-enabled
+async function shouldEnableCrossStack(
+  repositoryPath: string,
+  detectedFrameworks: string[],
+  explicitFlag: boolean | undefined
+): Promise<{ enabled: boolean; reason: string }> {
+  // If user explicitly set the flag, respect it
+  if (explicitFlag !== undefined) {
+    return {
+      enabled: explicitFlag,
+      reason: explicitFlag ? 'explicitly enabled via --cross-stack' : 'explicitly disabled via --no-cross-stack'
+    };
+  }
+
+  // Check for Vue + Laravel combination
+  const hasVue = detectedFrameworks.some(f => ['vue', 'nuxt'].includes(f));
+  const hasLaravel = detectedFrameworks.includes('laravel');
+
+  if (!hasVue || !hasLaravel) {
+    return { enabled: false, reason: 'Vue + Laravel not both detected' };
+  }
+
+  // Check for external API configuration
+  const hasExternalApi = await hasExternalApiConfig(repositoryPath);
+
+  if (hasExternalApi) {
+    return {
+      enabled: false,
+      reason: 'external API configuration detected in .env (use --cross-stack to override)'
+    };
+  }
+
+  return {
+    enabled: true,
+    reason: 'Vue + Laravel detected in same repository'
+  };
+}
+
 // Debug file mode handler
 async function handleDebugFileMode(repositoryPath: string, debugFile: string, options: any): Promise<void> {
   console.log(chalk.blue(`🔍 Debug Mode: Analyzing single file`));
@@ -167,7 +266,8 @@ program
   .option('--parallel-parsing', 'Enable parallel file parsing', true)
   .option('--max-concurrency <number>', 'Maximum concurrent file parsing operations (default: 10)', '10')
   .option('--skip-embeddings', 'Skip embedding generation (faster analysis, semantic search disabled)', false)
-  .option('--cross-stack', 'Enable cross-stack analysis for Vue ↔ Laravel projects', false)
+  .option('--cross-stack', 'Enable cross-stack analysis for Vue ↔ Laravel projects (auto-enabled when both frameworks detected)')
+  .option('--no-cross-stack', 'Disable cross-stack analysis even when frameworks detected')
   .option(
     '--vue-laravel',
     'Specifically analyze Vue.js and Laravel cross-stack relationships',
@@ -191,6 +291,37 @@ program
     const spinner = ora('Initializing analysis...').start();
 
     try {
+      // Detect frameworks early for smart defaults
+      spinner.text = 'Detecting frameworks...';
+      const detectedFrameworks = await detectFrameworksEarly(absolutePath);
+
+      // Determine cross-stack flag value (undefined if not explicitly set)
+      let crossStackFlag: boolean | undefined = undefined;
+      if (options.crossStack === true) {
+        crossStackFlag = true;
+      } else if (options.crossStack === false) {
+        crossStackFlag = false;
+      }
+
+      // Auto-enable cross-stack if appropriate
+      const crossStackDecision = await shouldEnableCrossStack(
+        absolutePath,
+        detectedFrameworks,
+        crossStackFlag
+      );
+
+      const enableCrossStack = crossStackDecision.enabled || options.vueLaravel === true;
+
+      // Log framework detection and cross-stack decision
+      if (detectedFrameworks.length > 0) {
+        spinner.succeed(`Detected frameworks: ${detectedFrameworks.join(', ')}`);
+        if (enableCrossStack) {
+          console.log(chalk.cyan(`${getEmoji('🔀', '[CS]')} Cross-stack analysis: enabled (${crossStackDecision.reason})`));
+        }
+      } else {
+        spinner.succeed('Framework detection complete');
+      }
+
       // Initialize database connection
       spinner.text = 'Connecting to database...';
       spinner.succeed('Database connection established');
@@ -213,8 +344,8 @@ program
         skipEmbeddings: options.skipEmbeddings === true,
         forceFullAnalysis: options.forceFull === true,
 
-        // Cross-stack analysis options
-        enableCrossStackAnalysis: options.crossStack === true || options.vueLaravel === true,
+        // Cross-stack analysis options (smart defaults applied)
+        enableCrossStackAnalysis: enableCrossStack,
         crossStackFrameworks: options.vueLaravel === true ? ['vue', 'laravel'] : undefined,
 
         // File size policy options (using aggressive preset)

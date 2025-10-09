@@ -87,16 +87,19 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 ### GPU Acceleration (Optional)
 
 **Performance Boost:**
+
 - **2-3x faster** embedding generation with NVIDIA GPUs
 - Automatic CUDA detection and configuration
 - Graceful fallback to CPU if GPU unavailable
 
 **Requirements:**
+
 - NVIDIA GPU with CUDA support (11.x or 12.x recommended)
 - ~1.2GB disk space for FP16 model
 - Download model: `node download-bge-m3.js`
 
 **Benefits:**
+
 - Faster analysis of large codebases (1000+ files)
 - Real-time semantic search with minimal latency
 - Optimized batch processing (500 symbols at once)
@@ -118,6 +121,7 @@ The `analyze` command is the core of Claude Compass, performing deep multi-langu
 ```
 
 **Key Options:**
+
 - `--force-full` - Force complete re-analysis instead of incremental
 - `--skip-embeddings` - Skip embedding generation for faster analysis (semantic search disabled)
 - `--no-test-files` - Exclude test files from analysis
@@ -132,20 +136,22 @@ The **GraphBuilder** coordinates the entire analysis pipeline:
 
 ```typescript
 // Initialize sub-builders
-new FileGraphBuilder()      // File-level relationships
-new SymbolGraphBuilder()    // Symbol-level dependencies
-new CrossStackGraphBuilder() // Vue ↔ Laravel connections
-new GodotRelationshipBuilder() // Game engine relationships
+new FileGraphBuilder(); // File-level relationships
+new SymbolGraphBuilder(); // Symbol-level dependencies
+new CrossStackGraphBuilder(); // Vue ↔ Laravel connections
+new GodotRelationshipBuilder(); // Game engine relationships
 ```
 
 ### 3. Repository Setup & Framework Detection
 
 **Repository Management:**
+
 - Creates or retrieves repository record from database
 - Detects frameworks by scanning for `package.json`, `composer.json`, `project.godot`
 - Determines incremental vs full analysis based on `last_indexed` timestamp
 
 **Framework Detection Results:**
+
 - JavaScript/TypeScript: Vue, React, Next.js, Express, Fastify
 - PHP: Laravel, Symfony, CodeIgniter
 - C#: Godot game engine projects
@@ -154,11 +160,13 @@ new GodotRelationshipBuilder() // Game engine relationships
 ### 4. File Discovery & Filtering (`src/graph/builder.ts:642`)
 
 **Directory Traversal:**
+
 - Recursive file system walk of repository path
 - Respects `.compassignore` patterns (like `.gitignore`)
 - Built-in skip rules for `node_modules`, `dist`, `build`, `.git`
 
 **File Filtering:**
+
 - Extension filtering: `.js,.jsx,.ts,.tsx,.vue,.php,.cs,.tscn` by default
 - Test file detection and optional exclusion
 - Generated file identification and handling
@@ -168,15 +176,16 @@ new GodotRelationshipBuilder() // Game engine relationships
 
 **Parser Selection Matrix:**
 
-| File Type | Parser | Capabilities |
-|-----------|--------|-------------|
-| `.js/.ts` | TypeScriptParser | Functions, classes, imports, exports |
-| `.vue` | VueParser | Components, composables, template deps |
-| `.php` | LaravelParser | Routes, models, controllers, jobs |
-| `.cs` | CSharpParser | Classes, methods, qualified names |
-| `.tscn` | GodotParser | Scenes, nodes, script attachments |
+| File Type | Parser           | Capabilities                           |
+| --------- | ---------------- | -------------------------------------- |
+| `.js/.ts` | TypeScriptParser | Functions, classes, imports, exports   |
+| `.vue`    | VueParser        | Components, composables, template deps |
+| `.php`    | LaravelParser    | Routes, models, controllers, jobs      |
+| `.cs`     | CSharpParser     | Classes, methods, qualified names      |
+| `.tscn`   | GodotParser      | Scenes, nodes, script attachments      |
 
 **Tree-sitter Parsing Features:**
+
 - Symbol extraction (functions, classes, methods, properties)
 - Dependency tracking (calls, imports, inheritance)
 - Framework entity detection (routes, components, models)
@@ -205,12 +214,14 @@ godot_scenes/nodes/scripts -- Game entities
 ### 7. Graph Construction (`src/graph/`)
 
 **File Graph Builder** (`file-graph.ts`):
+
 - Import/export relationship mapping
 - Module path resolution (relative, absolute, Node.js built-ins)
 - Circular dependency detection
 - Dependency depth calculation
 
 **Symbol Graph Builder** (`symbol-graph.ts`):
+
 - Enhanced qualified name resolution
 - Interface-to-implementation mapping (C#/TypeScript)
 - Call chain analysis with depth tracking
@@ -218,6 +229,7 @@ godot_scenes/nodes/scripts -- Game entities
 - Symbol complexity metrics
 
 **Cross-Stack Builder** (`cross-stack-builder.ts`):
+
 - Vue component → Laravel API route mapping
 - Data contract schema matching
 - Feature cluster identification
@@ -226,12 +238,14 @@ godot_scenes/nodes/scripts -- Game entities
 ### 8. Advanced Analysis Components
 
 **Symbol Resolver** (`src/graph/symbol-resolver.ts`):
+
 - File-aware symbol resolution respecting import boundaries
 - Field type mapping for C# interface resolution
 - Framework symbol registry integration
 - External symbol handling (npm packages, Laravel facades)
 
 **Transitive Analyzer** (`src/graph/transitive-analyzer.ts`):
+
 - Deep dependency traversal (configurable depth: default 10, max 20)
 - Cycle detection with visited set tracking
 - Cross-stack impact analysis
@@ -241,6 +255,7 @@ godot_scenes/nodes/scripts -- Game entities
 ### 9. Analysis Results & Metrics
 
 **Console Output:**
+
 ```
 ✅ Analysis completed successfully!
 ⏱️  Duration: 2.34s
@@ -254,6 +269,7 @@ godot_scenes/nodes/scripts -- Game entities
 ```
 
 **Database Storage:**
+
 - All relationships stored with line numbers and metadata
 - GPU-accelerated embeddings generated for semantic search (BGE-M3, 1024-dim, pgvector)
 - Parallel batch processing (500 symbols per batch)
@@ -263,12 +279,14 @@ godot_scenes/nodes/scripts -- Game entities
 ### 10. Incremental Analysis Optimization
 
 **Change Detection:**
+
 - Compares file `mtime` vs repository `last_indexed`
 - Selective re-parsing of modified files only
 - Smart graph rebuilding with updated relationships
 - Database transaction management for consistency
 
 **Performance Features:**
+
 - Batch database operations for efficiency
 - Configurable file size policies with chunking
 - Memory-efficient streaming for large codebases
@@ -277,6 +295,7 @@ godot_scenes/nodes/scripts -- Game entities
 ### 11. Error Handling & Recovery
 
 **Robust Error Management:**
+
 - Parsing failures logged but don't stop analysis
 - Encoding recovery with multiple fallback strategies
 - Size policy enforcement prevents memory issues
@@ -328,6 +347,7 @@ npm test
 ```
 
 **Server Modes:**
+
 - **`mcp-server`** - STDIO transport for local Claude Desktop integration
 - **`mcp-http`** - HTTP transport for remote MCP clients (manual tunnel setup)
 - **`mcp-unified`** - Combined webhook + MCP server with automatic SSH tunnel (recommended for remote development)
@@ -345,6 +365,7 @@ Claude Compass exposes 6 focused core tools via the Model Context Protocol for A
 Enhanced search for code symbols with framework awareness and hybrid vector+lexical search capabilities.
 
 **Parameters:**
+
 - `query` (required): Search query (symbol name or pattern)
 - `repo_ids`: Array of repository IDs to search in
 - `entity_types`: Framework-aware entity types
@@ -365,6 +386,7 @@ Enhanced search for code symbols with framework awareness and hybrid vector+lexi
 Get detailed information about a specific file including its metadata and symbols.
 
 **Parameters:**
+
 - `file_id`: The ID of the file to retrieve (number)
 - `file_path`: The path of the file to retrieve (alternative to file_id)
 
@@ -377,6 +399,7 @@ Get detailed information about a specific file including its metadata and symbol
 Get details about a specific symbol including its dependencies.
 
 **Parameters:**
+
 - `symbol_id` (required): The ID of the symbol to retrieve (number)
 
 **Returns:** Symbol details with dependencies and callers
@@ -386,6 +409,7 @@ Get details about a specific symbol including its dependencies.
 Find all symbols that call or reference a specific symbol.
 
 **Parameters:**
+
 - `symbol_id` (required): The ID of the symbol to find callers for (number)
 - `dependency_type`: Type of dependency relationship (default: `calls`)
   - Options: `calls`, `imports`, `inherits`, `implements`, `references`, `exports`, `api_call`, `shares_schema`, `frontend_backend`
@@ -398,6 +422,7 @@ Find all symbols that call or reference a specific symbol.
 List all dependencies of a specific symbol.
 
 **Parameters:**
+
 - `symbol_id` (required): The ID of the symbol to list dependencies for (number)
 - `dependency_type`: Type of dependency relationship
   - Options: `calls`, `imports`, `inherits`, `implements`, `references`, `exports`, `api_call`, `shares_schema`, `frontend_backend`
@@ -410,6 +435,7 @@ List all dependencies of a specific symbol.
 Comprehensive impact analysis - calculate blast radius across all frameworks including routes, jobs, and tests.
 
 **Parameters:**
+
 - `symbol_id` (required): The ID of the symbol to analyze impact for (number)
 - `frameworks`: Multi-framework impact analysis (default: all detected frameworks)
   - Options: `vue`, `laravel`, `react`, `node`
@@ -429,7 +455,7 @@ const results = await mcpClient.callTool('search_code', {
   query: 'authenticate',
   entity_types: ['function', 'class', 'route'],
   framework: 'laravel',
-  search_mode: 'auto'
+  search_mode: 'auto',
 });
 
 // Get comprehensive impact analysis
@@ -437,14 +463,14 @@ const impact = await mcpClient.callTool('impact_of', {
   symbol_id: 123,
   frameworks: ['vue', 'laravel'],
   max_depth: 10,
-  detail_level: 'full'
+  detail_level: 'full',
 });
 
 // Find who calls a specific function
 const callers = await mcpClient.callTool('who_calls', {
   symbol_id: 456,
   dependency_type: 'calls',
-  include_cross_stack: true
+  include_cross_stack: true,
 });
 ```
 
@@ -505,6 +531,7 @@ npm run mcp-unified
 ```
 
 **Output:**
+
 ```
 🚀 Unified Server running on http://localhost:3456
 
@@ -558,43 +585,32 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const transport = new StreamableHTTPClientTransport({
-  url: 'http://localhost:3456/mcp',  // via SSH tunnel
+  url: 'http://localhost:3456/mcp', // via SSH tunnel
   headers: {
-    'Authorization': 'Bearer your-mcp-token'
-  }
+    Authorization: 'Bearer your-mcp-token',
+  },
 });
 
-const client = new Client(
-  { name: 'remote-client', version: '1.0.0' },
-  { capabilities: {} }
-);
+const client = new Client({ name: 'remote-client', version: '1.0.0' }, { capabilities: {} });
 
 await client.connect(transport);
 
 // Use MCP tools
 const result = await client.callTool({
   name: 'search_code',
-  arguments: { query: 'authenticate' }
+  arguments: { query: 'authenticate' },
 });
 ```
 
 ### Performance Comparison
 
-| Method | Analysis Time | Disk Usage | Network I/O |
-|--------|--------------|------------|-------------|
-| **SSHFS** | 10-30 seconds | None | High (every file read) |
-| **Webhook + rsync** | 1-3 seconds | 20-100MB | Low (only changed files) |
-| **Performance Gain** | **10x faster** | Minimal | **95% reduction** |
+| Method               | Analysis Time  | Disk Usage | Network I/O              |
+| -------------------- | -------------- | ---------- | ------------------------ |
+| **SSHFS**            | 10-30 seconds  | None       | High (every file read)   |
+| **Webhook + rsync**  | 1-3 seconds    | 20-100MB   | Low (only changed files) |
+| **Performance Gain** | **10x faster** | Minimal    | **95% reduction**        |
 
 **📚 Complete setup instructions:** [webhook-server/SETUP_GUIDE.md](./webhook-server/SETUP_GUIDE.md)
-
-## Roadmap
-
-**Future Development:**
-
-- **Specification Tracking & Drift Detection** - API contract validation and documentation integration
-- **Python/Django Support** - Python framework support for web development
-- **Enhanced AI Integration** - Advanced AI-powered code analysis and suggestions
 
 ## Success Metrics
 

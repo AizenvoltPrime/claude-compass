@@ -480,7 +480,9 @@ export class VueParser extends BaseFrameworkParser {
       }
     }
 
-    if (!url) return null;
+    if (!url || !this.isValidApiUrl(url)) {
+      return null;
+    }
 
     // Normalize URL pattern
     const urlPattern = normalizeUrlPattern(url);
@@ -527,7 +529,7 @@ export class VueParser extends BaseFrameworkParser {
 
     // First argument is URL
     const urlArg = argsNode.child(1);
-    if (urlArg) {
+    if (urlArg && (urlArg.type === 'string' || urlArg.type === 'template_string')) {
       url = this.extractStringValue(urlArg, scriptContent);
       if (url.includes('${') || url.includes('" + ') || url.includes("' + ")) {
       }
@@ -581,7 +583,7 @@ export class VueParser extends BaseFrameworkParser {
     // Extract URL from first argument
     if (argsNode && argsNode.childCount > 1) {
       const urlArg = argsNode.child(1);
-      if (urlArg) {
+      if (urlArg && (urlArg.type === 'string' || urlArg.type === 'template_string')) {
         url = this.extractStringValue(urlArg, scriptContent);
       }
     }
@@ -614,7 +616,7 @@ export class VueParser extends BaseFrameworkParser {
     if (urlArg.type === 'arrow_function' || urlArg.type === 'function_expression') {
       // useFetch(() => `/api/users/${id}`)
       url = this.extractUrlFromFunction(urlArg, scriptContent);
-    } else {
+    } else if (urlArg.type === 'string' || urlArg.type === 'template_string') {
       // useFetch('/api/users')
       url = this.extractStringValue(urlArg, scriptContent);
     }
@@ -772,7 +774,6 @@ export class VueParser extends BaseFrameworkParser {
   private extractStringValue(node: Parser.SyntaxNode, content: string): string {
     if (node.type === 'string' || node.type === 'template_string') {
       const text = node.text;
-      // Remove quotes and handle template literals
       if (text.startsWith('`') && text.endsWith('`')) {
         return text.slice(1, -1);
       }
@@ -784,7 +785,32 @@ export class VueParser extends BaseFrameworkParser {
       }
       return text;
     }
-    return node.text;
+    return '';
+  }
+
+  private isValidApiUrl(url: string): boolean {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+
+    if (!url.startsWith('/') && !url.startsWith('http')) {
+      return false;
+    }
+
+    if (url.includes('.') && !url.includes('://')) {
+      return false;
+    }
+
+    if (url.includes('(') || url.includes(')')) {
+      return false;
+    }
+
+    const singleWordPattern = /^[a-z]+$/;
+    if (singleWordPattern.test(url)) {
+      return false;
+    }
+
+    return true;
   }
 
   private findObjectProperty(

@@ -373,36 +373,19 @@ export class McpTools {
   private dbService: DatabaseService;
   private logger: any;
   private sessionId?: string;
-  private defaultRepoName?: string;
   private defaultRepoId?: number;
 
   constructor(dbService: DatabaseService, sessionId?: string) {
     this.dbService = dbService;
     this.sessionId = sessionId;
     this.logger = logger;
-    this.defaultRepoName = process.env.DEFAULT_REPO_NAME;
   }
 
-  private async getDefaultRepoId(): Promise<number | undefined> {
-    if (!this.defaultRepoName) return undefined;
+  setDefaultRepoId(repoId: number): void {
+    this.defaultRepoId = repoId;
+  }
 
-    if (!this.defaultRepoId) {
-      // Cache the repo ID lookup
-      try {
-        const repo = await this.dbService.getRepositoryByName(this.defaultRepoName);
-        this.defaultRepoId = repo?.id;
-        if (this.defaultRepoId) {
-        } else {
-          this.logger.warn('Default repository not found', { name: this.defaultRepoName });
-        }
-      } catch (error) {
-        this.logger.error('Failed to resolve default repository', {
-          name: this.defaultRepoName,
-          error: (error as Error).message,
-        });
-      }
-    }
-
+  private getDefaultRepoId(): number | undefined {
     return this.defaultRepoId;
   }
 
@@ -597,7 +580,7 @@ export class McpTools {
     const validatedArgs = validateSearchCodeArgs(args);
 
     // Use repo_ids or default repo (repo_id parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-    const defaultRepoId = await this.getDefaultRepoId();
+    const defaultRepoId = this.getDefaultRepoId();
     const repoIds = validatedArgs.repo_ids || (defaultRepoId ? [defaultRepoId] : []);
 
     // Framework auto-detection based on entity_types (per PARAMETER_REDUNDANCY_ANALYSIS)
@@ -986,9 +969,10 @@ export class McpTools {
 
                   // For "to" field: keep original qualification logic for target symbol
                   const shouldQualifyTo = fromName === toName && fromFile !== toFile;
-                  const qualifiedToName = shouldQualifyTo && toFile
-                    ? `${this.getClassNameFromPath(toFile)}.${toName}`
-                    : toName;
+                  const qualifiedToName =
+                    shouldQualifyTo && toFile
+                      ? `${this.getClassNameFromPath(toFile)}.${toName}`
+                      : toName;
 
                   return {
                     from: fromName,
@@ -1178,9 +1162,10 @@ export class McpTools {
 
                   // For "to" field: keep original qualification logic for target symbol
                   const shouldQualifyTo = fromName === toName && fromFile !== toFile;
-                  const qualifiedToName = shouldQualifyTo && toFile
-                    ? `${this.getClassNameFromPath(toFile)}.${toName}`
-                    : toName;
+                  const qualifiedToName =
+                    shouldQualifyTo && toFile
+                      ? `${this.getClassNameFromPath(toFile)}.${toName}`
+                      : toName;
 
                   return {
                     from: fromName,
@@ -1264,8 +1249,12 @@ export class McpTools {
       const frameworksAffected = new Set<string>();
 
       // Direct impact analysis
-      const directDependencies = await this.dbService.getDependenciesFromWithContext(validatedArgs.symbol_id);
-      const directCallers = await this.dbService.getDependenciesToWithContext(validatedArgs.symbol_id);
+      const directDependencies = await this.dbService.getDependenciesFromWithContext(
+        validatedArgs.symbol_id
+      );
+      const directCallers = await this.dbService.getDependenciesToWithContext(
+        validatedArgs.symbol_id
+      );
 
       // Process direct dependencies and callers
       for (const dep of directDependencies) {
@@ -2578,19 +2567,28 @@ export class McpTools {
       case 'auto':
       default:
         // Intelligent auto mode: try semantic first, fallback to lexical with token-ranking
-        this.logger.info(`[VECTOR SEARCH] Auto mode: attempting vector search for query: "${query}"`);
+        this.logger.info(
+          `[VECTOR SEARCH] Auto mode: attempting vector search for query: "${query}"`
+        );
         try {
           const vectorResults = await this.dbService.vectorSearchSymbols(query, repoId, {
             ...searchOptions,
             similarityThreshold: 0.35,
           });
           if (vectorResults.length > 0) {
-            this.logger.info(`[VECTOR SEARCH] Auto mode: vector search returned ${vectorResults.length} results`);
+            this.logger.info(
+              `[VECTOR SEARCH] Auto mode: vector search returned ${vectorResults.length} results`
+            );
             return vectorResults;
           }
-          this.logger.info('[VECTOR SEARCH] Auto mode: vector search returned 0 results, falling back to lexical');
+          this.logger.info(
+            '[VECTOR SEARCH] Auto mode: vector search returned 0 results, falling back to lexical'
+          );
         } catch (error) {
-          this.logger.warn('[VECTOR SEARCH] Auto mode: vector search failed, falling back to lexical:', error);
+          this.logger.warn(
+            '[VECTOR SEARCH] Auto mode: vector search failed, falling back to lexical:',
+            error
+          );
         }
 
         return await this.dbService.lexicalSearchSymbols(query, repoId, searchOptions);
@@ -2665,9 +2663,10 @@ export class McpTools {
       // If from and to have same name but different files, qualify the "to" name
       const fromName = item.name;
       const shouldQualifyTo = fromName === targetSymbolName && item.file_path !== targetFilePath;
-      const qualifiedToName = shouldQualifyTo && targetFilePath
-        ? `${this.getClassNameFromPath(targetFilePath)}.${targetSymbolName}`
-        : targetSymbolName;
+      const qualifiedToName =
+        shouldQualifyTo && targetFilePath
+          ? `${this.getClassNameFromPath(targetFilePath)}.${targetSymbolName}`
+          : targetSymbolName;
 
       // Create one dependency entry for each matching original dependency
       // This ensures multiple calls from the same caller at different lines are all captured
@@ -2689,20 +2688,22 @@ export class McpTools {
       }
 
       // Fallback if no matching dependency found
-      return [{
-        from: fromName,
-        to: qualifiedToName,
-        type: impactType,
-        line_number: 0,
-        file_path: item.file_path,
-        relationship_context: item.relationship_context,
-        qualified_context: undefined,
-        parameter_types: undefined,
-        call_instance_id: undefined,
-        calling_object: undefined,
-        resolved_class: undefined,
-        parameter_context: undefined,
-      }];
+      return [
+        {
+          from: fromName,
+          to: qualifiedToName,
+          type: impactType,
+          line_number: 0,
+          file_path: item.file_path,
+          relationship_context: item.relationship_context,
+          qualified_context: undefined,
+          parameter_types: undefined,
+          call_instance_id: undefined,
+          calling_object: undefined,
+          resolved_class: undefined,
+          parameter_context: undefined,
+        },
+      ];
     });
   }
 
