@@ -1074,6 +1074,7 @@ export class GraphBuilder {
           is_exported: symbol.is_exported,
           visibility: symbol.visibility as any,
           signature: symbol.signature,
+          description: symbol.description,
         });
       }
     }

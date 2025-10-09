@@ -28,6 +28,8 @@ import {
   UrlPattern,
   RouteParameter,
 } from './utils/url-patterns';
+import { JavaScriptParser } from './javascript';
+import { TypeScriptParser } from './typescript';
 
 const logger = createComponentLogger('vue-parser');
 
@@ -67,6 +69,8 @@ export interface VueTypeInterface extends FrameworkEntity {
  */
 export class VueParser extends BaseFrameworkParser {
   private typescriptParser: Parser;
+  private jsParser: JavaScriptParser;
+  private tsParser: TypeScriptParser;
   private extractedSymbols: ParsedSymbol[] = [];
   private singlePassCache: {
     symbols: ParsedSymbol[];
@@ -81,6 +85,10 @@ export class VueParser extends BaseFrameworkParser {
     // Create TypeScript parser for handling TS script sections
     this.typescriptParser = new Parser();
     this.typescriptParser.setLanguage(TypeScript.typescript);
+
+    // Create parser instances for delegation (handles JSDoc extraction)
+    this.jsParser = new JavaScriptParser();
+    this.tsParser = new TypeScriptParser();
   }
 
   /**
@@ -189,22 +197,24 @@ export class VueParser extends BaseFrameworkParser {
           dependencies = chunkedResult.dependencies;
           errors = chunkedResult.errors;
         } else {
-          // Use normal parsing for smaller script sections
-          const tree = this.parseScriptContent(scriptContent!, isTypeScript);
-          if (tree?.rootNode) {
-            symbols = this.extractSymbols(tree.rootNode, scriptContent!);
-            imports = this.extractImports(tree.rootNode, scriptContent!);
-            exports = this.extractExports(tree.rootNode, scriptContent!);
-            dependencies = this.extractDependencies(tree.rootNode, scriptContent!);
+          // Delegate to JavaScriptParser or TypeScriptParser for proper JSDoc extraction
+          const tempFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
+          const parser = isTypeScript ? this.tsParser : this.jsParser;
 
-            if (tree.rootNode.hasError) {
-              errors.push({
-                message: 'Syntax errors in Vue script section',
-                line: 1,
-                column: 1,
-                severity: 'warning' as const,
-              });
-            }
+          try {
+            const parseResult = await parser.parseFile(tempFilePath, scriptContent!, options);
+            symbols = parseResult.symbols;
+            imports = parseResult.imports;
+            exports = parseResult.exports;
+            dependencies = parseResult.dependencies;
+            errors = parseResult.errors || [];
+          } catch (error: any) {
+            errors.push({
+              message: `Script parsing error: ${error.message}`,
+              line: 1,
+              column: 1,
+              severity: 'error' as const,
+            });
           }
         }
 
@@ -268,27 +278,22 @@ export class VueParser extends BaseFrameworkParser {
 
       try {
         const isTypeScript = sections.scriptLang === 'ts' || content.includes('lang="ts"');
-        const tree = this.parseScriptContent(scriptContent!, isTypeScript);
-        if (tree?.rootNode) {
-          symbols = this.extractSymbols(tree.rootNode, scriptContent!);
-          imports = this.extractImports(tree.rootNode, scriptContent!);
-          exports = this.extractExports(tree.rootNode, scriptContent!);
-          dependencies = this.extractDependencies(tree.rootNode, scriptContent!);
 
-          // Extract template symbols using lightweight parsing
-          if (sections.template) {
-            const templateSymbols = this.extractTemplateSymbols(sections.template);
-            symbols.push(...templateSymbols);
-          }
+        // Delegate to JavaScriptParser or TypeScriptParser for proper JSDoc extraction
+        const tempFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
+        const parser = isTypeScript ? this.tsParser : this.jsParser;
 
-          if (tree.rootNode.hasError) {
-            errors.push({
-              message: 'Syntax errors in Vue script section',
-              line: 1,
-              column: 1,
-              severity: 'warning' as const,
-            });
-          }
+        const parseResult = await parser.parseFile(tempFilePath, scriptContent!, options);
+        symbols = parseResult.symbols;
+        imports = parseResult.imports;
+        exports = parseResult.exports;
+        dependencies = parseResult.dependencies;
+        errors = parseResult.errors || [];
+
+        // Extract template symbols using lightweight parsing
+        if (sections.template) {
+          const templateSymbols = this.extractTemplateSymbols(sections.template);
+          symbols.push(...templateSymbols);
         }
       } catch (error) {
         errors.push({
@@ -1244,12 +1249,18 @@ export class VueParser extends BaseFrameworkParser {
         emits = scriptAnalysis.emits;
         composables = scriptAnalysis.composables;
 
-        // Also extract symbols and imports from script content
+        // Also extract symbols and imports from script content using delegation
         const isTypeScript = sections.scriptLang === 'ts' || content.includes('lang="ts"');
-        const tree = this.parseScriptContent(scriptContent!, isTypeScript);
-        if (tree?.rootNode) {
-          scriptSymbols = this.extractSymbols(tree.rootNode, scriptContent!);
-          scriptImports = this.extractImports(tree.rootNode, scriptContent!);
+        const tempFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
+        const parser = isTypeScript ? this.tsParser : this.jsParser;
+
+        try {
+          const parseResult = await parser.parseFile(tempFilePath, scriptContent!, {});
+          scriptSymbols = parseResult.symbols;
+          scriptImports = parseResult.imports;
+        } catch (error) {
+          // Continue even if parsing fails
+          logger.warn(`Failed to parse Vue script section: ${error.message}`);
         }
       }
 
@@ -3946,47 +3957,12 @@ export class VueParser extends BaseFrameworkParser {
       // Determine if it's TypeScript based on file extension or lang attribute
       const isTypeScript = filePath.includes('.ts') || content.includes('lang="ts"');
 
+      // Delegate to JavaScriptParser or TypeScriptParser for proper JSDoc extraction
+      const parser = isTypeScript ? this.tsParser : this.jsParser;
+      const tempFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
+
       try {
-        const tree = this.parseScriptContent(content, isTypeScript);
-        if (!tree || !tree.rootNode) {
-          return {
-            symbols: [],
-            dependencies: [],
-            imports: [],
-            exports: [],
-            errors: [
-              {
-                message: 'Failed to parse Vue script content',
-                line: 1,
-                column: 1,
-                severity: 'error',
-              },
-            ],
-          };
-        }
-
-        const symbols = this.extractSymbols(tree.rootNode, content);
-        const imports = this.extractImports(tree.rootNode, content);
-        const exports = this.extractExports(tree.rootNode, content);
-        const dependencies = this.extractDependencies(tree.rootNode, content);
-
-        const errors: any[] = [];
-        if (tree.rootNode.hasError) {
-          errors.push({
-            message: 'Syntax errors in Vue script content',
-            line: 1,
-            column: 1,
-            severity: 'warning' as const,
-          });
-        }
-
-        return {
-          symbols,
-          dependencies,
-          imports,
-          exports,
-          errors,
-        };
+        return await parser.parseFile(tempFilePath, content, options);
       } catch (error) {
         return {
           symbols: [],

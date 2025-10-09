@@ -257,6 +257,7 @@ export interface CreateSymbol {
   is_exported?: boolean;
   visibility?: Visibility;
   signature?: string;
+  description?: string;
 }
 
 export interface CreateDependency {

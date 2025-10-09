@@ -320,11 +320,51 @@ export class PHPParser extends ChunkedParser {
     return [];
   }
 
+  private extractPhpDocComment(node: Parser.SyntaxNode, content: string): string | undefined {
+    const parent = node.parent;
+    if (!parent) return undefined;
+
+    const nodeIndex = parent.children.indexOf(node);
+    if (nodeIndex <= 0) return undefined;
+
+    for (let i = nodeIndex - 1; i >= 0; i--) {
+      const sibling = parent.children[i];
+
+      if (sibling.type === '\n' || sibling.type === 'whitespace') continue;
+
+      if (sibling.type !== 'comment') break;
+
+      const commentText = this.getNodeText(sibling, content);
+
+      if (commentText.trim().startsWith('/**')) {
+        return this.cleanPhpDocComment(commentText);
+      }
+
+      break;
+    }
+
+    return undefined;
+  }
+
+  private cleanPhpDocComment(commentText: string): string {
+    let cleaned = commentText
+      .replace(/^\/\*\*/, '')
+      .replace(/\*\/$/, '')
+      .trim();
+
+    const lines = cleaned.split('\n').map(line => {
+      return line.replace(/^\s*\*?\s?/, '');
+    });
+
+    return lines.join('\n').trim();
+  }
+
   private extractNamespaceSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractPhpDocComment(node, content);
 
     return {
       name,
@@ -332,7 +372,8 @@ export class PHPParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: true, // Namespaces are always accessible
-      visibility: Visibility.PUBLIC
+      visibility: Visibility.PUBLIC,
+      description,
     };
   }
 
@@ -342,6 +383,7 @@ export class PHPParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const signature = this.extractClassSignature(node, content);
+    const description = this.extractPhpDocComment(node, content);
 
     return {
       name,
@@ -350,7 +392,8 @@ export class PHPParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: true, // Classes are typically exportable in PHP
       visibility: Visibility.PUBLIC,
-      signature
+      signature,
+      description,
     };
   }
 
@@ -359,6 +402,7 @@ export class PHPParser extends ChunkedParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractPhpDocComment(node, content);
 
     return {
       name,
@@ -366,7 +410,8 @@ export class PHPParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: true, // Interfaces are typically exportable
-      visibility: Visibility.PUBLIC
+      visibility: Visibility.PUBLIC,
+      description,
     };
   }
 
@@ -375,6 +420,7 @@ export class PHPParser extends ChunkedParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractPhpDocComment(node, content);
 
     return {
       name,
@@ -382,7 +428,8 @@ export class PHPParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: true, // Traits are typically exportable
-      visibility: Visibility.PUBLIC
+      visibility: Visibility.PUBLIC,
+      description,
     };
   }
 
@@ -392,6 +439,7 @@ export class PHPParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const signature = this.extractFunctionSignature(node, content);
+    const description = this.extractPhpDocComment(node, content);
 
     return {
       name,
@@ -400,7 +448,8 @@ export class PHPParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: true, // Functions are typically exportable
       visibility: Visibility.PUBLIC,
-      signature
+      signature,
+      description,
     };
   }
 
@@ -411,6 +460,7 @@ export class PHPParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const signature = this.extractFunctionSignature(node, content);
     const visibility = this.extractVisibility(node, content);
+    const description = this.extractPhpDocComment(node, content);
 
     return {
       name,
@@ -419,13 +469,15 @@ export class PHPParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: visibility === Visibility.PUBLIC,
       visibility,
-      signature
+      signature,
+      description,
     };
   }
 
   private extractPropertySymbols(node: Parser.SyntaxNode, content: string): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
     const visibility = this.extractVisibility(node, content);
+    const description = this.extractPhpDocComment(node, content);
 
     // Property declarations can contain multiple properties
     const propertyElements = this.findNodesOfType(node, 'property_element');
@@ -439,7 +491,8 @@ export class PHPParser extends ChunkedParser {
           start_line: element.startPosition.row + 1,
           end_line: element.endPosition.row + 1,
           is_exported: visibility === Visibility.PUBLIC,
-          visibility
+          visibility,
+          description,
         });
       }
     }
@@ -449,6 +502,7 @@ export class PHPParser extends ChunkedParser {
 
   private extractConstantSymbols(node: Parser.SyntaxNode, content: string): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
+    const description = this.extractPhpDocComment(node, content);
 
     // Constant declarations can contain multiple constants
     const constElements = this.findNodesOfType(node, 'const_element');
@@ -462,7 +516,8 @@ export class PHPParser extends ChunkedParser {
           start_line: element.startPosition.row + 1,
           end_line: element.endPosition.row + 1,
           is_exported: true, // Constants are typically accessible
-          visibility: Visibility.PUBLIC
+          visibility: Visibility.PUBLIC,
+          description,
         });
       }
     }

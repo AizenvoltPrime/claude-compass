@@ -108,6 +108,7 @@ export class TypeScriptParser extends JavaScriptParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractJSDocComment(node, content);
 
     return {
       name,
@@ -115,7 +116,8 @@ export class TypeScriptParser extends JavaScriptParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
-      signature: this.extractInterfaceSignature(node, content)
+      signature: this.extractInterfaceSignature(node, content),
+      description,
     };
   }
 
@@ -124,6 +126,7 @@ export class TypeScriptParser extends JavaScriptParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractJSDocComment(node, content);
 
     return {
       name,
@@ -131,7 +134,8 @@ export class TypeScriptParser extends JavaScriptParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
-      signature: this.getNodeText(node, content)
+      signature: this.getNodeText(node, content),
+      description,
     };
   }
 
@@ -140,6 +144,7 @@ export class TypeScriptParser extends JavaScriptParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
+    const description = this.extractJSDocComment(node, content);
 
     return {
       name,
@@ -147,7 +152,8 @@ export class TypeScriptParser extends JavaScriptParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
-      visibility: this.extractVisibility(node, content)
+      visibility: this.extractVisibility(node, content),
+      description,
     };
   }
 

@@ -615,6 +615,8 @@ export class CSharpParser extends ChunkedParser {
     context.currentNamespace = name;
     context.namespaceStack.push(name);
 
+    const description = this.extractXmlDocComment(node, content);
+
     symbols.push({
       name,
       symbol_type: SymbolType.NAMESPACE,
@@ -622,7 +624,56 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: true,
       visibility: Visibility.PUBLIC,
+      description,
     });
+  }
+
+  private extractXmlDocComment(node: Parser.SyntaxNode, content: string): string | undefined {
+    const parent = node.parent;
+    if (!parent) return undefined;
+
+    const nodeIndex = parent.children.indexOf(node);
+    if (nodeIndex <= 0) return undefined;
+
+    const xmlCommentLines: string[] = [];
+
+    for (let i = nodeIndex - 1; i >= 0; i--) {
+      const sibling = parent.children[i];
+
+      if (sibling.type === '\n' || sibling.type === 'whitespace') continue;
+
+      if (sibling.type !== 'comment') break;
+
+      const commentText = this.getNodeText(sibling, content);
+
+      if (commentText.trim().startsWith('///')) {
+        xmlCommentLines.unshift(commentText);
+      } else {
+        break;
+      }
+    }
+
+    if (xmlCommentLines.length === 0) return undefined;
+
+    const xmlText = xmlCommentLines.join('\n');
+    return this.extractXmlSummary(xmlText);
+  }
+
+  private extractXmlSummary(xmlText: string): string | undefined {
+    const cleaned = xmlText
+      .split('\n')
+      .map(line => line.replace(/^\s*\/\/\/\s?/, ''))
+      .join('\n');
+
+    const summaryMatch = cleaned.match(/<summary>\s*([\s\S]*?)\s*<\/summary>/i);
+    if (!summaryMatch) return undefined;
+
+    return summaryMatch[1]
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n')
+      .trim();
   }
 
   /**
@@ -659,6 +710,8 @@ export class CSharpParser extends ChunkedParser {
       namespace: context.currentNamespace,
     });
 
+    const description = this.extractXmlDocComment(node, content);
+
     const symbol: ParsedSymbol = {
       name,
       qualified_name: qualifiedName,
@@ -668,6 +721,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: this.buildClassSignature(name, modifiers, baseTypes),
+      description,
     };
 
     symbols.push(symbol);
@@ -719,6 +773,7 @@ export class CSharpParser extends ChunkedParser {
     context.methodMap.get(name)!.push(methodInfo);
 
     const methodQualifiedName = this.buildQualifiedName(context, name);
+    const description = this.extractXmlDocComment(node, content);
 
     const symbol: ParsedSymbol = {
       name,
@@ -729,6 +784,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: this.buildMethodSignature(name, modifiers, returnType, parameters),
+      description,
     };
 
     symbols.push(symbol);
@@ -754,6 +810,7 @@ export class CSharpParser extends ChunkedParser {
 
     // Check for Godot Export attribute
     const hasExportAttribute = this.hasAttribute(node, 'Export', content);
+    const description = this.extractXmlDocComment(node, content);
 
     // Extract each variable declarator
     const declaratorNodes = this.findNodesOfType(variableDeclaration, 'variable_declarator');
@@ -798,6 +855,7 @@ export class CSharpParser extends ChunkedParser {
         is_exported: modifiers.includes('public'),
         visibility,
         signature: `${modifiers.join(' ')} ${fieldType} ${fieldName}`.trim(),
+        description,
       });
     }
   }
@@ -1156,6 +1214,8 @@ export class CSharpParser extends ChunkedParser {
       namespace: context.currentNamespace,
     });
 
+    const description = this.extractXmlDocComment(node, content);
+
     symbols.push({
       name,
       symbol_type: SymbolType.PROPERTY,
@@ -1164,6 +1224,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: `${modifiers.join(' ')} ${propertyType} ${name}`.trim(),
+      description,
     });
   }
 
@@ -1453,6 +1514,8 @@ export class CSharpParser extends ChunkedParser {
       namespace: context.currentNamespace,
     });
 
+    const description = this.extractXmlDocComment(node, content);
+
     const symbol: ParsedSymbol = {
       name,
       qualified_name: qualifiedName,
@@ -1462,6 +1525,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: this.buildInterfaceSignature(name, modifiers, baseTypes),
+      description,
     };
 
     symbols.push(symbol);
@@ -1492,6 +1556,7 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
     const visibility = this.getVisibility(modifiers);
+    const description = this.extractXmlDocComment(node, content);
 
     symbols.push({
       name,
@@ -1501,6 +1566,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: `struct ${name}`,
+      description,
     });
 
     if (modifiers.includes('public')) {
@@ -1528,6 +1594,7 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
     const visibility = this.getVisibility(modifiers);
+    const description = this.extractXmlDocComment(node, content);
 
     symbols.push({
       name,
@@ -1536,6 +1603,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
       visibility,
+      description,
     });
 
     const bodyNode = node.childForFieldName('body');
@@ -1547,6 +1615,7 @@ export class CSharpParser extends ChunkedParser {
 
         const memberName = this.getNodeText(memberNameNode, content);
         const qualifiedName = `${name}.${memberName}`;
+        const memberDescription = this.extractXmlDocComment(memberNode, content);
 
         symbols.push({
           name: memberName,
@@ -1557,6 +1626,7 @@ export class CSharpParser extends ChunkedParser {
           is_exported: modifiers.includes('public'),
           visibility: Visibility.PUBLIC,
           signature: qualifiedName,
+          description: memberDescription,
         });
       }
     }
@@ -1590,6 +1660,8 @@ export class CSharpParser extends ChunkedParser {
     // Check for Signal attribute for potential delegate signals
     this.hasAttribute(node, 'Signal', content);
 
+    const description = this.extractXmlDocComment(node, content);
+
     symbols.push({
       name,
       symbol_type: SymbolType.TYPE_ALIAS,
@@ -1598,6 +1670,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: `delegate ${name}`,
+      description,
     });
   }
 
@@ -1617,6 +1690,7 @@ export class CSharpParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node);
     const visibility = this.getVisibility(modifiers);
     const parameters = this.extractParameters(node, content);
+    const description = this.extractXmlDocComment(node, content);
 
     symbols.push({
       name,
@@ -1626,6 +1700,7 @@ export class CSharpParser extends ChunkedParser {
       is_exported: modifiers.includes('public'),
       visibility,
       signature: this.buildConstructorSignature(name, modifiers, parameters),
+      description,
     });
   }
 
@@ -1650,6 +1725,7 @@ export class CSharpParser extends ChunkedParser {
       if (!nameNode) continue;
 
       const name = this.getNodeText(nameNode, content);
+      const description = this.extractXmlDocComment(node, content);
 
       symbols.push({
         name,
@@ -1659,6 +1735,7 @@ export class CSharpParser extends ChunkedParser {
         is_exported: modifiers.includes('public'),
         visibility,
         signature: `event ${name}`,
+        description,
       });
     }
   }
