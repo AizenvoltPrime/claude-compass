@@ -55,29 +55,6 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['name']);
   });
 
-  await knex.schema.createTable('cross_stack_calls', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table.integer('frontend_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
-    table.integer('backend_symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
-    table.string('call_type').notNullable();
-    table.text('endpoint_path');
-    table.string('http_method');
-    table.integer('line_number');
-    table.timestamps(true, true);
-
-    // Performance indexes
-    table.index(['repo_id', 'call_type']);
-    table.index(['frontend_symbol_id']);
-    table.index(['backend_symbol_id']);
-    table.index(['http_method', 'endpoint_path']);
-  });
-
   await knex.schema.createTable('api_calls', table => {
     table.increments('id').primary();
     table
@@ -521,7 +498,6 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('framework_metadata');
   await knex.schema.dropTableIfExists('data_contracts');
   await knex.schema.dropTableIfExists('api_calls');
-  await knex.schema.dropTableIfExists('cross_stack_calls');
   await knex.schema.dropTableIfExists('routes');
 
   // Remove vector columns from symbols

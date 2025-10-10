@@ -206,6 +206,7 @@ file_dependencies -- File→file relationships
 
 -- Framework Tables
 routes         -- Web routes (Laravel, Next.js, Express)
+api_calls      -- Cross-stack frontend→backend API connections (Vue → Laravel)
 components     -- UI components (Vue, React)
 composables    -- Reactive logic (Vue composables, React hooks)
 framework_metadata -- Framework-specific data
