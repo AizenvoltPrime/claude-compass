@@ -951,7 +951,10 @@ export class LaravelParser extends BaseFrameworkParser {
       }
 
       // Apply Laravel route file prefix conventions
-      const filePrefix = this.getRouteFilePrefix(filePath);
+      // Exception: /sanctum routes should NOT get the /api prefix even when defined in api.php
+      // Laravel Sanctum routes must be accessible without /api/ prefix for CORS/auth reasons
+      const isSanctumRoute = path.startsWith('/sanctum/') || path.startsWith('sanctum/');
+      const filePrefix = isSanctumRoute ? '' : this.getRouteFilePrefix(filePath);
       // Apply group prefix, then file prefix
       const fullPath = filePrefix + groupPrefix + (path.startsWith('/') ? path : '/' + path);
 
