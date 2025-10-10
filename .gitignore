@@ -81,3 +81,6 @@ docker-data/
 
 # MCP configuration
 .mcp.json
+tools/verification/frontend-api-calls.json
+.gitignore
+tools/verification/comparison-results.json
