@@ -107,7 +107,7 @@ The system uses PostgreSQL with these core tables:
 - `symbols`: All parsed code symbols with embeddings
 - `dependencies`: Symbol relationships and calls
 - `routes`: Framework-agnostic routes with Laravel-specific fields
-- `cross_stack_calls`: Frontend-backend connections
+- `api_calls`: Cross-stack frontend-backend API connections (Vue → Laravel)
 - `framework_metadata`: Consolidated framework-specific data storage
 
 ### Parser Flow

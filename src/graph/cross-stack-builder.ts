@@ -21,14 +21,8 @@ import {
 } from '../database/models';
 import { FrameworkEntity } from '../parsers/base';
 import { DatabaseService } from '../database/services';
-import {
-  CrossStackParser,
-  CrossStackRelationship,
-  ApiCallInfo,
-  LaravelRoute_CrossStack,
-} from '../parsers/cross-stack';
-import { VueApiCall, VueTypeInterface } from '../parsers/vue';
-import { LaravelRoute, LaravelApiSchema, ValidationRule } from '../parsers/laravel';
+import { CrossStackParser } from '../parsers/cross-stack';
+import { ApiCallExtractor } from '../parsers/utils/api-call-extractor';
 import { createComponentLogger } from '../utils/logger';
 
 const logger = createComponentLogger('cross-stack-builder');
@@ -120,11 +114,13 @@ export interface FeatureCluster {
 export class CrossStackGraphBuilder {
   private database: DatabaseService;
   private crossStackParser: CrossStackParser;
+  private apiCallExtractor: ApiCallExtractor;
   private logger: any;
 
   constructor(database: DatabaseService) {
     this.database = database;
     this.crossStackParser = new CrossStackParser(database);
+    this.apiCallExtractor = new ApiCallExtractor();
     this.logger = logger;
   }
 
@@ -549,6 +545,7 @@ export class CrossStackGraphBuilder {
       const vueComponentsRaw = await this.database.getComponentsByType(repoId, 'vue');
       const vueComponents = this.convertComponentsToFrameworkEntities(vueComponentsRaw);
       const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
+
       const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
 
       const allApiCalls = await this.extractApiCallsFromFrontendFiles(repoId);
@@ -564,7 +561,9 @@ export class CrossStackGraphBuilder {
 
           this.logger.info('Extracted Laravel route information', {
             count: laravelRouteInfo.length,
-            samplePaths: laravelRouteInfo.slice(0, 3).map(r => ({ path: r.path, method: r.method })),
+            samplePaths: laravelRouteInfo
+              .slice(0, 3)
+              .map(r => ({ path: r.path, method: r.method })),
           });
 
           const relationships = this.matchApiCallsToRoutes(allApiCalls, laravelRouteInfo);
@@ -1096,9 +1095,7 @@ export class CrossStackGraphBuilder {
 
         // Merge AST and regex results, deduplicating by URL+method
         const existingUrls = new Set(astApiCalls.map(c => `${c.url}|${c.method}`));
-        const newRegexCalls = regexApiCalls.filter(
-          c => !existingUrls.has(`${c.url}|${c.method}`)
-        );
+        const newRegexCalls = regexApiCalls.filter(c => !existingUrls.has(`${c.url}|${c.method}`));
 
         if (newRegexCalls.length > 0) {
           this.logger.info('Regex extraction found additional API calls', {
@@ -1157,7 +1154,9 @@ export class CrossStackGraphBuilder {
       totalFilesScanned: frontendFiles.length,
       filesWithApiCalls,
       totalApiCalls: apiCalls.length,
-      sampleUrls: apiCalls.slice(0, 5).map(c => ({ url: c.url, method: c.method, file: c.componentName })),
+      sampleUrls: apiCalls
+        .slice(0, 5)
+        .map(c => ({ url: c.url, method: c.method, file: c.componentName })),
     });
 
     return apiCalls;
@@ -1193,187 +1192,24 @@ export class CrossStackGraphBuilder {
     filePath: string,
     componentName: string
   ): any[] {
-    const apiCalls: any[] = [];
-    const uniqueCalls = new Set<string>(); // Track unique URL+method combinations
+    const language =
+      filePath.endsWith('.ts') || filePath.endsWith('.tsx') || filePath.endsWith('.vue')
+        ? 'typescript'
+        : 'javascript';
 
-    // First pass: Extract URL variable declarations with their positions
-    // Matches patterns like: const url = "/api/..."; or const endpoint = `/api/...`;
-    // Store as array since same variable name can be reused in different scopes
-    const urlVariableDeclarations: Array<{ varName: string; url: string; position: number }> = [];
-    const urlVariablePatterns = [
-      /(?:const|let|var)\s+(\w+)\s*=\s*['"`](\/api\/[^'"`]+)['"`]/g,
-      /(?:const|let|var)\s+(\w+)\s*=\s*`(\/api\/[^`]+)`/g,
-    ];
+    const extractedCalls = this.apiCallExtractor.extractFromContent(content, filePath, language);
 
-    for (const pattern of urlVariablePatterns) {
-      let match;
-      pattern.lastIndex = 0;
-      while ((match = pattern.exec(content)) !== null) {
-        const varName = match[1];
-        let url = match[2];
-        const position = match.index;
-
-        // Clean up template literal variables
-        if (url.includes('${')) {
-          url = url.replace(/\$\{[^}]+\}/g, '{id}');
-        }
-
-        urlVariableDeclarations.push({ varName, url, position });
-      }
-    }
-
-    // Log found URL variables for debugging
-    if (urlVariableDeclarations.length > 0) {
-      this.logger.debug('Found URL variable declarations', {
-        filePath,
-        count: urlVariableDeclarations.length,
-      });
-    }
-
-    // Enhanced regex patterns to match all fetch call variations
-    const fetchPatterns = [
-      // Standard fetch with string literals
-      /(?:await\s+)?fetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
-      /(?:await\s+)?fetch\s*\(\s*`([^`]+)`/g,
-      // Fetch with method in options
-      /(?:await\s+)?fetch\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
-      /(?:await\s+)?fetch\s*\(\s*`([^`]+)`\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
-      // $fetch (Nuxt 3)
-      /(?:await\s+)?\$fetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
-      /(?:await\s+)?\$fetch\s*\(\s*`([^`]+)`/g,
-      /(?:await\s+)?\$fetch\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*\{[^}]*method:\s*['"`](\w+)['"`]/g,
-      // useFetch (Nuxt 3)
-      /useFetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
-      /useFetch\s*\(\s*`([^`]+)`/g,
-      // useAsyncData with fetch
-      /useAsyncData\s*\([^,]+,\s*\(\)\s*=>\s*\$?fetch\s*\(\s*['"`]([^'"`]+)['"`]/g,
-      // Axios methods with string literals (multiline patterns must come first)
-      /axios\.(get|post|put|delete|patch)\s*\(\s+['"`]([^'"`]+)['"`]/g,
-      /axios\.(get|post|put|delete|patch)\s*\(\s+`([^`]+)`/g,
-      // Axios methods with string literals (single line)
-      /axios\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
-      /axios\.(get|post|put|delete|patch)\s*\(\s*`([^`]+)`/g,
-    ];
-
-    // Patterns for axios calls with variable references
-    // Matches: axios.METHOD(variableName, ...) or axios.METHOD(variableName)
-    const variableReferencePatterns = [
-      /axios\.(get|post|put|delete|patch)\s*\(\s*(\w+)\s*[,)]/g,
-      /(?:await\s+)?fetch\s*\(\s*(\w+)\s*[,)]/g,
-    ];
-
-    for (const pattern of fetchPatterns) {
-      let match;
-      pattern.lastIndex = 0; // Reset regex state
-      while ((match = pattern.exec(content)) !== null) {
-        let url = match[1];
-        let method = 'GET';
-
-        // Handle different capture groups based on pattern
-        if (match[2]) {
-          if (pattern.source.includes('axios')) {
-            // For axios pattern: match[1] is method, match[2] is URL
-            method = match[1].toUpperCase();
-            url = match[2];
-          } else {
-            // For fetch patterns: match[1] is URL, match[2] is method
-            method = match[2].toUpperCase();
-          }
-        }
-
-        // Clean up template literal variables (replace ${...} with placeholder)
-        if (url && url.includes('${')) {
-          url = url.replace(/\$\{[^}]+\}/g, '{id}');
-        }
-
-        // Only process absolute path URLs
-        if (url && url.startsWith('/')) {
-          // Create unique key for deduplication
-          const uniqueKey = `${url}|${method}`;
-
-          // Skip if we've already seen this exact URL+method combination
-          if (uniqueCalls.has(uniqueKey)) {
-            continue;
-          }
-
-          uniqueCalls.add(uniqueKey);
-
-          apiCalls.push({
-            url,
-            normalizedUrl: url,
-            method,
-            location: {
-              line: content.substring(0, match.index).split('\n').length,
-              column: match.index - content.lastIndexOf('\n', match.index) - 1,
-            },
-            filePath,
-            componentName,
-          });
-        }
-      }
-    }
-
-    // Second pass: Process axios/fetch calls with variable references
-    // Use proximity-based matching: find nearest variable declaration before the call
-    for (const pattern of variableReferencePatterns) {
-      let match;
-      pattern.lastIndex = 0;
-      while ((match = pattern.exec(content)) !== null) {
-        const fullMatch = match[0];
-        let method = 'GET';
-        let varName: string;
-        const callPosition = match.index;
-
-        // Determine if it's axios or fetch pattern
-        if (fullMatch.includes('axios')) {
-          method = match[1].toUpperCase(); // axios.METHOD
-          varName = match[2]; // variable name
-        } else {
-          // fetch pattern
-          varName = match[1]; // variable name
-          method = 'GET'; // default for fetch
-        }
-
-        // Find the nearest variable declaration before this call
-        // Look for declarations with matching name that appear before this position
-        const candidateDeclarations = urlVariableDeclarations
-          .filter(decl => decl.varName === varName && decl.position < callPosition)
-          .sort((a, b) => b.position - a.position); // Sort by position descending (nearest first)
-
-        if (candidateDeclarations.length > 0) {
-          const nearestDeclaration = candidateDeclarations[0];
-          const url = nearestDeclaration.url;
-
-          // Successfully resolved variable reference
-          const uniqueKey = `${url}|${method}`;
-
-          if (!uniqueCalls.has(uniqueKey)) {
-            uniqueCalls.add(uniqueKey);
-
-            apiCalls.push({
-              url,
-              normalizedUrl: url,
-              method,
-              location: {
-                line: content.substring(0, match.index).split('\n').length,
-                column: match.index - content.lastIndexOf('\n', match.index) - 1,
-              },
-              filePath,
-              componentName,
-            });
-
-            this.logger.debug('Resolved variable reference in API call', {
-              varName,
-              url,
-              method,
-              filePath,
-            });
-          }
-        }
-      }
-    }
-
-    return apiCalls;
+    return extractedCalls.map(call => ({
+      url: call.url,
+      normalizedUrl: call.url,
+      method: call.method,
+      location: {
+        line: call.line,
+        column: call.column,
+      },
+      filePath: call.filePath || filePath,
+      componentName: call.callerName || componentName,
+    }));
   }
 
   /**
@@ -1382,11 +1218,6 @@ export class CrossStackGraphBuilder {
   private async extractRouteInfoFromRoutes(repoId: number, laravelRoutes: any[]): Promise<any[]> {
     const routeInfo: any[] = [];
     const uniqueRoutes = new Set<string>(); // Track unique path+method combinations
-
-    this.logger.info('extractRouteInfoFromRoutes called', {
-      routeCount: laravelRoutes.length,
-      firstRoute: laravelRoutes[0],
-    });
 
     for (const route of laravelRoutes) {
       try {
@@ -1762,8 +1593,12 @@ export class CrossStackGraphBuilder {
       const allComponentSymbols = [];
       for (const componentName of componentNames) {
         const symbols = await this.database.searchSymbols(componentName, repoId);
-        const componentSymbols = symbols.filter(s =>
-          s.symbol_type === 'component' || s.symbol_type === 'variable' || s.symbol_type === 'function'
+        const componentSymbols = symbols.filter(
+          s =>
+            s.symbol_type === 'component' ||
+            s.symbol_type === 'variable' ||
+            s.symbol_type === 'function' ||
+            s.symbol_type === 'class'
         );
         allComponentSymbols.push(...componentSymbols);
       }

@@ -104,7 +104,7 @@ export async function up(knex: Knex): Promise<void> {
       COUNT(DISTINCT f.id) as total_files,
       COUNT(DISTINCT s.id) as total_symbols,
       COUNT(DISTINCT d.id) as total_dependencies,
-      COUNT(DISTINCT csc.id) as cross_stack_calls,
+      COUNT(DISTINCT ac.id) as api_calls,
       MAX(r.last_indexed) as last_indexed,
       COUNT(DISTINCT f.id) FILTER (WHERE f.is_test = true) as test_files,
       COUNT(DISTINCT s.id) FILTER (WHERE s.symbol_type = 'function') as functions,
@@ -113,7 +113,7 @@ export async function up(knex: Knex): Promise<void> {
     LEFT JOIN files f ON r.id = f.repo_id
     LEFT JOIN symbols s ON f.id = s.file_id
     LEFT JOIN dependencies d ON s.id = d.from_symbol_id
-    LEFT JOIN cross_stack_calls csc ON r.id = csc.repo_id
+    LEFT JOIN api_calls ac ON r.id = ac.repo_id
     GROUP BY r.id, r.name, r.language_primary, r.framework_stack
   `);
 
@@ -145,15 +145,6 @@ export async function up(knex: Knex): Promise<void> {
             'table', TG_TABLE_NAME,
             'operation', TG_OP,
             'symbol_id', COALESCE(NEW.caller_symbol_id, OLD.caller_symbol_id),
-            'timestamp', extract(epoch from now())
-          )::text
-        );
-      ELSIF TG_TABLE_NAME = 'cross_stack_calls' THEN
-        PERFORM pg_notify('dependency_changed',
-          json_build_object(
-            'table', TG_TABLE_NAME,
-            'operation', TG_OP,
-            'symbol_id', COALESCE(NEW.frontend_symbol_id, OLD.frontend_symbol_id),
             'timestamp', extract(epoch from now())
           )::text
         );
@@ -189,13 +180,6 @@ export async function up(knex: Knex): Promise<void> {
       FOR EACH ROW EXECUTE FUNCTION notify_dependency_change();
   `);
 
-  await knex.raw(`
-    DROP TRIGGER IF EXISTS cross_stack_calls_change_notify ON cross_stack_calls;
-    CREATE TRIGGER cross_stack_calls_change_notify
-      AFTER INSERT OR UPDATE OR DELETE ON cross_stack_calls
-      FOR EACH ROW EXECUTE FUNCTION notify_dependency_change();
-  `);
-
   // === PERFORMANCE MONITORING FUNCTIONS ===
 
   // Function to get dependency analysis performance stats
@@ -228,10 +212,10 @@ export async function up(knex: Knex): Promise<void> {
       UNION ALL
 
       SELECT
-        'cross_stack_calls'::text, COUNT(*)::bigint, csc.repo_id
-      FROM cross_stack_calls csc
-      WHERE repo_id_param IS NULL OR csc.repo_id = repo_id_param
-      GROUP BY csc.repo_id;
+        'api_calls'::text, COUNT(*)::bigint, ac.repo_id
+      FROM api_calls ac
+      WHERE repo_id_param IS NULL OR ac.repo_id = repo_id_param
+      GROUP BY ac.repo_id;
     END;
     $$ LANGUAGE plpgsql
   `);
@@ -249,7 +233,6 @@ export async function down(knex: Knex): Promise<void> {
   // Remove triggers
   await knex.raw('DROP TRIGGER IF EXISTS dependencies_change_notify ON dependencies');
   await knex.raw('DROP TRIGGER IF EXISTS api_calls_change_notify ON api_calls');
-  await knex.raw('DROP TRIGGER IF EXISTS cross_stack_calls_change_notify ON cross_stack_calls');
 
   // Remove functions
   await knex.raw('DROP FUNCTION IF EXISTS notify_dependency_change()');
