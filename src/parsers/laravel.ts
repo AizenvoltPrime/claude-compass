@@ -809,10 +809,13 @@ export class LaravelParser extends BaseFrameworkParser {
     let routeCount = 0;
 
     try {
-      this.traverseNode(rootNode, node => {
+      // Use traverseGroupChildren to avoid processing routes inside groups twice
+      this.traverseGroupChildren(rootNode, node => {
         if (this.isRouteGroup(node)) {
           groupCount++;
           this.processRouteGroup(node, [], routes, processedNodes, filePath, content);
+          // Return false to skip traversing into this group - processRouteGroup handles it
+          return false;
         } else if (this.isRouteDefinition(node) && !processedNodes.has(node)) {
           routeCount++;
           const routeDef = this.parseRouteDefinition(node, filePath, content);
@@ -822,6 +825,8 @@ export class LaravelParser extends BaseFrameworkParser {
             routes.push(routeDef);
           }
         }
+        // Continue traversing other children
+        return true;
       });
     } catch (error) {
       logger.error(`Route extraction failed for ${filePath}`, { error: error.message });
@@ -836,22 +841,38 @@ export class LaravelParser extends BaseFrameworkParser {
     routes: LaravelRoute[],
     processedNodes: Set<SyntaxNode>,
     filePath: string,
-    content: string
+    content: string,
+    parentPrefix: string = ''
   ): void {
     processedNodes.add(groupNode);
     const groupMiddleware = this.getRouteGroupMiddleware(groupNode, content);
     const accumulatedMiddleware = [...parentMiddleware, ...groupMiddleware];
 
-    this.traverseNode(groupNode, innerNode => {
+    const groupPrefix = this.getRouteGroupPrefix(groupNode, content);
+    const accumulatedPrefix = parentPrefix + (groupPrefix ? `/${groupPrefix}` : '');
+
+    // Traverse only the immediate children of this group, not descendants of nested groups
+    this.traverseGroupChildren(groupNode, innerNode => {
       if (innerNode === groupNode) {
-        return;
+        return true; // Continue traversing
       }
 
       if (this.isRouteGroup(innerNode) && !processedNodes.has(innerNode)) {
-        this.processRouteGroup(innerNode, accumulatedMiddleware, routes, processedNodes, filePath, content);
+        // Process the nested group - it will handle its own routes
+        this.processRouteGroup(
+          innerNode,
+          accumulatedMiddleware,
+          routes,
+          processedNodes,
+          filePath,
+          content,
+          accumulatedPrefix
+        );
+        // Don't traverse into this nested group's children - it already processed them
+        return false;
       } else if (this.isRouteDefinition(innerNode) && !processedNodes.has(innerNode)) {
         processedNodes.add(innerNode);
-        const routeDef = this.parseRouteDefinition(innerNode, filePath, content);
+        const routeDef = this.parseRouteDefinition(innerNode, filePath, content, accumulatedPrefix);
         if (Array.isArray(routeDef)) {
           routeDef.forEach(route => {
             route.middleware = [...accumulatedMiddleware, ...route.middleware];
@@ -862,6 +883,8 @@ export class LaravelParser extends BaseFrameworkParser {
           routes.push(routeDef);
         }
       }
+
+      return true; // Continue traversing other children
     });
   }
 
@@ -904,7 +927,8 @@ export class LaravelParser extends BaseFrameworkParser {
   private parseRouteDefinition(
     node: SyntaxNode,
     filePath: string,
-    content: string
+    content: string,
+    groupPrefix: string = ''
   ): LaravelRoute | LaravelRoute[] | null {
     try {
       const method = this.getRouteMethod(node);
@@ -927,8 +951,9 @@ export class LaravelParser extends BaseFrameworkParser {
       }
 
       // Apply Laravel route file prefix conventions
-      const prefix = this.getRouteFilePrefix(filePath);
-      const fullPath = prefix + (path.startsWith('/') ? path : '/' + path);
+      const filePrefix = this.getRouteFilePrefix(filePath);
+      // Apply group prefix, then file prefix
+      const fullPath = filePrefix + groupPrefix + (path.startsWith('/') ? path : '/' + path);
 
       const route: LaravelRoute = {
         type: 'route',
@@ -1640,6 +1665,19 @@ export class LaravelParser extends BaseFrameworkParser {
     callback(node);
     for (const child of node.children) {
       this.traverseNode(child, callback);
+    }
+  }
+
+  /**
+   * Traverse children with the ability to skip subtrees
+   * Callback returns true to continue into children, false to skip them
+   */
+  private traverseGroupChildren(node: SyntaxNode, callback: (node: SyntaxNode) => boolean): void {
+    const shouldContinue = callback(node);
+    if (shouldContinue) {
+      for (const child of node.children) {
+        this.traverseGroupChildren(child, callback);
+      }
     }
   }
 
@@ -2737,12 +2775,11 @@ export class LaravelParser extends BaseFrameworkParser {
    * Check if a node represents a route group
    */
   private isRouteGroup(node: SyntaxNode): boolean {
-    // Check for Route::middleware()->group() or Route::group() calls
+    // Check for Route::middleware()->group() or Route::group() or Route::prefix()->group() calls
     if (node.type === 'member_call_expression') {
       // Check if this is a call to 'group' method
       for (const child of node.children) {
         if (child.type === 'name' && child.text === 'group') {
-          // Check if this is chained from Route::middleware or directly Route::group
           return true;
         }
       }
@@ -2779,6 +2816,37 @@ export class LaravelParser extends BaseFrameworkParser {
     }
 
     return [];
+  }
+
+  /**
+   * Extract route prefix from a route group node
+   * Only extracts the prefix from the immediate method chain, not from nested groups
+   */
+  private getRouteGroupPrefix(node: SyntaxNode, content: string): string {
+    // Get the statement node (full line including Route::... ->group())
+    // But STOP at the first expression_statement, don't walk all the way to program
+    // This prevents us from getting the parent group when this is a nested group
+    let statementNode = node;
+    while (statementNode.parent &&
+           statementNode.parent.type !== 'program' &&
+           statementNode.parent.type !== 'expression_statement') {
+      statementNode = statementNode.parent;
+    }
+
+    // If we stopped at an expression_statement parent, use that
+    if (statementNode.parent && statementNode.parent.type === 'expression_statement') {
+      statementNode = statementNode.parent;
+    }
+
+    const statementContent = content.slice(statementNode.startIndex, statementNode.endIndex);
+
+    // Match Route::prefix('value')->...->group() or Route::prefix('value')->name(...)->group()
+    const prefixMatch = statementContent.match(/^[^\n]*?Route::(?:.*?->)?prefix\(\s*['"]([^'"]+)['"]\s*\).*?->group\(/);
+    if (prefixMatch) {
+      return prefixMatch[1];
+    }
+
+    return '';
   }
 
   // Helper methods for parsing

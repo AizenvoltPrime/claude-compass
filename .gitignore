@@ -84,3 +84,4 @@ docker-data/
 tools/verification/frontend-api-calls.json
 .gitignore
 tools/verification/comparison-results.json
+tools/verification/remaining-routes.json
