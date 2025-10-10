@@ -115,103 +115,84 @@ console.log('='.repeat(70));
 console.log(`Repository: ${REPOSITORY_PATH}`);
 console.log();
 
-// Auto-detect TypeScript stores directory
-const possibleStoreDirs = [
-  path.join(REPOSITORY_PATH, 'resources/ts/stores'),
-  path.join(REPOSITORY_PATH, 'src/stores'),
-  path.join(REPOSITORY_PATH, 'stores'),
-];
+// Recursively find all frontend files
+function findAllFrontendFiles(dir, files = []) {
+  if (!fs.existsSync(dir)) return files;
 
-let storesDir = null;
-for (const dir of possibleStoreDirs) {
-  if (fs.existsSync(dir)) {
-    storesDir = dir;
-    break;
-  }
-}
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-const storeApiCalls = [];
-if (storesDir) {
-  const storeFiles = fs.readdirSync(storesDir).filter(f => f.endsWith('.ts'));
-  console.log(`📁 Analyzing ${storeFiles.length} TypeScript store files...`);
-  console.log(`   Location: ${storesDir}`);
-  console.log();
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
 
-  storeFiles.forEach(file => {
-    const filePath = path.join(storesDir, file);
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const calls = extractUrlsFromFile(content, filePath);
-    storeApiCalls.push(...calls);
-  });
-
-  console.log(`  ✅ Found ${storeApiCalls.length} API calls from stores`);
-  console.log();
-} else {
-  console.log('  ⚠️  No TypeScript stores directory found');
-  console.log();
-}
-
-// Auto-detect Vue components with axios calls
-const possibleVueDirs = [
-  path.join(REPOSITORY_PATH, 'resources/ts/Pages'),
-  path.join(REPOSITORY_PATH, 'resources/js/Pages'),
-  path.join(REPOSITORY_PATH, 'src/components'),
-];
-
-const vueApiCalls = [];
-for (const vueDir of possibleVueDirs) {
-  if (fs.existsSync(vueDir)) {
-    console.log(`📁 Scanning for Vue components with axios calls...`);
-    console.log(`   Location: ${vueDir}`);
-
-    // Recursively find .vue files
-    function findVueFiles(dir) {
-      const files = [];
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          files.push(...findVueFiles(fullPath));
-        } else if (entry.name.endsWith('.vue')) {
+    // Skip excluded directories
+    if (entry.isDirectory()) {
+      if (
+        entry.name === 'node_modules' ||
+        entry.name === 'dist' ||
+        entry.name === 'build' ||
+        entry.name === '.git'
+      ) {
+        continue;
+      }
+      findAllFrontendFiles(fullPath, files);
+    } else {
+      // Include .ts, .js, .vue files
+      if (
+        (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) ||
+        entry.name.endsWith('.js') ||
+        entry.name.endsWith('.vue')
+      ) {
+        // Exclude test files
+        if (
+          !entry.name.includes('.test.') &&
+          !entry.name.includes('.spec.')
+        ) {
           files.push(fullPath);
         }
       }
-
-      return files;
     }
-
-    const allVueFiles = findVueFiles(vueDir);
-    const vueFilesWithAxios = [];
-
-    allVueFiles.forEach(filePath => {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      if (content.includes('axios.')) {
-        vueFilesWithAxios.push(filePath);
-        const calls = extractUrlsFromFile(content, filePath);
-        vueApiCalls.push(...calls);
-      }
-    });
-
-    console.log(`  ✅ Found ${vueApiCalls.length} API calls from ${vueFilesWithAxios.length} Vue components`);
-    console.log();
-    break;
   }
+
+  return files;
 }
 
-// Combine and deduplicate
-const allCalls = [...storeApiCalls, ...vueApiCalls];
+console.log(`📁 Scanning ALL frontend files (.ts, .js, .vue)...`);
+console.log(`   Location: ${REPOSITORY_PATH}`);
+console.log(`   Excluding: node_modules, dist, build, test files`);
+console.log();
+
+const allFrontendFiles = findAllFrontendFiles(REPOSITORY_PATH);
+console.log(`  Found ${allFrontendFiles.length} frontend files to scan`);
+console.log();
+
+const allCalls = [];
+let filesWithApiCalls = 0;
+
+allFrontendFiles.forEach(filePath => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const calls = extractUrlsFromFile(content, filePath);
+    if (calls.length > 0) {
+      filesWithApiCalls++;
+      allCalls.push(...calls);
+    }
+  } catch (error) {
+    // Silently skip files that can't be read
+  }
+});
+
+console.log(`  ✅ Found ${allCalls.length} API calls from ${filesWithApiCalls} files`);
+console.log();
 const uniqueEndpoints = new Set(allCalls.map(c => `${c.method} ${c.url}`));
 
 console.log('='.repeat(70));
 console.log('SUMMARY');
 console.log('='.repeat(70));
 console.log();
+console.log(`  Total files scanned:          ${allFrontendFiles.length}`);
+console.log(`  Files with API calls:         ${filesWithApiCalls}`);
 console.log(`  Total API calls extracted:    ${allCalls.length}`);
 console.log(`  Unique endpoints:             ${uniqueEndpoints.size}`);
-console.log();
-console.log(`  From TypeScript stores:       ${storeApiCalls.length}`);
-console.log(`  From Vue components:          ${vueApiCalls.length}`);
 console.log();
 
 // Show breakdown
@@ -242,10 +223,10 @@ const results = {
   repository: REPOSITORY_PATH,
   timestamp: new Date().toISOString(),
   summary: {
-    total: allCalls.length,
-    unique: uniqueEndpoints.size,
-    fromStores: storeApiCalls.length,
-    fromVueComponents: vueApiCalls.length,
+    totalFilesScanned: allFrontendFiles.length,
+    filesWithApiCalls: filesWithApiCalls,
+    totalApiCalls: allCalls.length,
+    uniqueEndpoints: uniqueEndpoints.size,
   },
   byMethod,
   endpoints: Array.from(uniqueEndpoints).sort(),

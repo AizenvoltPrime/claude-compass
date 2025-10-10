@@ -38,27 +38,59 @@ if (!fs.existsSync(apiPhpPath)) {
 
 const apiPhp = fs.readFileSync(apiPhpPath, 'utf-8');
 
-// Extract all route definitions from api.php
-const routePattern = /Route::(get|post|put|delete|patch)\(\s*['"](\/[^'"]+)['"]/g;
+// Extract all route definitions from api.php, handling route groups and prefixes
 const backendRoutes = new Map();
 
-let match;
-while ((match = routePattern.exec(apiPhp)) !== null) {
-  const method = match[1].toUpperCase();
-  let path = match[2];
+// Parse api.php content, tracking route prefixes from groups
+const lines = apiPhp.split('\n');
+const prefixStack = [];
 
-  // Routes in api.php get /api/ prefix automatically (unless they already have it)
-  // Exceptions: routes starting with /sanctum/, /orion/, etc.
-  if (!path.startsWith('/api/') && !path.startsWith('/sanctum') && !path.startsWith('/orion')) {
-    path = '/api' + path;
+for (let i = 0; i < lines.length; i++) {
+  const line = lines[i];
+
+  // Track route prefix groups
+  const prefixMatch = line.match(/Route::prefix\(['"](.*?)['"]\)/);
+  if (prefixMatch) {
+    prefixStack.push(prefixMatch[1]);
+    continue;
   }
 
-  // Normalize Laravel route parameters {param} style
-  // Convert Laravel {name} to our {id} placeholder
-  path = path.replace(/\{[^}]+\}/g, '{id}');
+  // Track closing braces to pop prefixes
+  if (line.match(/^\s*\}\);?\s*$/) && prefixStack.length > 0) {
+    prefixStack.pop();
+    continue;
+  }
 
-  const key = `${method} ${path}`;
-  backendRoutes.set(key, { method, path });
+  // Extract route definitions - handle both '/path' and 'path' (with or without leading /)
+  const routeMatch = line.match(/Route::(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/);
+  if (routeMatch) {
+    const method = routeMatch[1].toUpperCase();
+    let path = routeMatch[2];
+
+    // Ensure path starts with /
+    if (!path.startsWith('/')) {
+      path = '/' + path;
+    }
+
+    // Apply any active route prefixes
+    if (prefixStack.length > 0) {
+      const prefix = prefixStack.join('/');
+      path = `/${prefix}${path}`;
+    }
+
+    // All routes in api.php get /api/ prefix automatically
+    // Laravel applies this via RouteServiceProvider
+    if (!path.startsWith('/api/')) {
+      path = '/api' + path;
+    }
+
+    // Normalize Laravel route parameters {param} style
+    // Convert Laravel {name} to our {id} placeholder
+    path = path.replace(/\{[^}]+\}/g, '{id}');
+
+    const key = `${method} ${path}`;
+    backendRoutes.set(key, { method, path });
+  }
 }
 
 console.log('📊 BACKEND ROUTES (api.php)');
@@ -106,7 +138,7 @@ frontendEndpoints.forEach(endpoint => {
   }
 });
 
-backendRoutes.forEach((route, key) => {
+backendRoutes.forEach((_route, key) => {
   if (!frontendEndpoints.has(key)) {
     backendOnly.push(key);
   }

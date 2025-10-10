@@ -551,29 +551,11 @@ export class CrossStackGraphBuilder {
       const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
       const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
 
-      // Extract API calls from all frontend sources
-      const vueApiCalls = vueComponents.length > 0
-        ? await this.extractApiCallsFromComponents(repoId, vueComponents)
-        : [];
+      const allApiCalls = await this.extractApiCallsFromFrontendFiles(repoId);
 
-      this.logger.info('Extracted API calls from Vue components', {
-        count: vueApiCalls.length,
-        sampleUrls: vueApiCalls.slice(0, 3).map(call => ({ url: call.url, method: call.method })),
-      });
-
-      const storeApiCalls = await this.extractApiCallsFromStores(repoId);
-
-      this.logger.info('Extracted API calls from TypeScript stores', {
-        count: storeApiCalls.length,
-        sampleUrls: storeApiCalls.slice(0, 3).map(call => ({ url: call.url, method: call.method })),
-      });
-
-      const allApiCalls = [...vueApiCalls, ...storeApiCalls];
-
-      this.logger.info('Total API calls from all frontend sources', {
-        vueCount: vueApiCalls.length,
-        storeCount: storeApiCalls.length,
+      this.logger.info('Total API calls from all frontend files', {
         totalCount: allApiCalls.length,
+        sampleUrls: allApiCalls.slice(0, 5).map(call => ({ url: call.url, method: call.method })),
       });
 
       if (allApiCalls.length > 0 && laravelRoutes.length > 0) {
@@ -986,26 +968,37 @@ export class CrossStackGraphBuilder {
     return match ? match[1] : name;
   }
 
-  private async getTypeScriptStoreFiles(repoId: number): Promise<DbFile[]> {
+  private async getFrontendFilesWithApiCalls(repoId: number): Promise<DbFile[]> {
     const allFiles = await this.database.getFilesByRepository(repoId);
 
-    const storeFiles = allFiles.filter(file => {
+    const frontendFiles = allFiles.filter(file => {
       const path = file.path.toLowerCase();
-      return (
-        path.endsWith('.ts') &&
-        !path.endsWith('.d.ts') &&
-        (path.includes('/stores/') || path.includes('/store/')) &&
-        !path.includes('.test.') &&
-        !path.includes('.spec.')
-      );
+
+      if (!path.endsWith('.ts') && !path.endsWith('.js') && !path.endsWith('.vue')) {
+        return false;
+      }
+
+      if (path.endsWith('.d.ts')) {
+        return false;
+      }
+
+      if (path.includes('.test.') || path.includes('.spec.')) {
+        return false;
+      }
+
+      if (path.includes('/node_modules/') || path.includes('/dist/') || path.includes('/build/')) {
+        return false;
+      }
+
+      return true;
     });
 
-    this.logger.info('Found TypeScript store files', {
-      count: storeFiles.length,
-      samplePaths: storeFiles.slice(0, 3).map(f => f.path),
+    this.logger.info('Found frontend files to scan for API calls', {
+      count: frontendFiles.length,
+      samplePaths: frontendFiles.slice(0, 5).map(f => f.path),
     });
 
-    return storeFiles;
+    return frontendFiles;
   }
 
   /**
@@ -1129,44 +1122,67 @@ export class CrossStackGraphBuilder {
     return apiCalls;
   }
 
-  private async extractApiCallsFromStores(repoId: number): Promise<any[]> {
-    const storeFiles = await this.getTypeScriptStoreFiles(repoId);
+  private async extractApiCallsFromFrontendFiles(repoId: number): Promise<any[]> {
+    const frontendFiles = await this.getFrontendFilesWithApiCalls(repoId);
     const apiCalls: any[] = [];
+    let filesWithApiCalls = 0;
 
-    for (const storeFile of storeFiles) {
+    for (const file of frontendFiles) {
       try {
         const fs = await import('fs/promises');
-        const path = await import('path');
 
-        const fileContent = await fs.readFile(storeFile.path, 'utf-8');
+        const fileContent = await fs.readFile(file.path, 'utf-8');
 
-        const exportMatch = fileContent.match(/export\s+const\s+(\w+Store)\s*=/);
-        const storeName = exportMatch ? exportMatch[1] : path.basename(storeFile.path, '.ts');
+        const exportName = this.extractExportNameFromContent(fileContent, file.path);
 
         const extractedCalls = this.extractFetchCallsFromContent(
           fileContent,
-          storeFile.path,
-          storeName
+          file.path,
+          exportName
         );
 
         if (extractedCalls.length > 0) {
-          this.logger.info('Found API calls in store', {
-            storeName,
-            callCount: extractedCalls.length,
-            sampleUrls: extractedCalls.slice(0, 3).map(c => c.url),
-          });
+          filesWithApiCalls++;
+          apiCalls.push(...extractedCalls);
         }
-
-        apiCalls.push(...extractedCalls);
       } catch (error) {
-        this.logger.warn('Failed to extract API calls from store', {
-          path: storeFile.path,
+        this.logger.warn('Failed to extract API calls from file', {
+          path: file.path,
           error: error.message,
         });
       }
     }
 
+    this.logger.info('API call extraction complete', {
+      totalFilesScanned: frontendFiles.length,
+      filesWithApiCalls,
+      totalApiCalls: apiCalls.length,
+      sampleUrls: apiCalls.slice(0, 5).map(c => ({ url: c.url, method: c.method, file: c.componentName })),
+    });
+
     return apiCalls;
+  }
+
+  private extractExportNameFromContent(content: string, filePath: string): string {
+    const path = require('path');
+    const fileName = path.basename(filePath, path.extname(filePath));
+
+    const exportPatterns = [
+      /export\s+const\s+(use\w+)/,
+      /export\s+const\s+(\w+Store)/,
+      /export\s+function\s+(use\w+)/,
+      /export\s+default\s+\{[\s\S]*?name:\s*['"](\w+)['"]/,
+      /defineComponent\(\{[\s\S]*?name:\s*['"](\w+)['"]/,
+    ];
+
+    for (const pattern of exportPatterns) {
+      const match = content.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    return fileName;
   }
 
   /**
