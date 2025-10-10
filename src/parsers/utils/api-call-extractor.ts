@@ -18,6 +18,7 @@ interface VariableBinding {
   name: string;
   value: string;
   node: Parser.SyntaxNode;
+  position: number; // Start position in the file
 }
 
 interface FunctionInfo {
@@ -80,7 +81,7 @@ export class ApiCallExtractor {
 
       this.logger.debug('Extracted bindings and functions', {
         filePath,
-        variableBindings: variableBindings.size,
+        variableBindings: variableBindings.length,
         functionInfos: functionInfos.size,
       });
 
@@ -131,14 +132,14 @@ export class ApiCallExtractor {
     return '';
   }
 
-  private extractVariableBindings(rootNode: Parser.SyntaxNode, content: string): Map<string, VariableBinding> {
-    const bindings = new Map<string, VariableBinding>();
+  private extractVariableBindings(rootNode: Parser.SyntaxNode, content: string): VariableBinding[] {
+    const bindings: VariableBinding[] = [];
 
     const traverse = (node: Parser.SyntaxNode): void => {
-      if (
-        node.type === 'variable_declarator' ||
-        node.type === 'lexical_declaration'
-      ) {
+      // Only process variable_declarator nodes (not lexical_declaration)
+      // lexical_declaration is the parent (const/let/var statement)
+      // variable_declarator is the child (name = value part)
+      if (node.type === 'variable_declarator') {
         const nameNode = node.childForFieldName('name');
         const valueNode = node.childForFieldName('value');
 
@@ -146,12 +147,20 @@ export class ApiCallExtractor {
           const name = this.getNodeText(nameNode, content);
           const value = this.resolveValue(valueNode, content);
 
-          if (value && this.isApiUrl(value)) {
-            bindings.set(name, {
-              name,
-              value,
-              node: valueNode,
-            });
+          if (value) {
+            // Handle both single values and arrays (from ternary expressions)
+            const values = Array.isArray(value) ? value : [value];
+
+            for (const url of values) {
+              if (this.isApiUrl(url)) {
+                bindings.push({
+                  name,
+                  value: url,
+                  node: valueNode,
+                  position: nameNode.startIndex, // Store position for scope resolution
+                });
+              }
+            }
           }
         }
       }
@@ -163,6 +172,7 @@ export class ApiCallExtractor {
     };
 
     traverse(rootNode);
+
     return bindings;
   }
 
@@ -268,8 +278,14 @@ export class ApiCallExtractor {
         const valueNode = node.childForFieldName('argument') || node.child(1);
         if (valueNode) {
           const value = this.resolveValue(valueNode, content);
-          if (value && this.isApiUrl(value)) {
-            urls.push(value);
+          if (value) {
+            // Handle both single values and arrays (from ternary expressions)
+            const values = Array.isArray(value) ? value : [value];
+            for (const url of values) {
+              if (this.isApiUrl(url)) {
+                urls.push(url);
+              }
+            }
           }
         }
       } else if (node.type === 'switch_statement') {
@@ -298,8 +314,14 @@ export class ApiCallExtractor {
             const valueNode = child.childForFieldName('argument') || child.child(1);
             if (valueNode) {
               const value = this.resolveValue(valueNode, content);
-              if (value && this.isApiUrl(value)) {
-                urls.push(value);
+              if (value) {
+                // Handle both single values and arrays (from ternary expressions)
+                const values = Array.isArray(value) ? value : [value];
+                for (const url of values) {
+                  if (this.isApiUrl(url)) {
+                    urls.push(url);
+                  }
+                }
               }
             }
           }
@@ -318,7 +340,7 @@ export class ApiCallExtractor {
   private traverseForApiCalls(
     node: Parser.SyntaxNode,
     content: string,
-    variableBindings: Map<string, VariableBinding>,
+    variableBindings: VariableBinding[],
     functionInfos: Map<string, FunctionInfo>,
     apiCalls: ExtractedApiCall[],
     filePath: string
@@ -345,7 +367,7 @@ export class ApiCallExtractor {
   private extractApiCallFromNode(
     node: Parser.SyntaxNode,
     content: string,
-    variableBindings: Map<string, VariableBinding>,
+    variableBindings: VariableBinding[],
     functionInfos: Map<string, FunctionInfo>,
     filePath: string
   ): ExtractedApiCall | ExtractedApiCall[] | null {
@@ -407,7 +429,7 @@ export class ApiCallExtractor {
   private resolveUrlArgument(
     argNode: Parser.SyntaxNode,
     content: string,
-    variableBindings: Map<string, VariableBinding>,
+    variableBindings: VariableBinding[],
     functionInfos: Map<string, FunctionInfo>
   ): string | string[] | null {
     if (argNode.type === 'string' || argNode.type === 'template_string') {
@@ -416,9 +438,27 @@ export class ApiCallExtractor {
 
     if (argNode.type === 'identifier') {
       const varName = this.getNodeText(argNode, content);
-      const binding = variableBindings.get(varName);
-      if (binding) {
-        return binding.value;
+      const callPosition = argNode.startIndex;
+
+      // Find the closest variable binding with this name that appears BEFORE this call
+      // (searching backwards from the call position)
+      const candidates = variableBindings
+        .filter(b => b.name === varName && b.position < callPosition)
+        .sort((a, b) => b.position - a.position); // Sort by position descending
+
+      if (candidates.length > 0) {
+        // Get the position of the closest binding
+        const closestPosition = candidates[0].position;
+
+        // Get ALL bindings at that position (e.g., from ternary expression)
+        const bindingsAtSamePosition = candidates.filter(b => b.position === closestPosition);
+
+        if (bindingsAtSamePosition.length === 1) {
+          return bindingsAtSamePosition[0].value;
+        } else {
+          // Multiple bindings at same position (ternary expression) - return all
+          return bindingsAtSamePosition.map(b => b.value);
+        }
       }
 
       const enclosingFunction = this.findEnclosingFunction(argNode);
@@ -529,7 +569,7 @@ export class ApiCallExtractor {
     paramName: string,
     funcInfo: FunctionInfo,
     content: string
-  ): string | null {
+  ): string | string[] | null {
     const argsNode = callSite.childForFieldName('arguments');
     if (!argsNode) return null;
 
@@ -550,7 +590,7 @@ export class ApiCallExtractor {
     return current;
   }
 
-  private resolveValue(node: Parser.SyntaxNode, content: string): string | null {
+  private resolveValue(node: Parser.SyntaxNode, content: string): string | string[] | null {
     if (node.type === 'string') {
       let text = this.getNodeText(node, content);
       text = text.replace(/^['"`]|['"`]$/g, '');
@@ -564,6 +604,30 @@ export class ApiCallExtractor {
       return this.normalizeUrl(text);
     }
 
+    // Handle ternary expressions: condition ? value1 : value2
+    // Tree-sitter structure: [condition, ?, consequence, :, alternative]
+    if (node.type === 'ternary_expression') {
+      const urls: string[] = [];
+
+      // Iterate through all children and extract string/template_string nodes
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child && (child.type === 'string' || child.type === 'template_string')) {
+          const value = this.resolveValue(child, content);
+          if (value) {
+            if (Array.isArray(value)) {
+              urls.push(...value);
+            } else {
+              urls.push(value);
+            }
+          }
+        }
+      }
+
+      // Return array of unique URLs (deduplicate if both branches return same URL)
+      return urls.length > 0 ? [...new Set(urls)] : null;
+    }
+
     return null;
   }
 
@@ -572,7 +636,12 @@ export class ApiCallExtractor {
   }
 
   private isApiUrl(url: string): boolean {
-    return url.startsWith('/api/') || url.startsWith('http://') || url.startsWith('https://');
+    return (
+      url.startsWith('/api/') ||
+      url.startsWith('/sanctum/') ||
+      url.startsWith('http://') ||
+      url.startsWith('https://')
+    );
   }
 
   private getNodeText(node: Parser.SyntaxNode, content: string): string {
