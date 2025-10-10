@@ -1308,6 +1308,7 @@ export class CrossStackGraphBuilder {
     }
 
     const startTime = Date.now();
+    const matchedApiCalls = new Set<any>();
 
     for (const apiCall of limitedApiCalls) {
       for (const route of limitedRoutes) {
@@ -1343,12 +1344,25 @@ export class CrossStackGraphBuilder {
             laravelRoute: route,
             evidenceTypes: ['url_pattern_match', 'http_method_match'],
           });
+          matchedApiCalls.add(apiCall);
         }
       }
 
       // Break outer loop if max relationships reached
       if (relationships.length >= MAX_RELATIONSHIPS) {
         break;
+      }
+    }
+
+    // Add unmatched API calls as relationships with null laravelRoute
+    // This ensures all extracted API calls are stored in the database
+    for (const apiCall of limitedApiCalls) {
+      if (!matchedApiCalls.has(apiCall)) {
+        relationships.push({
+          vueApiCall: apiCall,
+          laravelRoute: null, // No matching backend route
+          evidenceTypes: [],
+        });
       }
     }
 
@@ -1629,28 +1643,34 @@ export class CrossStackGraphBuilder {
           // Lookup component from cache
           const componentSymbol = componentMap.get(relationship.vueApiCall.componentName);
 
-          // Lookup route from cache
-          const routeKey = `${relationship.laravelRoute.path}|${relationship.laravelRoute.method}`;
-          const matchingRoute = routeMap.get(routeKey);
+          // Lookup route from cache (handle null laravelRoute for unmatched API calls)
+          let matchingRoute = null;
+          if (relationship.laravelRoute) {
+            const routeKey = `${relationship.laravelRoute.path}|${relationship.laravelRoute.method}`;
+            matchingRoute = routeMap.get(routeKey);
+          }
 
-          if (componentSymbol && matchingRoute && matchingRoute.metadata.id) {
-            // For routes, try to use the handler symbol ID if available, otherwise use the route ID
+          if (componentSymbol) {
+            // Always create API call if we have a valid caller symbol
+            // The endpoint_symbol_id can be null if there's no matching route
             let endpointSymbolId = null;
 
-            // First, try to use the handler symbol ID (controller method)
-            if (matchingRoute.metadata.handlerSymbolId) {
-              const handlerSymbol = await this.database.getSymbol(
-                matchingRoute.metadata.handlerSymbolId
-              );
-              if (handlerSymbol) {
-                endpointSymbolId = matchingRoute.metadata.handlerSymbolId;
+            // Try to find and link to the backend handler symbol
+            if (matchingRoute && matchingRoute.metadata.id) {
+              // First, try to use the handler symbol ID (controller method)
+              if (matchingRoute.metadata.handlerSymbolId) {
+                const handlerSymbol = await this.database.getSymbol(
+                  matchingRoute.metadata.handlerSymbolId
+                );
+                if (handlerSymbol) {
+                  endpointSymbolId = matchingRoute.metadata.handlerSymbolId;
+                }
               }
             }
 
-            // If no handler symbol found, leave endpoint_symbol_id as null
-            // The endpoint_path will still identify the route target
-            // Note: endpoint_symbol_id must be a valid symbol ID or null, never a route ID
-
+            // Create API call record (endpoint_symbol_id may be null if no route match)
+            // This ensures all extracted API calls are stored, even if they can't be matched
+            // to a backend route (e.g., external APIs, /sanctum endpoints, etc.)
             const apiCallData = {
               repo_id: repoId,
               caller_symbol_id: componentSymbol.id,
@@ -1661,14 +1681,18 @@ export class CrossStackGraphBuilder {
             };
             apiCallsToCreate.push(apiCallData);
             processed++;
+
+            if (!matchingRoute) {
+              this.logger.debug('API call created without backend route match', {
+                url: relationship.vueApiCall.url,
+                method: relationship.vueApiCall.method,
+                caller: relationship.vueApiCall.componentName,
+              });
+            }
           } else {
-            this.logger.warn('Could not find required IDs for relationship', {
+            this.logger.warn('Could not find caller symbol for API call', {
               componentName: relationship.vueApiCall.componentName,
-              componentFound: !!componentSymbol,
-              routeKey,
-              routeFound: !!matchingRoute,
               vueUrl: relationship.vueApiCall.url,
-              laravelPath: relationship.laravelRoute.path,
             });
             skipped++;
           }

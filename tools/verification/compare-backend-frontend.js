@@ -13,9 +13,21 @@
 
 const fs = require('fs');
 const path = require('path');
+const { Client } = require('pg');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 // Configuration
 const REPOSITORY_PATH = process.argv[2] || process.env.REPO_PATH;
+const REPOSITORY_NAME = path.basename(REPOSITORY_PATH || '');
+
+// Database configuration
+const DB_CONFIG = {
+  host: process.env.DATABASE_HOST || 'localhost',
+  port: parseInt(process.env.DATABASE_PORT || '5432'),
+  database: process.env.DATABASE_NAME || 'claude_compass',
+  user: process.env.DATABASE_USER || 'claude_compass',
+  password: process.env.DATABASE_PASSWORD || 'password',
+};
 
 if (!REPOSITORY_PATH) {
   console.error('Error: Repository path required');
@@ -29,71 +41,55 @@ console.log('='.repeat(70));
 console.log(`Repository: ${REPOSITORY_PATH}`);
 console.log();
 
-// Read Laravel routes/api.php
-const apiPhpPath = path.join(REPOSITORY_PATH, 'routes/api.php');
-if (!fs.existsSync(apiPhpPath)) {
-  console.error(`Error: routes/api.php not found at ${apiPhpPath}`);
-  process.exit(1);
-}
+// Extract backend routes from database (routes table)
+async function extractBackendRoutesFromDatabase() {
+  const client = new Client(DB_CONFIG);
 
-const apiPhp = fs.readFileSync(apiPhpPath, 'utf-8');
+  try {
+    await client.connect();
 
-// Extract all route definitions from api.php, handling route groups and prefixes
-const backendRoutes = new Map();
+    const query = `
+      SELECT
+        r.method,
+        r.path
+      FROM routes r
+      JOIN repositories repo ON r.repo_id = repo.id
+      WHERE repo.name = $1
+        AND r.file_path LIKE '%/routes/api.php'
+      ORDER BY r.path, r.method
+    `;
 
-// Parse api.php content, tracking route prefixes from groups
-const lines = apiPhp.split('\n');
-const prefixStack = [];
+    const result = await client.query(query, [REPOSITORY_NAME]);
 
-for (let i = 0; i < lines.length; i++) {
-  const line = lines[i];
+    const backendRoutes = new Map();
 
-  // Track route prefix groups
-  const prefixMatch = line.match(/Route::prefix\(['"](.*?)['"]\)/);
-  if (prefixMatch) {
-    prefixStack.push(prefixMatch[1]);
-    continue;
-  }
+    for (const row of result.rows) {
+      const method = row.method.toUpperCase();
+      const originalPath = row.path;
 
-  // Track closing braces to pop prefixes
-  if (line.match(/^\s*\}\);?\s*$/) && prefixStack.length > 0) {
-    prefixStack.pop();
-    continue;
-  }
+      // Normalize route parameters to {id} for comparison with frontend
+      const normalizedPath = row.path.replace(/\{[^}]+\}/g, '{id}');
 
-  // Extract route definitions - handle both '/path' and 'path' (with or without leading /)
-  const routeMatch = line.match(/Route::(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/);
-  if (routeMatch) {
-    const method = routeMatch[1].toUpperCase();
-    let path = routeMatch[2];
-
-    // Ensure path starts with /
-    if (!path.startsWith('/')) {
-      path = '/' + path;
+      const key = `${method} ${normalizedPath}`;
+      backendRoutes.set(key, {
+        method,
+        path: normalizedPath,  // For matching
+        originalPath  // For display
+      });
     }
 
-    // Apply any active route prefixes
-    if (prefixStack.length > 0) {
-      const prefix = prefixStack.join('/');
-      path = `/${prefix}${path}`;
-    }
-
-    // All routes in api.php get /api/ prefix automatically
-    // Laravel applies this via RouteServiceProvider
-    if (!path.startsWith('/api/')) {
-      path = '/api' + path;
-    }
-
-    // Normalize Laravel route parameters {param} style
-    // Convert Laravel {name} to our {id} placeholder
-    path = path.replace(/\{[^}]+\}/g, '{id}');
-
-    const key = `${method} ${path}`;
-    backendRoutes.set(key, { method, path });
+    return backendRoutes;
+  } finally {
+    await client.end();
   }
 }
 
-console.log('📊 BACKEND ROUTES (api.php)');
+// Main function to wrap async operations
+async function main() {
+  // Fetch backend routes from database
+  const backendRoutes = await extractBackendRoutesFromDatabase();
+
+  console.log('📊 BACKEND ROUTES (api.php)');
 console.log('-'.repeat(70));
 console.log(`  Total routes defined: ${backendRoutes.size}`);
 console.log();
@@ -138,9 +134,11 @@ frontendEndpoints.forEach(endpoint => {
   }
 });
 
-backendRoutes.forEach((_route, key) => {
+backendRoutes.forEach((route, key) => {
   if (!frontendEndpoints.has(key)) {
-    backendOnly.push(key);
+    // Store original path with parameter names for better display
+    const displayKey = `${route.method} ${route.originalPath}`;
+    backendOnly.push(displayKey);
   }
 });
 
@@ -223,6 +221,13 @@ const comparisonResults = {
 const outputPath = path.join(__dirname, 'comparison-results.json');
 fs.writeFileSync(outputPath, JSON.stringify(comparisonResults, null, 2));
 
-console.log('='.repeat(70));
-console.log('Results saved to: ' + outputPath);
-console.log('='.repeat(70));
+  console.log('='.repeat(70));
+  console.log('Results saved to: ' + outputPath);
+  console.log('='.repeat(70));
+}
+
+// Run main function
+main().catch(error => {
+  console.error('Error:', error);
+  process.exit(1);
+});
