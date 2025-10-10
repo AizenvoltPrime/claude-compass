@@ -67,7 +67,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 - ✅ **Test Frameworks** - Jest, Vitest, Cypress, Playwright with coverage analysis
 - ✅ **ORM Systems** - Prisma, TypeORM, Sequelize, Mongoose, MikroORM
 - ✅ **Package Managers** - npm, yarn, pnpm with monorepo support
-- ✅ **Enhanced Search** - Hybrid vector+lexical search with framework awareness
+- ✅ **Enhanced Search** - Hybrid embedding+lexical search with vector similarity
 - ✅ **Impact Analysis** - Comprehensive blast radius calculation
 
 ## Architecture
@@ -76,10 +76,11 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - **Parser**: Tree-sitter with language-specific grammars
 - **Database**: PostgreSQL with pgvector extension
-- **Search**: Hybrid vector+lexical search with GPU acceleration
-  - **Model**: BGE-M3 (1024-dimensional embeddings, state-of-the-art)
+- **Search**: Hybrid embedding+lexical search with GPU acceleration
+  - **Model**: BGE-M3 (1024-dimensional embeddings, state-of-the-art for code)
   - **Performance**: CUDA GPU acceleration via ONNX Runtime (2-3x faster)
-  - **Quality**: Multi-lingual support with superior semantic understanding
+  - **Approach**: Vector similarity using learned code patterns from BGE-M3 training
+  - **Quality**: Finds conceptually similar code through embedding proximity
   - **Fallback**: Automatic CPU mode if GPU unavailable
 - **Cache**: Redis for performance optimization
 - **MCP Server**: Node.js/TypeScript implementation
@@ -101,7 +102,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 **Benefits:**
 
 - Faster analysis of large codebases (1000+ files)
-- Real-time semantic search with minimal latency
+- Real-time vector similarity search with minimal latency
 - Optimized batch processing (500 symbols at once)
 
 ### Graph Types
@@ -123,7 +124,7 @@ The `analyze` command is the core of Claude Compass, performing deep multi-langu
 **Key Options:**
 
 - `--force-full` - Force complete re-analysis instead of incremental
-- `--skip-embeddings` - Skip embedding generation for faster analysis (semantic search disabled)
+- `--skip-embeddings` - Skip embedding generation for faster analysis (vector similarity search disabled, lexical/fulltext only)
 - `--no-test-files` - Exclude test files from analysis
 - `--max-file-size <bytes>` - File size limit (default: 20MB)
 - `--extensions <list>` - File extensions to analyze (default: `.js,.jsx,.ts,.tsx,.vue,.php,.cs,.tscn`)
@@ -271,7 +272,9 @@ godot_scenes/nodes/scripts -- Game entities
 **Database Storage:**
 
 - All relationships stored with line numbers and metadata
-- GPU-accelerated embeddings generated for semantic search (BGE-M3, 1024-dim, pgvector)
+- GPU-accelerated embeddings for vector similarity search (BGE-M3, 1024-dim, pgvector)
+  - Finds conceptually similar symbols using learned code patterns
+  - Uses cosine distance in 1024-dimensional embedding space
 - Parallel batch processing (500 symbols per batch)
 - Indexes created for fast MCP tool queries
 - Repository timestamp updated for incremental analysis
@@ -327,7 +330,7 @@ npm run analyze .                              # Analyze current directory
 npm run analyze /path/to/your/project          # Analyze specific path
 npm run analyze /path/to/your/godot-project    # Analyze Godot game project
 npm run analyze . --force-full                 # Force full analysis (clears existing data)
-npm run analyze . --skip-embeddings            # Skip semantic search (faster, dependencies only)
+npm run analyze . --skip-embeddings            # Skip vector embeddings (faster, lexical/fulltext search only)
 
 # Database management
 npm run migrate:status                         # Check migration status
@@ -362,7 +365,7 @@ Claude Compass exposes 6 focused core tools via the Model Context Protocol for A
 
 #### 1. `search_code`
 
-Enhanced search for code symbols with framework awareness and hybrid vector+lexical search capabilities.
+Search for code symbols with framework awareness and hybrid search capabilities (combines vector similarity, lexical matching, and full-text search).
 
 **Parameters:**
 
@@ -374,10 +377,10 @@ Enhanced search for code symbols with framework awareness and hybrid vector+lexi
   - Options: `laravel`, `vue`, `react`, `node`
 - `is_exported`: Filter by exported symbols only (boolean)
 - `search_mode`: Search strategy (default: `auto`)
-  - `auto`: Hybrid vector+lexical search
-  - `exact`: Lexical search only
-  - `semantic`: Vector search only
-  - `qualified`: Namespace-aware search
+  - `auto`: Hybrid embedding+lexical search (recommended)
+  - `exact`: Lexical search only (exact name matching)
+  - `semantic`: Vector similarity search only (embedding-based)
+  - `qualified`: Namespace-aware search (qualified names)
 
 **Returns:** List of matching symbols with framework context (limit: 100 results)
 
@@ -450,12 +453,18 @@ Comprehensive impact analysis - calculate blast radius across all frameworks inc
 ### Usage Examples
 
 ```typescript
-// Search for authentication-related code
+// Search for authentication-related code using hybrid embedding+lexical search
 const results = await mcpClient.callTool('search_code', {
   query: 'authenticate',
   entity_types: ['function', 'class', 'route'],
   framework: 'laravel',
-  search_mode: 'auto',
+  search_mode: 'auto', // Hybrid: combines vector similarity, lexical, and fulltext
+});
+
+// Or use vector similarity only
+const vectorResults = await mcpClient.callTool('search_code', {
+  query: 'user verification',
+  search_mode: 'semantic', // Vector similarity - finds login, auth, verify, etc.
 });
 
 // Get comprehensive impact analysis
