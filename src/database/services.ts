@@ -1822,6 +1822,76 @@ export class DatabaseService {
     return (route as Route) || null;
   }
 
+  async findMethodByQualifiedName(
+    repoId: number,
+    qualifiedName: string
+  ): Promise<Symbol | null> {
+    const result = await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .where('symbols.qualified_name', qualifiedName)
+      .where('symbols.symbol_type', 'method')
+      .first();
+
+    return result || null;
+  }
+
+  async findMethodInController(
+    repoId: number,
+    controllerClass: string,
+    methodName: string
+  ): Promise<Symbol | null> {
+    const qualifiedPatterns = [
+      `${controllerClass}::${methodName}`,
+      `App\\Http\\Controllers\\${controllerClass}::${methodName}`,
+    ];
+
+    for (const pattern of qualifiedPatterns) {
+      const result = await this.db('symbols')
+        .join('files', 'symbols.file_id', 'files.id')
+        .where('files.repo_id', repoId)
+        .where('symbols.qualified_name', pattern)
+        .where('symbols.symbol_type', 'method')
+        .first();
+
+      if (result) return result as Symbol;
+    }
+
+    const controllerSymbol = await this.db('symbols')
+      .select('symbols.*')
+      .join('files', 'symbols.file_id', 'files.id')
+      .where('files.repo_id', repoId)
+      .where('symbols.symbol_type', 'class')
+      .where(function () {
+        this.where('symbols.name', controllerClass).orWhere(
+          'symbols.qualified_name',
+          'like',
+          `%${controllerClass}`
+        );
+      })
+      .first();
+
+    if (!controllerSymbol) return null;
+
+    const methodSymbol = await this.db('symbols')
+      .where('parent_symbol_id', controllerSymbol.id)
+      .where('name', methodName)
+      .where('symbol_type', 'method')
+      .first();
+
+    return (methodSymbol as Symbol) || null;
+  }
+
+  async updateRouteHandlerSymbolId(routeId: number, handlerSymbolId: number): Promise<void> {
+    await this.db('routes').where({ id: routeId }).update({ handler_symbol_id: handlerSymbolId });
+  }
+
+  async updateSymbolParent(symbolId: number, parentSymbolId: number): Promise<void> {
+    await this.db('symbols')
+      .where({ id: symbolId })
+      .update({ parent_symbol_id: parentSymbolId });
+  }
+
   async searchRoutes(options: RouteSearchOptions): Promise<Route[]> {
     let query = this.db('routes').select('*');
 

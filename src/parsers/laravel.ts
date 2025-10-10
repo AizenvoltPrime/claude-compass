@@ -926,12 +926,16 @@ export class LaravelParser extends BaseFrameworkParser {
         return null;
       }
 
+      // Apply Laravel route file prefix conventions
+      const prefix = this.getRouteFilePrefix(filePath);
+      const fullPath = prefix + (path.startsWith('/') ? path : '/' + path);
+
       const route: LaravelRoute = {
         type: 'route',
-        name: routeName || `${method.toUpperCase()} ${path}`,
+        name: routeName || `${method.toUpperCase()} ${fullPath}`,
         filePath,
         framework: 'laravel',
-        path,
+        path: fullPath,
         method: method.toUpperCase(),
         controller: handler?.controller,
         action: handler?.action,
@@ -1612,6 +1616,21 @@ export class LaravelParser extends BaseFrameworkParser {
         filePath.endsWith('console.php') ||
         filePath.endsWith('channels.php'))
     );
+  }
+
+  /**
+   * Get route prefix based on Laravel routing conventions
+   * Laravel automatically prefixes routes based on the file they're defined in:
+   * - routes/api.php → /api prefix
+   * - routes/web.php → no prefix
+   * - routes/console.php → no prefix (CLI routes)
+   * - routes/channels.php → no prefix (broadcast routes)
+   */
+  private getRouteFilePrefix(filePath: string): string {
+    if (filePath.endsWith('/routes/api.php') || filePath.endsWith('\\routes\\api.php')) {
+      return '/api';
+    }
+    return '';
   }
 
   /**

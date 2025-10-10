@@ -163,11 +163,12 @@ export class GraphBuilder {
       path: repositoryPath,
     });
 
-    const validatedOptions = this.validateOptions(options);
-
     try {
-      // Create or get repository record
+      // Create or get repository record first to detect frameworks
       const repository = await this.ensureRepository(repositoryPath);
+
+      // Validate options with repository context for smart defaults
+      const validatedOptions = this.validateOptions(options, repository);
 
       // Automatically detect if incremental analysis is possible (unless forced full analysis)
       if (repository.last_indexed && !validatedOptions.forceFullAnalysis) {
@@ -204,6 +205,9 @@ export class GraphBuilder {
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
       const symbols = await this.storeSymbols(dbFiles, parseResults);
 
+      // Link symbol parent-child relationships
+      await this.linkSymbolHierarchy(repository.id);
+
       // Generate embeddings for symbols
       if (!validatedOptions.skipEmbeddings) {
         await this.generateSymbolEmbeddings(repository.id);
@@ -213,6 +217,9 @@ export class GraphBuilder {
 
       // Store framework entities
       await this.storeFrameworkEntities(repository.id, symbols, parseResults);
+
+      // Link route handlers to symbols
+      await this.linkRouteHandlers(repository.id);
 
       // Build graphs
       const importsMap = this.createImportsMap(dbFiles, parseResults);
@@ -590,15 +597,16 @@ export class GraphBuilder {
       fileCount: filePaths.length,
     });
 
-    const validatedOptions = this.validateOptions(options);
-    const files = filePaths.map(filePath => ({ path: filePath }));
-
-    const parseResults = await this.parseFiles(files as any[], validatedOptions);
+    // Fetch repository first for framework-aware validation
     const repository = await this.dbService.getRepository(repositoryId);
-
     if (!repository) {
       throw new Error(`Repository with id ${repositoryId} not found`);
     }
+
+    const validatedOptions = this.validateOptions(options, repository);
+    const files = filePaths.map(filePath => ({ path: filePath }));
+
+    const parseResults = await this.parseFiles(files as any[], validatedOptions);
 
     const existingFiles = await this.dbService.getFilesByRepository(repositoryId);
     const fileIdsToCleanup = existingFiles.filter(f => filePaths.includes(f.path)).map(f => f.id);
@@ -1407,7 +1415,7 @@ export class GraphBuilder {
               auth_required: false,
               name: laravelRoute.routeName,
               controller_class: laravelRoute.controller,
-              controller_method: this.extractControllerMethod(laravelRoute.action),
+              controller_method: laravelRoute.action,
               action: laravelRoute.action,
               file_path: laravelRoute.filePath,
               line_number: laravelRoute.metadata?.line || 1,
@@ -1915,6 +1923,114 @@ export class GraphBuilder {
     if (atIndex === -1) return undefined;
 
     return action.substring(atIndex + 1);
+  }
+
+  private async linkSymbolHierarchy(repositoryId: number): Promise<void> {
+    this.logger.info('Linking symbol parent-child relationships', { repositoryId });
+
+    const symbols = await this.dbService.getSymbolsByRepository(repositoryId);
+    const files = await this.dbService.getFilesByRepository(repositoryId);
+
+    const symbolsByFile = new Map<number, Symbol[]>();
+    for (const symbol of symbols) {
+      if (!symbolsByFile.has(symbol.file_id)) {
+        symbolsByFile.set(symbol.file_id, []);
+      }
+      symbolsByFile.get(symbol.file_id)!.push(symbol);
+    }
+
+    let linked = 0;
+    const updates: Array<{ id: number; parent_symbol_id: number }> = [];
+
+    for (const [fileId, fileSymbols] of symbolsByFile) {
+      const parentTypes = ['class', 'interface', 'trait'];
+      const childTypes = ['method', 'property'];
+
+      const potentialParents = fileSymbols.filter(s => parentTypes.includes(s.symbol_type));
+      const potentialChildren = fileSymbols.filter(s => childTypes.includes(s.symbol_type));
+
+      for (const child of potentialChildren) {
+        for (const parent of potentialParents) {
+          if (
+            child.start_line >= parent.start_line &&
+            child.end_line <= parent.end_line &&
+            child.id !== parent.id
+          ) {
+            updates.push({ id: child.id, parent_symbol_id: parent.id });
+            linked++;
+            break;
+          }
+        }
+      }
+    }
+
+    for (const update of updates) {
+      await this.dbService.updateSymbolParent(update.id, update.parent_symbol_id);
+    }
+
+    this.logger.info('Symbol hierarchy linkage complete', {
+      total: symbols.length,
+      linked,
+    });
+  }
+
+  private async linkRouteHandlers(repositoryId: number): Promise<void> {
+    this.logger.info('Linking route handlers to symbols', { repositoryId });
+
+    const routes = await this.dbService.getRoutesByRepository(repositoryId);
+    const unlinkedRoutes = routes.filter(
+      route =>
+        route.framework_type === 'laravel' &&
+        !route.handler_symbol_id &&
+        route.controller_class &&
+        route.controller_method
+    );
+
+    if (unlinkedRoutes.length === 0) {
+      this.logger.info('No Laravel routes need handler linkage');
+      return;
+    }
+
+    let linked = 0;
+    let failed = 0;
+
+    for (const route of unlinkedRoutes) {
+      this.logger.debug('Looking for handler method', {
+        repositoryId,
+        controllerClass: route.controller_class,
+        controllerMethod: route.controller_method,
+        routePath: route.path,
+      });
+
+      const handlerSymbol = await this.dbService.findMethodInController(
+        repositoryId,
+        route.controller_class!,
+        route.controller_method!
+      );
+
+      if (handlerSymbol) {
+        this.logger.debug('Found handler symbol', {
+          symbolId: handlerSymbol.id,
+          symbolName: handlerSymbol.name,
+        });
+        await this.dbService.updateRouteHandlerSymbolId(route.id, handlerSymbol.id);
+        linked++;
+      } else {
+        this.logger.warn('Handler symbol not found for route', {
+          routePath: route.path,
+          routeMethod: route.method,
+          controllerClass: route.controller_class,
+          controllerMethod: route.controller_method,
+        });
+        failed++;
+      }
+    }
+
+    this.logger.info('Route handler linkage complete', {
+      total: unlinkedRoutes.length,
+      linked,
+      failed,
+    });
   }
 
   // Phase 3 entity type guards
@@ -2475,7 +2591,7 @@ export class GraphBuilder {
     return { ...DEFAULT_POLICY };
   }
 
-  private validateOptions(options: BuildOptions): Required<BuildOptions> {
+  private validateOptions(options: BuildOptions, repository?: Repository): Required<BuildOptions> {
     return {
       includeTestFiles: options.includeTestFiles ?? true,
       includeNodeModules: options.includeNodeModules ?? false,
@@ -2502,10 +2618,37 @@ export class GraphBuilder {
       forceFullAnalysis: options.forceFullAnalysis ?? false,
 
       // Phase 5 - Cross-stack analysis options
-      enableCrossStackAnalysis: options.enableCrossStackAnalysis ?? false,
+      enableCrossStackAnalysis: this.shouldEnableCrossStackAnalysis(options, repository),
       detectFrameworks: options.detectFrameworks ?? false,
       verbose: options.verbose ?? false,
     };
+  }
+
+  /**
+   * Determine if cross-stack analysis should be enabled based on detected frameworks
+   */
+  private shouldEnableCrossStackAnalysis(options: BuildOptions, repository?: Repository): boolean {
+    // Explicit option takes precedence
+    if (options.enableCrossStackAnalysis !== undefined) {
+      return options.enableCrossStackAnalysis;
+    }
+
+    // Auto-enable for Vue + Laravel projects
+    if (
+      repository?.framework_stack &&
+      Array.isArray(repository.framework_stack) &&
+      repository.framework_stack.includes('vue') &&
+      repository.framework_stack.includes('laravel')
+    ) {
+      this.logger.info('Auto-enabling cross-stack analysis for Vue + Laravel project', {
+        repositoryId: repository.id,
+        frameworks: repository.framework_stack,
+      });
+      return true;
+    }
+
+    // Default: disabled
+    return false;
   }
 
   /**
