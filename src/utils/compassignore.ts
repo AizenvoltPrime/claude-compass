@@ -284,7 +284,7 @@ export class CompassIgnore {
    */
   private matchesGitignorePattern(normalizedPath: string, pattern: string): boolean {
     // For now, use the same logic as glob patterns
-    // In the future, we could implement full gitignore semantics
+    // In the future, we could implement full gitignore pattern rules
     return this.matchesGlob(normalizedPath, path.basename(normalizedPath), pattern);
   }
 }

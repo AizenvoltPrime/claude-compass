@@ -127,7 +127,7 @@ BATCH_DELAY_MS=3000                     # Wait time before processing batched ch
 **Common analysis flag combinations:**
 
 ```bash
-# Fast mode (skip semantic search embeddings, 5-10x faster analysis)
+# Fast mode (skip vector search embeddings, 5-10x faster analysis)
 ANALYSIS_FLAGS="--verbose --skip-embeddings"
 
 # Force full re-analysis every time (clears existing data)
@@ -830,7 +830,7 @@ nano ~/Documents/claude-compass/webhook-server/.env
 BATCH_DELAY_MS=10000  # Wait 10 seconds to batch more changes
 
 # Analysis optimization flags:
-ANALYSIS_FLAGS="--verbose --skip-embeddings"  # Skip semantic search (5-10x faster analysis)
+ANALYSIS_FLAGS="--verbose --skip-embeddings"  # Skip vector embedding generation (5-10x faster analysis)
 
 # Or disable analysis entirely (sync only):
 ENABLE_ANALYSIS=false  # Only sync files, no analysis

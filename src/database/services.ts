@@ -716,7 +716,7 @@ export class DatabaseService {
   }
 
   /**
-   * Vector search (semantic similarity)
+   * Vector search (embedding-based similarity)
    */
   async vectorSearchSymbols(
     query: string,

@@ -265,7 +265,7 @@ program
   .option('--encoding-fallback <encoding>', 'Fallback encoding for problematic files', 'iso-8859-1')
   .option('--parallel-parsing', 'Enable parallel file parsing', true)
   .option('--max-concurrency <number>', 'Maximum concurrent file parsing operations (default: 10)', '10')
-  .option('--skip-embeddings', 'Skip embedding generation (faster analysis, semantic search disabled)', false)
+  .option('--skip-embeddings', 'Skip embedding generation (faster analysis, vector search disabled)', false)
   .option('--cross-stack', 'Enable cross-stack analysis for Vue ↔ Laravel projects (auto-enabled when both frameworks detected)')
   .option('--no-cross-stack', 'Disable cross-stack analysis even when frameworks detected')
   .option(
