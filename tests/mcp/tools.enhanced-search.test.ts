@@ -194,11 +194,11 @@ describe('Enhanced MCP Tools Search', () => {
       expect(response.results.length).toBeGreaterThan(0);
     });
 
-    test('should use semantic search with search_mode', async () => {
+    test('should use vector search with search_mode', async () => {
       const result = await mcpTools.searchCode({
         query: 'user service',
         repo_ids: [repoId],
-        search_mode: 'semantic'
+        search_mode: 'vector'
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -418,7 +418,7 @@ describe('Enhanced MCP Tools Search', () => {
 
   describe('Search Mode Enhancement Tests', () => {
     test('should accept all search_mode values', async () => {
-      const searchModes = ['auto', 'exact', 'semantic', 'qualified'];
+      const searchModes = ['auto', 'exact', 'vector', 'qualified'];
 
       for (const mode of searchModes) {
         const result = await mcpTools.searchCode({
@@ -437,11 +437,11 @@ describe('Enhanced MCP Tools Search', () => {
       const result = await mcpTools.searchCode({
         query: 'user',
         repo_ids: [repoId],
-        search_mode: 'semantic'
+        search_mode: 'vector'
       });
 
       const response = JSON.parse(result.content[0].text);
-      expect(response.query_filters.search_mode).toBe('semantic');
+      expect(response.query_filters.search_mode).toBe('vector');
     });
   });
 
@@ -501,7 +501,7 @@ describe('Enhanced MCP Tools Search', () => {
         expect(typeof response.query_filters.framework).toBe('string');
       }
       if (response.query_filters.search_mode !== undefined) {
-        expect(['auto', 'exact', 'semantic', 'qualified']).toContain(response.query_filters.search_mode);
+        expect(['auto', 'exact', 'vector', 'qualified']).toContain(response.query_filters.search_mode);
       }
       if (response.query_filters.is_exported !== undefined) {
         expect(typeof response.query_filters.is_exported).toBe('boolean');
@@ -593,7 +593,7 @@ describe('Enhanced MCP Tools Search', () => {
           query: 'test',
           use_vector: true
         });
-      }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+      }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
     });
 
     test('should validate search_mode values', async () => {
@@ -602,7 +602,7 @@ describe('Enhanced MCP Tools Search', () => {
           query: 'test',
           search_mode: 'invalid'
         });
-      }).rejects.toThrow('search_mode must be one of: auto, exact, semantic, qualified');
+      }).rejects.toThrow('search_mode must be one of: auto, exact, vector, qualified');
     });
 
     test('should validate analysis_type values for who_calls', async () => {

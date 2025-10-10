@@ -545,7 +545,7 @@ describe('McpTools', () => {
           query: 'test',
           search_mode: 'invalid'
         });
-      }).rejects.toThrow('search_mode must be one of: auto, exact, semantic, qualified');
+      }).rejects.toThrow('search_mode must be one of: auto, exact, vector, qualified');
 
       // Invalid repo_ids should fail
       await expect(async () => {

@@ -430,7 +430,7 @@ describe('Tool Consolidation Validation', () => {
     });
 
     test('should handle search_mode enum replacing use_vector', async () => {
-      const searchModes = ['auto', 'exact', 'semantic', 'qualified'];
+      const searchModes = ['auto', 'exact', 'vector', 'qualified'];
 
       for (const mode of searchModes) {
         const result = await mcpTools.searchCode({
@@ -513,7 +513,7 @@ describe('Tool Consolidation Validation', () => {
           query: 'test',
           use_vector: true
         });
-      }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+      }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
     });
 
     test('should maintain response format consistency after consolidation', async () => {
@@ -603,7 +603,7 @@ describe('Tool Consolidation Validation', () => {
           query: 'test',
           search_mode: 'invalid_mode'
         });
-      }).rejects.toThrow('search_mode must be one of: auto, exact, semantic, qualified');
+      }).rejects.toThrow('search_mode must be one of: auto, exact, vector, qualified');
     });
   });
 
@@ -872,7 +872,7 @@ describe('Tool Consolidation Validation', () => {
             query: 'test',
             use_vector: true
           });
-        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
       });
 
       test('should handle use_vector with false value', async () => {
@@ -881,7 +881,7 @@ describe('Tool Consolidation Validation', () => {
             query: 'test',
             use_vector: false
           });
-        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
       });
 
       test('should handle use_vector with string value', async () => {
@@ -890,7 +890,7 @@ describe('Tool Consolidation Validation', () => {
             query: 'test',
             use_vector: 'true'
           });
-        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
       });
 
       test('should handle use_vector with numeric value', async () => {
@@ -899,7 +899,7 @@ describe('Tool Consolidation Validation', () => {
             query: 'test',
             use_vector: 1
           });
-        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
       });
 
       test('should handle use_vector combined with search_mode', async () => {
@@ -907,9 +907,9 @@ describe('Tool Consolidation Validation', () => {
           await mcpTools.searchCode({
             query: 'test',
             use_vector: true,
-            search_mode: 'semantic'
+            search_mode: 'vector'
           });
-        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid');
+        }).rejects.toThrow('use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid');
       });
     });
 
@@ -976,7 +976,7 @@ describe('Tool Consolidation Validation', () => {
 
       test('should demonstrate correct migration from use_vector to search_mode', async () => {
         // This should work with new parameter structure
-        const modes = ['auto', 'exact', 'semantic', 'qualified'];
+        const modes = ['auto', 'exact', 'vector', 'qualified'];
 
         for (const mode of modes) {
           const result = await mcpTools.searchCode({
@@ -1008,7 +1008,7 @@ describe('Tool Consolidation Validation', () => {
           { param: 'repo_id', value: 123, expectedMessage: 'repo_id parameter removed. Use repo_ids array instead' },
           { param: 'symbol_type', value: 'function', expectedMessage: 'symbol_type parameter removed. Use entity_types array instead' },
           { param: 'limit', value: 50, expectedMessage: 'limit parameter removed. Fixed limit of 100 is now used for all searches' },
-          { param: 'use_vector', value: true, expectedMessage: 'use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid' }
+          { param: 'use_vector', value: true, expectedMessage: 'use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid' }
         ];
 
         for (const { param, value, expectedMessage } of deprecatedParams) {

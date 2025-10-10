@@ -202,9 +202,9 @@ export class ClaudeCompassMCPServer {
                 },
                 search_mode: {
                   type: 'string',
-                  enum: ['auto', 'exact', 'semantic', 'qualified'],
+                  enum: ['auto', 'exact', 'vector', 'qualified'],
                   description:
-                    'Search mode: auto (hybrid), exact (lexical), semantic (vector), qualified (namespace-aware)',
+                    'Search mode: auto (hybrid), exact (lexical), vector (embedding-based), qualified (namespace-aware)',
                   default: 'auto',
                 },
               },

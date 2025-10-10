@@ -45,7 +45,7 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
   }
   if (args.use_vector !== undefined) {
     throw new Error(
-      'use_vector parameter removed. Use search_mode instead: "semantic" for vector search, "exact" for lexical, "auto" for hybrid'
+      'use_vector parameter removed. Use search_mode instead: "vector" for vector search, "exact" for lexical, "auto" for hybrid'
     );
   }
 
@@ -98,9 +98,9 @@ function validateSearchCodeArgs(args: any): SearchCodeArgs {
   }
 
   if (args.search_mode !== undefined) {
-    const validModes = ['auto', 'exact', 'semantic', 'qualified'];
+    const validModes = ['auto', 'exact', 'vector', 'qualified'];
     if (typeof args.search_mode !== 'string' || !validModes.includes(args.search_mode)) {
-      throw new Error('search_mode must be one of: auto, exact, semantic, qualified');
+      throw new Error('search_mode must be one of: auto, exact, vector, qualified');
     }
   }
 
@@ -217,7 +217,7 @@ function groupDependenciesByCallSite(dependencies: any[]): any {
       file_path: dep.to_symbol.file_path,
     };
 
-    // Create unique key for deduplication based on semantic equivalence
+    // Create unique key for deduplication based on structural equivalence
     const relationshipKey = `${relationshipInfo.id}:${relationType}:${relationshipInfo.target}:${relationshipInfo.file_path}`;
 
     // Skip if we've already seen this relationship
@@ -304,7 +304,7 @@ export interface SearchCodeArgs {
   entity_types?: string[]; // route, model, controller, component, job, etc.
   framework?: string; // laravel, vue, react, node
   is_exported?: boolean;
-  search_mode?: 'auto' | 'exact' | 'semantic' | 'qualified';
+  search_mode?: 'auto' | 'exact' | 'vector' | 'qualified';
 }
 
 export interface WhoCallsArgs {
@@ -566,14 +566,14 @@ export class McpTools {
 
   /**
    * Core Tool 3: searchCode - Enhanced search for code symbols with framework awareness
-   * Supports multi-mode search: exact (lexical), semantic (vector), auto (hybrid), qualified (namespace-aware)
+   * Supports multi-mode search: exact (lexical), vector (embedding-based), auto (hybrid), qualified (namespace-aware)
    *
    * @param args.query - The search query (symbol name or pattern)
    * @param args.entity_types - Framework-aware entity types: route, model, controller, component, job, function, class, interface
    * @param args.framework - Filter by framework type: laravel, vue, react, node
    * @param args.is_exported - Filter by exported symbols only
    * @param args.repo_ids - Repository IDs to search in
-   * @param args.search_mode - Search mode: auto (hybrid), exact (lexical), semantic (vector), qualified (namespace-aware)
+   * @param args.search_mode - Search mode: auto (hybrid), exact (lexical), vector (embedding-based), qualified (namespace-aware)
    * @returns List of matching symbols with framework context
    */
   async searchCode(args: any) {
@@ -2310,7 +2310,7 @@ export class McpTools {
 
   /**
    * Deduplicate relationships to prevent duplicate entries in analysis results
-   * Compares relationships based on semantic equivalence rather than just ID
+   * Compares relationships based on structural equivalence rather than just ID
    */
   private deduplicateRelationships(newRelationships: any[], existingRelationships: any[]): any[] {
     const existingKeys = new Set<string>();
@@ -2329,7 +2329,7 @@ export class McpTools {
   }
 
   /**
-   * Create a unique key for a relationship based on semantic equivalence
+   * Create a unique key for a relationship based on structural equivalence
    */
   private createRelationshipKey(relationship: any): string | null {
     // Handle different relationship formats (from different tools)
@@ -2535,11 +2535,11 @@ export class McpTools {
     query: string,
     repoId: number,
     searchOptions: any,
-    searchMode: 'auto' | 'exact' | 'semantic' | 'qualified' = 'auto'
+    searchMode: 'auto' | 'exact' | 'vector' | 'qualified' = 'auto'
   ) {
     switch (searchMode) {
-      case 'semantic':
-        this.logger.info(`[VECTOR SEARCH] Attempting semantic search for query: "${query}"`);
+      case 'vector':
+        this.logger.info(`[VECTOR SEARCH] Attempting vector search for query: "${query}"`);
         try {
           const vectorResults = await this.dbService.vectorSearchSymbols(query, repoId, {
             ...searchOptions,
@@ -2566,7 +2566,7 @@ export class McpTools {
 
       case 'auto':
       default:
-        // Intelligent auto mode: try semantic first, fallback to lexical with token-ranking
+        // Intelligent auto mode: try vector first, fallback to lexical with token-ranking
         this.logger.info(
           `[VECTOR SEARCH] Auto mode: attempting vector search for query: "${query}"`
         );

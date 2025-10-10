@@ -490,7 +490,7 @@ export async function up(knex: Knex): Promise<void> {
   await knex.raw('ALTER TABLE symbols ADD COLUMN embeddings_updated_at TIMESTAMP');
   await knex.raw('ALTER TABLE symbols ADD COLUMN embedding_model VARCHAR(100)');
 
-  // Create HNSW vector index for semantic search
+  // Create HNSW vector index for embedding-based search
   // m = 16: connections per layer (good balance of speed/accuracy)
   // ef_construction = 64: index build quality
   await knex.raw(`

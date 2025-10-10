@@ -138,7 +138,7 @@ The system uses PostgreSQL with these core tables:
 **Search Capabilities**
 
 - Full-text search with PostgreSQL ranking
-- Vector similarity for semantic search
+- Vector similarity for embedding-based search
 - Framework-aware filtering
 - Impact analysis and blast radius
 

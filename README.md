@@ -379,7 +379,7 @@ Search for code symbols with framework awareness and hybrid search capabilities 
 - `search_mode`: Search strategy (default: `auto`)
   - `auto`: Hybrid embedding+lexical search (recommended)
   - `exact`: Lexical search only (exact name matching)
-  - `semantic`: Vector similarity search only (embedding-based)
+  - `vector`: Vector similarity search only (embedding-based)
   - `qualified`: Namespace-aware search (qualified names)
 
 **Returns:** List of matching symbols with framework context (limit: 100 results)
@@ -464,7 +464,7 @@ const results = await mcpClient.callTool('search_code', {
 // Or use vector similarity only
 const vectorResults = await mcpClient.callTool('search_code', {
   query: 'user verification',
-  search_mode: 'semantic', // Vector similarity - finds login, auth, verify, etc.
+  search_mode: 'vector', // Vector similarity - finds login, auth, verify, etc.
 });
 
 // Get comprehensive impact analysis
