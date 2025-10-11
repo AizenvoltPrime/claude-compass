@@ -79,6 +79,7 @@ export class VueParser extends BaseFrameworkParser {
     imports: any[];
   } | null = null;
   private singlePassCacheKey: string = '';
+  private axiosIdentifiers: Set<string> = new Set(['axios']);
 
   constructor(parser: Parser) {
     super(parser, 'vue');
@@ -409,6 +410,8 @@ export class VueParser extends BaseFrameworkParser {
         return apiCalls;
       }
 
+      this.trackAxiosImports(tree.rootNode, scriptContent);
+
       const traverse = (node: Parser.SyntaxNode) => {
         // Detect various API call patterns
         if (node.type === 'call_expression') {
@@ -574,15 +577,26 @@ export class VueParser extends BaseFrameworkParser {
     requestType?: string;
     responseType?: string;
   } | null {
-    const fullCall = functionNode.text;
     let method = 'GET';
     let url = '';
 
-    // Extract method from function name (axios.get, axios.post, etc.)
-    if (fullCall) {
-      const methodMatch = fullCall.match(/axios\.(\w+)/);
-      if (methodMatch) {
-        method = methodMatch[1].toUpperCase();
+    if (functionNode.type === 'member_expression') {
+      const object = functionNode.childForFieldName('object');
+      const property = functionNode.childForFieldName('property');
+
+      if (object && property) {
+        const objectName = object.text;
+
+        if (this.axiosIdentifiers.has(objectName)) {
+          const methodName = property.text.toUpperCase();
+          const validMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+
+          if (validMethods.includes(methodName)) {
+            method = methodName;
+          }
+        } else {
+          return null;
+        }
       }
     }
 
@@ -777,6 +791,56 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Helper methods for parsing API calls and types
    */
+  private trackAxiosImports(rootNode: Parser.SyntaxNode, content: string): void {
+    this.axiosIdentifiers.clear();
+    this.axiosIdentifiers.add('axios');
+
+    const traverse = (node: Parser.SyntaxNode): void => {
+      if (node.type === 'import_statement') {
+        const source = node.childForFieldName('source');
+        if (source && this.extractStringValue(source, content).includes('axios')) {
+          const importClause = node.children.find(n => n.type === 'import_clause');
+          if (importClause) {
+            for (const child of importClause.children) {
+              if (child.type === 'identifier') {
+                this.axiosIdentifiers.add(child.text);
+              } else if (child.type === 'named_imports') {
+                for (const namedImport of child.children) {
+                  if (namedImport.type === 'import_specifier') {
+                    const localName = namedImport.childForFieldName('name') || namedImport.children.find(c => c.type === 'identifier');
+                    if (localName) {
+                      this.axiosIdentifiers.add(localName.text);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (node.type === 'variable_declarator') {
+        const value = node.childForFieldName('value');
+        if (value && value.type === 'call_expression') {
+          const func = value.childForFieldName('function');
+          if (func && func.type === 'member_expression') {
+            const funcText = func.text;
+            if (funcText.includes('axios.create')) {
+              const name = node.childForFieldName('name');
+              if (name) {
+                this.axiosIdentifiers.add(name.text);
+              }
+            }
+          }
+        }
+      }
+
+      for (const child of node.children) {
+        traverse(child);
+      }
+    };
+
+    traverse(rootNode);
+  }
+
   private extractStringValue(node: Parser.SyntaxNode, content: string): string {
     if (node.type === 'string' || node.type === 'template_string') {
       const text = node.text;
@@ -1127,10 +1191,10 @@ export class VueParser extends BaseFrameworkParser {
         // Styling features
         styling: {
           cssModules: this.extractCSSModules(content),
-          hasCSSModules: /<style\s+module/.test(content),
+          hasCSSModules: sections.styleModules === true,
           preprocessors: this.extractPreprocessors(content),
-          hasPreprocessors: /<style\s+[^>]*lang=["'](scss|sass|less|stylus)["']/.test(content),
-          scoped: /<style[^>]*\s+scoped/.test(content),
+          hasPreprocessors: sections.styleLang !== undefined && ['scss', 'sass', 'less', 'stylus'].includes(sections.styleLang),
+          scoped: sections.styleScoped === true,
           variables: this.extractCSSVariables(content),
           hasDynamicStyling: this.hasDynamicStyling(content),
           dynamicStyleVariables: this.extractDynamicStyleVariables(content),
@@ -4432,6 +4496,8 @@ export class VueParser extends BaseFrameworkParser {
     scriptSetup?: string;
     style?: string;
     styleScoped?: boolean;
+    styleModules?: boolean;
+    styleLang?: string;
     scriptLang?: string;
   } {
     const sections: any = {};
@@ -4465,6 +4531,13 @@ export class VueParser extends BaseFrameworkParser {
     if (styleMatch) {
       sections.style = styleMatch[1];
       sections.styleScoped = /<style[^>]*\s+scoped/.test(content);
+      sections.styleModules = /<style\s+module/.test(content);
+    }
+
+    // Extract style language
+    const styleLangMatch = content.match(/<style\s+[^>]*lang=["']([^"']+)["']/);
+    if (styleLangMatch) {
+      sections.styleLang = styleLangMatch[1];
     }
 
     return sections;

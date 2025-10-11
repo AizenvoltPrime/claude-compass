@@ -88,10 +88,28 @@ export interface CrossStackGraphData {
   apiCallGraph?: {
     nodes: CrossStackGraphNode[];
     edges: CrossStackGraphEdge[];
+    metadata: {
+      vueComponents: number;
+      laravelRoutes: number;
+      apiCalls: number;
+      vueApiCalls?: number;
+      typescriptApiCalls?: number;
+      backendEndpoints?: number;
+      dataContracts: number;
+    };
   };
   dataContractGraph?: {
     nodes: CrossStackGraphNode[];
     edges: CrossStackGraphEdge[];
+    metadata: {
+      vueComponents: number;
+      laravelRoutes: number;
+      apiCalls: number;
+      vueApiCalls?: number;
+      typescriptApiCalls?: number;
+      backendEndpoints?: number;
+      dataContracts: number;
+    };
   };
   features?: CrossStackFeature[];
   metadata?: {
@@ -301,6 +319,36 @@ export class GraphBuilder {
             repository.id
           );
 
+          // Query database for actual API call counts after all storage operations
+          const apiCallStats: any = await this.dbService.knex('api_calls as ac')
+            .join('symbols as s', 'ac.caller_symbol_id', 's.id')
+            .join('files as f', 's.file_id', 'f.id')
+            .where('ac.repo_id', repository.id)
+            .select(
+              this.dbService.knex.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.vue') as vue_calls"),
+              this.dbService.knex.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.ts') as ts_calls"),
+              this.dbService.knex.raw('COUNT(*) as total_calls')
+            )
+            .first();
+
+          const actualApiCallCount = parseInt(apiCallStats?.total_calls as string) || 0;
+          const vueApiCallCount = parseInt(apiCallStats?.vue_calls as string) || 0;
+          const tsApiCallCount = parseInt(apiCallStats?.ts_calls as string) || 0;
+
+          // Query for backend API endpoint count
+          const backendEndpointCount = await this.dbService.knex('routes')
+            .where('repo_id', repository.id)
+            .where('framework_type', 'laravel')
+            .count('* as count')
+            .first()
+            .then(result => parseInt((result as any)?.count as string) || 0);
+
+          // Update graph metadata with actual database counts
+          fullStackGraph.apiCallGraph.metadata.apiCalls = actualApiCallCount;
+          fullStackGraph.apiCallGraph.metadata.vueApiCalls = vueApiCallCount;
+          fullStackGraph.apiCallGraph.metadata.typescriptApiCalls = tsApiCallCount;
+          fullStackGraph.apiCallGraph.metadata.backendEndpoints = backendEndpointCount;
+
           // Convert CrossStackGraphBuilder types to GraphBuilder types
           const convertGraph = (graph: any) => ({
             nodes: graph.nodes.map((node: any) => ({
@@ -323,6 +371,15 @@ export class GraphBuilder {
                     : 'frontend_backend',
               metadata: edge.metadata,
             })),
+            metadata: graph.metadata || {
+              vueComponents: 0,
+              laravelRoutes: 0,
+              apiCalls: 0,
+              vueApiCalls: 0,
+              typescriptApiCalls: 0,
+              backendEndpoints: 0,
+              dataContracts: 0
+            },
           });
 
           crossStackGraph = {

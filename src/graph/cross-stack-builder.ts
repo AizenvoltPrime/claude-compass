@@ -77,6 +77,9 @@ export interface CrossStackGraphData {
     vueComponents: number;
     laravelRoutes: number;
     apiCalls: number;
+    vueApiCalls?: number;
+    typescriptApiCalls?: number;
+    backendEndpoints?: number;
     dataContracts: number;
   };
 }
@@ -523,13 +526,7 @@ export class CrossStackGraphBuilder {
       });
     }
 
-    const startTime = process.hrtime.bigint();
-    let totalMemoryUsed = 0;
-
     try {
-      // Performance monitoring
-      const initialMemory = process.memoryUsage();
-
       // Get cross-stack data from database (now with caching)
       const crossStackData = await this.database.getCrossStackDependencies(repoId);
       const { apiCalls, dataContracts } = crossStackData;
@@ -664,13 +661,6 @@ export class CrossStackGraphBuilder {
       // Calculate overall metrics
       const totalRelationships = apiCallGraph.edges.length + dataContractGraph.edges.length;
 
-      // Performance monitoring
-      const finalMemory = process.memoryUsage();
-      totalMemoryUsed = finalMemory.heapUsed - initialMemory.heapUsed;
-
-      const endTime = process.hrtime.bigint();
-      const executionTime = Number(endTime - startTime) / 1000000;
-
       return {
         features,
         apiCallGraph,
@@ -693,7 +683,6 @@ export class CrossStackGraphBuilder {
   private async buildFullStackFeatureGraphStreaming(
     repoId: number
   ): Promise<FullStackFeatureGraph> {
-    const startTime = process.hrtime.bigint();
     const features: FeatureCluster[] = [];
     let totalApiCalls = 0;
     let totalDataContracts = 0;
@@ -777,7 +766,7 @@ export class CrossStackGraphBuilder {
       apiCallGraph.metadata = {
         vueComponents: apiCallGraph.nodes.filter(n => n.type === 'vue_component').length,
         laravelRoutes: apiCallGraph.nodes.filter(n => n.type === 'laravel_route').length,
-        apiCalls: totalApiCalls,
+        apiCalls: apiCallGraph.edges.length,
         dataContracts: 0,
       };
 
@@ -790,9 +779,6 @@ export class CrossStackGraphBuilder {
 
       // Identify feature clusters from the accumulated graphs
       const identifiedFeatures = this.identifyFeatureClusters(apiCallGraph, dataContractGraph);
-
-      const endTime = process.hrtime.bigint();
-      const executionTime = Number(endTime - startTime) / 1000000;
 
       return {
         features: identifiedFeatures,
@@ -1130,7 +1116,7 @@ export class CrossStackGraphBuilder {
 
         const fileContent = await fs.readFile(file.path, 'utf-8');
 
-        const exportName = this.extractExportNameFromContent(fileContent, file.path);
+        const exportName = await this.extractExportNameFromContent(fileContent, file.path);
 
         const extractedCalls = this.extractFetchCallsFromContent(
           fileContent,
@@ -1162,26 +1148,63 @@ export class CrossStackGraphBuilder {
     return apiCalls;
   }
 
-  private extractExportNameFromContent(content: string, filePath: string): string {
+  private async extractExportNameFromContent(content: string, filePath: string): Promise<string> {
     const path = require('path');
     const fileName = path.basename(filePath, path.extname(filePath));
 
-    const exportPatterns = [
-      /export\s+const\s+(use\w+)/,
-      /export\s+const\s+(\w+Store)/,
-      /export\s+function\s+(use\w+)/,
-      /export\s+default\s+\{[\s\S]*?name:\s*['"](\w+)['"]/,
-      /defineComponent\(\{[\s\S]*?name:\s*['"](\w+)['"]/,
-    ];
+    try {
+      // First, try to find exported symbols (preferred)
+      let symbols = await this.database.knex('symbols')
+        .join('files', 'symbols.file_id', '=', 'files.id')
+        .where('files.path', filePath)
+        .andWhere('symbols.is_exported', true)
+        .select('symbols.name', 'symbols.symbol_type', 'symbols.is_exported')
+        .orderByRaw("CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class') THEN 1 ELSE 2 END")
+        .limit(1);
 
-    for (const pattern of exportPatterns) {
-      const match = content.match(pattern);
-      if (match && match[1]) {
-        return match[1];
+      if (symbols.length > 0 && symbols[0].name) {
+        return symbols[0].name;
       }
-    }
 
-    return fileName;
+      // No exported symbols - try ANY symbol from this file to avoid name mismatch
+      this.logger.debug('No exported symbols found, searching for any symbol', { filePath });
+
+      symbols = await this.database.knex('symbols')
+        .join('files', 'symbols.file_id', '=', 'files.id')
+        .where('files.path', filePath)
+        .whereIn('symbols.symbol_type', ['variable', 'function', 'class', 'component'])
+        .select('symbols.name', 'symbols.symbol_type')
+        .orderByRaw("CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class') THEN 1 ELSE 2 END")
+        .limit(1);
+
+      if (symbols.length > 0 && symbols[0].name) {
+        this.logger.debug('Using non-exported symbol name', {
+          filePath,
+          symbolName: symbols[0].name,
+          symbolType: symbols[0].symbol_type
+        });
+        return symbols[0].name;
+      }
+
+      // File exists but has no parseable symbols - this indicates a parsing failure
+      this.logger.warn('File has no symbols in database, API calls from this file will be dropped', {
+        filePath,
+        fileName,
+      });
+
+      // Return filename as last resort, but this will likely cause downstream lookup failure
+      return fileName;
+
+    } catch (error) {
+      // Database errors should not be silently caught - they indicate system issues
+      this.logger.error('Database error while extracting export name', {
+        filePath,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw new Error(
+        `Failed to query component name from database: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**
