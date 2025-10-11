@@ -84,6 +84,12 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['caller_symbol_id', 'endpoint_symbol_id'], 'api_calls_symbol_idx');
     table.index(['caller_symbol_id']);
     table.index(['endpoint_symbol_id']);
+
+    // UNIQUE constraint to prevent duplicate API call entries
+    table.unique(
+      ['caller_symbol_id', 'endpoint_symbol_id', 'line_number', 'http_method', 'endpoint_path'],
+      { indexName: 'api_calls_unique_constraint' }
+    );
   });
 
   // Data contracts table - CLEAN SCHEMA WITH CORRECT COLUMN NAMES

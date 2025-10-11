@@ -3064,14 +3064,79 @@ export class DatabaseService {
 
     const BATCH_SIZE = 100;
     const results: ApiCall[] = [];
+    let totalSkipped = 0;
 
     try {
       for (let i = 0; i < data.length; i += BATCH_SIZE) {
         const batch = data.slice(i, i + BATCH_SIZE);
 
-        const batchResults = await this.db('api_calls').insert(batch).returning('*');
+        const batchResults = await this.db('api_calls')
+          .insert(batch)
+          .onConflict(['caller_symbol_id', 'endpoint_symbol_id', 'line_number', 'http_method', 'endpoint_path'])
+          .ignore()
+          .returning('*');
+
+        const skipped = batch.length - batchResults.length;
+        totalSkipped += skipped;
+
+        if (skipped > 0) {
+          // Find duplicates by counting occurrences of each key in the batch
+          const keyCounts = new Map<string, { count: number; item: CreateApiCall }>();
+
+          for (const item of batch) {
+            const key = `${item.caller_symbol_id}|${item.endpoint_symbol_id}|${item.line_number}|${item.http_method}|${item.endpoint_path}`;
+            const existing = keyCounts.get(key);
+            if (existing) {
+              existing.count++;
+            } else {
+              keyCounts.set(key, { count: 1, item });
+            }
+          }
+
+          // Find keys that appear more than once (duplicates within batch)
+          const duplicateKeys = Array.from(keyCounts.entries())
+            .filter(([_, value]) => value.count > 1)
+            .map(([key, value]) => ({
+              key,
+              count: value.count,
+              sample: {
+                caller_symbol_id: value.item.caller_symbol_id,
+                endpoint_symbol_id: value.item.endpoint_symbol_id,
+                line_number: value.item.line_number,
+                http_method: value.item.http_method,
+                endpoint_path: value.item.endpoint_path,
+              },
+            }));
+
+          logger.warn('Duplicate API calls skipped by UNIQUE constraint', {
+            batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+            batchSize: batch.length,
+            inserted: batchResults.length,
+            skipped,
+            skipRate: `${((skipped / batch.length) * 100).toFixed(1)}%`,
+            duplicatesFoundInBatch: duplicateKeys.length,
+            duplicateDetails: duplicateKeys,
+          });
+        }
 
         results.push(...(batchResults as ApiCall[]));
+      }
+
+      if (totalSkipped > 0) {
+        const overallSkipRate = ((totalSkipped / data.length) * 100).toFixed(1);
+        logger.info('API call insertion complete with duplicates skipped', {
+          totalAttempted: data.length,
+          totalInserted: results.length,
+          totalSkipped,
+          overallSkipRate: `${overallSkipRate}%`,
+        });
+
+        if (totalSkipped / data.length > 0.1) {
+          logger.warn('High duplicate rate detected - investigate if analysis is running multiple times', {
+            skipRate: `${overallSkipRate}%`,
+            threshold: '10%',
+          });
+        }
       }
 
       return results;
@@ -3649,6 +3714,114 @@ export class DatabaseService {
         ? this.safeParseParameterTypes(result.parameter_types)
         : undefined,
     })) as EnhancedDependencyWithSymbols[];
+  }
+
+  /**
+   * Get cross-stack API callers for a backend endpoint symbol
+   * Returns frontend symbols that make API calls to this backend endpoint
+   */
+  async getCrossStackApiCallers(symbolId: number): Promise<EnhancedDependencyWithSymbols[]> {
+    const results = await this.db('api_calls')
+      .join('symbols as endpoint_symbol', 'api_calls.endpoint_symbol_id', 'endpoint_symbol.id')
+      .join('symbols as caller_symbol', 'api_calls.caller_symbol_id', 'caller_symbol.id')
+      .leftJoin('files as caller_files', 'caller_symbol.file_id', 'caller_files.id')
+      .where('api_calls.endpoint_symbol_id', symbolId)
+      .select(
+        'api_calls.id as dependency_id',
+        'api_calls.caller_symbol_id as from_symbol_id',
+        'api_calls.endpoint_symbol_id as to_symbol_id',
+        'api_calls.http_method',
+        'api_calls.endpoint_path',
+        'api_calls.line_number',
+        'caller_symbol.name as from_symbol_name',
+        'caller_symbol.symbol_type as from_symbol_type',
+        'caller_files.path as from_file_path',
+        'caller_files.id as from_file_id'
+      )
+      .distinct();
+
+    return results.map(result => ({
+      id: result.dependency_id,
+      from_symbol_id: result.from_symbol_id,
+      to_symbol_id: result.to_symbol_id,
+      dependency_type: 'api_call' as any,
+      line_number: result.line_number,
+      created_at: new Date(),
+      updated_at: new Date(),
+      from_symbol: {
+        id: result.from_symbol_id,
+        name: result.from_symbol_name,
+        symbol_type: result.from_symbol_type,
+        file: {
+          id: result.from_file_id,
+          path: result.from_file_path,
+        },
+      },
+      http_method: result.http_method,
+      endpoint_path: result.endpoint_path,
+      is_cross_stack: true,
+    })) as any;
+  }
+
+  /**
+   * Get cross-stack API dependencies for a frontend symbol
+   * Returns backend endpoint symbols that this frontend symbol calls
+   */
+  async getCrossStackApiDependencies(symbolId: number): Promise<EnhancedDependencyWithSymbols[]> {
+    const results = await this.db('api_calls')
+      .join('symbols as caller_symbol', 'api_calls.caller_symbol_id', 'caller_symbol.id')
+      .join('symbols as endpoint_symbol', 'api_calls.endpoint_symbol_id', 'endpoint_symbol.id')
+      .leftJoin('files as caller_files', 'caller_symbol.file_id', 'caller_files.id')
+      .leftJoin('files as endpoint_files', 'endpoint_symbol.file_id', 'endpoint_files.id')
+      .where('api_calls.caller_symbol_id', symbolId)
+      .select(
+        'api_calls.id as dependency_id',
+        'api_calls.caller_symbol_id as from_symbol_id',
+        'api_calls.endpoint_symbol_id as to_symbol_id',
+        'api_calls.http_method',
+        'api_calls.endpoint_path',
+        'api_calls.line_number',
+        'caller_symbol.name as from_symbol_name',
+        'caller_symbol.symbol_type as from_symbol_type',
+        'caller_files.path as from_file_path',
+        'caller_files.id as from_file_id',
+        'endpoint_symbol.name as to_symbol_name',
+        'endpoint_symbol.symbol_type as to_symbol_type',
+        'endpoint_files.path as to_file_path',
+        'endpoint_files.id as to_file_id'
+      )
+      .distinct();
+
+    return results.map(result => ({
+      id: result.dependency_id,
+      from_symbol_id: result.from_symbol_id,
+      to_symbol_id: result.to_symbol_id,
+      dependency_type: 'api_call' as any,
+      line_number: result.line_number,
+      created_at: new Date(),
+      updated_at: new Date(),
+      from_symbol: {
+        id: result.from_symbol_id,
+        name: result.from_symbol_name,
+        symbol_type: result.from_symbol_type,
+        file: {
+          id: result.from_file_id,
+          path: result.from_file_path,
+        },
+      },
+      to_symbol: {
+        id: result.to_symbol_id,
+        name: result.to_symbol_name,
+        symbol_type: result.to_symbol_type,
+        file: {
+          id: result.to_file_id,
+          path: result.to_file_path,
+        },
+      },
+      http_method: result.http_method,
+      endpoint_path: result.endpoint_path,
+      is_cross_stack: true,
+    })) as any;
   }
 
   /**

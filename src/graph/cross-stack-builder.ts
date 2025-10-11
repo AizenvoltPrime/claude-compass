@@ -129,23 +129,20 @@ export class CrossStackGraphBuilder {
   }
 
   /**
-   * Build API call graph from Vue components and Laravel routes
+   * Build API call graph from matched relationships (new approach - no database dependency)
+   * This method builds the graph directly from relationship data to avoid duplicate persistence
    */
-  async buildAPICallGraph(
+  private async buildAPICallGraphFromRelationships(
     vueComponents: FrameworkEntity[],
     laravelRoutes: FrameworkEntity[],
-    apiCalls: ApiCall[]
+    matchedRelationships: any[],
+    repoId: number
   ): Promise<CrossStackGraphData> {
-    // Handle null parameters gracefully
-    const safeVueComponents = vueComponents || [];
-    const safeLaravelRoutes = laravelRoutes || [];
-    const safeApiCalls = apiCalls || [];
-
     const nodes: CrossStackNode[] = [];
     const edges: CrossStackEdge[] = [];
 
     // Create nodes for Vue components
-    for (const component of safeVueComponents) {
+    for (const component of vueComponents) {
       nodes.push({
         id: `vue_component_${component.name}`,
         type: 'vue_component',
@@ -160,7 +157,7 @@ export class CrossStackGraphBuilder {
     }
 
     // Create nodes for Laravel routes
-    for (const route of safeLaravelRoutes) {
+    for (const route of laravelRoutes) {
       nodes.push({
         id: `laravel_route_${route.name}`,
         type: 'laravel_route',
@@ -168,119 +165,85 @@ export class CrossStackGraphBuilder {
         filePath: route.filePath,
         framework: 'laravel',
         metadata: {
-          entityId: route.name,
+          // entityId should be the handler symbol ID for proper persistence
+          entityId: route.metadata.handlerSymbolId || route.name,
           ...route.metadata,
         },
       });
     }
 
-    // Batch fetch all required symbols and routes to avoid N+1 queries
-    const symbolIds = Array.from(new Set(safeApiCalls.map(call => call.caller_symbol_id)));
-    const routeIds = Array.from(
-      new Set(safeApiCalls.map(call => call.endpoint_symbol_id).filter(id => id !== undefined))
-    );
+    // Build edges from matched relationships
+    for (const relationship of matchedRelationships) {
+      try {
+        const vueCall = relationship.vueApiCall;
+        const laravelRoute = relationship.laravelRoute;
 
-    // Create lookup maps for performance
-    const symbolsMap = new Map();
-    const routesMap = new Map();
+        // Look up caller symbol
+        const callerSymbols = await this.database.lexicalSearchSymbols(
+          vueCall.componentName,
+          repoId
+        );
+        const callerSymbol = this.selectBestMatchingSymbol(
+          callerSymbols.filter(
+            s =>
+              s.symbol_type === 'component' ||
+              s.symbol_type === 'variable' ||
+              s.symbol_type === 'function' ||
+              s.symbol_type === 'method'
+          ),
+          vueCall.filePath
+        );
 
-    // Batch fetch symbols
-    for (const symbolId of symbolIds) {
-      const symbol = await this.database.getSymbol(symbolId);
-      if (symbol) {
-        symbolsMap.set(symbolId, symbol);
-      }
-    }
+        if (!callerSymbol) continue;
 
-    // Batch fetch routes and symbols for endpoints
-    for (const endpointId of routeIds) {
-      // Try to get as a framework entity (route) first
-      let backendEntity: any = await this.database.getFrameworkEntityById(endpointId);
+        // Look up route and its handler symbol
+        const routeEntity = laravelRoutes.find(
+          r => r.metadata.path === laravelRoute.path && r.metadata.method === laravelRoute.method
+        );
 
-      // If not found as framework entity, try as symbol (controller method)
-      if (!backendEntity) {
-        const symbol = await this.database.getSymbol(endpointId);
-        if (symbol) {
-          // Create a synthetic framework entity for the symbol
-          backendEntity = {
-            name: symbol.name,
-            filePath: `symbol_${symbol.id}`,
-            metadata: {
-              id: symbol.id,
-              symbolId: symbol.id,
-              symbolType: symbol.symbol_type,
-            },
-            properties: {
-              symbolType: symbol.symbol_type,
-            },
-          };
-        }
-      }
+        if (!routeEntity || !routeEntity.metadata.handlerSymbolId) continue;
 
-      if (backendEntity) {
-        routesMap.set(endpointId, backendEntity);
-      }
-    }
+        const handlerSymbol = await this.database.getSymbol(routeEntity.metadata.handlerSymbolId);
+        if (!handlerSymbol) continue;
 
-    // Create edges for API calls using cached lookups
-    for (const apiCall of safeApiCalls) {
-      const frontendSymbol = symbolsMap.get(apiCall.caller_symbol_id);
-      const backendRoute = routesMap.get(apiCall.endpoint_symbol_id);
+        // Create edge
+        const fromId = `vue_component_${callerSymbol.name}`;
+        const toId = `laravel_route_${routeEntity.name}`;
 
-      if (frontendSymbol && backendRoute) {
-        const edgeId = `api_call_${apiCall.id}`;
-        const fromId = `vue_component_${frontendSymbol.name}`;
-        const toId = `laravel_route_${backendRoute.name}`;
-
-        // Ensure the frontend component node exists
-        const existingFromNode = nodes.find(n => n.id === fromId);
-        if (!existingFromNode) {
+        // Ensure nodes exist
+        if (!nodes.find(n => n.id === fromId)) {
           nodes.push({
             id: fromId,
             type: 'vue_component',
-            name: frontendSymbol.name,
-            filePath: '',
+            name: callerSymbol.name,
+            filePath: vueCall.filePath || '',
             framework: 'vue',
             metadata: {
-              symbolId: frontendSymbol.id,
-              entityId: frontendSymbol.name,
-            },
-          });
-        }
-
-        // Ensure the backend route node exists
-        const existingToNode = nodes.find(n => n.id === toId);
-        if (!existingToNode) {
-          // Ensure entityId is a valid integer or string
-          const entityId = backendRoute.metadata?.id;
-          const validEntityId =
-            entityId && !isNaN(Number(entityId)) ? entityId : apiCall.endpoint_symbol_id;
-
-          nodes.push({
-            id: toId,
-            type: 'laravel_route',
-            name: backendRoute.name,
-            filePath: backendRoute.filePath || '',
-            framework: 'laravel',
-            metadata: {
-              entityId: validEntityId,
-              ...backendRoute.metadata,
+              symbolId: callerSymbol.id,
+              entityId: callerSymbol.name,
             },
           });
         }
 
         edges.push({
-          id: edgeId,
+          id: `api_call_${vueCall.componentName}_${laravelRoute.path}_${laravelRoute.method}_${vueCall.location?.line || vueCall.lineNumber}`,
           from: fromId,
           to: toId,
           relationshipType: 'api_call',
-          dependencyType: DependencyType.API_CALL,
+          dependencyType: 'api_call' as any,
           evidence: ['api_call_detected'],
           metadata: {
-            urlPattern: apiCall.endpoint_path,
-            httpMethod: apiCall.http_method,
-            callType: apiCall.call_type,
+            urlPattern: vueCall.url,
+            httpMethod: vueCall.method,
+            callerSymbolId: callerSymbol.id,
+            endpointSymbolId: routeEntity.metadata.handlerSymbolId,
+            lineNumber: vueCall.location?.line || vueCall.lineNumber || null,
           },
+        });
+      } catch (error) {
+        this.logger.warn('Failed to create edge for relationship', {
+          error: error.message,
+          relationship: relationship.vueApiCall?.url,
         });
       }
     }
@@ -289,13 +252,14 @@ export class CrossStackGraphBuilder {
       nodes,
       edges,
       metadata: {
-        vueComponents: safeVueComponents.length,
-        laravelRoutes: safeLaravelRoutes.length,
-        apiCalls: safeApiCalls.length,
+        vueComponents: vueComponents.length,
+        laravelRoutes: laravelRoutes.length,
+        apiCalls: edges.length,
         dataContracts: 0,
       },
     };
   }
+
 
   /**
    * Build data contract graph from TypeScript interfaces and PHP DTOs
@@ -532,13 +496,6 @@ export class CrossStackGraphBuilder {
       const crossStackData = await this.database.getCrossStackDependencies(repoId);
       const { apiCalls, dataContracts } = crossStackData;
 
-      // Force non-streaming mode for better test performance
-      const useStreaming = false; // Disabled for test stability
-
-      if (useStreaming) {
-        return this.buildFullStackFeatureGraphStreaming(repoId);
-      }
-
       // Get framework entities - Fixed: Get Laravel routes from dedicated routes table
       const vueComponentsRaw = await this.database.getComponentsByType(repoId, 'vue');
       const vueComponents = this.convertComponentsToFrameworkEntities(vueComponentsRaw);
@@ -553,6 +510,8 @@ export class CrossStackGraphBuilder {
         sampleUrls: allApiCalls.slice(0, 5).map(call => ({ url: call.url, method: call.method })),
       });
 
+      // Match API calls to routes to create relationships
+      let matchedRelationships: any[] = [];
       if (allApiCalls.length > 0 && laravelRoutes.length > 0) {
         try {
           const laravelRouteInfo = await this.extractRouteInfoFromRoutes(repoId, laravelRoutes);
@@ -564,17 +523,14 @@ export class CrossStackGraphBuilder {
               .map(r => ({ path: r.path, method: r.method })),
           });
 
-          const relationships = this.matchApiCallsToRoutes(allApiCalls, laravelRouteInfo);
+          matchedRelationships = this.matchApiCallsToRoutes(allApiCalls, laravelRouteInfo);
 
           this.logger.info('Matched API calls to routes', {
-            relationshipsCount: relationships.length,
+            relationshipsCount: matchedRelationships.length,
           });
 
-          await this.storeDetectedRelationships(repoId, relationships);
-
-          const updatedCrossStackData = await this.database.getCrossStackDependencies(repoId);
-          apiCalls.push(...updatedCrossStackData.apiCalls);
-          dataContracts.push(...updatedCrossStackData.dataContracts);
+          // NOTE: Relationships are NOT stored here. They will be persisted later by
+          // storeCrossStackRelationships() after graph building to avoid duplicate inserts.
         } catch (error) {
           this.logger.error('Cross-stack relationship detection failed', { error: error.message });
         }
@@ -649,7 +605,13 @@ export class CrossStackGraphBuilder {
       }
 
       // Build individual graphs
-      const apiCallGraph = await this.buildAPICallGraph(vueComponents, laravelRoutes, apiCalls);
+      // Build API call graph using matched relationships instead of database records
+      const apiCallGraph = await this.buildAPICallGraphFromRelationships(
+        vueComponents,
+        laravelRoutes,
+        matchedRelationships,
+        repoId
+      );
       const dataContractGraph = await this.buildDataContractGraph(
         typescriptInterfaces,
         phpDtos,
@@ -677,124 +639,6 @@ export class CrossStackGraphBuilder {
     }
   }
 
-  /**
-   * Build full-stack feature graph using streaming for large datasets
-   * Memory-efficient processing for repositories with >10k relationships
-   */
-  private async buildFullStackFeatureGraphStreaming(
-    repoId: number
-  ): Promise<FullStackFeatureGraph> {
-    const features: FeatureCluster[] = [];
-    let totalApiCalls = 0;
-    let totalDataContracts = 0;
-    let totalRelationships = 0;
-
-    // Build empty graphs to accumulate results
-    let apiCallGraph: CrossStackGraphData = {
-      nodes: [],
-      edges: [],
-      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 },
-    };
-
-    let dataContractGraph: CrossStackGraphData = {
-      nodes: [],
-      edges: [],
-      metadata: { vueComponents: 0, laravelRoutes: 0, apiCalls: 0, dataContracts: 0 },
-    };
-
-    try {
-      // Skip data contract detection in streaming mode to avoid performance issues
-      // Data contracts will be detected separately if needed
-      // await this.detectAndStoreDataContracts(repoId);
-
-      // Get cross-stack data (using regular method instead of streaming for now)
-      const crossStackData = await this.database.getCrossStackDependencies(repoId);
-      const batch = crossStackData; // Structure: {apiCalls: ApiCall[], dataContracts: DataContract[]}
-
-      // Process API calls batch
-      if (batch.apiCalls.length > 0) {
-        // Get required framework entities for this batch - Fixed: Get Laravel routes from dedicated routes table
-        const vueComponentsRaw = await this.database.getComponentsByType(repoId, 'vue');
-        const vueComponents = this.convertComponentsToFrameworkEntities(vueComponentsRaw);
-        const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
-        const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
-
-        const batchApiCallGraph = await this.buildAPICallGraph(
-          vueComponents,
-          laravelRoutes,
-          batch.apiCalls
-        );
-
-        // Merge with accumulated graph
-        apiCallGraph.nodes.push(
-          ...batchApiCallGraph.nodes.filter(
-            node => !apiCallGraph.nodes.some(existing => existing.id === node.id)
-          )
-        );
-        apiCallGraph.edges.push(...batchApiCallGraph.edges);
-
-        totalApiCalls += batch.apiCalls.length;
-      }
-
-      // Process data contracts batch (skip heavy symbol fetching in streaming mode)
-      if (batch.dataContracts.length > 0) {
-        // For performance, use empty arrays to avoid repeated database queries
-        const batchDataContractGraph = await this.buildDataContractGraph(
-          [],
-          [],
-          batch.dataContracts
-        );
-
-        // Merge with accumulated graph
-        dataContractGraph.nodes.push(
-          ...batchDataContractGraph.nodes.filter(
-            node => !dataContractGraph.nodes.some(existing => existing.id === node.id)
-          )
-        );
-        dataContractGraph.edges.push(...batchDataContractGraph.edges);
-
-        totalDataContracts += batch.dataContracts.length;
-      }
-
-      // Force garbage collection hint after processing
-      if (global.gc) {
-        global.gc();
-      }
-
-      // Update metadata
-      totalRelationships = apiCallGraph.edges.length + dataContractGraph.edges.length;
-
-      apiCallGraph.metadata = {
-        vueComponents: apiCallGraph.nodes.filter(n => n.type === 'vue_component').length,
-        laravelRoutes: apiCallGraph.nodes.filter(n => n.type === 'laravel_route').length,
-        apiCalls: apiCallGraph.edges.length,
-        dataContracts: 0,
-      };
-
-      dataContractGraph.metadata = {
-        vueComponents: 0,
-        laravelRoutes: 0,
-        apiCalls: 0,
-        dataContracts: totalDataContracts,
-      };
-
-      // Identify feature clusters from the accumulated graphs
-      const identifiedFeatures = this.identifyFeatureClusters(apiCallGraph, dataContractGraph);
-
-      return {
-        features: identifiedFeatures,
-        apiCallGraph,
-        dataContractGraph,
-        metadata: {
-          totalFeatures: identifiedFeatures.length,
-          crossStackRelationships: totalRelationships,
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to build streaming full-stack feature graph', { error, repoId });
-      throw error;
-    }
-  }
 
   /**
    * Store cross-stack relationships in database
@@ -817,6 +661,7 @@ export class CrossStackGraphBuilder {
               http_method: edge.metadata.httpMethod || 'GET',
               endpoint_path: edge.metadata.urlPattern || '',
               call_type: 'axios', // Default call type
+              line_number: edge.metadata.lineNumber || null,
             });
           }
         }
@@ -987,125 +832,6 @@ export class CrossStackGraphBuilder {
     return frontendFiles;
   }
 
-  /**
-   * Extract API calls from Vue components by reading their source files
-   */
-  private async extractApiCallsFromComponents(
-    repoId: number,
-    vueComponents: any[]
-  ): Promise<any[]> {
-    const apiCalls: any[] = [];
-
-    // Import Vue parser to use proper API call extraction
-    const { VueParser } = await import('../parsers/vue');
-    const Parser = await import('tree-sitter');
-    const JavaScript = await import('tree-sitter-javascript');
-
-    const parser = new Parser.default();
-    parser.setLanguage(JavaScript.default);
-    const vueParser = new VueParser(parser);
-
-    for (const component of vueComponents) {
-      try {
-        // Get the file content for this component
-        const files = await this.database.getFilesByRepository(repoId);
-        const componentFile = files.find(f => f.path === component.filePath);
-
-        if (!componentFile) {
-          this.logger.warn('Component file not found', {
-            componentName: component.name,
-            filePath: component.filePath,
-            availableFiles: files.map(f => f.path),
-          });
-          continue;
-        }
-
-        // Read the file content
-        const fs = await import('fs/promises');
-        const fileContent = await fs.readFile(component.filePath, 'utf-8');
-
-        // Use Vue parser to properly extract API calls
-        let astApiCalls: any[] = [];
-        try {
-          const parseResult = await vueParser.parseFile(component.filePath, fileContent);
-          if (parseResult.frameworkEntities) {
-            const vueApiCalls = parseResult.frameworkEntities.filter(
-              (entity): entity is any => entity.type === 'api_call'
-            );
-
-            if (vueApiCalls.length > 0) {
-              this.logger.info('Found API calls in component via AST', {
-                componentName: component.name,
-                apiCallCount: vueApiCalls.length,
-                urls: vueApiCalls.map(c => c.url),
-              });
-            }
-
-            // Ensure API calls have the componentName field
-            const apiCallsWithComponentName = vueApiCalls.map(call => ({
-              ...call,
-              componentName: component.name,
-            }));
-
-            const validApiCalls = apiCallsWithComponentName.filter(call => {
-              const isValid =
-                call.url &&
-                call.url.startsWith('/') &&
-                (!call.url.includes('.') || call.url.includes('://'));
-
-              if (!isValid) {
-                this.logger.debug('Filtered invalid API call URL', {
-                  url: call.url,
-                  component: call.componentName,
-                  filePath: component.filePath,
-                });
-              }
-
-              return isValid;
-            });
-
-            astApiCalls = validApiCalls;
-          }
-        } catch (parseError) {
-          this.logger.warn('Vue parser threw error', {
-            componentName: component.name,
-            error: parseError.message,
-          });
-        }
-
-        // Always run regex extraction to catch variable-based API calls
-        const regexApiCalls = this.extractFetchCallsFromContent(
-          fileContent,
-          component.filePath,
-          component.name
-        );
-
-        // Merge AST and regex results, deduplicating by URL+method
-        const existingUrls = new Set(astApiCalls.map(c => `${c.url}|${c.method}`));
-        const newRegexCalls = regexApiCalls.filter(c => !existingUrls.has(`${c.url}|${c.method}`));
-
-        if (newRegexCalls.length > 0) {
-          this.logger.info('Regex extraction found additional API calls', {
-            componentName: component.name,
-            astCallCount: astApiCalls.length,
-            regexCallCount: newRegexCalls.length,
-            newUrls: newRegexCalls.map(c => c.url),
-          });
-        }
-
-        // Add all API calls (AST + unique regex calls)
-        apiCalls.push(...astApiCalls, ...newRegexCalls);
-      } catch (error) {
-        this.logger.warn('Failed to extract API calls from component', {
-          componentName: component.name,
-          error: error.message,
-        });
-      }
-    }
-
-    return apiCalls;
-  }
-
   private async extractApiCallsFromFrontendFiles(repoId: number): Promise<any[]> {
     const frontendFiles = await this.getFrontendFilesWithApiCalls(repoId);
     const apiCalls: any[] = [];
@@ -1155,12 +881,15 @@ export class CrossStackGraphBuilder {
 
     try {
       // First, try to find exported symbols (preferred)
-      let symbols = await this.database.knex('symbols')
+      let symbols = await this.database
+        .knex('symbols')
         .join('files', 'symbols.file_id', '=', 'files.id')
         .where('files.path', filePath)
         .andWhere('symbols.is_exported', true)
         .select('symbols.name', 'symbols.symbol_type', 'symbols.is_exported')
-        .orderByRaw("CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class') THEN 1 ELSE 2 END")
+        .orderByRaw(
+          "CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class') THEN 1 ELSE 2 END"
+        )
         .limit(1);
 
       if (symbols.length > 0 && symbols[0].name) {
@@ -1170,37 +899,42 @@ export class CrossStackGraphBuilder {
       // No exported symbols - try ANY symbol from this file to avoid name mismatch
       this.logger.debug('No exported symbols found, searching for any symbol', { filePath });
 
-      symbols = await this.database.knex('symbols')
+      symbols = await this.database
+        .knex('symbols')
         .join('files', 'symbols.file_id', '=', 'files.id')
         .where('files.path', filePath)
         .whereIn('symbols.symbol_type', ['variable', 'function', 'class', 'component', 'method'])
         .select('symbols.name', 'symbols.symbol_type')
-        .orderByRaw("CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class', 'method') THEN 1 ELSE 2 END")
+        .orderByRaw(
+          "CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class', 'method') THEN 1 ELSE 2 END"
+        )
         .limit(1);
 
       if (symbols.length > 0 && symbols[0].name) {
         this.logger.debug('Using non-exported symbol name', {
           filePath,
           symbolName: symbols[0].name,
-          symbolType: symbols[0].symbol_type
+          symbolType: symbols[0].symbol_type,
         });
         return symbols[0].name;
       }
 
       // File exists but has no parseable symbols - this indicates a parsing failure
-      this.logger.warn('File has no symbols in database, API calls from this file will be dropped', {
-        filePath,
-        fileName,
-      });
+      this.logger.warn(
+        'File has no symbols in database, API calls from this file will be dropped',
+        {
+          filePath,
+          fileName,
+        }
+      );
 
       // Return filename as last resort, but this will likely cause downstream lookup failure
       return fileName;
-
     } catch (error) {
       // Database errors should not be silently caught - they indicate system issues
       this.logger.error('Database error while extracting export name', {
         filePath,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       throw new Error(
         `Failed to query component name from database: ${error instanceof Error ? error.message : String(error)}`
@@ -1646,9 +1380,7 @@ export class CrossStackGraphBuilder {
     }
 
     if (apiCallFilePath) {
-      const sameFileCandidates = frontendCandidates.filter(
-        s => getFilePath(s) === apiCallFilePath
-      );
+      const sameFileCandidates = frontendCandidates.filter(s => getFilePath(s) === apiCallFilePath);
 
       if (sameFileCandidates.length > 0) {
         return sameFileCandidates[0];
@@ -1734,7 +1466,7 @@ export class CrossStackGraphBuilder {
 
           if (candidates.length > 1) {
             const selectedPath = componentSymbol
-              ? ((componentSymbol as any).file_path || componentSymbol.file?.path)
+              ? (componentSymbol as any).file_path || componentSymbol.file?.path
               : null;
             this.logger.debug('Multiple symbol candidates found, applied heuristics', {
               componentName: relationship.vueApiCall.componentName,
@@ -1745,12 +1477,15 @@ export class CrossStackGraphBuilder {
           }
 
           if (candidates.length > 0 && !componentSymbol) {
-            this.logger.warn('Symbol candidates exist but selection returned null (no frontend matches)', {
-              componentName: relationship.vueApiCall.componentName,
-              candidatesCount: candidates.length,
-              candidatePaths: candidates.map(c => (c as any).file_path || c.file?.path),
-              apiCallFile: relationship.vueApiCall.filePath,
-            });
+            this.logger.warn(
+              'Symbol candidates exist but selection returned null (no frontend matches)',
+              {
+                componentName: relationship.vueApiCall.componentName,
+                candidatesCount: candidates.length,
+                candidatePaths: candidates.map(c => (c as any).file_path || c.file?.path),
+                apiCallFile: relationship.vueApiCall.filePath,
+              }
+            );
           }
 
           // Lookup route from cache (handle null laravelRoute for unmatched API calls)

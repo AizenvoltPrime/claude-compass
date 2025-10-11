@@ -925,6 +925,7 @@ export interface CreateApiCall {
   http_method: string;
   endpoint_path: string;
   call_type: string;
+  line_number?: number | null;
 }
 
 export interface CreateDataContract {
