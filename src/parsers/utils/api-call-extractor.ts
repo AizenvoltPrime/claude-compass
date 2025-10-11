@@ -384,20 +384,22 @@ export class ApiCallExtractor {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) return null;
 
-    const functionText = this.getNodeText(functionNode, content);
-    const { method, isApiCall } = this.parseApiCallFunction(functionText);
-
-    if (!isApiCall) return null;
-
     const argumentsNode = node.childForFieldName('arguments');
     if (!argumentsNode) return null;
 
     const firstArgNode = argumentsNode.namedChild(0);
     if (!firstArgNode) return null;
 
-    const urlResult = this.resolveUrlArgument(firstArgNode, content, variableBindings, functionInfos);
+    // First check: Is this an HTTP call pattern?
+    const httpInfo = this.detectHttpCallPattern(functionNode, argumentsNode, content);
 
+    if (!httpInfo) return null;
+
+    // Second check: Does first argument resolve to a URL?
+    const urlResult = this.resolveUrlArgument(firstArgNode, content, variableBindings, functionInfos);
     if (!urlResult) return null;
+
+    const method = httpInfo.method;
 
     const enclosingFunction = this.findEnclosingFunction(node);
     const callerName = enclosingFunction
@@ -427,21 +429,79 @@ export class ApiCallExtractor {
     };
   }
 
-  private parseApiCallFunction(functionText: string): { method: string; isApiCall: boolean } {
-    const axiosMatch = functionText.match(/axios\.(get|post|put|patch|delete)/);
-    if (axiosMatch) {
-      return { method: axiosMatch[1].toUpperCase(), isApiCall: true };
+  private detectHttpCallPattern(
+    functionNode: Parser.SyntaxNode,
+    argumentsNode: Parser.SyntaxNode,
+    content: string
+  ): { method: string } | null {
+    // Unwrap await: await axios.get(...) -> axios.get(...)
+    let actualFunctionNode = functionNode;
+    if (functionNode.type === 'await_expression') {
+      // Tree-sitter doesn't have named fields for await, use first named child
+      const innerExpression = functionNode.namedChild(0);
+      if (innerExpression) {
+        actualFunctionNode = innerExpression;
+      }
     }
 
-    if (functionText.includes('fetch') || functionText.includes('$fetch')) {
-      return { method: 'GET', isApiCall: true };
+    // Handle TypeScript generics: axios.get<Type>(...) -> axios.get
+    if (actualFunctionNode.type === 'call_expression') {
+      const innerFunction = actualFunctionNode.childForFieldName('function');
+      if (innerFunction) {
+        actualFunctionNode = innerFunction;
+      }
     }
 
-    if (functionText.includes('useFetch') || functionText.includes('useAsyncData')) {
-      return { method: 'GET', isApiCall: true };
+    // Pattern 1: member_expression where property is an HTTP method
+    // Examples: axios.get, client.post, http.delete, axios.get<Type>
+    if (actualFunctionNode.type === 'member_expression') {
+      const propertyNode = actualFunctionNode.childForFieldName('property');
+      if (propertyNode) {
+        const propertyName = this.getNodeText(propertyNode, content).toUpperCase();
+        if (['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'REQUEST'].includes(propertyName)) {
+          return { method: propertyName === 'REQUEST' ? 'GET' : propertyName };
+        }
+      }
     }
 
-    return { method: '', isApiCall: false };
+    // Pattern 2: identifier 'fetch' with options object containing method
+    // Example: fetch(url, { method: 'POST' }) or fetch<Type>(url, { method: 'POST' })
+    if (actualFunctionNode.type === 'identifier') {
+      const name = this.getNodeText(actualFunctionNode, content);
+      if (name === 'fetch') {
+        const secondArgNode = argumentsNode.namedChild(1);
+        if (secondArgNode && secondArgNode.type === 'object') {
+          const methodProperty = this.findPropertyInObject(secondArgNode, 'method', content);
+          if (methodProperty) {
+            return { method: methodProperty.toUpperCase() };
+          }
+        }
+        // fetch without options defaults to GET
+        return { method: 'GET' };
+      }
+    }
+
+    // Not an HTTP call pattern
+    return null;
+  }
+
+  private findPropertyInObject(objectNode: Parser.SyntaxNode, propertyName: string, content: string): string | null {
+    for (let i = 0; i < objectNode.childCount; i++) {
+      const child = objectNode.child(i);
+      if (child && child.type === 'pair') {
+        const keyNode = child.childForFieldName('key');
+        const valueNode = child.childForFieldName('value');
+
+        if (keyNode && valueNode) {
+          const key = this.getNodeText(keyNode, content).replace(/['"]/g, '');
+          if (key === propertyName) {
+            const value = this.getNodeText(valueNode, content).replace(/['"]/g, '');
+            return value;
+          }
+        }
+      }
+    }
+    return null;
   }
 
   private resolveUrlArgument(
