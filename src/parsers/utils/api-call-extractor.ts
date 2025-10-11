@@ -537,6 +537,34 @@ export class ApiCallExtractor {
       }
     }
 
+    let current = functionNode.parent;
+    let depth = 0;
+    const MAX_DEPTH = 15;
+
+    while (current && depth < MAX_DEPTH) {
+      if (
+        current.type === 'function_declaration' ||
+        current.type === 'arrow_function' ||
+        current.type === 'function_expression' ||
+        current.type === 'method_definition'
+      ) {
+        const parentFunctionName = current.childForFieldName('name');
+        if (parentFunctionName) {
+          return this.getNodeText(parentFunctionName, content);
+        }
+
+        if (current.parent && current.parent.type === 'variable_declarator') {
+          const varName = current.parent.childForFieldName('name');
+          if (varName) {
+            return this.getNodeText(varName, content);
+          }
+        }
+      }
+
+      current = current.parent;
+      depth++;
+    }
+
     return 'anonymous';
   }
 

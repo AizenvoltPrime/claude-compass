@@ -7,6 +7,7 @@ import {
   File,
   Symbol,
   SymbolType,
+  Visibility,
   CreateFile,
   CreateSymbol,
   CreateFileDependency,
@@ -2051,8 +2052,45 @@ export class GraphBuilder {
 
     let linked = 0;
     let failed = 0;
+    let closuresCreated = 0;
 
     for (const route of unlinkedRoutes) {
+      if (route.controller_class === 'Closure') {
+        this.logger.debug('Creating synthetic symbol for closure route', {
+          routePath: route.path,
+          routeMethod: route.method,
+          filePath: route.file_path,
+          lineNumber: route.line_number,
+        });
+
+        const routeFile = await this.dbService.getFileByPath(route.file_path!);
+        if (!routeFile) {
+          this.logger.warn('Route file not found for closure route', {
+            filePath: route.file_path,
+            routePath: route.path,
+          });
+          failed++;
+          continue;
+        }
+
+        const closureSymbolName = `Closure_${route.path.replace(/[^a-zA-Z0-9]/g, '_')}_${route.method}`;
+        const closureSymbol = await this.dbService.createSymbol({
+          file_id: routeFile.id,
+          name: closureSymbolName,
+          qualified_name: `Closure::${route.path}`,
+          symbol_type: SymbolType.FUNCTION,
+          start_line: route.line_number || 1,
+          end_line: route.line_number || 1,
+          is_exported: false,
+          visibility: Visibility.PUBLIC,
+        });
+
+        await this.dbService.updateRouteHandlerSymbolId(route.id, closureSymbol.id);
+        closuresCreated++;
+        linked++;
+        continue;
+      }
+
       this.logger.debug('Looking for handler method', {
         repositoryId,
         controllerClass: route.controller_class,
@@ -2107,6 +2145,7 @@ export class GraphBuilder {
     this.logger.info('Route handler linkage complete', {
       total: unlinkedRoutes.length,
       linked,
+      closuresCreated,
       failed,
     });
   }

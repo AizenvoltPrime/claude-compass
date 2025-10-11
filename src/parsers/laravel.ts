@@ -1982,13 +1982,18 @@ export class LaravelParser extends BaseFrameworkParser {
   private getRouteHandler(
     node: SyntaxNode,
     content: string
-  ): { controller?: string; action?: string } | null {
+  ): { controller?: string; action?: string; isClosure?: boolean } | null {
     const args = this.findArgumentsNode(node);
     if (args && args.children && args.children.length > 2) {
       // Second argument is usually the handler (skip opening parenthesis and first argument)
       const handlerArg = args.children[3]; // Skip (, first arg, comma
       if (handlerArg && handlerArg.type === 'argument') {
         const handlerNode = handlerArg.children[0];
+
+        logger.debug('Route handler node type', {
+          nodeType: handlerNode?.type,
+          nodeText: handlerNode?.text?.substring(0, 100),
+        });
 
         if (handlerNode.type === 'string') {
           const stringContent = handlerNode.children[1]; // Get string_content
@@ -2007,6 +2012,20 @@ export class LaravelParser extends BaseFrameworkParser {
               action: elements[1],
             };
           }
+        }
+
+        if (handlerNode.type === 'anonymous_function_creation_expression' ||
+            handlerNode.type === 'arrow_function' ||
+            handlerNode.type === 'anonymous_function' ||
+            handlerNode.text?.startsWith('function')) {
+          logger.info('Detected closure route handler', {
+            nodeType: handlerNode.type,
+          });
+          return {
+            controller: 'Closure',
+            action: 'handle',
+            isClosure: true,
+          };
         }
       }
     }
