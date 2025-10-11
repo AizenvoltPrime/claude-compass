@@ -1172,9 +1172,9 @@ export class CrossStackGraphBuilder {
       symbols = await this.database.knex('symbols')
         .join('files', 'symbols.file_id', '=', 'files.id')
         .where('files.path', filePath)
-        .whereIn('symbols.symbol_type', ['variable', 'function', 'class', 'component'])
+        .whereIn('symbols.symbol_type', ['variable', 'function', 'class', 'component', 'method'])
         .select('symbols.name', 'symbols.symbol_type')
-        .orderByRaw("CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class') THEN 1 ELSE 2 END")
+        .orderByRaw("CASE WHEN symbols.symbol_type = 'variable' AND symbols.name LIKE 'use%Store' THEN 0 WHEN symbols.symbol_type IN ('function', 'class', 'method') THEN 1 ELSE 2 END")
         .limit(1);
 
       if (symbols.length > 0 && symbols[0].name) {
@@ -1635,7 +1635,8 @@ export class CrossStackGraphBuilder {
             s.symbol_type === 'component' ||
             s.symbol_type === 'variable' ||
             s.symbol_type === 'function' ||
-            s.symbol_type === 'class'
+            s.symbol_type === 'class' ||
+            s.symbol_type === 'method'
         );
         allComponentSymbols.push(...componentSymbols);
       }
