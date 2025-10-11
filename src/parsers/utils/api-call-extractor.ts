@@ -386,6 +386,11 @@ export class ApiCallExtractor {
 
     if (!urlResult) return null;
 
+    const enclosingFunction = this.findEnclosingFunction(node);
+    const callerName = enclosingFunction
+      ? this.getFunctionName(enclosingFunction, content)
+      : undefined;
+
     // If we got an array of URLs (from fallback), create multiple API calls
     if (Array.isArray(urlResult)) {
       return urlResult.map(url => ({
@@ -394,6 +399,7 @@ export class ApiCallExtractor {
         line: node.startPosition.row + 1,
         column: node.startPosition.column,
         filePath,
+        callerName,
       }));
     }
 
@@ -403,6 +409,7 @@ export class ApiCallExtractor {
       line: node.startPosition.row + 1,
       column: node.startPosition.column,
       filePath,
+      callerName,
     };
   }
 
