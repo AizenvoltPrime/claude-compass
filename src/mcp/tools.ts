@@ -869,6 +869,21 @@ export class McpTools {
         timeoutPromise,
       ])) as any;
 
+      // Add cross-stack API callers if requested
+      if (validatedArgs.include_cross_stack) {
+        try {
+          const crossStackCallers = await this.dbService.getCrossStackApiCallers(validatedArgs.symbol_id);
+          if (crossStackCallers.length > 0) {
+            callers = [...callers, ...crossStackCallers];
+          }
+        } catch (error) {
+          this.logger.warn('Failed to fetch cross-stack callers', {
+            error: (error as Error).message,
+            symbolId: validatedArgs.symbol_id,
+          });
+        }
+      }
+
       if (validatedArgs.dependency_type) {
         const depType = validatedArgs.dependency_type as DependencyType;
         callers = callers.filter(caller => caller.dependency_type === depType);
@@ -974,7 +989,8 @@ export class McpTools {
                       ? `${this.getClassNameFromPath(toFile)}.${toName}`
                       : toName;
 
-                  return {
+                  // Build base dependency object
+                  const dep: any = {
                     from: fromName,
                     to: qualifiedToName,
                     type: caller.dependency_type,
@@ -987,6 +1003,15 @@ export class McpTools {
                     resolved_class: caller.resolved_class,
                     parameter_context: caller.parameter_context,
                   };
+
+                  // Add cross-stack specific fields if this is an API call
+                  if (caller.is_cross_stack) {
+                    dep.is_cross_stack = true;
+                    dep.http_method = caller.http_method;
+                    dep.endpoint_path = caller.endpoint_path;
+                  }
+
+                  return dep;
                 }),
                 total_count: directCallers.length,
                 parameter_analysis: parameterAnalysis,
@@ -1062,6 +1087,21 @@ export class McpTools {
         this.dbService.getDependenciesFromWithContext(validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
+
+      // Add cross-stack API dependencies if requested
+      if (validatedArgs.include_cross_stack) {
+        try {
+          const crossStackDeps = await this.dbService.getCrossStackApiDependencies(validatedArgs.symbol_id);
+          if (crossStackDeps.length > 0) {
+            dependencies = [...dependencies, ...crossStackDeps];
+          }
+        } catch (error) {
+          this.logger.warn('Failed to fetch cross-stack dependencies', {
+            error: (error as Error).message,
+            symbolId: validatedArgs.symbol_id,
+          });
+        }
+      }
 
       // Filter by dependency type if specified
       if (validatedArgs.dependency_type) {
@@ -1167,7 +1207,8 @@ export class McpTools {
                       ? `${this.getClassNameFromPath(toFile)}.${toName}`
                       : toName;
 
-                  return {
+                  // Build base dependency object
+                  const depObj: any = {
                     from: fromName,
                     to: qualifiedToName,
                     type: dep.dependency_type,
@@ -1180,6 +1221,15 @@ export class McpTools {
                     resolved_class: dep.resolved_class,
                     parameter_context: dep.parameter_context,
                   };
+
+                  // Add cross-stack specific fields if this is an API call
+                  if (dep.is_cross_stack) {
+                    depObj.is_cross_stack = true;
+                    depObj.http_method = dep.http_method;
+                    depObj.endpoint_path = dep.endpoint_path;
+                  }
+
+                  return depObj;
                 }),
                 total_count: dependencies.length,
                 query_info: {

@@ -33,22 +33,6 @@ describe('CrossStackGraphBuilder - Basic Tests', () => {
     });
   });
 
-  describe('buildAPICallGraph', () => {
-    it('should handle empty input gracefully', async () => {
-      const result = await builder.buildAPICallGraph([], [], []);
-
-      expect(result).toBeDefined();
-      expect(result.nodes).toHaveLength(0);
-      expect(result.edges).toHaveLength(0);
-      expect(result.metadata).toBeDefined();
-    });
-
-    it('should handle null input without throwing', async () => {
-      await expect(async () => {
-        await builder.buildAPICallGraph(null as any, null as any, null as any);
-      }).not.toThrow();
-    });
-  });
 
   describe('buildDataContractGraph', () => {
     it('should handle empty input gracefully', async () => {

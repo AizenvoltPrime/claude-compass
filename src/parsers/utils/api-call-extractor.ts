@@ -92,12 +92,25 @@ export class ApiCallExtractor {
 
       this.traverseForApiCalls(rootNode, scriptContent, variableBindings, functionInfos, apiCalls, filePath);
 
+      // Deduplicate API calls (same line + URL can appear multiple times during resolution)
+      const uniqueApiCalls: ExtractedApiCall[] = [];
+      const seenKeys = new Set<string>();
+
+      for (const call of apiCalls) {
+        const key = `${call.line}|${call.method}|${call.url}|${call.callerName || ''}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueApiCalls.push(call);
+        }
+      }
+
       this.logger.debug('API call extraction complete', {
         filePath,
-        callsFound: apiCalls.length,
+        callsFound: uniqueApiCalls.length,
+        duplicatesRemoved: apiCalls.length - uniqueApiCalls.length,
       });
 
-      return apiCalls;
+      return uniqueApiCalls;
     } catch (error) {
       this.logger.error('Failed to extract API calls', {
         filePath,
@@ -391,7 +404,8 @@ export class ApiCallExtractor {
       ? this.getFunctionName(enclosingFunction, content)
       : undefined;
 
-    // If we got an array of URLs (from fallback), create multiple API calls
+    // If we got an array of URLs (from URL builder with multiple branches),
+    // create separate API call entries for each possible endpoint
     if (Array.isArray(urlResult)) {
       return urlResult.map(url => ({
         url,
