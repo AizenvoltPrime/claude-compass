@@ -2070,7 +2070,27 @@ export class GraphBuilder {
         this.logger.debug('Found handler symbol', {
           symbolId: handlerSymbol.id,
           symbolName: handlerSymbol.name,
+          qualifiedName: handlerSymbol.qualified_name,
         });
+
+        const symbolExists = await this.dbService.getSymbol(handlerSymbol.id);
+        if (!symbolExists) {
+          this.logger.error('Handler symbol does not exist in database!', {
+            symbolId: handlerSymbol.id,
+            symbolName: handlerSymbol.name,
+            routeId: route.id,
+            routePath: route.path,
+          });
+          failed++;
+          continue;
+        }
+
+        this.logger.debug('Linking route to symbol', {
+          routeId: route.id,
+          routePath: route.path,
+          symbolId: handlerSymbol.id,
+        });
+
         await this.dbService.updateRouteHandlerSymbolId(route.id, handlerSymbol.id);
         linked++;
       } else {

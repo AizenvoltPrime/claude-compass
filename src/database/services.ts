@@ -1417,6 +1417,12 @@ export class DatabaseService {
     // Delete in correct order to respect foreign key constraints
     // 1. Delete dependencies first (they reference symbols)
     await this.db.transaction(async trx => {
+      // Delete framework entities (they reference symbols)
+      const deletedRoutes = await trx('routes').where('repo_id', repositoryId).del();
+      const deletedApiCalls = await trx('api_calls').where('repo_id', repositoryId).del();
+      const deletedComponents = await trx('components').where('repo_id', repositoryId).del();
+      const deletedFrameworkMetadata = await trx('framework_metadata').where('repo_id', repositoryId).del();
+
       // Delete dependencies related to symbols in this repository
       const deletedDependencies = await trx('dependencies')
         .whereIn(
@@ -1443,6 +1449,10 @@ export class DatabaseService {
 
       logger.info('Repository cleanup completed', {
         repositoryId,
+        deletedRoutes,
+        deletedApiCalls,
+        deletedComponents,
+        deletedFrameworkMetadata,
         deletedDependencies,
         deletedSymbols,
         deletedFiles,
@@ -1848,19 +1858,30 @@ export class DatabaseService {
 
     for (const pattern of qualifiedPatterns) {
       const result = await this.db('symbols')
+        .select('symbols.*')
         .join('files', 'symbols.file_id', 'files.id')
         .where('files.repo_id', repoId)
+        .where('files.language', 'php')
         .where('symbols.qualified_name', pattern)
         .where('symbols.symbol_type', 'method')
         .first();
 
-      if (result) return result as Symbol;
+      if (result) {
+        logger.info('Found method via qualified pattern', {
+          controllerClass,
+          methodName,
+          pattern,
+          symbolId: result.id,
+        });
+        return result as Symbol;
+      }
     }
 
     const controllerSymbol = await this.db('symbols')
       .select('symbols.*')
       .join('files', 'symbols.file_id', 'files.id')
       .where('files.repo_id', repoId)
+      .where('files.language', 'php')
       .where('symbols.symbol_type', 'class')
       .where(function () {
         this.where('symbols.name', controllerClass).orWhere(
@@ -1871,13 +1892,35 @@ export class DatabaseService {
       })
       .first();
 
-    if (!controllerSymbol) return null;
+    if (!controllerSymbol) {
+      logger.warn('Controller class not found', {
+        controllerClass,
+        methodName,
+        repoId,
+      });
+      return null;
+    }
 
     const methodSymbol = await this.db('symbols')
       .where('parent_symbol_id', controllerSymbol.id)
       .where('name', methodName)
       .where('symbol_type', 'method')
       .first();
+
+    if (methodSymbol) {
+      logger.info('Found method via fallback query', {
+        controllerClass,
+        methodName,
+        controllerSymbolId: controllerSymbol.id,
+        methodSymbolId: methodSymbol.id,
+      });
+    } else {
+      logger.warn('Method not found in controller', {
+        controllerClass,
+        methodName,
+        controllerSymbolId: controllerSymbol.id,
+      });
+    }
 
     return (methodSymbol as Symbol) || null;
   }
