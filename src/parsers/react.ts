@@ -23,6 +23,7 @@ import {
 import { TypeScriptParser } from './typescript';
 import { JavaScriptParser } from './javascript';
 import { createComponentLogger } from '../utils/logger';
+import { extractJSDocComment, extractDescriptionOnly } from './utils/jsdoc-extractor';
 import * as path from 'path';
 
 const logger = createComponentLogger('react-parser');
@@ -279,6 +280,14 @@ export class ReactParser extends BaseFrameworkParser {
 
       const componentName = mainComponent.name || this.extractComponentName(filePath);
 
+      let componentDescription: string | undefined;
+      if (mainComponent.node) {
+        const jsdocComment = extractJSDocComment(mainComponent.node, content);
+        if (jsdocComment) {
+          componentDescription = extractDescriptionOnly(jsdocComment);
+        }
+      }
+
       // Extract component metadata with error handling
       let props: PropDefinition[] = [];
       let hooks: string[] = [];
@@ -347,6 +356,7 @@ export class ReactParser extends BaseFrameworkParser {
         type: 'component',
         name: componentName,
         filePath,
+        description: componentDescription,
         componentType: mainComponent.type,
         props,
         hooks,

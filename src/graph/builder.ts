@@ -1464,6 +1464,7 @@ export class GraphBuilder {
               end_line: entityLine,
               is_exported: true,
               signature: `${entity.type} ${entity.name}`,
+              description: entity.description,
             });
 
             matchingSymbol = syntheticSymbol;
