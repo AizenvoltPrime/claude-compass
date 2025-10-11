@@ -213,34 +213,61 @@ export class PHPParser extends ChunkedParser {
           break;
         }
         case 'class_declaration': {
-          const symbol = this.extractClassSymbol(node, content);
+          const symbol = this.extractClassSymbol(node, content, context);
           if (symbol) {
             symbols.push(symbol);
+            const previousClass = context.currentClass;
+            context.currentClass = symbol.name;
+
+            for (const child of node.children) {
+              traverse(child);
+            }
+
+            context.currentClass = previousClass;
+
             const exportInfo = this.extractClassExport(node, content);
             if (exportInfo) exports.push(exportInfo);
           }
-          break;
+          return;
         }
         case 'interface_declaration': {
-          const symbol = this.extractInterfaceSymbol(node, content);
+          const symbol = this.extractInterfaceSymbol(node, content, context);
           if (symbol) {
             symbols.push(symbol);
+            const previousClass = context.currentClass;
+            context.currentClass = symbol.name;
+
+            for (const child of node.children) {
+              traverse(child);
+            }
+
+            context.currentClass = previousClass;
+
             const exportInfo = this.extractInterfaceExport(node, content);
             if (exportInfo) exports.push(exportInfo);
           }
-          break;
+          return;
         }
         case 'trait_declaration': {
-          const symbol = this.extractTraitSymbol(node, content);
+          const symbol = this.extractTraitSymbol(node, content, context);
           if (symbol) {
             symbols.push(symbol);
+            const previousClass = context.currentClass;
+            context.currentClass = symbol.name;
+
+            for (const child of node.children) {
+              traverse(child);
+            }
+
+            context.currentClass = previousClass;
+
             const exportInfo = this.extractTraitExport(node, content);
             if (exportInfo) exports.push(exportInfo);
           }
-          break;
+          return;
         }
         case 'function_definition': {
-          const symbol = this.extractFunctionSymbol(node, content);
+          const symbol = this.extractFunctionSymbol(node, content, context);
           if (symbol) {
             symbols.push(symbol);
             const exportInfo = this.extractFunctionExport(node, content);
@@ -249,7 +276,7 @@ export class PHPParser extends ChunkedParser {
           break;
         }
         case 'method_declaration': {
-          const symbol = this.extractMethodSymbol(node, content);
+          const symbol = this.extractMethodSymbol(node, content, context);
           if (symbol) symbols.push(symbol);
           break;
         }
@@ -359,6 +386,22 @@ export class PHPParser extends ChunkedParser {
     return lines.join('\n').trim();
   }
 
+  private buildQualifiedName(context: { currentNamespace: string | null; currentClass: string | null }, name: string): string {
+    const parts: string[] = [];
+
+    if (context.currentNamespace) {
+      parts.push(context.currentNamespace);
+    }
+
+    if (context.currentClass && context.currentClass !== name) {
+      parts.push(context.currentClass);
+    }
+
+    parts.push(name);
+
+    return parts.join('\\');
+  }
+
   private extractNamespaceSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -377,16 +420,18 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractClassSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractClassSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null }): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
     const signature = this.extractClassSignature(node, content);
     const description = this.extractPhpDocComment(node, content);
+    const qualifiedName = this.buildQualifiedName(context, name);
 
     return {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.CLASS,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
@@ -397,15 +442,17 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractInterfaceSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractInterfaceSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null }): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
     const description = this.extractPhpDocComment(node, content);
+    const qualifiedName = this.buildQualifiedName(context, name);
 
     return {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.INTERFACE,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
@@ -415,15 +462,17 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractTraitSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractTraitSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null }): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
     const description = this.extractPhpDocComment(node, content);
+    const qualifiedName = this.buildQualifiedName(context, name);
 
     return {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.TRAIT,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
@@ -433,16 +482,18 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractFunctionSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null }): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
     const signature = this.extractFunctionSignature(node, content);
     const description = this.extractPhpDocComment(node, content);
+    const qualifiedName = this.buildQualifiedName(context, name);
 
     return {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.FUNCTION,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
@@ -453,7 +504,7 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractMethodSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractMethodSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null }): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -462,8 +513,15 @@ export class PHPParser extends ChunkedParser {
     const visibility = this.extractVisibility(node, content);
     const description = this.extractPhpDocComment(node, content);
 
+    let qualifiedName: string | undefined;
+    if (context.currentClass) {
+      const classQualifiedName = this.buildQualifiedName(context, context.currentClass);
+      qualifiedName = `${classQualifiedName}::${name}`;
+    }
+
     return {
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.METHOD,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
