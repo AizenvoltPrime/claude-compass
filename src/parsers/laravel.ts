@@ -444,43 +444,257 @@ export class LaravelParser extends BaseFrameworkParser {
   }
 
   /**
-   * Parse FormRequest validation rules
+   * Parse FormRequest validation rules using AST
    */
-  private parseFormRequestValidation(content: string, filePath: string): ValidationRule[] {
+  private parseFormRequestValidation(
+    content: string,
+    filePath: string,
+    rootNode: SyntaxNode
+  ): ValidationRule[] {
     const validationRules: ValidationRule[] = [];
 
     try {
-      // Look for rules() method in FormRequest classes
-      const rulesPattern = /public\s+function\s+rules\s*\(\s*\)\s*\{([^}]+)\}/g;
-      let match;
+      const rulesMethod = this.findMethodByName(rootNode, 'rules');
+      if (!rulesMethod) return validationRules;
 
-      while ((match = rulesPattern.exec(content)) !== null) {
-        const rulesBody = match[1];
+      const returnStatement = this.findReturnStatement(rulesMethod);
+      if (!returnStatement) return validationRules;
 
-        // Extract individual validation rules
-        const rulePattern = /['"]([^'"]+)['"]\s*=>\s*['"]([^'"]+)['"]/g;
-        let ruleMatch;
+      const arrayNode = this.findChildByType(returnStatement, 'array_creation_expression');
+      if (!arrayNode) return validationRules;
 
-        while ((ruleMatch = rulePattern.exec(rulesBody)) !== null) {
-          const field = ruleMatch[1];
-          const rules = ruleMatch[2].split('|');
-
-          const validationRule: ValidationRule = {
-            field,
-            rules,
-            typeScriptEquivalent: this.mapLaravelRulesToTypeScript(rules),
-            required: rules.includes('required'),
-            nullable: rules.includes('nullable'),
-          };
-
-          validationRules.push(validationRule);
-        }
-      }
+      const rules = this.parseValidationArray(arrayNode, content);
+      validationRules.push(...rules);
     } catch (error) {
       logger.warn(`Failed to parse FormRequest validation from ${filePath}`, { error });
     }
 
     return validationRules;
+  }
+
+  private findMethodByName(node: SyntaxNode, methodName: string): SyntaxNode | null {
+    if (node.type === 'method_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode?.text === methodName) {
+        return node;
+      }
+    }
+
+    for (const child of node.children) {
+      const result = this.findMethodByName(child, methodName);
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  private findReturnStatement(methodNode: SyntaxNode): SyntaxNode | null {
+    const body = methodNode.childForFieldName('body');
+    if (!body) return null;
+
+    for (const child of body.children) {
+      if (child.type === 'return_statement') {
+        return child;
+      }
+      const nested = this.findReturnStatement(child);
+      if (nested) return nested;
+    }
+
+    return null;
+  }
+
+  private findChildByType(node: SyntaxNode, type: string): SyntaxNode | null {
+    for (const child of node.children) {
+      if (child.type === type) return child;
+      const nested = this.findChildByType(child, type);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  private parseValidationArray(arrayNode: SyntaxNode, content: string): ValidationRule[] {
+    const rules: ValidationRule[] = [];
+
+    const elements = arrayNode.children.filter(n => n.type === 'array_element_initializer');
+
+    for (const element of elements) {
+      const key = this.extractArrayKey(element, content);
+      if (!key) continue;
+
+      const valueNode = this.extractArrayValueNode(element);
+      if (!valueNode) continue;
+
+      const rulesList = this.parseRuleValue(valueNode, content);
+
+      rules.push({
+        field: key,
+        rules: rulesList,
+        typeScriptEquivalent: this.inferTypeScriptType(rulesList),
+        required: rulesList.includes('required'),
+        nullable: rulesList.includes('nullable'),
+      });
+    }
+
+    return rules;
+  }
+
+  private extractArrayKey(elementNode: SyntaxNode, content: string): string | null {
+    for (const child of elementNode.children) {
+      if (child.type === 'string') {
+        return this.extractLaravelStringLiteral(child, content);
+      }
+    }
+    return null;
+  }
+
+  private extractArrayValueNode(elementNode: SyntaxNode): SyntaxNode | null {
+    let foundArrow = false;
+    for (const child of elementNode.children) {
+      if (child.type === '=>') {
+        foundArrow = true;
+        continue;
+      }
+      if (foundArrow && (child.type === 'string' || child.type === 'array_creation_expression')) {
+        return child;
+      }
+    }
+    return null;
+  }
+
+  private parseRuleValue(valueNode: SyntaxNode, content: string): string[] {
+    if (valueNode.type === 'string') {
+      const ruleString = this.extractLaravelStringLiteral(valueNode, content);
+      return ruleString.split('|').map(r => r.trim()).filter(r => r.length > 0);
+    }
+
+    if (valueNode.type === 'array_creation_expression') {
+      return this.extractRulesFromArray(valueNode, content);
+    }
+
+    return [];
+  }
+
+  private extractRulesFromArray(arrayNode: SyntaxNode, content: string): string[] {
+    const rules: string[] = [];
+
+    const elements = arrayNode.children.filter(n => n.type === 'array_element_initializer');
+
+    for (const element of elements) {
+      for (const child of element.children) {
+        if (child.type === 'string') {
+          rules.push(this.extractLaravelStringLiteral(child, content));
+        } else if (child.type === 'scoped_call_expression') {
+          const ruleName = this.extractRuleFacadeCall(child, content);
+          rules.push(ruleName);
+        } else if (child.type === 'object_creation_expression') {
+          const className = this.extractClassNameFromCreation(child, content);
+          if (className) rules.push(className);
+        }
+      }
+    }
+
+    return rules;
+  }
+
+  private extractLaravelStringLiteral(node: SyntaxNode, content: string): string {
+    const text = content.substring(node.startIndex, node.endIndex);
+    return text.replace(/^['"]|['"]$/g, '');
+  }
+
+  private extractRuleFacadeCall(node: SyntaxNode, content: string): string {
+    const methodNode = node.childForFieldName('name');
+    return methodNode?.text || 'custom';
+  }
+
+  private extractClassNameFromCreation(node: SyntaxNode, content: string): string | null {
+    for (const child of node.children) {
+      if (child.type === 'name' || child.type === 'qualified_name') {
+        return child.text;
+      }
+    }
+    return null;
+  }
+
+  private inferTypeScriptType(rules: string[]): string {
+    if (rules.some(r => r.startsWith('numeric') || r.startsWith('integer'))) {
+      return 'number';
+    }
+    if (rules.some(r => r.startsWith('boolean'))) {
+      return 'boolean';
+    }
+    if (rules.some(r => r.startsWith('array'))) {
+      return 'any[]';
+    }
+    return 'string';
+  }
+
+  private findValidationCalls(methodNode: SyntaxNode): SyntaxNode[] {
+    const calls: SyntaxNode[] = [];
+    const validationMethods = ['validate', 'validateWithBag', 'validateNested', 'safe', 'validated'];
+
+    const traverse = (node: SyntaxNode): void => {
+      if (node.type === 'member_call_expression') {
+        const methodName = node.childForFieldName('name');
+        if (methodName && validationMethods.includes(methodName.text)) {
+          calls.push(node);
+        }
+      }
+
+      for (const child of node.children) {
+        traverse(child);
+      }
+    };
+
+    const body = methodNode.childForFieldName('body');
+    if (body) traverse(body);
+
+    return calls;
+  }
+
+  private findResponseJsonCalls(methodNode: SyntaxNode): SyntaxNode[] {
+    const calls: SyntaxNode[] = [];
+
+    const traverse = (node: SyntaxNode): void => {
+      if (node.type === 'member_call_expression') {
+        const methodName = node.childForFieldName('name');
+        if (methodName && methodName.text === 'json') {
+          calls.push(node);
+        }
+      }
+
+      for (const child of node.children) {
+        traverse(child);
+      }
+    };
+
+    const body = methodNode.childForFieldName('body');
+    if (body) traverse(body);
+
+    return calls;
+  }
+
+  private parseResponseArrayStructure(arrayNode: SyntaxNode, content: string): any {
+    const result: any = {};
+
+    const elements = arrayNode.children.filter(n => n.type === 'array_element_initializer');
+
+    for (const element of elements) {
+      const key = this.extractArrayKey(element, content);
+      if (!key) continue;
+
+      const valueNode = this.extractArrayValueNode(element);
+      if (!valueNode) continue;
+
+      if (valueNode.type === 'array_creation_expression') {
+        result[key] = this.parseResponseArrayStructure(valueNode, content);
+      } else if (valueNode.type === 'string') {
+        result[key] = 'string';
+      } else {
+        result[key] = 'mixed';
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -569,27 +783,16 @@ export class LaravelParser extends BaseFrameworkParser {
         });
       }
 
-      // Also look for inline validation
-      const inlineValidationPattern = /validate\s*\(\s*\[([^\]]+)\]/g;
-      let validationMatch;
+      // Also look for inline validation using AST
+      const validateCalls = this.findValidationCalls(methodNode);
+      for (const callNode of validateCalls) {
+        const args = callNode.childForFieldName('arguments');
+        if (!args) continue;
 
-      while ((validationMatch = inlineValidationPattern.exec(methodText)) !== null) {
-        const rulesText = validationMatch[1];
-        // Parse inline validation rules
-        const rulePattern = /['"]([^'"]+)['"]\s*=>\s*['"]([^'"]+)['"]/g;
-        let ruleMatch;
-
-        while ((ruleMatch = rulePattern.exec(rulesText)) !== null) {
-          const field = ruleMatch[1];
-          const rules = ruleMatch[2].split('|');
-
-          validationRules.push({
-            field,
-            rules,
-            typeScriptEquivalent: this.mapLaravelRulesToTypeScript(rules),
-            required: rules.includes('required'),
-            nullable: rules.includes('nullable'),
-          });
+        const arrayArg = this.findChildByType(args, 'array_creation_expression');
+        if (arrayArg) {
+          const rules = this.parseValidationArray(arrayArg, content);
+          validationRules.push(...rules);
         }
       }
     } catch (error) {
@@ -611,11 +814,16 @@ export class LaravelParser extends BaseFrameworkParser {
         return { type: 'resource', resource: 'ApiResource' };
       }
       if (methodText.includes('response()->json(')) {
-        // Try to extract the structure from the json() call
-        const jsonPattern = /response\(\)->json\(\s*(\{[^}]+\}|\[.*?\]|[^)]+)\)/;
-        const match = jsonPattern.exec(methodText);
-        if (match) {
-          return { type: 'json', structure: 'custom' };
+        const jsonCalls = this.findResponseJsonCalls(methodNode);
+        for (const callNode of jsonCalls) {
+          const args = callNode.childForFieldName('arguments');
+          if (!args) continue;
+
+          const arrayArg = this.findChildByType(args, 'array_creation_expression');
+          if (arrayArg) {
+            const structure = this.parseResponseArrayStructure(arrayArg, content);
+            return { type: 'json', structure };
+          }
         }
       }
 
@@ -735,7 +943,7 @@ export class LaravelParser extends BaseFrameworkParser {
 
       // Extract validation rules from FormRequest classes
       if (filePath.includes('Request') && content.includes('FormRequest')) {
-        const validationRules = this.parseFormRequestValidation(content, filePath);
+        const validationRules = this.parseFormRequestValidation(content, filePath, tree.rootNode);
         if (validationRules.length > 0) {
           // Create a framework entity for the validation rules
           const formRequestEntity: FrameworkEntity = {
@@ -1092,16 +1300,16 @@ export class LaravelParser extends BaseFrameworkParser {
   }
 
   /**
-   * Check if a class extends Controller
+   * Check if a class extends Controller using AST
    */
   private extendsController(content: string, node: SyntaxNode): boolean {
-    const className = this.getClassName(node, content);
-    if (!className) return false;
+    if (node.type !== 'class_declaration') return false;
 
-    const classPattern = new RegExp(
-      `class\\s+${className}\\s+extends\\s+(Controller|BaseController)`
-    );
-    return classPattern.test(content);
+    const baseClause = node.childForFieldName('base_clause');
+    if (!baseClause) return false;
+
+    const baseClass = content.substring(baseClause.startIndex, baseClause.endIndex);
+    return baseClass.includes('Controller') || baseClass.includes('BaseController');
   }
 
   /**

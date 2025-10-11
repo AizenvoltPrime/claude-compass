@@ -409,12 +409,33 @@ program
         console.log(chalk.magenta(`\n${getEmoji('🔀', 'Cross:')} Cross-Stack Analysis Results:`));
         console.log(
           chalk.magenta(
-            `${getEmoji('🌐', 'API:')} API calls detected: ${result.crossStackGraph.apiCallGraph?.edges.length || 0}`
+            `${getEmoji('🌐', 'API:')} API calls detected: ${result.crossStackGraph.apiCallGraph?.metadata.apiCalls || 0}`
           )
         );
+
+        // Show breakdown of API calls by source
+        const vueApiCalls = result.crossStackGraph.apiCallGraph?.metadata.vueApiCalls;
+        const tsApiCalls = result.crossStackGraph.apiCallGraph?.metadata.typescriptApiCalls;
+        if (vueApiCalls !== undefined || tsApiCalls !== undefined) {
+          console.log(
+            chalk.gray(`  ├─ Vue components: ${vueApiCalls || 0} calls`)
+          );
+          console.log(
+            chalk.gray(`  └─ TypeScript files: ${tsApiCalls || 0} calls`)
+          );
+        }
+
+        // Show backend endpoints
+        const backendEndpoints = result.crossStackGraph.apiCallGraph?.metadata.backendEndpoints;
+        if (backendEndpoints !== undefined) {
+          console.log(
+            chalk.cyan(`${getEmoji('🔌', 'Backend:')} Backend API endpoints: ${backendEndpoints}`)
+          );
+        }
+
         console.log(
           chalk.magenta(
-            `${getEmoji('📋', 'Schema:')} Data contracts: ${result.crossStackGraph.dataContractGraph?.edges.length || 0}`
+            `${getEmoji('📋', 'Schema:')} Data contracts: ${result.crossStackGraph.dataContractGraph?.metadata.dataContracts || 0}`
           )
         );
         console.log(

@@ -2,6 +2,7 @@ import Parser from 'tree-sitter';
 import { typescript as TypeScript } from 'tree-sitter-typescript';
 import JavaScript from 'tree-sitter-javascript';
 import { createComponentLogger } from '../../utils/logger';
+import { VueSFCParser } from './vue-sfc-parser';
 
 const logger = createComponentLogger('api-call-extractor');
 
@@ -31,10 +32,12 @@ interface FunctionInfo {
 export class ApiCallExtractor {
   private parser: Parser;
   private logger: any;
+  private sfcParser: VueSFCParser;
 
   constructor() {
     this.parser = new Parser();
     this.logger = logger;
+    this.sfcParser = new VueSFCParser();
   }
 
   extractFromContent(
@@ -122,14 +125,8 @@ export class ApiCallExtractor {
   }
 
   private extractScriptFromVue(vueContent: string): string {
-    const scriptTagRegex = /<script[^>]*>([\s\S]*?)<\/script>/i;
-    const match = vueContent.match(scriptTagRegex);
-
-    if (match && match[1]) {
-      return match[1];
-    }
-
-    return '';
+    const sections = this.sfcParser.extractSections(vueContent);
+    return this.sfcParser.getCombinedScript(sections);
   }
 
   private extractVariableBindings(rootNode: Parser.SyntaxNode, content: string): VariableBinding[] {
