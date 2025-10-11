@@ -78,8 +78,9 @@ export interface FrameworkEntity {
   type: string;
   name: string;
   filePath: string;
+  description?: string;
   metadata?: Record<string, any>;
-  properties?: Record<string, any>; // Phase 5 addition for cross-stack properties
+  properties?: Record<string, any>;
 }
 
 export interface VueComponent extends FrameworkEntity {

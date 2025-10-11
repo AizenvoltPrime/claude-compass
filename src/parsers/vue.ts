@@ -30,6 +30,7 @@ import {
 } from './utils/url-patterns';
 import { JavaScriptParser } from './javascript';
 import { TypeScriptParser } from './typescript';
+import { extractLeadingJSDocComment, extractDescriptionOnly, extractJSDocComment } from './utils/jsdoc-extractor';
 
 const logger = createComponentLogger('vue-parser');
 
@@ -990,6 +991,14 @@ export class VueParser extends BaseFrameworkParser {
       }
     }
 
+    let componentDescription: string | undefined;
+    if (scriptTree) {
+      const jsdocComment = extractLeadingJSDocComment(scriptTree.rootNode, scriptContent!);
+      if (jsdocComment) {
+        componentDescription = extractDescriptionOnly(jsdocComment);
+      }
+    }
+
     // Extract enhanced metadata (with error handling)
     let builtInComponents = [];
     let directives = [];
@@ -1056,6 +1065,7 @@ export class VueParser extends BaseFrameworkParser {
       type: 'component',
       name: componentName,
       filePath,
+      description: componentDescription,
       metadata: {
         // Basic SFC metadata
         scriptSetup: !!sections.scriptSetup,
@@ -2648,13 +2658,14 @@ export class VueParser extends BaseFrameworkParser {
       }
 
       const tree = this.parseContent(content);
-      const functions = this.findComposableFunctions(tree);
+      const functions = this.findComposableFunctions(tree, content);
 
       for (const func of functions) {
         const composable: VueComposable = {
           type: 'composable',
           name: func.name,
           filePath,
+          description: func.description,
           returns: func.returns,
           dependencies: func.dependencies,
           reactive_refs: func.reactiveRefs,
@@ -2680,13 +2691,14 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Find composable functions in the AST
    */
-  private findComposableFunctions(tree: any): Array<{
+  private findComposableFunctions(tree: any, content: string): Array<{
     name: string;
     returns: string[];
     dependencies: string[];
     reactiveRefs: string[];
     isDefault: boolean;
     parameters: string[];
+    description?: string;
   }> {
     const functions: any[] = [];
 
@@ -2706,7 +2718,7 @@ export class VueParser extends BaseFrameworkParser {
         const name = nameNode?.text;
 
         if (name && name.startsWith('use') && name.length > 3) {
-          functions.push(this.analyzeComposableFunction(node, name, false));
+          functions.push(this.analyzeComposableFunction(node, name, false, content));
         }
       }
 
@@ -2722,7 +2734,7 @@ export class VueParser extends BaseFrameworkParser {
           name.length > 3 &&
           (valueNode?.type === 'arrow_function' || valueNode?.type === 'function_expression')
         ) {
-          functions.push(this.analyzeComposableFunction(valueNode, name, false));
+          functions.push(this.analyzeComposableFunction(valueNode, name, false, content));
         }
       }
 
@@ -2744,7 +2756,7 @@ export class VueParser extends BaseFrameworkParser {
 
         if (funcNode) {
           const name = 'default'; // Will be extracted from filename
-          functions.push(this.analyzeComposableFunction(funcNode, name, true));
+          functions.push(this.analyzeComposableFunction(funcNode, name, true, content));
         }
       }
 
@@ -2767,7 +2779,8 @@ export class VueParser extends BaseFrameworkParser {
   private analyzeComposableFunction(
     node: any,
     name: string,
-    isDefault: boolean
+    isDefault: boolean,
+    content?: string
   ): {
     name: string;
     returns: string[];
@@ -2775,11 +2788,20 @@ export class VueParser extends BaseFrameworkParser {
     reactiveRefs: string[];
     isDefault: boolean;
     parameters: string[];
+    description?: string;
   } {
     const returns: string[] = [];
     const dependencies: string[] = [];
     const reactiveRefs: string[] = [];
     const parameters: string[] = [];
+    let description: string | undefined;
+
+    if (content) {
+      const jsdocComment = extractJSDocComment(node, content);
+      if (jsdocComment) {
+        description = extractDescriptionOnly(jsdocComment);
+      }
+    }
 
     // Extract parameters
     let parametersList = null;
@@ -2821,6 +2843,7 @@ export class VueParser extends BaseFrameworkParser {
       reactiveRefs,
       isDefault,
       parameters,
+      description,
     };
   }
 
