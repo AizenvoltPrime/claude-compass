@@ -919,14 +919,17 @@ export class McpTools {
         const toFile = symbol.file?.path;
         const fromName = caller.from_symbol?.name || 'unknown';
 
-        // For "to" field: keep original qualification logic for target symbol
-        const shouldQualifyTo = fromName === toName && fromFile !== toFile;
-        const qualifiedToName =
-          shouldQualifyTo && toFile ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
+        // Always qualify both fields when file paths are available
+        const qualifiedFromName =
+          fromFile && fromName !== 'unknown'
+            ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
+            : fromName;
+
+        const qualifiedToName = toFile ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
 
         // Build SimplifiedDependency object
         const dep: SimplifiedDependency = {
-          from: fromName,
+          from: qualifiedFromName,
           to: qualifiedToName,
           type: caller.dependency_type,
           line_number: caller.line_number,
@@ -1133,17 +1136,20 @@ export class McpTools {
         const toName = dep.to_symbol?.name || 'unknown';
         const toFile = dep.to_symbol?.file?.path;
         const fromFile = dep.from_symbol?.file?.path;
-        // Use from_symbol if available, fallback to queried symbol
         const fromName = dep.from_symbol?.name || symbol.name;
 
-        // For "to" field: keep original qualification logic for target symbol
-        const shouldQualifyTo = fromName === toName && fromFile !== toFile;
+        // Always qualify both fields when file paths are available
+        const qualifiedFromName =
+          fromFile && fromName !== 'unknown'
+            ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
+            : fromName;
+
         const qualifiedToName =
-          shouldQualifyTo && toFile ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
+          toFile && toName !== 'unknown' ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
 
         // Build SimplifiedDependency object
         const simplifiedDep: SimplifiedDependency = {
-          from: fromName,
+          from: qualifiedFromName,
           to: qualifiedToName,
           type: dep.dependency_type,
           line_number: dep.line_number,
@@ -1359,12 +1365,14 @@ export class McpTools {
       const directImpactDeps: SimplifiedDependency[] = this.convertImpactItemsToSimplifiedDeps(
         deduplicatedDirectImpact,
         symbol.name,
+        symbol.file?.path,
         [...directDependencies, ...directCallers]
       );
 
       const indirectImpactDeps: SimplifiedDependency[] = this.convertImpactItemsToSimplifiedDeps(
         deduplicatedTransitiveImpact,
         symbol.name,
+        symbol.file?.path,
         []
       );
 
@@ -2517,6 +2525,7 @@ export class McpTools {
   private convertImpactItemsToSimplifiedDeps(
     impactItems: ImpactItem[],
     targetSymbolName: string,
+    targetSymbolFilePath: string | undefined,
     originalDependencies: any[]
   ): SimplifiedDependency[] {
     return impactItems.map(item => {
@@ -2528,28 +2537,18 @@ export class McpTools {
 
       // Get file paths for qualification logic
       const fromFile = matchingDep?.from_symbol?.file?.path;
-      const toFile = matchingDep?.to_symbol?.file?.path;
+      const toFile = matchingDep?.to_symbol?.file?.path || targetSymbolFilePath;
 
       // Determine correct from/to based on direction
-      // - 'dependency': target calls item (target -> item), e.g., SetHandPositions -> HandManager.SetHandPositions
-      // - 'caller': item calls target (item -> target), e.g., InitializeServices -> SetHandPositions
+      // - 'dependency': target calls item (target -> item)
+      // - 'caller': item calls target (item -> target)
       let from: string, to: string;
       if (item.direction === 'dependency') {
-        from = targetSymbolName;
-        to = item.name;
-
-        // Apply qualification if names collide but are in different files
-        if (from === to && fromFile && toFile && fromFile !== toFile) {
-          to = `${this.getClassNameFromPath(toFile)}.${to}`;
-        }
+        from = fromFile ? `${this.getClassNameFromPath(fromFile)}.${targetSymbolName}` : targetSymbolName;
+        to = toFile ? `${this.getClassNameFromPath(toFile)}.${item.name}` : item.name;
       } else if (item.direction === 'caller') {
-        from = item.name;
-        to = targetSymbolName;
-
-        // Apply qualification if names collide but are in different files
-        if (from === to && fromFile && toFile && fromFile !== toFile) {
-          from = `${this.getClassNameFromPath(fromFile)}.${from}`;
-        }
+        from = fromFile ? `${this.getClassNameFromPath(fromFile)}.${item.name}` : item.name;
+        to = toFile ? `${this.getClassNameFromPath(toFile)}.${targetSymbolName}` : targetSymbolName;
       } else {
         throw new Error(`Invalid direction field in ImpactItem: ${item.direction}`);
       }
