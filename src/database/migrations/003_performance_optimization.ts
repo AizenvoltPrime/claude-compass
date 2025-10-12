@@ -130,9 +130,11 @@ export async function up(knex: Knex): Promise<void> {
     $$ LANGUAGE plpgsql
   `);
 
-  // Function to notify cache invalidation and refresh materialized views
+  // Function to notify cache invalidation and conditionally refresh materialized views
   await knex.raw(`
     CREATE OR REPLACE FUNCTION notify_dependency_change() RETURNS trigger AS $$
+    DECLARE
+      bulk_mode TEXT;
     BEGIN
       -- Notify cache invalidation system with the appropriate symbol_id field
       IF TG_TABLE_NAME = 'api_calls' THEN
@@ -156,8 +158,14 @@ export async function up(knex: Knex): Promise<void> {
         );
       END IF;
 
-      -- Refresh materialized views to keep stats current
-      PERFORM refresh_dependency_stats();
+      -- Check if we're in bulk mode (returns NULL if not set)
+      bulk_mode := current_setting('app.in_bulk_mode', true);
+
+      -- Only refresh materialized views if NOT in bulk mode
+      -- Application will manually refresh after bulk operations complete
+      IF bulk_mode IS DISTINCT FROM 'true' THEN
+        PERFORM refresh_dependency_stats();
+      END IF;
 
       RETURN COALESCE(NEW, OLD);
     END;
