@@ -68,6 +68,7 @@ export async function up(knex: Knex): Promise<void> {
     table.integer('parent_symbol_id').unsigned().references('id').inTable('symbols').onDelete('CASCADE');
     table.string('symbol_type', 500).notNullable();
     table.string('entity_type', 500); // Semantic/framework-aware type (component, service, manager, etc.)
+    table.string('framework', 100); // Framework context (godot, laravel, vue, react, etc.)
     table.string('base_class', 500); // Inheritance information (Node, Control, Model, etc.)
     table.text('signature');
     table.text('description');
@@ -86,6 +87,7 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['file_id', 'is_exported'], 'symbols_file_exported_idx');
     table.index(['symbol_type', 'is_exported'], 'symbols_type_exported_idx');
     table.index(['entity_type'], 'symbols_entity_type_idx'); // Index for entity_type queries
+    table.index(['framework'], 'symbols_framework_idx'); // Index for framework queries
     table.index(['base_class'], 'symbols_base_class_idx'); // Index for inheritance queries
     table.index(['name']);
     table.index(['qualified_name'], 'symbols_qualified_name_idx');
