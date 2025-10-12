@@ -721,7 +721,7 @@ export class CSharpParser extends ChunkedParser {
       name,
       baseTypes,
       context.filePath || '',
-      'godot' // C# files are primarily Godot in this codebase
+      undefined // Auto-detect framework from file path and base classes
     );
 
     const symbol: ParsedSymbol = {
@@ -729,6 +729,7 @@ export class CSharpParser extends ChunkedParser {
       qualified_name: qualifiedName,
       symbol_type: SymbolType.CLASS,
       entity_type: classification.entityType,
+      framework: classification.framework,
       base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
@@ -789,6 +790,15 @@ export class CSharpParser extends ChunkedParser {
     const methodQualifiedName = this.buildQualifiedName(context, name);
     const description = this.extractXmlDocComment(node, content);
 
+    // Classify to detect framework context
+    const classification = entityClassifier.classify(
+      'method',
+      name,
+      [],
+      context.filePath || '',
+      undefined // Auto-detect framework
+    );
+
     // Interface members are implicitly public
     const isInterfaceMember = this.isInsideInterface(node);
     const isExported = isInterfaceMember || modifiers.includes('public');
@@ -797,6 +807,7 @@ export class CSharpParser extends ChunkedParser {
       name,
       qualified_name: methodQualifiedName,
       symbol_type: SymbolType.METHOD,
+      framework: classification.framework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: isExported,
@@ -1538,10 +1549,20 @@ export class CSharpParser extends ChunkedParser {
 
     const description = this.extractXmlDocComment(node, content);
 
+    // Classify entity type using configuration-driven classifier
+    const classification = entityClassifier.classify(
+      'interface',
+      name,
+      baseTypes,
+      context.filePath || '',
+      undefined // Auto-detect framework from file path and base classes
+    );
+
     const symbol: ParsedSymbol = {
       name,
       qualified_name: qualifiedName,
       symbol_type: SymbolType.INTERFACE,
+      framework: classification.framework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),

@@ -301,7 +301,7 @@ export class DatabaseService {
   }
 
   async createFilesBatch(files: CreateFile[]): Promise<File[]> {
-    return await this.db.transaction(async (trx) => {
+    return await this.db.transaction(async trx => {
       const results: File[] = [];
 
       for (const data of files) {
@@ -595,7 +595,6 @@ export class DatabaseService {
       const foundInSearch = searchResults.some(s => s.id === testSymbolId);
       const foundInLexical = lexicalResults.some(s => s.id === testSymbolId);
 
-
       return foundInSearch || foundInLexical;
     } catch (error) {
       logger.warn('Search infrastructure validation failed', {
@@ -682,7 +681,6 @@ export class DatabaseService {
       return [];
     }
 
-
     // Default to fulltext search for backwards compatibility
     return this.fullTextSearch(query, effectiveRepoIds, options);
   }
@@ -746,7 +744,10 @@ export class DatabaseService {
     const { limit = 30, symbolTypes = [], isExported, framework } = options;
 
     // Tokenize multi-word queries and search for any token
-    const tokens = query.trim().split(/\s+/).filter(t => t.length > 0);
+    const tokens = query
+      .trim()
+      .split(/\s+/)
+      .filter(t => t.length > 0);
     const fuzzyTokens = tokens.map(t => t.replace(/[%_]/g, '\\$&'));
 
     // Build token match score - count how many query tokens match each result
@@ -1007,7 +1008,9 @@ export class DatabaseService {
     logger.info('[VECTOR SEARCH DB] Query embedding generated successfully');
 
     const { limit = 100, symbolTypes, isExported, similarityThreshold = 0.5 } = options;
-    logger.info(`[VECTOR SEARCH DB] Search parameters: limit=${limit}, threshold=${similarityThreshold}`);
+    logger.info(
+      `[VECTOR SEARCH DB] Search parameters: limit=${limit}, threshold=${similarityThreshold}`
+    );
 
     // Build the base query using combined_embedding (2x faster than double similarity)
     const baseQuery = this.db('symbols as s')
@@ -1025,14 +1028,11 @@ export class DatabaseService {
       .join('repositories as r', 'f.repo_id', 'r.id')
       .whereIn('f.repo_id', repoIds)
       .whereNotNull('s.combined_embedding')
-      .whereRaw(
-        '(1 - (s.combined_embedding <=> ?)) >= ?',
-        [JSON.stringify(queryEmbedding), similarityThreshold]
-      )
-      .orderByRaw(
-        '(1 - (s.combined_embedding <=> ?)) DESC',
-        [JSON.stringify(queryEmbedding)]
-      )
+      .whereRaw('(1 - (s.combined_embedding <=> ?)) >= ?', [
+        JSON.stringify(queryEmbedding),
+        similarityThreshold,
+      ])
+      .orderByRaw('(1 - (s.combined_embedding <=> ?)) DESC', [JSON.stringify(queryEmbedding)])
       .limit(limit);
 
     // Apply additional filters
@@ -1051,7 +1051,9 @@ export class DatabaseService {
     if (results.length > 0) {
       const topScore = (results[0] as any)?.vector_score || 0;
       const bottomScore = (results[results.length - 1] as any)?.vector_score || 0;
-      logger.info(`[VECTOR SEARCH DB] Score range: ${topScore.toFixed(3)} to ${bottomScore.toFixed(3)}`);
+      logger.info(
+        `[VECTOR SEARCH DB] Score range: ${topScore.toFixed(3)} to ${bottomScore.toFixed(3)}`
+      );
     }
 
     const formattedResults = this.formatSymbolResults(results);
@@ -1122,7 +1124,6 @@ export class DatabaseService {
       number,
       { symbol: SymbolWithFile; scores: number[]; sources: string[] }
     >();
-
 
     // Process lexical results
     lexicalResults.forEach((symbol, index) => {
@@ -1207,7 +1208,6 @@ export class DatabaseService {
   async createDependencies(dependencies: CreateDependency[]): Promise<Dependency[]> {
     if (dependencies.length === 0) return [];
 
-
     // Process in chunks to avoid PostgreSQL parameter limits
     const BATCH_SIZE = 1000;
     const results: Dependency[] = [];
@@ -1266,7 +1266,6 @@ export class DatabaseService {
 
   async createFileDependencies(dependencies: CreateFileDependency[]): Promise<FileDependency[]> {
     if (dependencies.length === 0) return [];
-
 
     // Deduplicate before processing to prevent constraint violations
     const uniqueDependencies = this.deduplicateFileDependencies(dependencies);
@@ -1406,7 +1405,9 @@ export class DatabaseService {
       const deletedRoutes = await trx('routes').where('repo_id', repositoryId).del();
       const deletedApiCalls = await trx('api_calls').where('repo_id', repositoryId).del();
       const deletedComponents = await trx('components').where('repo_id', repositoryId).del();
-      const deletedFrameworkMetadata = await trx('framework_metadata').where('repo_id', repositoryId).del();
+      const deletedFrameworkMetadata = await trx('framework_metadata')
+        .where('repo_id', repositoryId)
+        .del();
 
       // Delete dependencies related to symbols in this repository
       const deletedDependencies = await trx('dependencies')
@@ -1448,12 +1449,13 @@ export class DatabaseService {
   async cleanupFileData(fileIds: number[]): Promise<void> {
     if (fileIds.length === 0) return;
 
-    logger.info('Cleaning up file data for incremental re-analysis', { fileIds, count: fileIds.length });
+    logger.info('Cleaning up file data for incremental re-analysis', {
+      fileIds,
+      count: fileIds.length,
+    });
 
     await this.db.transaction(async trx => {
-      const symbolIds = await trx('symbols')
-        .whereIn('file_id', fileIds)
-        .pluck('id');
+      const symbolIds = await trx('symbols').whereIn('file_id', fileIds).pluck('id');
 
       logger.info('Found symbols to clean up', { symbolCount: symbolIds.length });
 
@@ -1496,9 +1498,7 @@ export class DatabaseService {
 
         const hasJobQueues = await trx.schema.hasTable('job_queues');
         if (hasJobQueues) {
-          deletionResults.jobQueues = await trx('job_queues')
-            .whereIn('symbol_id', symbolIds)
-            .del();
+          deletionResults.jobQueues = await trx('job_queues').whereIn('symbol_id', symbolIds).del();
         }
       }
 
@@ -1509,20 +1509,14 @@ export class DatabaseService {
 
       const hasTestSuites = await trx.schema.hasTable('test_suites');
       if (hasTestSuites) {
-        deletionResults.testSuites = await trx('test_suites')
-          .whereIn('file_id', fileIds)
-          .del();
+        deletionResults.testSuites = await trx('test_suites').whereIn('file_id', fileIds).del();
       }
 
       const hasGodotScenes = await trx.schema.hasTable('godot_scenes');
       if (hasGodotScenes) {
-        const filePaths = await trx('files')
-          .whereIn('id', fileIds)
-          .pluck('path');
+        const filePaths = await trx('files').whereIn('id', fileIds).pluck('path');
 
-        const scenePaths = await trx('godot_scenes')
-          .whereIn('scene_path', filePaths)
-          .pluck('id');
+        const scenePaths = await trx('godot_scenes').whereIn('scene_path', filePaths).pluck('id');
 
         if (scenePaths.length > 0) {
           const hasGodotNodes = await trx.schema.hasTable('godot_nodes');
@@ -1535,16 +1529,16 @@ export class DatabaseService {
           const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
           if (hasGodotRelationships) {
             deletionResults.godotRelationships = await trx('godot_relationships')
-              .where(function() {
-                this.where('from_entity_type', 'scene').whereIn('from_entity_id', scenePaths)
-                  .orWhere('to_entity_type', 'scene').whereIn('to_entity_id', scenePaths);
+              .where(function () {
+                this.where('from_entity_type', 'scene')
+                  .whereIn('from_entity_id', scenePaths)
+                  .orWhere('to_entity_type', 'scene')
+                  .whereIn('to_entity_id', scenePaths);
               })
               .del();
           }
 
-          deletionResults.godotScenes = await trx('godot_scenes')
-            .whereIn('id', scenePaths)
-            .del();
+          deletionResults.godotScenes = await trx('godot_scenes').whereIn('id', scenePaths).del();
         }
       }
 
@@ -1571,9 +1565,11 @@ export class DatabaseService {
             const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
             if (hasGodotRelationships) {
               deletionResults.godotScriptRelationships = await trx('godot_relationships')
-                .where(function() {
-                  this.where('from_entity_type', 'script').whereIn('from_entity_id', scriptIds)
-                    .orWhere('to_entity_type', 'script').whereIn('to_entity_id', scriptIds);
+                .where(function () {
+                  this.where('from_entity_type', 'script')
+                    .whereIn('from_entity_id', scriptIds)
+                    .orWhere('to_entity_type', 'script')
+                    .whereIn('to_entity_id', scriptIds);
                 })
                 .del();
             }
@@ -1586,9 +1582,7 @@ export class DatabaseService {
       }
 
       if (symbolIds.length > 0) {
-        deletionResults.symbols = await trx('symbols')
-          .whereIn('id', symbolIds)
-          .del();
+        deletionResults.symbols = await trx('symbols').whereIn('id', symbolIds).del();
       }
 
       logger.info('File cleanup completed', {
@@ -1599,9 +1593,12 @@ export class DatabaseService {
   }
 
   async resolveQualifiedNameDependencies(repositoryId: number): Promise<number> {
-    logger.info('Re-resolving dependencies by qualified name after incremental update', { repositoryId });
+    logger.info('Re-resolving dependencies by qualified name after incremental update', {
+      repositoryId,
+    });
 
-    const result = await this.db.raw(`
+    const result = await this.db.raw(
+      `
       UPDATE dependencies
       SET to_symbol_id = symbols.id,
           updated_at = NOW()
@@ -1612,7 +1609,9 @@ export class DatabaseService {
         AND dependencies.to_qualified_name IS NOT NULL
         AND (dependencies.to_symbol_id IS NULL
              OR dependencies.to_symbol_id != symbols.id)
-    `, [repositoryId]);
+    `,
+      [repositoryId]
+    );
 
     const updatedCount = result.rowCount || 0;
     logger.info('Resolved dependencies by qualified name', { updatedCount });
@@ -1708,7 +1707,6 @@ export class DatabaseService {
 
   // Route operations
   async createRoute(data: CreateRoute): Promise<Route> {
-
     // Convert array fields to JSON strings for JSONB columns
     const insertData = {
       ...data,
@@ -1817,10 +1815,7 @@ export class DatabaseService {
     return (route as Route) || null;
   }
 
-  async findMethodByQualifiedName(
-    repoId: number,
-    qualifiedName: string
-  ): Promise<Symbol | null> {
+  async findMethodByQualifiedName(repoId: number, qualifiedName: string): Promise<Symbol | null> {
     const result = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
       .where('files.repo_id', repoId)
@@ -1915,9 +1910,7 @@ export class DatabaseService {
   }
 
   async updateSymbolParent(symbolId: number, parentSymbolId: number): Promise<void> {
-    await this.db('symbols')
-      .where({ id: symbolId })
-      .update({ parent_symbol_id: parentSymbolId });
+    await this.db('symbols').where({ id: symbolId }).update({ parent_symbol_id: parentSymbolId });
   }
 
   async searchRoutes(options: RouteSearchOptions): Promise<Route[]> {
@@ -1950,7 +1943,6 @@ export class DatabaseService {
 
   // Component operations
   async createComponent(data: CreateComponent): Promise<Component> {
-
     const [component] = await this.db('components').insert(data).returning('*');
 
     return component as Component;
@@ -2082,7 +2074,6 @@ export class DatabaseService {
 
   // Composable operations
   async createComposable(data: CreateComposable): Promise<Composable> {
-
     const [composable] = await this.db('composables').insert(data).returning('*');
 
     return composable as Composable;
@@ -2131,7 +2122,6 @@ export class DatabaseService {
 
   // Framework metadata operations
   async storeFrameworkMetadata(data: CreateFrameworkMetadata): Promise<FrameworkMetadata> {
-
     // Try to find existing metadata first
     const existingMetadata = await this.db('framework_metadata')
       .where({ repo_id: data.repo_id, framework_type: data.framework_type })
@@ -2194,7 +2184,6 @@ export class DatabaseService {
 
   // Godot Scene operations
   async storeGodotScene(data: CreateGodotScene): Promise<GodotScene> {
-
     try {
       // Check if scene already exists
       const existingScene = await this.db('godot_scenes')
@@ -2256,7 +2245,6 @@ export class DatabaseService {
 
   // Godot Node operations
   async storeGodotNode(data: CreateGodotNode): Promise<GodotNode> {
-
     try {
       // Check if node already exists in this scene
       const existingNode = await this.db('godot_nodes')
@@ -2320,7 +2308,6 @@ export class DatabaseService {
 
   // Godot Script operations
   async storeGodotScript(data: CreateGodotScript): Promise<GodotScript> {
-
     try {
       // Check if script already exists
       const existingScript = await this.db('godot_scripts')
@@ -2415,7 +2402,6 @@ export class DatabaseService {
 
   // Godot Autoload operations
   async storeGodotAutoload(data: CreateGodotAutoload): Promise<GodotAutoload> {
-
     try {
       // Check if autoload already exists
       const existingAutoload = await this.db('godot_autoloads')
@@ -2452,7 +2438,6 @@ export class DatabaseService {
 
   // Godot Relationship operations (Core of Solution 1)
   async createGodotRelationship(data: CreateGodotRelationship): Promise<GodotRelationship> {
-
     try {
       // Check if relationship already exists
       const existingRelationship = await this.db('godot_relationships')
@@ -2800,7 +2785,6 @@ export class DatabaseService {
   async getCrossStackDependencies(
     repoId: number
   ): Promise<{ apiCalls: ApiCall[]; dataContracts: DataContract[] }> {
-
     // Get API calls
     const apiCalls = await this.db('api_calls')
       .where({ repo_id: repoId })
@@ -2810,7 +2794,6 @@ export class DatabaseService {
     const dataContracts = await this.db('data_contracts')
       .where({ repo_id: repoId })
       .orderBy('created_at', 'desc');
-
 
     return {
       apiCalls: apiCalls as ApiCall[],
@@ -2841,7 +2824,6 @@ export class DatabaseService {
    * Get a framework entity by ID (routes, components, etc.)
    */
   async getFrameworkEntityById(id: number): Promise<Route | Component | Composable | null> {
-
     // Try routes first
     const route = await this.db('routes').where({ id }).first();
 
@@ -2872,7 +2854,6 @@ export class DatabaseService {
   async createApiCalls(data: CreateApiCall[]): Promise<ApiCall[]> {
     if (data.length === 0) return [];
 
-
     const BATCH_SIZE = 100;
     const results: ApiCall[] = [];
     let totalSkipped = 0;
@@ -2883,7 +2864,13 @@ export class DatabaseService {
 
         const batchResults = await this.db('api_calls')
           .insert(batch)
-          .onConflict(['caller_symbol_id', 'endpoint_symbol_id', 'line_number', 'http_method', 'endpoint_path'])
+          .onConflict([
+            'caller_symbol_id',
+            'endpoint_symbol_id',
+            'line_number',
+            'http_method',
+            'endpoint_path',
+          ])
           .ignore()
           .returning('*');
 
@@ -2943,10 +2930,13 @@ export class DatabaseService {
         });
 
         if (totalSkipped / data.length > 0.1) {
-          logger.warn('High duplicate rate detected - investigate if analysis is running multiple times', {
-            skipRate: `${overallSkipRate}%`,
-            threshold: '10%',
-          });
+          logger.warn(
+            'High duplicate rate detected - investigate if analysis is running multiple times',
+            {
+              skipRate: `${overallSkipRate}%`,
+              threshold: '10%',
+            }
+          );
         }
       }
 
@@ -2967,7 +2957,6 @@ export class DatabaseService {
    */
   async createDataContracts(data: CreateDataContract[]): Promise<DataContract[]> {
     if (data.length === 0) return [];
-
 
     const BATCH_SIZE = 100;
     const results: DataContract[] = [];
@@ -3012,7 +3001,6 @@ export class DatabaseService {
    * Get data contracts by schema name
    */
   async getDataContractsBySchema(schemaName: string): Promise<DataContract[]> {
-
     const dataContracts = await this.db('data_contracts')
       .where({ name: schemaName })
       .orderBy('created_at', 'desc');
@@ -3024,7 +3012,6 @@ export class DatabaseService {
    * Get frameworks used in a repository
    */
   async getRepositoryFrameworks(repoId: number): Promise<string[]> {
-
     const metadata = await this.db('framework_metadata')
       .where({ repo_id: repoId })
       .select('framework_type')
@@ -3039,7 +3026,6 @@ export class DatabaseService {
   async streamCrossStackData(
     repoId: number
   ): Promise<AsyncIterable<{ type: 'apiCall' | 'dataContract'; data: any }>> {
-
     const stream = async function* (db: any) {
       // Stream API calls
       const apiCalls = await db('api_calls')
@@ -3108,7 +3094,6 @@ export class DatabaseService {
       message: string;
     }>;
   }> {
-
     const issues: string[] = [];
     const recommendations: string[] = [];
     const checks: Array<{ name: string; status: 'pass' | 'fail'; message: string }> = [];
@@ -3199,7 +3184,6 @@ export class DatabaseService {
       driftDetected: number;
     };
   }> {
-
     try {
       const crossStackData = await this.getCrossStackDependencies(repoId);
 
@@ -3249,7 +3233,6 @@ export class DatabaseService {
     repoId: number,
     entityType: string
   ): Promise<(Route | Component | Composable | ORMEntity)[]> {
-
     const results: (Route | Component | Composable | ORMEntity)[] = [];
 
     // Check routes
@@ -3283,7 +3266,6 @@ export class DatabaseService {
    * Get symbols by type for a repository
    */
   async getSymbolsByType(repoId: number, symbolType: string): Promise<Symbol[]> {
-
     const symbols = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
       .where('files.repo_id', repoId)
@@ -3298,7 +3280,6 @@ export class DatabaseService {
    * Get files by language for a repository
    */
   async getFilesByLanguage(repoId: number, language: string): Promise<File[]> {
-
     const files = await this.db('files').where({ repo_id: repoId, language }).orderBy('path');
 
     return files as File[];
@@ -3353,7 +3334,6 @@ export class DatabaseService {
           embeddings_updated_at: new Date(),
           embedding_model: 'bge-m3',
         });
-
     } catch (error) {
       logger.warn(`Failed to generate embeddings for symbol ${symbolId}:`, error);
       throw error;
@@ -3368,7 +3348,6 @@ export class DatabaseService {
     if (symbols.length === 0) return;
 
     try {
-
       // Process each symbol individually for better error handling
       for (const symbol of symbols) {
         try {
@@ -3381,7 +3360,6 @@ export class DatabaseService {
           );
         }
       }
-
     } catch (error) {
       logger.error('Batch embedding generation failed:', error);
       throw error;
@@ -3416,18 +3394,16 @@ export class DatabaseService {
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const batch = updates.slice(i, i + BATCH_SIZE);
 
-      await this.db.transaction(async (trx) => {
+      await this.db.transaction(async trx => {
         // Process serially to avoid holding all JSON strings in memory
         for (const update of batch) {
           const combinedEmbStr = JSON.stringify(update.combinedEmbedding);
 
-          await trx('symbols')
-            .where('id', update.id)
-            .update({
-              combined_embedding: combinedEmbStr,
-              embeddings_updated_at: new Date(),
-              embedding_model: update.embeddingModel,
-            });
+          await trx('symbols').where('id', update.id).update({
+            combined_embedding: combinedEmbStr,
+            embeddings_updated_at: new Date(),
+            embedding_model: update.embeddingModel,
+          });
 
           // String goes out of scope here and can be freed
         }
@@ -3440,10 +3416,15 @@ export class DatabaseService {
    */
   async getDependenciesFromWithContext(symbolId: number): Promise<EnhancedDependencyWithSymbols[]> {
     const results = await this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
       .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
       .select(
         'dependencies.*',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path',
         'to_symbols.name as to_symbol_name',
         'to_symbols.symbol_type as to_symbol_type',
         'to_files.path as to_file_path'
@@ -3453,6 +3434,15 @@ export class DatabaseService {
 
     return results.map(result => ({
       ...result,
+      from_symbol: {
+        id: result.from_symbol_id,
+        name: result.from_symbol_name,
+        symbol_type: result.from_symbol_type,
+        file: {
+          id: result.from_file_id,
+          path: result.from_file_path,
+        },
+      },
       to_symbol: {
         id: result.to_symbol_id,
         name: result.to_symbol_name,
@@ -3655,7 +3645,6 @@ export class DatabaseService {
       parameter_types?: string[];
     }>;
   }> {
-
     // Get the target symbol information
     const targetSymbol = await this.getSymbolWithFile(symbolId);
     if (!targetSymbol) {
@@ -3673,7 +3662,6 @@ export class DatabaseService {
         'from_symbols.name as caller_name',
         'from_files.path as caller_file_path'
       );
-
 
     // Group calls by parameter context
     const parameterGroups = new Map<string, any>();
@@ -3709,7 +3697,6 @@ export class DatabaseService {
     const parameterVariations = Array.from(parameterGroups.values()).map(group => ({
       ...group,
     }));
-
 
     return {
       methodName: targetSymbol.name,
@@ -3945,16 +3932,22 @@ export class DatabaseService {
   /**
    * Get dependencies FROM a symbol with pagination support (dependencies)
    * Phase 1: Pagination support for large result sets
+   * Fixed: Now includes from_files join to get the correct file path where the call happens
    */
   async getDependenciesFromWithContextPaginated(
     symbolId: number,
     paginationParams: PaginationParams = {}
   ): Promise<PaginatedResponse<EnhancedDependencyWithSymbols>> {
     const baseQuery = this.db('dependencies')
+      .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
+      .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
       .leftJoin('files as to_files', 'to_symbols.file_id', 'to_files.id')
       .select(
         'dependencies.*',
+        'from_symbols.name as from_symbol_name',
+        'from_symbols.symbol_type as from_symbol_type',
+        'from_files.path as from_file_path',
         'to_symbols.name as to_symbol_name',
         'to_symbols.symbol_type as to_symbol_type',
         'to_files.path as to_file_path'
@@ -3977,6 +3970,15 @@ export class DatabaseService {
     // Transform results to match EnhancedDependencyWithSymbols interface
     result.data = result.data.map(row => ({
       ...row,
+      from_symbol: {
+        id: row.from_symbol_id,
+        name: row.from_symbol_name,
+        symbol_type: row.from_symbol_type,
+        file: {
+          id: row.from_file_id,
+          path: row.from_file_path,
+        },
+      },
       to_symbol: {
         id: row.to_symbol_id,
         name: row.to_symbol_name,

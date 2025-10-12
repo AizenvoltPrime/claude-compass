@@ -315,6 +315,7 @@ export interface CreateSymbol {
   parent_symbol_id?: number;
   symbol_type: SymbolType;
   entity_type?: string;
+  framework?: string;
   base_class?: string;
   start_line?: number;
   end_line?: number;

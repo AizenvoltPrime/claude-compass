@@ -334,6 +334,10 @@ export interface ImpactItem {
     | 'delegation';
   relationship_type?: string;
   relationship_context?: string;
+  // Direction of the relationship: 'dependency' means target calls this, 'caller' means this calls target
+  direction?: 'dependency' | 'caller';
+  // Framework information for external symbols
+  framework?: string;
   // Call chain visualization fields (Enhancement 1)
   call_chain?: string;
   depth?: number;
@@ -877,7 +881,7 @@ export class McpTools {
                   id: result.symbolId,
                   from_symbol_id: result.symbolId,
                   to_symbol_id: firstDep.to_symbol_id,
-                  dependency_type: firstDep.dependency_type || DependencyType.CALLS,
+                  dependency_type: firstDep.dependency_type,
                   line_number: firstDep.line_number,
                   created_at: new Date(),
                   updated_at: new Date(),
@@ -1093,7 +1097,7 @@ export class McpTools {
                   id: result.symbolId,
                   from_symbol_id: firstDep.from_symbol_id,
                   to_symbol_id: result.symbolId,
-                  dependency_type: firstDep.dependency_type || DependencyType.CALLS,
+                  dependency_type: firstDep.dependency_type,
                   line_number: firstDep.line_number,
                   created_at: new Date(),
                   updated_at: new Date(),
@@ -1143,7 +1147,7 @@ export class McpTools {
           to: qualifiedToName,
           type: dep.dependency_type,
           line_number: dep.line_number,
-          file_path: toFile, // Show where the TARGET is defined
+          file_path: fromFile,
           qualified_context: dep.qualified_context,
           parameter_types: dep.parameter_types,
           parameter_context: dep.parameter_context,
@@ -1243,34 +1247,38 @@ export class McpTools {
       // Process direct dependencies and callers
       for (const dep of directDependencies) {
         if (dep.to_symbol) {
+          const framework = this.determineFramework(dep.to_symbol);
           directImpact.push({
             id: dep.to_symbol.id,
             name: dep.to_symbol.name,
             type: dep.to_symbol.symbol_type,
-            file_path: dep.to_symbol.file?.path || '',
+            file_path: dep.to_symbol.file?.path,
             impact_type: this.classifyRelationshipImpact(dep, 'dependency'),
-            relationship_type: dep.dependency_type || 'unknown',
+            relationship_type: dep.dependency_type,
             relationship_context: this.getRelationshipContext(dep),
+            direction: 'dependency',
+            framework: framework,
           });
 
-          const framework = this.determineFramework(dep.to_symbol);
           if (framework) frameworksAffected.add(framework);
         }
       }
 
       for (const caller of directCallers) {
         if (caller.from_symbol) {
+          const framework = this.determineFramework(caller.from_symbol);
           directImpact.push({
             id: caller.from_symbol.id,
             name: caller.from_symbol.name,
             type: caller.from_symbol.symbol_type,
-            file_path: caller.from_symbol.file?.path || '',
+            file_path: caller.from_symbol.file?.path,
             impact_type: this.classifyRelationshipImpact(caller, 'caller'),
-            relationship_type: caller.dependency_type || 'unknown',
+            relationship_type: caller.dependency_type,
             relationship_context: this.getRelationshipContext(caller),
+            direction: 'caller',
+            framework: framework,
           });
 
-          const framework = this.determineFramework(caller.from_symbol);
           if (framework) frameworksAffected.add(framework);
         }
       }
@@ -1296,6 +1304,7 @@ export class McpTools {
         for (const result of transitiveResult.results) {
           if (result.dependencies[0]?.to_symbol) {
             const toSymbol = result.dependencies[0].to_symbol;
+            const framework = this.determineFramework(toSymbol);
             transitiveImpact.push({
               id: toSymbol.id,
               name: toSymbol.name,
@@ -1304,9 +1313,10 @@ export class McpTools {
               impact_type: 'indirect',
               call_chain: result.call_chain,
               depth: result.depth,
+              direction: 'dependency', // Transitive results are always dependencies (what the symbol calls)
+              framework: framework,
             });
 
-            const framework = this.determineFramework(toSymbol);
             if (framework) frameworksAffected.add(framework);
           }
         }
@@ -1799,169 +1809,14 @@ export class McpTools {
     }
   }
 
-  private determineEntityType(symbol: any): string {
-    // Use database-stored entity_type if available (populated by parsers or classification script)
-    // Fallback to symbol_type for backwards compatibility
-    return symbol.entity_type || symbol.symbol_type || 'unknown';
+  private determineEntityType(symbol: any): string | undefined {
+    return symbol.entity_type;
   }
 
-  private determineFramework(symbol: any): string {
-    const filePath = symbol.file?.path || '';
-    const symbolName = symbol.name || '';
-
-    if (filePath === '[Framework:unknown]' || !filePath) {
-      return this.detectFrameworkByPattern(symbolName);
-    }
-
-    if (filePath.includes('app/') || filePath.endsWith('.php')) return 'laravel';
-
-    if (filePath.endsWith('.vue')) return 'vue';
-
-    if (filePath.includes('components/') && filePath.endsWith('.tsx')) return 'react';
-
-    if (filePath.includes('server/') || filePath.includes('api/')) return 'node';
-
-    if (this.isGodotFile(filePath)) return 'godot';
-
-    return 'unknown';
+  private determineFramework(symbol: any): string | undefined {
+    return symbol.framework;
   }
 
-  private detectFrameworkByPattern(symbolName: string): string {
-    const laravelFacades = [
-      'Log::',
-      'DB::',
-      'Cache::',
-      'Queue::',
-      'Event::',
-      'Storage::',
-      'Mail::',
-      'Auth::',
-      'Session::',
-      'Cookie::',
-      'Crypt::',
-      'Hash::',
-      'Config::',
-      'View::',
-      'Route::',
-      'Redirect::',
-      'Response::',
-      'Request::',
-      'Validator::',
-    ];
-
-    for (const facade of laravelFacades) {
-      if (symbolName.includes(facade)) {
-        return 'laravel';
-      }
-    }
-
-    const laravelMethods = [
-      '::create',
-      '::find',
-      '::where',
-      '::all',
-      '::first',
-      '::save',
-      '::update',
-      '::delete',
-    ];
-    for (const method of laravelMethods) {
-      if (symbolName.endsWith(method)) {
-        return 'laravel';
-      }
-    }
-
-    return 'unknown';
-  }
-
-  /**
-   * Enhanced Godot framework detection
-   * Recognizes various Godot project patterns and structures
-   */
-  private isGodotFile(filePath: string): boolean {
-    // Direct Godot file types
-    if (filePath.endsWith('.tscn') || filePath.endsWith('.godot') || filePath.endsWith('.tres')) {
-      return true;
-    }
-
-    // GDScript files
-    if (filePath.endsWith('.gd')) {
-      return true;
-    }
-
-    // C# files in Godot project structures
-    if (filePath.endsWith('.cs')) {
-      // Common Godot C# directory patterns
-      const godotDirectoryPatterns = [
-        'scripts/', // Common Godot scripts directory
-        'scenes/', // Godot scenes directory
-        'addons/', // Godot addons directory
-        'autoload/', // Autoload scripts
-        'autoloads/', // Alternative autoload naming
-        'core/', // Core game systems
-        'gameplay/', // Gameplay-specific scripts
-        'ui/', // UI components
-        'managers/', // Game managers
-        'controllers/', // Game controllers
-        'services/', // Game services
-        'components/', // Game components
-        'systems/', // Game systems
-        'entities/', // Game entities
-        'data/', // Game data structures
-        'events/', // Event systems
-        'interfaces/', // Interfaces directory
-        'coordinators/', // Coordinator pattern
-        'phases/', // Game phases
-        'handlers/', // Event/phase handlers
-      ];
-
-      // Check if the file path contains any Godot-specific directory patterns
-      if (godotDirectoryPatterns.some(pattern => filePath.includes(pattern))) {
-        return true;
-      }
-
-      // Check for Godot-specific C# class patterns in the file path or symbol name
-      const godotClassPatterns = [
-        'Node', // Godot Node base class
-        'Node2D', // 2D Node
-        'Node3D', // 3D Node
-        'Control', // UI Control
-        'RigidBody', // Physics body
-        'CharacterBody', // Character controller
-        'StaticBody', // Static physics body
-        'Area', // Area/trigger
-        'CollisionShape', // Collision shapes
-        'MeshInstance', // 3D mesh
-        'Sprite', // 2D sprite
-        'AnimationPlayer', // Animation system
-        'AudioStreamPlayer', // Audio system
-        'Camera', // Camera nodes
-        'SceneTree', // Scene tree
-        'PackedScene', // Scene resources
-        'Resource', // Godot resources
-        'Singleton', // Autoload singletons
-      ];
-
-      // Check if the file path suggests Godot usage
-      if (
-        godotClassPatterns.some(pattern => filePath.toLowerCase().includes(pattern.toLowerCase()))
-      ) {
-        return true;
-      }
-    }
-
-    // Check for project.godot in parent directories (indicates Godot project root)
-    const pathParts = filePath.split('/');
-    for (let i = pathParts.length - 1; i >= 0; i--) {
-      const currentPath = pathParts.slice(0, i).join('/');
-      // This is a simple heuristic - in a real implementation, we might cache this check
-      if (currentPath && (filePath.includes('project_card_game') || filePath.includes('godot'))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
 
   /**
    * Classify the impact type based on relationship type and context
@@ -2657,6 +2512,7 @@ export class McpTools {
 
   /**
    * Convert ImpactItems to SimplifiedDependencies for new impact response format
+   * Fixed: Correctly handles direction (dependency vs caller) and uses consistent file paths
    */
   private convertImpactItemsToSimplifiedDeps(
     impactItems: ImpactItem[],
@@ -2664,18 +2520,57 @@ export class McpTools {
     originalDependencies: any[]
   ): SimplifiedDependency[] {
     return impactItems.map(item => {
-      // Find matching original dependency for line number
+      // Find matching original dependency for line number and file path
       const matchingDep = originalDependencies.find(dep => {
         const symbolId = dep.to_symbol?.id || dep.from_symbol?.id;
         return symbolId === item.id;
       });
 
+      // Get file paths for qualification logic
+      const fromFile = matchingDep?.from_symbol?.file?.path;
+      const toFile = matchingDep?.to_symbol?.file?.path;
+
+      // Determine correct from/to based on direction
+      // - 'dependency': target calls item (target -> item), e.g., SetHandPositions -> HandManager.SetHandPositions
+      // - 'caller': item calls target (item -> target), e.g., InitializeServices -> SetHandPositions
+      let from: string, to: string;
+      if (item.direction === 'dependency') {
+        from = targetSymbolName;
+        to = item.name;
+
+        // Apply qualification if names collide but are in different files
+        if (from === to && fromFile && toFile && fromFile !== toFile) {
+          to = `${this.getClassNameFromPath(toFile)}.${to}`;
+        }
+      } else if (item.direction === 'caller') {
+        from = item.name;
+        to = targetSymbolName;
+
+        // Apply qualification if names collide but are in different files
+        if (from === to && fromFile && toFile && fromFile !== toFile) {
+          from = `${this.getClassNameFromPath(fromFile)}.${from}`;
+        }
+      } else {
+        throw new Error(`Invalid direction field in ImpactItem: ${item.direction}`);
+      }
+
+      // Use file_path from the dependency record's from_symbol (where the call happens)
+      // to ensure file_path and line_number match
+      let filePath = fromFile;
+
+      // Format framework symbols without file paths
+      if (!filePath && item.framework) {
+        const frameworkName =
+          item.framework.charAt(0).toUpperCase() + item.framework.slice(1);
+        filePath = `[${frameworkName} Framework]`;
+      }
+
       const dep: SimplifiedDependency = {
-        from: item.name,
-        to: targetSymbolName,
-        type: (item.relationship_type as DependencyType) || DependencyType.CALLS,
+        from,
+        to,
+        type: item.relationship_type as DependencyType,
         line_number: matchingDep?.line_number,
-        file_path: item.file_path,
+        file_path: filePath,
       };
 
       // Add call chain if present (for indirect impact)

@@ -1,11 +1,5 @@
 import Parser from 'tree-sitter';
-import {
-  SymbolType,
-  DependencyType,
-  CreateSymbol,
-  CreateDependency,
-  Visibility,
-} from '../database/models';
+import { SymbolType, DependencyType, Visibility } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { EncodingConverter } from '../utils/encoding-converter';
 import * as fs from 'fs/promises';
@@ -18,6 +12,7 @@ export interface ParsedSymbol {
   qualified_name?: string;
   symbol_type: SymbolType;
   entity_type?: string; // Semantic/framework-aware type (component, service, manager, etc.)
+  framework?: string; // Framework context (godot, laravel, vue, react, etc.)
   base_class?: string; // Inheritance information (Node, Control, Model, etc.)
   start_line: number;
   end_line: number;
@@ -363,8 +358,6 @@ export abstract class BaseParser {
         encodingResult.detectedEncoding
       );
       return recovered;
-
-      return null;
     } catch (error) {
       this.logger.warn('Encoding recovery failed', { filePath, error: (error as Error).message });
       return null;

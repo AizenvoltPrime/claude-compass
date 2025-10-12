@@ -458,7 +458,7 @@ export class PHPParser extends ChunkedParser {
       name,
       baseClasses,
       context.filePath || '',
-      'laravel' // PHP files are primarily Laravel in this context
+      undefined // Auto-detect framework from file path and base classes
     );
 
     return {
@@ -467,6 +467,7 @@ export class PHPParser extends ChunkedParser {
       symbol_type: SymbolType.CLASS,
       entity_type: classification.entityType,
       base_class: classification.baseClass || undefined,
+      framework: classification.framework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: true, // Classes are typically exportable in PHP
