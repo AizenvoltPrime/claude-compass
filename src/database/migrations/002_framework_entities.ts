@@ -22,7 +22,7 @@ import type { Knex } from 'knex';
 export async function up(knex: Knex): Promise<void> {
   console.log('🚀 Creating consolidated framework entities...');
 
-  // Generic routes table (framework-agnostic with Laravel-specific fields)
+  // Routes table (Laravel-biased design with core fields usable by other frameworks)
   await knex.schema.createTable('routes', table => {
     table.increments('id').primary();
     table
