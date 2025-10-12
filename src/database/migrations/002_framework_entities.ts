@@ -13,11 +13,6 @@ import type { Knex } from 'knex';
  * - Data contracts for schema tracking
  * - Vector search capabilities
  * - Enhanced dependency tracking
- *
- * Removed (never used/never exposed):
- * - ORM relationships table (never called by parsers)
- * - Test cases/coverage tables (never populated)
- * - Package dependencies table (never read)
  */
 export async function up(knex: Knex): Promise<void> {
   console.log('🚀 Creating consolidated framework entities...');
@@ -128,7 +123,6 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(['frontend_type_id', 'backend_type_id', 'name']);
   });
 
-
   await knex.schema.createTable('godot_scenes', table => {
     table.increments('id').primary();
     table
@@ -180,72 +174,6 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['scene_id']);
     table.index(['node_type']);
     table.index(['parent_node_id']);
-  });
-
-  await knex.schema.createTable('godot_scripts', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table.text('script_path').notNullable();
-    table.string('class_name').notNullable();
-    table.string('base_class');
-    table.boolean('is_autoload').defaultTo(false);
-    table.text('signals').defaultTo('[]'); // JSON string of signal definitions
-    table.text('exports').defaultTo('[]'); // JSON string of export definitions
-    table.jsonb('metadata').defaultTo('{}');
-    table.timestamps(true, true);
-
-    table.unique(['repo_id', 'script_path']);
-    table.index(['repo_id']);
-    table.index(['class_name']);
-    table.index(['is_autoload']);
-  });
-
-  await knex.schema.createTable('godot_autoloads', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table.string('autoload_name').notNullable();
-    table.text('script_path').notNullable();
-    table.integer('script_id').references('id').inTable('godot_scripts').onDelete('CASCADE');
-    table.jsonb('metadata').defaultTo('{}');
-    table.timestamps(true, true);
-
-    table.unique(['repo_id', 'autoload_name']);
-    table.index(['repo_id']);
-    table.index(['autoload_name']);
-    table.index(['script_id']);
-  });
-
-  await knex.schema.createTable('godot_relationships', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table.string('relationship_type').notNullable();
-    table.string('from_entity_type').notNullable();
-    table.integer('from_entity_id').notNullable();
-    table.string('to_entity_type').notNullable();
-    table.integer('to_entity_id').notNullable();
-    table.string('resource_id');
-    table.jsonb('metadata').defaultTo('{}');
-    table.timestamps(true, true);
-
-    table.index(['repo_id', 'relationship_type']);
-    table.index(['from_entity_type', 'from_entity_id']);
-    table.index(['to_entity_type', 'to_entity_id']);
-    table.index(['relationship_type']);
   });
 
   // Framework metadata table - stores framework-specific data as JSON
@@ -303,33 +231,7 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['parent_component_id']);
   });
 
-  // Composables table - Vue/React composable metadata
-  await knex.schema.createTable('composables', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table
-      .integer('symbol_id')
-      .notNullable()
-      .references('id')
-      .inTable('symbols')
-      .onDelete('CASCADE');
-    table.string('composable_type').notNullable();
-    table.jsonb('returns').defaultTo('[]');
-    table.jsonb('dependencies').defaultTo('[]');
-    table.jsonb('reactive_refs').defaultTo('[]');
-    table.jsonb('dependency_array').defaultTo('[]');
-    table.timestamps(true, true);
-
-    // Indexes for performance
-    table.index(['repo_id', 'composable_type']);
-    table.index(['symbol_id']);
-    table.index(['composable_type']);
-  });
+  // Composables table removed (never populated by parser)
 
   // Add vector extension support for symbols table (BGE-M3: 1024 dimensions)
   // Uses combined_embedding: embedding(name + description) for optimal speed and quality
@@ -353,11 +255,7 @@ export async function down(knex: Knex): Promise<void> {
   console.log('🗑️  Dropping consolidated framework entities...');
 
   // Drop in reverse order to respect foreign key constraints
-  await knex.schema.dropTableIfExists('composables');
   await knex.schema.dropTableIfExists('components');
-  await knex.schema.dropTableIfExists('godot_relationships');
-  await knex.schema.dropTableIfExists('godot_autoloads');
-  await knex.schema.dropTableIfExists('godot_scripts');
   await knex.schema.dropTableIfExists('godot_nodes');
   await knex.schema.dropTableIfExists('godot_scenes');
   await knex.schema.dropTableIfExists('framework_metadata');

@@ -204,9 +204,8 @@ file_dependencies -- File→file relationships
 routes         -- Web routes (Laravel, Next.js, Express)
 api_calls      -- Cross-stack frontend→backend API connections (Vue → Laravel)
 components     -- UI components (Vue, React)
-composables    -- Reactive logic (Vue composables, React hooks)
 framework_metadata -- Framework-specific data
-godot_scenes/nodes/scripts -- Game entities
+godot_scenes/nodes -- Game entities (scenes and node hierarchy)
 ```
 
 ### 7. Graph Construction (`src/graph/`)
@@ -333,6 +332,7 @@ npm run analyze . --skip-embeddings            # Skip vector embeddings (faster,
 npm run migrate:status                         # Check migration status
 npm run db:clear                              # Clear database completely (SQL method)
 npm run db:clear:docker                       # Clear database with Docker reset
+npm run db:vacuum                             # Run VACUUM ANALYZE (reclaim space, update stats)
 
 # Clear existing repository analysis
 ./dist/src/cli/index.js clear <repository-name> --yes
