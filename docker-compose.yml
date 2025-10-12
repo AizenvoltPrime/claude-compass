@@ -6,16 +6,16 @@ services:
       POSTGRES_DB: claude_compass
       POSTGRES_USER: claude_compass
       POSTGRES_PASSWORD: password
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+      POSTGRES_INITDB_ARGS: '--encoding=UTF-8'
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d
     networks:
       - claude-compass-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U claude_compass -d claude_compass"]
+      test: ['CMD-SHELL', 'pg_isready -U claude_compass -d claude_compass']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,9 +28,9 @@ services:
       POSTGRES_DB: claude_compass_test
       POSTGRES_USER: claude_compass
       POSTGRES_PASSWORD: password
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+      POSTGRES_INITDB_ARGS: '--encoding=UTF-8'
     ports:
-      - "5433:5432"
+      - '5433:5432'
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d
@@ -39,7 +39,7 @@ services:
     profiles:
       - test
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U claude_compass -d claude_compass_test"]
+      test: ['CMD-SHELL', 'pg_isready -U claude_compass -d claude_compass_test']
       interval: 10s
       timeout: 5s
       retries: 3
@@ -48,7 +48,7 @@ services:
     image: redis:7-alpine
     container_name: claude-compass-redis
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
     networks:
@@ -57,17 +57,21 @@ services:
       - cache
     command: redis-server --appendonly yes
 
-  adminer:
-    image: adminer:4.8.1
-    container_name: claude-compass-adminer
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: claude-compass-pgadmin
     ports:
-      - "8080:8080"
+      - '5050:80'
     networks:
       - claude-compass-network
     profiles:
       - tools
     environment:
-      ADMINER_DEFAULT_SERVER: postgres
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
 
 volumes:
   postgres_data:
@@ -75,6 +79,8 @@ volumes:
   postgres_test_data:
     driver: local
   redis_data:
+    driver: local
+  pgadmin_data:
     driver: local
 
 networks:
