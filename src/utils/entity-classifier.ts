@@ -233,61 +233,22 @@ export class EntityTypeClassifier {
    * Auto-detect framework from file path and base classes
    */
   private detectFramework(filePath: string, baseClasses: string[]): string | undefined {
-    // Vue detection (highest priority for .vue files)
-    if (filePath.endsWith('.vue')) return 'vue';
+    // Framework detection based ONLY on base class inheritance
+    // No file path checks - if you inherit from a framework class, you're using that framework
 
     // Godot detection (C# game engine)
-    if (filePath.endsWith('.tscn') || filePath.endsWith('.godot')) return 'godot';
-    if (
-      filePath.includes('/scripts/') ||
-      filePath.includes('/scenes/') ||
-      filePath.includes('/addons/')
-    ) {
-      return 'godot';
-    }
-    if (filePath.endsWith('.cs') && this.hasGodotBaseClass(baseClasses)) return 'godot';
     if (this.hasGodotBaseClass(baseClasses)) return 'godot';
 
     // Laravel detection (PHP framework)
-    if (filePath.endsWith('.php')) {
-      if (
-        filePath.includes('/app/') ||
-        filePath.includes('/Http/Controllers/') ||
-        filePath.includes('/Models/') ||
-        filePath.includes('laravel')
-      ) {
-        return 'laravel';
-      }
-      if (baseClasses.some(bc => ['Model', 'Controller', 'Job', 'Middleware', 'Eloquent'].includes(bc))) {
-        return 'laravel';
-      }
+    if (baseClasses.some(bc => ['Model', 'Controller', 'Job', 'Middleware', 'Eloquent'].includes(bc))) {
+      return 'laravel';
     }
 
-    // Next.js detection (React framework)
-    if (filePath.includes('/pages/') || filePath.includes('/app/')) {
-      if (filePath.endsWith('.tsx') || filePath.endsWith('.jsx') || filePath.endsWith('.ts') || filePath.endsWith('.js')) {
-        return 'nextjs';
-      }
-    }
+    // Vue detection (special case: .vue files are components by definition, not based on inheritance)
+    if (filePath.endsWith('.vue')) return 'vue';
 
-    // React detection
-    if (filePath.endsWith('.jsx') || filePath.endsWith('.tsx')) {
-      if (filePath.includes('components/') || filePath.includes('hooks/')) {
-        return 'react';
-      }
-    }
-
-    // Node.js detection (TypeScript/JavaScript server patterns)
-    if (filePath.endsWith('.ts') || filePath.endsWith('.js')) {
-      if (
-        filePath.includes('/server/') ||
-        filePath.includes('/api/') ||
-        filePath.includes('/routes/') ||
-        filePath.includes('express')
-      ) {
-        return 'node';
-      }
-    }
+    // Godot scene files (special case: .tscn files are always Godot scenes)
+    if (filePath.endsWith('.tscn') || filePath.endsWith('.godot')) return 'godot';
 
     return undefined;
   }
@@ -315,6 +276,7 @@ export class EntityTypeClassifier {
       'StaticBody2D',
       'StaticBody3D',
     ];
+
     return baseClasses.some(bc => godotClasses.includes(bc));
   }
 

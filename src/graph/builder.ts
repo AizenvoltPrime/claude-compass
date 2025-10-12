@@ -1136,6 +1136,7 @@ export class GraphBuilder {
           parent_symbol_id: symbol.parent_symbol_id,
           symbol_type: symbol.symbol_type,
           entity_type: symbol.entity_type,
+          framework: symbol.framework,
           base_class: symbol.base_class,
           start_line: symbol.start_line,
           end_line: symbol.end_line,
