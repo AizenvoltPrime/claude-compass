@@ -22,6 +22,7 @@ import {
   ChunkResult,
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
+import { entityClassifier } from '../utils/entity-classifier';
 
 const logger = createComponentLogger('javascript-parser');
 
@@ -117,7 +118,7 @@ export class JavaScriptParser extends ChunkedParser {
 
     try {
       this.clearNodeCache();
-      const result = this.performSinglePassExtraction(tree.rootNode, content);
+      const result = this.performSinglePassExtraction(tree.rootNode, content, filePath);
 
       return {
         symbols: validatedOptions.includePrivateSymbols
@@ -133,7 +134,7 @@ export class JavaScriptParser extends ChunkedParser {
     }
   }
 
-  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string): {
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string, filePath?: string): {
     symbols: ParsedSymbol[];
     dependencies: ParsedDependency[];
     imports: ParsedImport[];
@@ -151,7 +152,7 @@ export class JavaScriptParser extends ChunkedParser {
 
       switch (node.type) {
         case 'function_declaration': {
-          const symbol = this.extractFunctionSymbol(node, content);
+          const symbol = this.extractFunctionSymbol(node, content, filePath);
           if (symbol) symbols.push(symbol);
           break;
         }
@@ -165,7 +166,7 @@ export class JavaScriptParser extends ChunkedParser {
           break;
         }
         case 'class_declaration': {
-          const symbol = this.extractClassSymbol(node, content);
+          const symbol = this.extractClassSymbol(node, content, filePath);
           if (symbol) symbols.push(symbol);
           break;
         }
@@ -387,7 +388,7 @@ export class JavaScriptParser extends ChunkedParser {
     return cleanJSDoc(commentText);
   }
 
-  private extractFunctionSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractFunctionSymbol(node: Parser.SyntaxNode, content: string, filePath?: string): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -395,9 +396,20 @@ export class JavaScriptParser extends ChunkedParser {
     const signature = this.extractFunctionSignature(node, content);
     const description = this.extractJSDocComment(node, content);
 
+    // Classify entity type using configuration-driven classifier
+    const classification = entityClassifier.classify(
+      'function',
+      name,
+      [], // Functions don't have base classes
+      filePath || '',
+      undefined // Auto-detect framework from file path
+    );
+
     return {
       name,
       symbol_type: SymbolType.FUNCTION,
+      entity_type: classification.entityType,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
@@ -445,16 +457,37 @@ export class JavaScriptParser extends ChunkedParser {
     };
   }
 
-  private extractClassSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractClassSymbol(node: Parser.SyntaxNode, content: string, filePath?: string): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
     const description = this.extractJSDocComment(node, content);
 
+    // Extract base classes for classification
+    const baseClasses: string[] = [];
+    const heritageNode = node.childForFieldName('heritage');
+    if (heritageNode) {
+      const baseClassName = this.getNodeText(heritageNode, content).replace(/^extends\s+/, '').trim();
+      if (baseClassName) {
+        baseClasses.push(baseClassName);
+      }
+    }
+
+    // Classify entity type using configuration-driven classifier
+    const classification = entityClassifier.classify(
+      'class',
+      name,
+      baseClasses,
+      filePath || '',
+      undefined // Auto-detect framework from file path
+    );
+
     return {
       name,
       symbol_type: SymbolType.CLASS,
+      entity_type: classification.entityType,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),

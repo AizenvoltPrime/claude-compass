@@ -36,6 +36,8 @@ export interface Symbol {
   qualified_name?: string;
   parent_symbol_id?: number;
   symbol_type: SymbolType;
+  entity_type?: string; // Semantic/framework-aware type (component, service, manager, model, etc.)
+  base_class?: string; // Inheritance information (Node, Control, Model, Resource, etc.)
   start_line?: number;
   end_line?: number;
   is_exported: boolean;
@@ -75,25 +77,35 @@ export interface EnhancedDependency extends Dependency {
   depth?: number;
 }
 
-// ===== PHASE 2: SIMPLIFIED DEPENDENCY INTERFACES =====
-// These interfaces support the "Return Everything, Let AI Decide" approach
-// by providing comprehensive relationship data for AI analysis
-
 /**
- * Simplified dependency interface for Phase 2+ implementation
- * Focuses on core dependency relationships without filtering thresholds
+ * Simplified dependency interface - Canonical format for all MCP tools
+ * Language-agnostic, token-optimized structure with essential context only
  */
 export interface SimplifiedDependency {
-  from_symbol: string;
-  to_symbol: string;
-  dependency_type: DependencyType;
+  from: string;
+  to: string;
+  type: DependencyType;
   line_number?: number;
   file_path?: string;
+
+  // Context fields (language-agnostic disambiguation)
+  qualified_context?: string;
+  parameter_types?: string[];
+  parameter_context?: string;
+
+  // Transitive analysis (only present for indirect dependencies)
+  call_chain?: string;
+  depth?: number;
+
+  // Cross-stack fields (only present for API calls)
+  is_cross_stack?: boolean;
+  http_method?: string;
+  endpoint_path?: string;
 }
 
 /**
- * Simple dependency response format for MCP tools
- * Phase 2: Clean response format with comprehensive relationship data
+ * Standard dependency response format for MCP tools
+ * Used by who_calls and list_dependencies
  */
 export interface SimplifiedDependencyResponse {
   dependencies: SimplifiedDependency[];
@@ -106,8 +118,63 @@ export interface SimplifiedDependencyResponse {
 }
 
 /**
+ * Restructured impact analysis response
+ * Categorizes different types of impact for better AI comprehension
+ */
+export interface ImpactAnalysisResponse {
+  direct_impact: SimplifiedDependency[];
+  indirect_impact: SimplifiedDependency[];
+  routes_affected: Array<{
+    path: string;
+    method: string;
+    framework: string;
+  }>;
+  jobs_affected: Array<{
+    name: string;
+    type: string;
+  }>;
+  tests_affected: Array<{
+    name: string;
+    file_path: string;
+  }>;
+  summary: {
+    total_symbols: number;
+    total_routes: number;
+    total_jobs: number;
+    total_tests: number;
+    max_depth: number;
+    frameworks: string[];
+  };
+  query_info: {
+    symbol: string;
+    analysis_type: 'impact';
+    timestamp: string;
+  };
+}
+
+/**
+ * Simplified symbol metadata response
+ * Focused on symbol details only, relationships accessed via dedicated tools
+ */
+export interface SimplifiedSymbolResponse {
+  symbol: {
+    id: number;
+    name: string;
+    type: string;
+    start_line?: number;
+    end_line?: number;
+    is_exported: boolean;
+    visibility?: string;
+    signature?: string;
+  };
+  file_path: string;
+  repository_name?: string;
+  dependencies_count: number;
+  callers_count: number;
+}
+
+/**
  * Simple cross-stack relationship for Vue ↔ Laravel analysis
- * Phase 2: Comprehensive cross-stack analysis with all relationship data
  */
 export interface SimpleCrossStackRelationship {
   from_component: string;
@@ -120,7 +187,6 @@ export interface SimpleCrossStackRelationship {
 
 /**
  * Simplified API call interface
- * Phase 2: Comprehensive URL/method matching with all detected relationships
  */
 export interface SimpleApiCall {
   component: string;
@@ -133,7 +199,6 @@ export interface SimpleApiCall {
 
 /**
  * Response format for simplified dependency list
- * Phase 2: Flat list format optimized for AI processing
  */
 export interface FlatDependencyResponse {
   data: SimplifiedDependency[];
@@ -200,7 +265,6 @@ export enum DependencyType {
   IMPLEMENTS = 'implements',
   REFERENCES = 'references',
   EXPORTS = 'exports',
-  // Phase 3 additions
   ORM_RELATION = 'orm_relation',
   TEST_COVERS = 'test_covers',
   PROCESSES_JOB = 'processes_job',
@@ -214,11 +278,9 @@ export enum DependencyType {
   IMPORTS_FOR_TEST = 'imports_for_test',
   PACKAGE_DEPENDENCY = 'package_dependency',
   WORKSPACE_DEPENDENCY = 'workspace_dependency',
-  // Phase 5 additions - Cross-stack tracking
   API_CALL = 'api_call', // Vue component calls Laravel API
   SHARES_SCHEMA = 'shares_schema', // TypeScript interface ↔ PHP DTO
   FRONTEND_BACKEND = 'frontend_backend', // Generic cross-stack relationship
-  // Phase 7 additions - C#/Godot support
   SCENE_REFERENCE = 'scene_reference',
   NODE_CHILD = 'node_child',
   SIGNAL_CONNECTION = 'signal_connection',
@@ -252,6 +314,8 @@ export interface CreateSymbol {
   qualified_name?: string;
   parent_symbol_id?: number;
   symbol_type: SymbolType;
+  entity_type?: string;
+  base_class?: string;
   start_line?: number;
   end_line?: number;
   is_exported?: boolean;
@@ -310,7 +374,7 @@ export interface DependencyWithSymbols extends Dependency {
   depth?: number;
 }
 
-// Enhanced dependency interface with rich context (Phase 4)
+// Enhanced dependency interface with rich context
 export interface EnhancedDependencyWithSymbols extends DependencyWithSymbols {
   calling_object?: string;
   resolved_class?: string;
@@ -406,9 +470,7 @@ export enum FrameworkType {
   EXPRESS = 'express',
   FASTIFY = 'fastify',
   NUXT = 'nuxt',
-  // Phase 4 additions - PHP/Laravel
   LARAVEL = 'laravel',
-  // Phase 7 additions - C#/Godot support
   GODOT = 'godot',
 }
 
@@ -443,7 +505,6 @@ export interface ComposableSearchOptions {
   limit?: number;
 }
 
-// Phase 6 - Enhanced search options
 export interface SymbolSearchOptions {
   limit?: number;
   symbolTypes?: SymbolType[];
@@ -552,8 +613,6 @@ export interface ComposableDependency {
   updated_at: Date;
 }
 
-// Phase 5 Models - Cross-Stack Tracking
-
 export interface ApiCall {
   id: number;
   repo_id: number;
@@ -576,8 +635,6 @@ export interface DataContract {
   drift_detected: boolean;
   last_verified: Date;
 }
-
-// Phase 3 Models - Background Jobs
 
 export interface JobQueue {
   id: number;
@@ -630,8 +687,6 @@ export enum WorkerType {
   CHILD_PROCESS = 'child_process',
 }
 
-// Phase 3 Models - ORM Entities
-
 export interface ORMEntity {
   id: number;
   repo_id: number;
@@ -662,7 +717,7 @@ export enum ORMType {
   TYPEORM = 'typeorm',
   SEQUELIZE = 'sequelize',
   MONGOOSE = 'mongoose',
-  // Phase 4 additions - PHP/Laravel ORM
+
   ELOQUENT = 'eloquent',
 }
 
@@ -705,7 +760,6 @@ export enum PackageManagerType {
   YARN = 'yarn',
   PNPM = 'pnpm',
   BUN = 'bun',
-  // Phase 4 additions - PHP package manager
   COMPOSER = 'composer',
 }
 
@@ -717,8 +771,6 @@ export enum WorkspaceType {
   YARN_WORKSPACES = 'yarn_workspaces',
   NPM_WORKSPACES = 'npm_workspaces',
 }
-
-// Phase 3 Create Input Types
 
 export interface CreateJobQueue {
   repo_id: number;
@@ -777,8 +829,6 @@ export interface CreateWorkspaceProject {
   config_data?: Record<string, any>;
 }
 
-// Phase 5 Create Input Types - Cross-Stack Tracking
-
 export interface CreateApiCall {
   repo_id: number;
   caller_symbol_id: number;
@@ -798,7 +848,6 @@ export interface CreateDataContract {
   drift_detected?: boolean;
 }
 
-// Phase 7B: Godot Framework Entity Models
 // Implementation of Solution 1: Enhanced Framework Relationships
 
 export interface GodotScene {
