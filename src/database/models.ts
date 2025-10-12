@@ -646,18 +646,6 @@ export interface ORMEntity {
   updated_at: Date;
 }
 
-export interface ORMRelationship {
-  id: number;
-  from_entity_id: number;
-  to_entity_id: number;
-  relationship_type: ORMRelationshipType;
-  foreign_key?: string;
-  through_table?: string;
-  inverse_relationship_id?: number;
-  created_at: Date;
-  updated_at: Date;
-}
-
 export interface ORMRepository {
   id: number;
   repo_id: number;
@@ -678,13 +666,6 @@ export enum ORMType {
   ELOQUENT = 'eloquent',
 }
 
-export enum ORMRelationshipType {
-  HAS_MANY = 'has_many',
-  BELONGS_TO = 'belongs_to',
-  HAS_ONE = 'has_one',
-  MANY_TO_MANY = 'many_to_many',
-}
-
 export enum ORMRepositoryType {
   TYPEORM_REPOSITORY = 'typeorm_repository',
   PRISMA_SERVICE = 'prisma_service',
@@ -692,44 +673,7 @@ export enum ORMRepositoryType {
   CUSTOM_REPOSITORY = 'custom_repository',
 }
 
-// Phase 3 Models - Test Frameworks
-
-export interface TestSuite {
-  id: number;
-  repo_id: number;
-  file_id: number;
-  suite_name: string;
-  parent_suite_id?: number;
-  framework_type: TestFrameworkType;
-  start_line?: number;
-  end_line?: number;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface TestCase {
-  id: number;
-  repo_id: number;
-  suite_id: number;
-  symbol_id?: number;
-  test_name: string;
-  test_type: TestType;
-  start_line?: number;
-  end_line?: number;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface TestCoverage {
-  id: number;
-  test_case_id: number;
-  target_symbol_id: number;
-  coverage_type: TestCoverageType;
-  line_number?: number;
-  created_at: Date;
-  updated_at: Date;
-}
-
+// Test Framework Type (used by parser, not stored in DB)
 export enum TestFrameworkType {
   JEST = 'jest',
   VITEST = 'vitest',
@@ -737,40 +681,11 @@ export enum TestFrameworkType {
   PLAYWRIGHT = 'playwright',
   MOCHA = 'mocha',
   JASMINE = 'jasmine',
-  // Phase 4 additions - PHP testing frameworks
   PHPUNIT = 'phpunit',
   PEST = 'pest',
 }
 
-export enum TestType {
-  UNIT = 'unit',
-  INTEGRATION = 'integration',
-  E2E = 'e2e',
-  COMPONENT = 'component',
-}
-
-export enum TestCoverageType {
-  TESTS = 'tests',
-  MOCKS = 'mocks',
-  IMPORTS_FOR_TEST = 'imports_for_test',
-  SPY = 'spy',
-}
-
-// Phase 3 Models - Package Dependencies
-
-export interface PackageDependency {
-  id: number;
-  repo_id: number;
-  package_name: string;
-  version_spec: string;
-  resolved_version?: string;
-  dependency_type: PackageDependencyType;
-  package_manager: PackageManagerType;
-  lock_file_path?: string;
-  is_workspace: boolean;
-  created_at: Date;
-  updated_at: Date;
-}
+// Workspace Projects
 
 export interface WorkspaceProject {
   id: number;
@@ -783,13 +698,6 @@ export interface WorkspaceProject {
   config_data: Record<string, any>;
   created_at: Date;
   updated_at: Date;
-}
-
-export enum PackageDependencyType {
-  DEPENDENCIES = 'dependencies',
-  DEV_DEPENDENCIES = 'devDependencies',
-  PEER_DEPENDENCIES = 'peerDependencies',
-  OPTIONAL_DEPENDENCIES = 'optionalDependencies',
 }
 
 export enum PackageManagerType {
@@ -851,59 +759,12 @@ export interface CreateORMEntity {
   indexes?: any[];
 }
 
-export interface CreateORMRelationship {
-  from_entity_id: number;
-  to_entity_id: number;
-  relationship_type: ORMRelationshipType;
-  foreign_key?: string;
-  through_table?: string;
-  inverse_relationship_id?: number;
-}
-
 export interface CreateORMRepository {
   repo_id: number;
   symbol_id: number;
   entity_id: number;
   repository_type: ORMRepositoryType;
   methods?: string[];
-}
-
-export interface CreateTestSuite {
-  repo_id: number;
-  file_id: number;
-  suite_name: string;
-  parent_suite_id?: number;
-  framework_type: TestFrameworkType;
-  start_line?: number;
-  end_line?: number;
-}
-
-export interface CreateTestCase {
-  repo_id: number;
-  suite_id: number;
-  symbol_id?: number;
-  test_name: string;
-  test_type: TestType;
-  start_line?: number;
-  end_line?: number;
-}
-
-export interface CreateTestCoverage {
-  test_case_id: number;
-  target_symbol_id: number;
-  coverage_type: TestCoverageType;
-  line_number?: number;
-}
-
-export interface CreatePackageDependency {
-  repo_id: number;
-  package_name: string;
-  version_spec: string;
-  resolved_version?: string;
-  dependency_type: PackageDependencyType;
-  package_manager: PackageManagerType;
-  lock_file_path?: string;
-  is_workspace?: boolean;
 }
 
 export interface CreateWorkspaceProject {

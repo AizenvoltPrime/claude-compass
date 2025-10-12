@@ -1633,31 +1633,6 @@ export class GraphBuilder {
               orm_type: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
               fields: ormSystemEntity.metadata?.fields || {},
             });
-          } else if (this.isTestSystemEntity(entity)) {
-            const testSystemEntity = entity as any;
-
-            const matchingFile =
-              filesMap.get(parseResult.filePath) ||
-              normalizedFilesMap.get(path.normalize(parseResult.filePath));
-
-            if (matchingFile) {
-              await this.dbService.createTestSuite({
-                repo_id: repositoryId,
-                file_id: matchingFile.id,
-                suite_name: testSystemEntity.name,
-                framework_type: testSystemEntity.testFrameworks?.[0] || 'jest',
-              });
-            }
-          } else if (this.isPackageSystemEntity(entity)) {
-            // Handle package manager system entities
-            const packageSystemEntity = entity as any;
-            await this.dbService.createPackageDependency({
-              repo_id: repositoryId,
-              package_name: packageSystemEntity.name,
-              version_spec: packageSystemEntity.version || '1.0.0',
-              dependency_type: 'dependencies' as any,
-              package_manager: packageSystemEntity.packageManagers?.[0] || 'npm',
-            });
           } else if (this.isGodotScene(entity)) {
             // Handle Godot scene entities - Core of Solution 1
             const sceneEntity = entity as any;
@@ -2157,14 +2132,6 @@ export class GraphBuilder {
 
   private isORMSystemEntity(entity: any): boolean {
     return entity.type === 'orm_system';
-  }
-
-  private isTestSystemEntity(entity: any): boolean {
-    return entity.type === 'test_suite' || entity.type === 'test_system';
-  }
-
-  private isPackageSystemEntity(entity: any): boolean {
-    return entity.type === 'package_system' || entity.type === 'package';
   }
 
   // Phase 7B: Godot Framework Entity type guards
