@@ -1703,45 +1703,6 @@ export class DatabaseService {
     logger.info('Database connection closed');
   }
 
-  // Bulk operations with materialized view optimization
-  async executeBulkOperation<T>(operation: () => Promise<T>): Promise<T> {
-    logger.debug('Starting bulk operation with materialized view refresh disabled');
-
-    // Set bulk mode flag to prevent per-row materialized view refreshes
-    await this.db.raw("SET LOCAL app.in_bulk_mode = 'true'");
-
-    try {
-      // Execute the bulk operation
-      const result = await operation();
-
-      // Manually refresh materialized views once at the end
-      await this.refreshMaterializedViews();
-
-      logger.debug('Bulk operation completed with final materialized view refresh');
-      return result;
-    } catch (error) {
-      logger.error('Bulk operation failed', { error });
-      throw error;
-    } finally {
-      // Reset bulk mode flag (automatically cleared at transaction end, but being explicit)
-      await this.db.raw("RESET app.in_bulk_mode");
-    }
-  }
-
-  async refreshMaterializedViews(): Promise<void> {
-    logger.debug('Refreshing materialized views');
-
-    try {
-      // Call the PostgreSQL function that refreshes both views concurrently
-      await this.db.raw('SELECT refresh_dependency_stats()');
-
-      logger.debug('Materialized views refreshed successfully');
-    } catch (error) {
-      logger.error('Failed to refresh materialized views', { error });
-      throw error;
-    }
-  }
-
   // Framework-specific operations
 
   // Route operations
