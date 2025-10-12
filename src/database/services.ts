@@ -51,30 +51,14 @@ import {
   WorkerType,
   // Phase 3 imports - ORM Entities
   ORMEntity,
-  ORMRelationship,
   ORMRepository,
   CreateORMEntity,
-  CreateORMRelationship,
   CreateORMRepository,
   ORMType,
-  ORMRelationshipType,
   ORMRepositoryType,
-  // Phase 3 imports - Test Frameworks
-  TestSuite,
-  TestCase,
-  TestCoverage,
-  CreateTestSuite,
-  CreateTestCase,
-  CreateTestCoverage,
-  TestFrameworkType,
-  TestType,
-  TestCoverageType,
-  // Phase 3 imports - Package Dependencies
-  PackageDependency,
+  // Phase 3 imports - Workspace Projects
   WorkspaceProject,
-  CreatePackageDependency,
   CreateWorkspaceProject,
-  PackageDependencyType,
   PackageManagerType,
   WorkspaceType,
   // Phase 5 imports - Cross-Stack Tracking
@@ -2736,36 +2720,6 @@ export class DatabaseService {
     return (ormEntity as ORMEntity) || null;
   }
 
-  // ORM Relationship operations
-  async createORMRelationship(data: CreateORMRelationship): Promise<ORMRelationship> {
-    const [ormRelationship] = await this.db('orm_relationships').insert(data).returning('*');
-    return ormRelationship as ORMRelationship;
-  }
-
-  async getORMRelationship(id: number): Promise<ORMRelationship | null> {
-    const ormRelationship = await this.db('orm_relationships').where({ id }).first();
-    return (ormRelationship as ORMRelationship) || null;
-  }
-
-  async getORMRelationshipsByEntity(entityId: number): Promise<ORMRelationship[]> {
-    const relationships = await this.db('orm_relationships')
-      .where(function () {
-        this.where({ from_entity_id: entityId }).orWhere({ to_entity_id: entityId });
-      })
-      .orderBy('relationship_type');
-    return relationships as ORMRelationship[];
-  }
-
-  async getORMRelationshipsByType(
-    entityId: number,
-    relationshipType: ORMRelationshipType
-  ): Promise<ORMRelationship[]> {
-    const relationships = await this.db('orm_relationships')
-      .where({ from_entity_id: entityId, relationship_type: relationshipType })
-      .orderBy('id');
-    return relationships as ORMRelationship[];
-  }
-
   // ORM Repository operations
   async createORMRepository(data: CreateORMRepository): Promise<ORMRepository> {
     const [ormRepository] = await this.db('orm_repositories').insert(data).returning('*');
@@ -2782,150 +2736,6 @@ export class DatabaseService {
       .where({ entity_id: entityId })
       .orderBy('repository_type');
     return ormRepositories as ORMRepository[];
-  }
-
-  // Test Suite operations
-  async createTestSuite(data: CreateTestSuite): Promise<TestSuite> {
-    const [testSuite] = await this.db('test_suites').insert(data).returning('*');
-    return testSuite as TestSuite;
-  }
-
-  async getTestSuite(id: number): Promise<TestSuite | null> {
-    const testSuite = await this.db('test_suites').where({ id }).first();
-    return (testSuite as TestSuite) || null;
-  }
-
-  async getTestSuitesByRepository(repoId: number): Promise<TestSuite[]> {
-    const testSuites = await this.db('test_suites')
-      .where({ repo_id: repoId })
-      .orderBy('suite_name');
-    return testSuites as TestSuite[];
-  }
-
-  async getTestSuitesByFramework(
-    repoId: number,
-    frameworkType: TestFrameworkType
-  ): Promise<TestSuite[]> {
-    const testSuites = await this.db('test_suites')
-      .where({ repo_id: repoId, framework_type: frameworkType })
-      .orderBy('suite_name');
-    return testSuites as TestSuite[];
-  }
-
-  async getTestSuitesByFile(fileId: number): Promise<TestSuite[]> {
-    const testSuites = await this.db('test_suites')
-      .where({ file_id: fileId })
-      .orderBy('start_line');
-    return testSuites as TestSuite[];
-  }
-
-  // Test Case operations
-  async createTestCase(data: CreateTestCase): Promise<TestCase> {
-    const [testCase] = await this.db('test_cases').insert(data).returning('*');
-    return testCase as TestCase;
-  }
-
-  async getTestCase(id: number): Promise<TestCase | null> {
-    const testCase = await this.db('test_cases').where({ id }).first();
-    return (testCase as TestCase) || null;
-  }
-
-  async getTestCasesBySuite(suiteId: number): Promise<TestCase[]> {
-    const testCases = await this.db('test_cases')
-      .where({ suite_id: suiteId })
-      .orderBy('start_line');
-    return testCases as TestCase[];
-  }
-
-  async getTestCasesByType(repoId: number, testType: TestType): Promise<TestCase[]> {
-    const testCases = await this.db('test_cases')
-      .where({ repo_id: repoId, test_type: testType })
-      .orderBy('test_name');
-    return testCases as TestCase[];
-  }
-
-  // Test Coverage operations
-  async createTestCoverage(data: CreateTestCoverage): Promise<TestCoverage> {
-    const [testCoverage] = await this.db('test_coverage').insert(data).returning('*');
-    return testCoverage as TestCoverage;
-  }
-
-  async getTestCoverage(id: number): Promise<TestCoverage | null> {
-    const testCoverage = await this.db('test_coverage').where({ id }).first();
-    return (testCoverage as TestCoverage) || null;
-  }
-
-  async getTestCoverageByTestCase(testCaseId: number): Promise<TestCoverage[]> {
-    const testCoverage = await this.db('test_coverage')
-      .where({ test_case_id: testCaseId })
-      .orderBy('coverage_type');
-    return testCoverage as TestCoverage[];
-  }
-
-  async getTestCoverageBySymbol(symbolId: number): Promise<TestCoverage[]> {
-    const testCoverage = await this.db('test_coverage')
-      .where({ target_symbol_id: symbolId })
-      .orderBy('coverage_type');
-    return testCoverage as TestCoverage[];
-  }
-
-  async getTestCoverageByType(
-    testCaseId: number,
-    coverageType: TestCoverageType
-  ): Promise<TestCoverage[]> {
-    const testCoverage = await this.db('test_coverage')
-      .where({ test_case_id: testCaseId, coverage_type: coverageType })
-      .orderBy('line_number');
-    return testCoverage as TestCoverage[];
-  }
-
-  // Package Dependency operations
-  async createPackageDependency(data: CreatePackageDependency): Promise<PackageDependency> {
-    const [packageDependency] = await this.db('package_dependencies').insert(data).returning('*');
-    return packageDependency as PackageDependency;
-  }
-
-  async getPackageDependency(id: number): Promise<PackageDependency | null> {
-    const packageDependency = await this.db('package_dependencies').where({ id }).first();
-    return (packageDependency as PackageDependency) || null;
-  }
-
-  async getPackageDependenciesByRepository(repoId: number): Promise<PackageDependency[]> {
-    const packageDependencies = await this.db('package_dependencies')
-      .where({ repo_id: repoId })
-      .orderBy('package_name');
-    return packageDependencies as PackageDependency[];
-  }
-
-  async getPackageDependenciesByType(
-    repoId: number,
-    dependencyType: PackageDependencyType
-  ): Promise<PackageDependency[]> {
-    const packageDependencies = await this.db('package_dependencies')
-      .where({ repo_id: repoId, dependency_type: dependencyType })
-      .orderBy('package_name');
-    return packageDependencies as PackageDependency[];
-  }
-
-  async getPackageDependenciesByManager(
-    repoId: number,
-    packageManager: PackageManagerType
-  ): Promise<PackageDependency[]> {
-    const packageDependencies = await this.db('package_dependencies')
-      .where({ repo_id: repoId, package_manager: packageManager })
-      .orderBy('package_name');
-    return packageDependencies as PackageDependency[];
-  }
-
-  async findPackageDependency(
-    repoId: number,
-    packageName: string,
-    dependencyType: PackageDependencyType
-  ): Promise<PackageDependency | null> {
-    const packageDependency = await this.db('package_dependencies')
-      .where({ repo_id: repoId, package_name: packageName, dependency_type: dependencyType })
-      .first();
-    return (packageDependency as PackageDependency) || null;
   }
 
   // Workspace Project operations

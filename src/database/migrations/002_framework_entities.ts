@@ -10,12 +10,14 @@ import type { Knex } from 'knex';
  * - Laravel entities (routes, models, controllers)
  * - Vue/React components and cross-stack calls
  * - Godot framework support
- * - Background job systems
- * - ORM relationships
- * - Test framework support
- * - Package dependencies
+ * - Data contracts for schema tracking
  * - Vector search capabilities
  * - Enhanced dependency tracking
+ *
+ * Removed (never used/never exposed):
+ * - ORM relationships table (never called by parsers)
+ * - Test cases/coverage tables (never populated)
+ * - Package dependencies table (never read)
  */
 export async function up(knex: Knex): Promise<void> {
   console.log('🚀 Creating consolidated framework entities...');
@@ -126,144 +128,6 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(['frontend_type_id', 'backend_type_id', 'name']);
   });
 
-  await knex.schema.createTable('orm_relationships', table => {
-    table.increments('id').primary();
-    table
-      .integer('from_model_id')
-      .notNullable()
-      .references('id')
-      .inTable('symbols')
-      .onDelete('CASCADE');
-    table
-      .integer('to_model_id')
-      .notNullable()
-      .references('id')
-      .inTable('symbols')
-      .onDelete('CASCADE');
-    table.string('relationship_type').notNullable();
-    table.string('foreign_key');
-    table.string('local_key');
-    table.string('pivot_table');
-    table.timestamps(true, true);
-
-    table.index(['from_model_id', 'relationship_type']);
-    table.index(['to_model_id', 'relationship_type']);
-  });
-
-  await knex.schema.createTable('test_suites', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table
-      .integer('file_id')
-      .notNullable()
-      .references('id')
-      .inTable('files')
-      .onDelete('CASCADE');
-    table.string('suite_name').notNullable();
-    table
-      .integer('parent_suite_id')
-      .nullable()
-      .references('id')
-      .inTable('test_suites')
-      .onDelete('CASCADE');
-    table
-      .enum('framework_type', [
-        'jest',
-        'vitest',
-        'cypress',
-        'playwright',
-        'mocha',
-        'jasmine',
-        'phpunit',
-        'pest',
-      ])
-      .notNullable();
-    table.integer('start_line').nullable();
-    table.integer('end_line').nullable();
-    table.timestamps(true, true);
-
-    table.index(['repo_id']);
-    table.index(['file_id']);
-    table.index(['parent_suite_id']);
-    table.index(['framework_type']);
-  });
-
-  await knex.schema.createTable('test_cases', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table
-      .integer('suite_id')
-      .notNullable()
-      .references('id')
-      .inTable('test_suites')
-      .onDelete('CASCADE');
-    table.integer('symbol_id').nullable().references('id').inTable('symbols').onDelete('CASCADE');
-    table.string('test_name').notNullable();
-    table.enum('test_type', ['unit', 'integration', 'e2e', 'component']).notNullable();
-    table.integer('start_line').nullable();
-    table.integer('end_line').nullable();
-    table.timestamps(true, true);
-
-    table.index(['repo_id']);
-    table.index(['suite_id']);
-    table.index(['symbol_id']);
-    table.index(['test_type']);
-  });
-
-  await knex.schema.createTable('test_coverage', table => {
-    table.increments('id').primary();
-    table
-      .integer('test_case_id')
-      .notNullable()
-      .references('id')
-      .inTable('test_cases')
-      .onDelete('CASCADE');
-    table
-      .integer('target_symbol_id')
-      .notNullable()
-      .references('id')
-      .inTable('symbols')
-      .onDelete('CASCADE');
-    table
-      .enum('coverage_type', ['tests', 'mocks', 'imports_for_test', 'spy'])
-      .notNullable();
-    table.integer('line_number').nullable();
-    table.timestamps(true, true);
-
-    table.index(['test_case_id']);
-    table.index(['target_symbol_id']);
-    table.index(['coverage_type']);
-    table.unique(['test_case_id', 'target_symbol_id', 'coverage_type']);
-  });
-
-  await knex.schema.createTable('package_dependencies', table => {
-    table.increments('id').primary();
-    table
-      .integer('repo_id')
-      .notNullable()
-      .references('id')
-      .inTable('repositories')
-      .onDelete('CASCADE');
-    table.string('package_name').notNullable();
-    table.string('version');
-    table.string('dependency_type').notNullable(); // 'dependencies', 'devDependencies', etc
-    table.string('package_manager'); // npm, composer, etc
-    table.timestamps(true, true);
-
-    table.index(['repo_id', 'package_name']);
-    table.index(['package_name']);
-    table.index(['dependency_type']);
-  });
 
   await knex.schema.createTable('godot_scenes', table => {
     table.increments('id').primary();
@@ -496,11 +360,6 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('godot_scripts');
   await knex.schema.dropTableIfExists('godot_nodes');
   await knex.schema.dropTableIfExists('godot_scenes');
-  await knex.schema.dropTableIfExists('package_dependencies');
-  await knex.schema.dropTableIfExists('test_coverage');
-  await knex.schema.dropTableIfExists('test_cases');
-  await knex.schema.dropTableIfExists('test_suites');
-  await knex.schema.dropTableIfExists('orm_relationships');
   await knex.schema.dropTableIfExists('framework_metadata');
   await knex.schema.dropTableIfExists('data_contracts');
   await knex.schema.dropTableIfExists('api_calls');
