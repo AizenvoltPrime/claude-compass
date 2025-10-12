@@ -68,6 +68,7 @@ interface ASTContext {
   classStack: string[];
   currentNamespace?: string;
   currentClass?: string;
+  currentClassFramework?: string; // Track framework of current class for method inheritance
   usingDirectives: Set<string>;
   symbolCache: Map<string, ParsedSymbol>;
   nodeCache: Map<string, Parser.SyntaxNode[]>;
@@ -724,6 +725,9 @@ export class CSharpParser extends ChunkedParser {
       undefined // Auto-detect framework from file path and base classes
     );
 
+    // Store class framework in context so methods can inherit it
+    context.currentClassFramework = classification.framework;
+
     const symbol: ParsedSymbol = {
       name,
       qualified_name: qualifiedName,
@@ -790,14 +794,9 @@ export class CSharpParser extends ChunkedParser {
     const methodQualifiedName = this.buildQualifiedName(context, name);
     const description = this.extractXmlDocComment(node, content);
 
-    // Classify to detect framework context
-    const classification = entityClassifier.classify(
-      'method',
-      name,
-      [],
-      context.filePath || '',
-      undefined // Auto-detect framework
-    );
+    // Methods inherit framework from their parent class
+    // No need to call entityClassifier for methods - they don't have independent framework context
+    const methodFramework = context.currentClassFramework;
 
     // Interface members are implicitly public
     const isInterfaceMember = this.isInsideInterface(node);
@@ -807,7 +806,7 @@ export class CSharpParser extends ChunkedParser {
       name,
       qualified_name: methodQualifiedName,
       symbol_type: SymbolType.METHOD,
-      framework: classification.framework,
+      framework: methodFramework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: isExported,
@@ -1557,6 +1556,9 @@ export class CSharpParser extends ChunkedParser {
       context.filePath || '',
       undefined // Auto-detect framework from file path and base classes
     );
+
+    // Store interface framework in context so methods can inherit it
+    context.currentClassFramework = classification.framework;
 
     const symbol: ParsedSymbol = {
       name,
