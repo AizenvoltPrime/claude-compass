@@ -1054,7 +1054,8 @@ export class DatabaseService {
       logger.info(`[VECTOR SEARCH DB] Score range: ${topScore.toFixed(3)} to ${bottomScore.toFixed(3)}`);
     }
 
-    return results.map((result: any) => ({
+    const formattedResults = this.formatSymbolResults(results);
+    return formattedResults.map((result: any) => ({
       ...result,
       match_type: 'vector' as const,
       search_rank: result.vector_score,

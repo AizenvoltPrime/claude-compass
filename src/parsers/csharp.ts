@@ -10,6 +10,7 @@ import {
   ParseError,
 } from './base';
 import { createComponentLogger } from '../utils/logger';
+import { entityClassifier } from '../utils/entity-classifier';
 import {
   ChunkedParser,
   MergedParseResult,
@@ -73,6 +74,7 @@ interface ASTContext {
   partialClassFields: Map<string, Map<string, TypeInfo>>;
   isPartialClass: boolean;
   currentMethodParameters: Map<string, string>;
+  filePath?: string; // File path for entity classification
 }
 
 /**
@@ -376,6 +378,7 @@ export class CSharpParser extends ChunkedParser {
     try {
       // Initialize context for single-pass traversal
       const context = this.initializeASTContext();
+      context.filePath = filePath; // Store file path for entity classification
       const godotContext = this.initializeGodotContext();
 
       // Single traversal to extract everything
@@ -712,10 +715,21 @@ export class CSharpParser extends ChunkedParser {
 
     const description = this.extractXmlDocComment(node, content);
 
+    // Classify entity type using configuration-driven classifier
+    const classification = entityClassifier.classify(
+      'class',
+      name,
+      baseTypes,
+      context.filePath || '',
+      'godot' // C# files are primarily Godot in this codebase
+    );
+
     const symbol: ParsedSymbol = {
       name,
       qualified_name: qualifiedName,
       symbol_type: SymbolType.CLASS,
+      entity_type: classification.entityType,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),

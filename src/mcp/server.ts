@@ -67,17 +67,17 @@ export class ClaudeCompassMCPServer {
         this.tools.setDefaultRepoId(repository.id);
         logger.info('Default repository resolved', {
           name: defaultRepoName,
-          id: repository.id
+          id: repository.id,
         });
       } else {
         logger.warn('DEFAULT_REPO_NAME set but repository not found', {
-          name: defaultRepoName
+          name: defaultRepoName,
         });
       }
     } catch (error) {
       logger.error('Failed to resolve default repository', {
         name: defaultRepoName,
-        error: (error as Error).message
+        error: (error as Error).message,
       });
     }
   }
@@ -285,7 +285,7 @@ export class ClaudeCompassMCPServer {
           {
             name: 'impact_of',
             description:
-              'Comprehensive impact analysis - calculate blast radius across all frameworks (Vue, Laravel, React, Node.js) including routes, jobs, and tests.',
+              'Comprehensive impact analysis - calculate blast radius across all frameworks including routes, jobs, and tests. Returns categorized results with separate arrays for direct impact, indirect impact, routes, jobs, and tests.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -303,29 +303,11 @@ export class ClaudeCompassMCPServer {
                 },
                 max_depth: {
                   type: 'number',
-                  description: 'Transitive analysis depth',
+                  description: 'Transitive analysis depth (default: 5)',
                   default: 5,
                   minimum: 1,
                   maximum: 20,
                 },
-                page_size: {
-                  type: 'number',
-                  description: 'Number of results per page (default: 1000, max: 5000)',
-                  default: 1000,
-                  minimum: 1,
-                  maximum: 5000,
-                },
-                cursor: {
-                  type: 'string',
-                  description: 'Pagination cursor for next page',
-                },
-                detail_level: {
-                  type: 'string',
-                  enum: ['summary', 'standard', 'full'],
-                  description: 'Response detail level',
-                  default: 'standard',
-                },
-                // REMOVED: analysis_type - no longer needed with simple dependency lists (Phase 4)
               },
               required: ['symbol_id'],
               additionalProperties: false,

@@ -17,6 +17,8 @@ export interface ParsedSymbol {
   name: string;
   qualified_name?: string;
   symbol_type: SymbolType;
+  entity_type?: string; // Semantic/framework-aware type (component, service, manager, etc.)
+  base_class?: string; // Inheritance information (Node, Control, Model, etc.)
   start_line: number;
   end_line: number;
   is_exported: boolean;

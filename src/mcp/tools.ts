@@ -1,10 +1,11 @@
 import { DatabaseService } from '../database/services';
 import {
   DependencyType,
-  DependencyWithSymbols,
-  SymbolWithFile,
-  SymbolSearchOptions,
   SymbolType,
+  SimplifiedDependency,
+  SimplifiedDependencyResponse,
+  ImpactAnalysisResponse,
+  SimplifiedSymbolResponse,
 } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { transitiveAnalyzer, TransitiveAnalysisOptions } from '../graph/transitive-analyzer';
@@ -165,15 +166,6 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
     }
     args.max_depth = maxDepth;
   }
-  if (args.show_call_chains !== undefined && typeof args.show_call_chains !== 'boolean') {
-    throw new Error('show_call_chains must be a boolean');
-  }
-  if (args.analysis_type !== undefined) {
-    const validTypes = ['quick', 'standard', 'comprehensive'];
-    if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
-      throw new Error('analysis_type must be one of: quick, standard, comprehensive');
-    }
-  }
   return args as ImpactOfArgs;
 }
 
@@ -321,13 +313,11 @@ export interface ListDependenciesArgs {
   analysis_type?: 'quick' | 'standard' | 'comprehensive';
 }
 
-// Comprehensive impact analysis interface (Phase 6A)
+// Comprehensive impact analysis interface
 export interface ImpactOfArgs {
   symbol_id: number;
   frameworks?: string[]; // Multi-framework impact: ['vue', 'laravel', 'react', 'node']
-  max_depth?: number; // Transitive depth (default 5)
-  show_call_chains?: boolean; // Include human-readable call chains
-  analysis_type?: 'quick' | 'standard' | 'comprehensive';
+  max_depth?: number; // Transitive depth (default 5, min 1, max 20)
 }
 
 export interface ImpactItem {
@@ -479,11 +469,11 @@ export class McpTools {
   }
 
   /**
-   * Core Tool 2: getSymbol - Get details about a specific symbol including its dependencies
-   * Always includes dependencies and callers (simplified interface)
+   * Core Tool 2: getSymbol - Get metadata about a specific symbol
+   * Lightweight symbol inspection. Use who_calls or list_dependencies for relationships.
    *
    * @param args.symbol_id - The ID of the symbol to retrieve
-   * @returns Symbol details with dependencies and callers
+   * @returns Symbol metadata with relationship counts
    */
   async getSymbol(args: any) {
     const validatedArgs = validateGetSymbolArgs(args);
@@ -493,72 +483,32 @@ export class McpTools {
       throw new Error('Symbol not found');
     }
 
-    // Always include dependencies and callers (parameters removed per PARAMETER_REDUNDANCY_ANALYSIS)
+    // Get counts only (not full relationship data)
     const dependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
     const callers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
+
+    const response: SimplifiedSymbolResponse = {
+      symbol: {
+        id: symbol.id,
+        name: symbol.name,
+        type: symbol.symbol_type,
+        start_line: symbol.start_line,
+        end_line: symbol.end_line,
+        is_exported: symbol.is_exported,
+        visibility: symbol.visibility,
+        signature: symbol.signature,
+      },
+      file_path: symbol.file?.path || '',
+      repository_name: symbol.file?.repository?.name,
+      dependencies_count: dependencies.length,
+      callers_count: callers.length,
+    };
 
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify(
-            {
-              symbol: {
-                id: symbol.id,
-                name: symbol.name,
-                type: symbol.symbol_type,
-                start_line: symbol.start_line,
-                end_line: symbol.end_line,
-                is_exported: symbol.is_exported,
-                visibility: symbol.visibility,
-                signature: symbol.signature,
-                file: symbol.file
-                  ? {
-                      id: symbol.file.id,
-                      path: symbol.file.path,
-                      language: symbol.file.language,
-                      repository: symbol.file.repository || null,
-                    }
-                  : null,
-              },
-              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-              dependencies: groupDependenciesByCallSite(
-                dependencies.map(dep => ({
-                  id: dep.id,
-                  type: dep.dependency_type,
-                  dependency_type: dep.dependency_type,
-                  line_number: dep.line_number,
-                  to_symbol: dep.to_symbol
-                    ? {
-                        id: dep.to_symbol.id,
-                        name: dep.to_symbol.name,
-                        type: dep.to_symbol.symbol_type,
-                        file_path: dep.to_symbol.file?.path,
-                      }
-                    : null,
-                }))
-              ),
-              // Always group results by default (group_results parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-              callers: groupDependenciesByCallSite(
-                callers.map(caller => ({
-                  id: caller.id,
-                  type: caller.dependency_type,
-                  dependency_type: caller.dependency_type,
-                  line_number: caller.line_number,
-                  to_symbol: caller.from_symbol
-                    ? {
-                        id: caller.from_symbol.id,
-                        name: caller.from_symbol.name,
-                        type: caller.from_symbol.symbol_type,
-                        file_path: caller.from_symbol.file?.path,
-                      }
-                    : null,
-                }))
-              ),
-            },
-            null,
-            2
-          ),
+          text: JSON.stringify(response, null, 2),
         },
       ],
     };
@@ -809,15 +759,6 @@ export class McpTools {
                 is_exported: validatedArgs.is_exported,
                 repo_ids: repoIds,
                 search_mode: validatedArgs.search_mode,
-                // Deprecated parameters removed per PARAMETER_REDUNDANCY_ANALYSIS: symbol_type, use_vector, include_qualified, class_context, namespace_context
-              },
-              search_options: {
-                entity_types: validatedArgs.entity_types,
-                framework: detectedFramework,
-                is_exported: validatedArgs.is_exported,
-                repo_ids: repoIds,
-                search_mode: validatedArgs.search_mode,
-                // Deprecated parameters removed per PARAMETER_REDUNDANCY_ANALYSIS: symbol_type, use_vector, include_qualified, class_context, namespace_context
               },
               search_mode: 'enhanced_framework_aware',
               absorbed_tools: [
@@ -872,7 +813,9 @@ export class McpTools {
       // Add cross-stack API callers if requested
       if (validatedArgs.include_cross_stack) {
         try {
-          const crossStackCallers = await this.dbService.getCrossStackApiCallers(validatedArgs.symbol_id);
+          const crossStackCallers = await this.dbService.getCrossStackApiCallers(
+            validatedArgs.symbol_id
+          );
           if (crossStackCallers.length > 0) {
             callers = [...callers, ...crossStackCallers];
           }
@@ -965,70 +908,64 @@ export class McpTools {
       // Apply symbol consolidation to handle interface/implementation relationships
       callers = this.consolidateRelatedSymbols(callers);
 
-      // Enhanced whoCalls with parameter analysis but mathematically accurate insights
-      const parameterAnalysis = await this.getParameterContextAnalysis(validatedArgs.symbol_id);
+      // Build SimplifiedDependency array
+      const dependencies: SimplifiedDependency[] = callers.map(caller => {
+        const toName = symbol.name;
+        const fromFile = caller.from_symbol?.file?.path;
+        const toFile = symbol.file?.path;
+        const fromName = caller.from_symbol?.name || 'unknown';
 
-      const result = {
+        // For "to" field: keep original qualification logic for target symbol
+        const shouldQualifyTo = fromName === toName && fromFile !== toFile;
+        const qualifiedToName =
+          shouldQualifyTo && toFile ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
+
+        // Build SimplifiedDependency object
+        const dep: SimplifiedDependency = {
+          from: fromName,
+          to: qualifiedToName,
+          type: caller.dependency_type,
+          line_number: caller.line_number,
+          file_path: fromFile,
+          qualified_context: caller.qualified_context,
+          parameter_types: caller.parameter_types,
+          parameter_context: caller.parameter_context,
+        };
+
+        // Add transitive fields if present
+        if (caller.call_chain) {
+          dep.call_chain = caller.call_chain;
+          dep.depth = caller.depth;
+        }
+
+        // Add cross-stack specific fields if this is an API call
+        if (caller.is_cross_stack) {
+          dep.is_cross_stack = true;
+          dep.http_method = caller.http_method;
+          dep.endpoint_path = caller.endpoint_path;
+        }
+
+        return dep;
+      });
+
+      const response: SimplifiedDependencyResponse = {
+        dependencies,
+        total_count: dependencies.length,
+        query_info: {
+          symbol: symbol.name,
+          analysis_type: 'callers',
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                dependencies: directCallers.map(caller => {
-                  const toName = symbol.name;
-                  const fromFile = caller.from_symbol?.file?.path;
-                  const toFile = symbol.file?.path;
-
-                  // Use actual caller symbol name, not class from path
-                  const fromName = caller.from_symbol?.name || 'unknown';
-
-                  // For "to" field: keep original qualification logic for target symbol
-                  const shouldQualifyTo = fromName === toName && fromFile !== toFile;
-                  const qualifiedToName =
-                    shouldQualifyTo && toFile
-                      ? `${this.getClassNameFromPath(toFile)}.${toName}`
-                      : toName;
-
-                  // Build base dependency object
-                  const dep: any = {
-                    from: fromName,
-                    to: qualifiedToName,
-                    type: caller.dependency_type,
-                    line_number: caller.line_number,
-                    file_path: fromFile,
-                    qualified_context: caller.qualified_context,
-                    parameter_types: caller.parameter_types,
-                    call_instance_id: caller.call_instance_id,
-                    calling_object: caller.calling_object,
-                    resolved_class: caller.resolved_class,
-                    parameter_context: caller.parameter_context,
-                  };
-
-                  // Add cross-stack specific fields if this is an API call
-                  if (caller.is_cross_stack) {
-                    dep.is_cross_stack = true;
-                    dep.http_method = caller.http_method;
-                    dep.endpoint_path = caller.endpoint_path;
-                  }
-
-                  return dep;
-                }),
-                total_count: directCallers.length,
-                parameter_analysis: parameterAnalysis,
-                query_info: {
-                  symbol: symbol.name,
-                  analysis_type: 'whoCalls',
-                  timestamp: new Date().toISOString(),
-                },
-              },
-              null,
-              2
-            ),
+            text: JSON.stringify(response, null, 2),
           },
         ],
       };
-
-      return result;
     } catch (error) {
       this.logger.error('whoCalls operation failed', {
         error: (error as Error).message,
@@ -1076,7 +1013,7 @@ export class McpTools {
 
     try {
       const symbol = (await Promise.race([
-        this.dbService.getSymbol(validatedArgs.symbol_id),
+        this.dbService.getSymbolWithFile(validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
       if (!symbol) {
@@ -1091,7 +1028,9 @@ export class McpTools {
       // Add cross-stack API dependencies if requested
       if (validatedArgs.include_cross_stack) {
         try {
-          const crossStackDeps = await this.dbService.getCrossStackApiDependencies(validatedArgs.symbol_id);
+          const crossStackDeps = await this.dbService.getCrossStackApiDependencies(
+            validatedArgs.symbol_id
+          );
           if (crossStackDeps.length > 0) {
             dependencies = [...dependencies, ...crossStackDeps];
           }
@@ -1185,67 +1124,65 @@ export class McpTools {
       // Apply symbol consolidation to handle interface/implementation relationships
       dependencies = this.consolidateRelatedSymbols(dependencies);
 
-      // Phase 4: Simple dependency list format
-      const result = {
+      // Build SimplifiedDependency array
+      const simplifiedDeps: SimplifiedDependency[] = dependencies.map(dep => {
+        const toName = dep.to_symbol?.name || 'unknown';
+        const toFile = dep.to_symbol?.file?.path;
+        const fromFile = dep.from_symbol?.file?.path;
+        // Use from_symbol if available, fallback to queried symbol
+        const fromName = dep.from_symbol?.name || symbol.name;
+
+        // For "to" field: keep original qualification logic for target symbol
+        const shouldQualifyTo = fromName === toName && fromFile !== toFile;
+        const qualifiedToName =
+          shouldQualifyTo && toFile ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
+
+        // Build SimplifiedDependency object
+        const simplifiedDep: SimplifiedDependency = {
+          from: fromName,
+          to: qualifiedToName,
+          type: dep.dependency_type,
+          line_number: dep.line_number,
+          file_path: toFile, // Show where the TARGET is defined
+          qualified_context: dep.qualified_context,
+          parameter_types: dep.parameter_types,
+          parameter_context: dep.parameter_context,
+        };
+
+        // Add transitive fields if present
+        if (dep.call_chain) {
+          simplifiedDep.call_chain = dep.call_chain;
+          simplifiedDep.depth = dep.depth;
+        }
+
+        // Add cross-stack specific fields if this is an API call
+        if (dep.is_cross_stack) {
+          simplifiedDep.is_cross_stack = true;
+          simplifiedDep.http_method = dep.http_method;
+          simplifiedDep.endpoint_path = dep.endpoint_path;
+        }
+
+        return simplifiedDep;
+      });
+
+      const response: SimplifiedDependencyResponse = {
+        dependencies: simplifiedDeps,
+        total_count: simplifiedDeps.length,
+        query_info: {
+          symbol: symbol.name,
+          analysis_type: 'dependencies',
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                dependencies: dependencies.map(dep => {
-                  const toName = dep.to_symbol?.name || 'unknown';
-                  const fromFile = dep.from_symbol?.file?.path;
-                  const toFile = dep.to_symbol?.file?.path;
-
-                  // Use actual symbol name, not class from path
-                  const fromName = dep.from_symbol?.name || 'unknown';
-
-                  // For "to" field: keep original qualification logic for target symbol
-                  const shouldQualifyTo = fromName === toName && fromFile !== toFile;
-                  const qualifiedToName =
-                    shouldQualifyTo && toFile
-                      ? `${this.getClassNameFromPath(toFile)}.${toName}`
-                      : toName;
-
-                  // Build base dependency object
-                  const depObj: any = {
-                    from: fromName,
-                    to: qualifiedToName,
-                    type: dep.dependency_type,
-                    line_number: dep.line_number,
-                    file_path: fromFile,
-                    qualified_context: dep.qualified_context,
-                    parameter_types: dep.parameter_types,
-                    call_instance_id: dep.call_instance_id,
-                    calling_object: dep.calling_object,
-                    resolved_class: dep.resolved_class,
-                    parameter_context: dep.parameter_context,
-                  };
-
-                  // Add cross-stack specific fields if this is an API call
-                  if (dep.is_cross_stack) {
-                    depObj.is_cross_stack = true;
-                    depObj.http_method = dep.http_method;
-                    depObj.endpoint_path = dep.endpoint_path;
-                  }
-
-                  return depObj;
-                }),
-                total_count: dependencies.length,
-                query_info: {
-                  symbol: symbol.name,
-                  analysis_type: 'dependencies',
-                  timestamp: new Date().toISOString(),
-                },
-              },
-              null,
-              2
-            ),
+            text: JSON.stringify(response, null, 2),
           },
         ],
       };
-
-      return result;
     } catch (error) {
       this.logger.error('listDependencies operation failed', {
         error: (error as Error).message,
@@ -1272,15 +1209,12 @@ export class McpTools {
 
   /**
    * Core Tool 6: impactOf - Comprehensive impact analysis across all frameworks
-   * Returns simple dependency list format with transitive impact analysis
+   * Returns categorized impact with separate arrays for different types
    *
    * @param args.symbol_id - The ID of the symbol to analyze impact for
    * @param args.frameworks - Multi-framework impact analysis (default: all detected frameworks)
    * @param args.max_depth - Transitive analysis depth (default: 5, min: 1, max: 20)
-   * @param args.page_size - Number of results per page (default: 1000, max: 5000)
-   * @param args.cursor - Pagination cursor for next page
-   * @param args.detail_level - Response detail level: 'summary', 'standard', or 'full'
-   * @returns Comprehensive impact analysis with simple dependency format
+   * @returns Structured impact analysis with direct/indirect symbols, routes, jobs, and tests
    */
   async impactOf(args: any) {
     const validatedArgs = validateImpactOfArgs(args);
@@ -1411,75 +1345,62 @@ export class McpTools {
         )
       );
 
-      // Calculate overall impact score using deduplicated data
-      const allImpactItems = [...deduplicatedDirectImpact, ...deduplicatedTransitiveImpact];
-
-      // Phase 4: Simple dependency list format for impact analysis
-      // Create dependency mappings with actual line numbers from original dependency records
-      const directImpactDependencies = this.createImpactDependencies(
+      // Convert ImpactItems to SimplifiedDependencies
+      const directImpactDeps: SimplifiedDependency[] = this.convertImpactItemsToSimplifiedDeps(
         deduplicatedDirectImpact,
         symbol.name,
-        symbol.file?.path || '',
-        'impacts',
         [...directDependencies, ...directCallers]
       );
 
-      const transitiveImpactDependencies = this.createImpactDependencies(
+      const indirectImpactDeps: SimplifiedDependency[] = this.convertImpactItemsToSimplifiedDeps(
         deduplicatedTransitiveImpact,
         symbol.name,
-        symbol.file?.path || '',
-        'impacts_indirect',
         []
       );
 
-      const allImpactDependencies = [
-        ...directImpactDependencies,
-        ...transitiveImpactDependencies,
-        ...routeImpact.map(route => ({
-          from: route.path,
-          to: symbol.name,
-          type: 'route_impact' as const,
-          line_number: 0,
-          file_path: '',
-        })),
-        ...jobImpact.map(job => ({
-          from: job.name,
-          to: symbol.name,
-          type: 'job_impact' as const,
-          line_number: 0,
-          file_path: '',
-        })),
-        ...testImpact.map(test => ({
-          from: test.name,
-          to: symbol.name,
-          type: 'test_impact' as const,
-          line_number: 0,
-          file_path: test.file_path || '',
-        })),
-      ];
+      // Calculate max depth from transitive impact
+      const maxDepthReached = Math.max(
+        0,
+        ...deduplicatedTransitiveImpact.map(item => item.depth || 0)
+      );
 
-      // Final deduplication of impact dependencies to eliminate any remaining duplicates
-      const deduplicatedImpactDependencies =
-        this.deduplicateImpactDependencies(allImpactDependencies);
+      // Build structured response
+      const response: ImpactAnalysisResponse = {
+        direct_impact: directImpactDeps,
+        indirect_impact: indirectImpactDeps,
+        routes_affected: routeImpact.map(route => ({
+          path: route.path,
+          method: route.method,
+          framework: route.framework,
+        })),
+        jobs_affected: jobImpact.map(job => ({
+          name: job.name,
+          type: job.type,
+        })),
+        tests_affected: testImpact.map(test => ({
+          name: test.name,
+          file_path: test.file_path,
+        })),
+        summary: {
+          total_symbols: directImpactDeps.length + indirectImpactDeps.length,
+          total_routes: routeImpact.length,
+          total_jobs: jobImpact.length,
+          total_tests: testImpact.length,
+          max_depth: maxDepthReached,
+          frameworks: Array.from(frameworksAffected),
+        },
+        query_info: {
+          symbol: symbol.name,
+          analysis_type: 'impact',
+          timestamp: new Date().toISOString(),
+        },
+      };
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                dependencies: deduplicatedImpactDependencies,
-                total_count: deduplicatedImpactDependencies.length,
-                query_info: {
-                  symbol: symbol.name,
-                  analysis_type: 'impact',
-                  timestamp: new Date().toISOString(),
-                  frameworks_affected: Array.from(frameworksAffected),
-                },
-              },
-              null,
-              2
-            ),
+            text: JSON.stringify(response, null, 2),
           },
         ],
       };
@@ -1879,10 +1800,9 @@ export class McpTools {
   }
 
   private determineEntityType(symbol: any): string {
-    if (symbol.file?.path?.endsWith('.vue')) return 'component';
-    if (symbol.symbol_type === 'function' && symbol.name?.match(/^[A-Z]/)) return 'component';
-    if (symbol.symbol_type === 'class' && symbol.name?.includes('Job')) return 'job';
-    return symbol.symbol_type || 'unknown';
+    // Use database-stored entity_type if available (populated by parsers or classification script)
+    // Fallback to symbol_type for backwards compatibility
+    return symbol.entity_type || symbol.symbol_type || 'unknown';
   }
 
   private determineFramework(symbol: any): string {
@@ -1908,9 +1828,25 @@ export class McpTools {
 
   private detectFrameworkByPattern(symbolName: string): string {
     const laravelFacades = [
-      'Log::', 'DB::', 'Cache::', 'Queue::', 'Event::', 'Storage::', 'Mail::',
-      'Auth::', 'Session::', 'Cookie::', 'Crypt::', 'Hash::', 'Config::',
-      'View::', 'Route::', 'Redirect::', 'Response::', 'Request::', 'Validator::'
+      'Log::',
+      'DB::',
+      'Cache::',
+      'Queue::',
+      'Event::',
+      'Storage::',
+      'Mail::',
+      'Auth::',
+      'Session::',
+      'Cookie::',
+      'Crypt::',
+      'Hash::',
+      'Config::',
+      'View::',
+      'Route::',
+      'Redirect::',
+      'Response::',
+      'Request::',
+      'Validator::',
     ];
 
     for (const facade of laravelFacades) {
@@ -1919,7 +1855,16 @@ export class McpTools {
       }
     }
 
-    const laravelMethods = ['::create', '::find', '::where', '::all', '::first', '::save', '::update', '::delete'];
+    const laravelMethods = [
+      '::create',
+      '::find',
+      '::where',
+      '::all',
+      '::first',
+      '::save',
+      '::update',
+      '::delete',
+    ];
     for (const method of laravelMethods) {
       if (symbolName.endsWith(method)) {
         return 'laravel';
@@ -2708,6 +2653,39 @@ export class McpTools {
     }
 
     return deduplicatedDependencies;
+  }
+
+  /**
+   * Convert ImpactItems to SimplifiedDependencies for new impact response format
+   */
+  private convertImpactItemsToSimplifiedDeps(
+    impactItems: ImpactItem[],
+    targetSymbolName: string,
+    originalDependencies: any[]
+  ): SimplifiedDependency[] {
+    return impactItems.map(item => {
+      // Find matching original dependency for line number
+      const matchingDep = originalDependencies.find(dep => {
+        const symbolId = dep.to_symbol?.id || dep.from_symbol?.id;
+        return symbolId === item.id;
+      });
+
+      const dep: SimplifiedDependency = {
+        from: item.name,
+        to: targetSymbolName,
+        type: (item.relationship_type as DependencyType) || DependencyType.CALLS,
+        line_number: matchingDep?.line_number,
+        file_path: item.file_path,
+      };
+
+      // Add call chain if present (for indirect impact)
+      if (item.call_chain) {
+        dep.call_chain = item.call_chain;
+        dep.depth = item.depth;
+      }
+
+      return dep;
+    });
   }
 
   /**

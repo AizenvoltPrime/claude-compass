@@ -1,0 +1,474 @@
+{
+  "godot": {
+    "class": {
+      "baseClassRules": {
+        "Node": {
+          "priority": 1,
+          "entityType": "node",
+          "description": "Base Godot node class"
+        },
+        "Node2D": {
+          "priority": 1,
+          "entityType": "node",
+          "description": "2D node class"
+        },
+        "Node3D": {
+          "priority": 1,
+          "entityType": "node",
+          "description": "3D node class"
+        },
+        "Control": {
+          "priority": 1,
+          "entityType": "ui_component",
+          "description": "UI control element"
+        },
+        "Resource": {
+          "priority": 1,
+          "entityType": "resource",
+          "description": "Godot resource"
+        },
+        "RefCounted": {
+          "priority": 1,
+          "entityType": "resource",
+          "description": "Reference-counted object"
+        },
+        "EventArgs": {
+          "priority": 2,
+          "entityType": "event",
+          "description": "C# EventArgs base class"
+        },
+        "Exception": {
+          "priority": 2,
+          "entityType": "exception",
+          "description": "C# Exception base class"
+        },
+        "Attribute": {
+          "priority": 2,
+          "entityType": "attribute",
+          "description": "C# Attribute base class"
+        }
+      },
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Manager",
+            "priority": 10,
+            "entityType": "manager",
+            "description": "Management/coordination class"
+          },
+          {
+            "pattern": "Service",
+            "priority": 10,
+            "entityType": "service",
+            "description": "Business logic service"
+          },
+          {
+            "pattern": "Handler",
+            "priority": 10,
+            "entityType": "handler",
+            "description": "Event/request handler"
+          },
+          {
+            "pattern": "Controller",
+            "priority": 10,
+            "entityType": "controller",
+            "description": "Controller class",
+            "exclude": {
+              "baseClass": "Controller"
+            }
+          },
+          {
+            "pattern": "Component",
+            "priority": 10,
+            "entityType": "component",
+            "description": "Reusable component"
+          },
+          {
+            "pattern": "Factory",
+            "priority": 10,
+            "entityType": "factory",
+            "description": "Object factory"
+          },
+          {
+            "pattern": "Builder",
+            "priority": 10,
+            "entityType": "builder",
+            "description": "Builder pattern class"
+          },
+          {
+            "pattern": "Provider",
+            "priority": 10,
+            "entityType": "provider",
+            "description": "Data/service provider"
+          },
+          {
+            "pattern": "Repository",
+            "priority": 10,
+            "entityType": "repository",
+            "description": "Data repository"
+          },
+          {
+            "pattern": "Coordinator",
+            "priority": 10,
+            "entityType": "coordinator",
+            "description": "Coordination class"
+          },
+          {
+            "pattern": "Engine",
+            "priority": 10,
+            "entityType": "engine",
+            "description": "Core engine/processor"
+          },
+          {
+            "pattern": "Exception",
+            "priority": 10,
+            "entityType": "exception",
+            "description": "Exception class (universal error handling)"
+          },
+          {
+            "pattern": "Strategy",
+            "priority": 10,
+            "entityType": "strategy",
+            "description": "Strategy pattern implementation"
+          },
+          {
+            "pattern": "State",
+            "priority": 10,
+            "entityType": "state",
+            "description": "State pattern class"
+          },
+          {
+            "pattern": "StateMachine",
+            "priority": 11,
+            "entityType": "state_machine",
+            "description": "State machine (higher priority than State)"
+          },
+          {
+            "pattern": "Policy",
+            "priority": 10,
+            "entityType": "policy",
+            "description": "Policy pattern class"
+          },
+          {
+            "pattern": "Configuration",
+            "priority": 10,
+            "entityType": "configuration",
+            "description": "Configuration class"
+          },
+          {
+            "pattern": "Config",
+            "priority": 10,
+            "entityType": "configuration",
+            "description": "Config class (short form)"
+          },
+          {
+            "pattern": "Constants",
+            "priority": 10,
+            "entityType": "constants",
+            "description": "Constants collection"
+          },
+          {
+            "pattern": "Const",
+            "priority": 10,
+            "entityType": "constants",
+            "description": "Constants (short form)"
+          },
+          {
+            "pattern": "Paths",
+            "priority": 10,
+            "entityType": "constants",
+            "description": "Path constants"
+          },
+          {
+            "pattern": "Events",
+            "priority": 10,
+            "entityType": "event_bus",
+            "description": "Event bus/collection"
+          },
+          {
+            "pattern": "EventArgs",
+            "priority": 10,
+            "entityType": "event",
+            "description": "Event arguments (.NET convention)"
+          },
+          {
+            "pattern": "Attribute",
+            "priority": 10,
+            "entityType": "attribute",
+            "description": "C# attribute class"
+          },
+          {
+            "pattern": "Pool",
+            "priority": 10,
+            "entityType": "pool",
+            "description": "Object pool implementation"
+          },
+          {
+            "pattern": "Statistics",
+            "priority": 10,
+            "entityType": "metrics",
+            "description": "Statistics/metrics collector"
+          },
+          {
+            "pattern": "Metrics",
+            "priority": 10,
+            "entityType": "metrics",
+            "description": "Metrics collector"
+          },
+          {
+            "pattern": "Info",
+            "priority": 8,
+            "entityType": "data_model",
+            "description": "Info/DTO object (lower priority)"
+          },
+          {
+            "pattern": "Result",
+            "priority": 10,
+            "entityType": "data_model",
+            "description": "Result/outcome object"
+          },
+          {
+            "pattern": "Report",
+            "priority": 10,
+            "entityType": "data_model",
+            "description": "Report data object"
+          },
+          {
+            "pattern": "Summary",
+            "priority": 10,
+            "entityType": "data_model",
+            "description": "Summary data object"
+          },
+          {
+            "pattern": "Data",
+            "priority": 7,
+            "entityType": "data_model",
+            "description": "Data class (lowest priority)"
+          },
+          {
+            "pattern": "DTO",
+            "priority": 10,
+            "entityType": "data_model",
+            "description": "Data Transfer Object"
+          },
+          {
+            "pattern": "Rules",
+            "priority": 10,
+            "entityType": "rules",
+            "description": "Business rules class"
+          },
+          {
+            "pattern": "Validator",
+            "priority": 10,
+            "entityType": "validator",
+            "description": "Validation logic class"
+          },
+          {
+            "pattern": "Subscription",
+            "priority": 10,
+            "entityType": "subscription",
+            "description": "Pub/sub subscription"
+          },
+          {
+            "pattern": "Effect",
+            "priority": 9,
+            "entityType": "effect",
+            "description": "Effect class (side effects/game effects)"
+          },
+          {
+            "pattern": "Adapter",
+            "priority": 10,
+            "entityType": "adapter",
+            "description": "Adapter pattern"
+          },
+          {
+            "pattern": "Wrapper",
+            "priority": 10,
+            "entityType": "wrapper",
+            "description": "Wrapper class"
+          },
+          {
+            "pattern": "Helper",
+            "priority": 10,
+            "entityType": "helper",
+            "description": "Helper/utility class"
+          },
+          {
+            "pattern": "Util",
+            "priority": 10,
+            "entityType": "utility",
+            "description": "Utility class (short form)"
+          },
+          {
+            "pattern": "Utility",
+            "priority": 10,
+            "entityType": "utility",
+            "description": "Utility class"
+          }
+        ]
+      }
+    }
+  },
+  "laravel": {
+    "class": {
+      "baseClassRules": {
+        "Model": {
+          "priority": 1,
+          "entityType": "model",
+          "description": "Eloquent model"
+        },
+        "Controller": {
+          "priority": 1,
+          "entityType": "controller",
+          "description": "Laravel controller"
+        },
+        "Job": {
+          "priority": 1,
+          "entityType": "job",
+          "description": "Queue job"
+        },
+        "Middleware": {
+          "priority": 1,
+          "entityType": "middleware",
+          "description": "HTTP middleware"
+        },
+        "Request": {
+          "priority": 1,
+          "entityType": "request",
+          "description": "Form request validation"
+        },
+        "Resource": {
+          "priority": 1,
+          "entityType": "api_resource",
+          "description": "API resource transformer"
+        },
+        "Notification": {
+          "priority": 1,
+          "entityType": "notification",
+          "description": "Notification class"
+        }
+      },
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Controller",
+            "priority": 10,
+            "entityType": "controller",
+            "description": "Controller suffix"
+          },
+          {
+            "pattern": "Job",
+            "priority": 10,
+            "entityType": "job",
+            "description": "Job suffix"
+          },
+          {
+            "pattern": "Service",
+            "priority": 10,
+            "entityType": "service",
+            "description": "Service class"
+          },
+          {
+            "pattern": "Repository",
+            "priority": 10,
+            "entityType": "repository",
+            "description": "Repository pattern"
+          }
+        ]
+      },
+      "directoryRules": [
+        {
+          "path": "/Models/",
+          "priority": 5,
+          "entityType": "model",
+          "description": "Models directory"
+        },
+        {
+          "path": "/Controllers/",
+          "priority": 5,
+          "entityType": "controller",
+          "description": "Controllers directory"
+        },
+        {
+          "path": "/Jobs/",
+          "priority": 5,
+          "entityType": "job",
+          "description": "Jobs directory"
+        },
+        {
+          "path": "/Middleware/",
+          "priority": 5,
+          "entityType": "middleware",
+          "description": "Middleware directory"
+        }
+      ]
+    }
+  },
+  "vue": {
+    "default": {
+      "fileExtensionRules": [
+        {
+          "extension": ".vue",
+          "priority": 20,
+          "entityType": "component",
+          "description": "Vue single-file component"
+        }
+      ],
+      "directoryRules": [
+        {
+          "path": "/components/",
+          "priority": 5,
+          "entityType": "component",
+          "description": "Components directory"
+        },
+        {
+          "path": "/composables/",
+          "priority": 5,
+          "entityType": "composable",
+          "description": "Vue composables"
+        },
+        {
+          "path": "/stores/",
+          "priority": 5,
+          "entityType": "store",
+          "description": "Pinia stores"
+        }
+      ]
+    }
+  },
+  "react": {
+    "function": {
+      "namePatterns": {
+        "prefix": [
+          {
+            "pattern": "^[A-Z]",
+            "priority": 10,
+            "entityType": "component",
+            "description": "Capitalized function (React component)",
+            "fileExtensions": [".jsx", ".tsx"]
+          },
+          {
+            "pattern": "^use[A-Z]",
+            "priority": 15,
+            "entityType": "hook",
+            "description": "React hook (useXxx pattern)"
+          }
+        ]
+      },
+      "directoryRules": [
+        {
+          "path": "/components/",
+          "priority": 5,
+          "entityType": "component",
+          "description": "Components directory"
+        },
+        {
+          "path": "/hooks/",
+          "priority": 5,
+          "entityType": "hook",
+          "description": "Hooks directory"
+        }
+      ]
+    }
+  }
+}

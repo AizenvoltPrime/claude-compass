@@ -20,6 +20,7 @@ import {
 } from './base';
 import { DependencyType, SymbolType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
+import { entityClassifier } from '../utils/entity-classifier';
 import * as path from 'path';
 import {
   normalizeUrlPattern,
