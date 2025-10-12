@@ -198,6 +198,8 @@ export class PHPParser extends ChunkedParser {
     const context = {
       currentNamespace: null as string | null,
       currentClass: null as string | null,
+      typeMap: new Map<string, string>(),
+      parentClass: null as string | null,
     };
 
     const traverse = (node: Parser.SyntaxNode): void => {
@@ -217,13 +219,16 @@ export class PHPParser extends ChunkedParser {
           if (symbol) {
             symbols.push(symbol);
             const previousClass = context.currentClass;
+            const previousParent = context.parentClass;
             context.currentClass = symbol.name;
+            context.parentClass = this.extractParentClass(node, content);
 
             for (const child of node.children) {
               traverse(child);
             }
 
             context.currentClass = previousClass;
+            context.parentClass = previousParent;
 
             const exportInfo = this.extractClassExport(node, content);
             if (exportInfo) exports.push(exportInfo);
@@ -277,12 +282,18 @@ export class PHPParser extends ChunkedParser {
         }
         case 'method_declaration': {
           const symbol = this.extractMethodSymbol(node, content, context);
-          if (symbol) symbols.push(symbol);
+          if (symbol) {
+            symbols.push(symbol);
+            if (symbol.name === '__construct') {
+              this.trackConstructorParameterTypes(node, content, context.typeMap);
+            }
+          }
           break;
         }
         case 'property_declaration': {
           const propertySymbols = this.extractPropertySymbols(node, content);
           symbols.push(...propertySymbols);
+          this.trackPropertyTypes(node, content, context.typeMap);
           break;
         }
         case 'const_declaration': {
@@ -291,22 +302,22 @@ export class PHPParser extends ChunkedParser {
           break;
         }
         case 'function_call_expression': {
-          const dependency = this.extractCallDependency(node, content);
+          const dependency = this.extractCallDependency(node, content, context);
           if (dependency) dependencies.push(dependency);
           break;
         }
         case 'member_call_expression': {
-          const dependency = this.extractMethodCallDependency(node, content);
+          const dependency = this.extractMethodCallDependency(node, content, context);
           if (dependency) dependencies.push(dependency);
           break;
         }
         case 'scoped_call_expression': {
-          const dependency = this.extractScopedCallDependency(node, content);
+          const dependency = this.extractScopedCallDependency(node, content, context);
           if (dependency) dependencies.push(dependency);
           break;
         }
         case 'object_creation_expression': {
-          const dependency = this.extractNewDependency(node, content);
+          const dependency = this.extractNewDependency(node, content, context);
           if (dependency) dependencies.push(dependency);
           break;
         }
@@ -655,7 +666,11 @@ export class PHPParser extends ChunkedParser {
     return 'global';
   }
 
-  private extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  private extractCallDependency(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+  ): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) return null;
 
@@ -664,38 +679,65 @@ export class PHPParser extends ChunkedParser {
     if (functionNode.type === 'name') {
       functionName = this.getNodeText(functionNode, content);
     } else if (functionNode.type === 'qualified_name') {
-      // Handle namespaced function calls
       functionName = this.getNodeText(functionNode, content);
     } else {
       return null;
     }
 
     const callerName = this.findContainingFunction(node, content);
+    const { values: parameters, types: parameterTypes } = this.extractCallParameters(node, content, context.typeMap);
+    const qualifiedContext = this.generateQualifiedContext(context.currentNamespace, context.currentClass, '', functionName);
+    const callInstanceId = this.generateCallInstanceId(context.currentClass, functionName, node.startPosition.row, node.startPosition.column);
 
     return {
       from_symbol: callerName,
       to_symbol: functionName,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
+      calling_object: undefined,
+      resolved_class: undefined,
+      qualified_context: qualifiedContext,
+      parameter_context: parameters.length > 0 ? parameters.join(', ') : undefined,
+      parameter_types: parameterTypes.length > 0 ? parameterTypes : undefined,
+      call_instance_id: callInstanceId,
     };
   }
 
-  private extractMethodCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  private extractMethodCallDependency(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+  ): ParsedDependency | null {
     const memberNode = node.childForFieldName('name');
     if (!memberNode) return null;
 
     const methodName = this.getNodeText(memberNode, content);
     const callerName = this.findContainingFunction(node, content);
+    const callingObject = this.extractCallingObject(node, content);
+    const resolvedClass = this.resolvePhpType(callingObject, context.typeMap, context);
+    const { values: parameters, types: parameterTypes } = this.extractCallParameters(node, content, context.typeMap);
+    const qualifiedContext = this.generateQualifiedContext(context.currentNamespace, context.currentClass, callingObject, methodName);
+    const callInstanceId = this.generateCallInstanceId(context.currentClass, methodName, node.startPosition.row, node.startPosition.column);
 
     return {
       from_symbol: callerName,
       to_symbol: methodName,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
+      calling_object: callingObject || undefined,
+      resolved_class: resolvedClass,
+      qualified_context: qualifiedContext,
+      parameter_context: parameters.length > 0 ? parameters.join(', ') : undefined,
+      parameter_types: parameterTypes.length > 0 ? parameterTypes : undefined,
+      call_instance_id: callInstanceId,
     };
   }
 
-  private extractNewDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  private extractNewDependency(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+  ): ParsedDependency | null {
     const classNode = node.childForFieldName('class');
     if (!classNode) return null;
 
@@ -709,35 +751,57 @@ export class PHPParser extends ChunkedParser {
     }
 
     const callerName = this.findContainingFunction(node, content);
+    const { values: parameters, types: parameterTypes } = this.extractCallParameters(node, content, context.typeMap);
+    const qualifiedContext = this.generateQualifiedContext(context.currentNamespace, context.currentClass, 'new', className);
+    const callInstanceId = this.generateCallInstanceId(context.currentClass, className, node.startPosition.row, node.startPosition.column);
 
     return {
       from_symbol: callerName,
       to_symbol: className,
       dependency_type: DependencyType.REFERENCES,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
+      calling_object: undefined,
+      resolved_class: className,
+      qualified_context: qualifiedContext,
+      parameter_context: parameters.length > 0 ? parameters.join(', ') : undefined,
+      parameter_types: parameterTypes.length > 0 ? parameterTypes : undefined,
+      call_instance_id: callInstanceId,
     };
   }
 
-  private extractScopedCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
-    // Extract static method calls like User::create()
-    // Structure: scoped_call_expression -> [name, ::, name, arguments]
+  private extractScopedCallDependency(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+  ): ParsedDependency | null {
     const children = node.children;
     if (children.length < 3) return null;
 
-    const classNode = children[0]; // Class name
-    const methodNode = children[2]; // Method name (after ::)
+    const classNode = children[0];
+    const methodNode = children[2];
 
     if (classNode.type !== 'name' || methodNode.type !== 'name') return null;
 
     const className = this.getNodeText(classNode, content);
     const methodName = this.getNodeText(methodNode, content);
     const callerName = this.findContainingFunction(node, content);
+    const callingObject = `${className}::`;
+    const resolvedClass = className === 'self' || className === 'static' ? context.currentClass : className === 'parent' ? context.parentClass : className;
+    const { values: parameters, types: parameterTypes } = this.extractCallParameters(node, content, context.typeMap);
+    const qualifiedContext = this.generateQualifiedContext(context.currentNamespace, context.currentClass, callingObject, methodName);
+    const callInstanceId = this.generateCallInstanceId(context.currentClass, methodName, node.startPosition.row, node.startPosition.column);
 
     return {
       from_symbol: callerName,
       to_symbol: `${className}::${methodName}`,
       dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1
+      line_number: node.startPosition.row + 1,
+      calling_object: callingObject,
+      resolved_class: resolvedClass || undefined,
+      qualified_context: qualifiedContext,
+      parameter_context: parameters.length > 0 ? parameters.join(', ') : undefined,
+      parameter_types: parameterTypes.length > 0 ? parameterTypes : undefined,
+      call_instance_id: callInstanceId,
     };
   }
 
@@ -1491,5 +1555,172 @@ export class PHPParser extends ChunkedParser {
 
     traverseForErrors(rootNode);
     return errors;
+  }
+
+  private trackPropertyTypes(node: Parser.SyntaxNode, content: string, typeMap: Map<string, string>): void {
+    const typeNode = node.childForFieldName('type');
+    const propertyElements = this.findNodesOfType(node, 'property_element');
+
+    let typeName: string | null = null;
+    if (typeNode) {
+      typeName = this.getNodeText(typeNode, content);
+    } else {
+      const docComment = this.extractPhpDocComment(node, content);
+      if (docComment) {
+        const varMatch = docComment.match(/@var\s+([^\s]+)/);
+        if (varMatch) {
+          typeName = varMatch[1];
+        }
+      }
+    }
+
+    if (typeName) {
+      for (const element of propertyElements) {
+        const nameNode = element.childForFieldName('name');
+        if (nameNode) {
+          const propertyName = this.getNodeText(nameNode, content).replace('$', '');
+          typeMap.set(propertyName, typeName);
+        }
+      }
+    }
+  }
+
+  private trackConstructorParameterTypes(node: Parser.SyntaxNode, content: string, typeMap: Map<string, string>): void {
+    const parametersNode = node.childForFieldName('parameters');
+    if (!parametersNode) return;
+
+    for (const param of parametersNode.children) {
+      if (param.type !== 'simple_parameter' && param.type !== 'property_promotion_parameter') continue;
+
+      const typeNode = param.childForFieldName('type');
+      const nameNode = param.childForFieldName('name');
+
+      if (typeNode && nameNode) {
+        const typeName = this.getNodeText(typeNode, content);
+        const paramName = this.getNodeText(nameNode, content).replace('$', '');
+        typeMap.set(paramName, typeName);
+      }
+    }
+  }
+
+  private extractParentClass(node: Parser.SyntaxNode, content: string): string | null {
+    const baseClauseNode = node.childForFieldName('base_clause');
+    if (!baseClauseNode) return null;
+
+    const nameNode = baseClauseNode.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return this.getNodeText(nameNode, content);
+  }
+
+  private extractCallingObject(node: Parser.SyntaxNode, content: string): string {
+    const objectNode = node.childForFieldName('object');
+    if (!objectNode) return '';
+
+    return this.getNodeText(objectNode, content);
+  }
+
+  private resolvePhpType(objectExpression: string, typeMap: Map<string, string>, context: { parentClass: string | null; currentClass: string | null }): string | undefined {
+    if (!objectExpression) return undefined;
+
+    const cleanedObject = objectExpression.replace(/^\$this->/, '').replace(/^\$/, '');
+
+    if (objectExpression === '$this' || objectExpression === 'this') {
+      return context.currentClass || undefined;
+    }
+
+    if (objectExpression === 'self' || objectExpression === 'static') {
+      return context.currentClass || undefined;
+    }
+
+    if (objectExpression === 'parent') {
+      return context.parentClass || undefined;
+    }
+
+    return typeMap.get(cleanedObject);
+  }
+
+  private extractCallParameters(node: Parser.SyntaxNode, content: string, typeMap: Map<string, string>): { values: string[]; types: string[] } {
+    const argumentsNode = node.childForFieldName('arguments');
+    const values: string[] = [];
+    const types: string[] = [];
+
+    if (!argumentsNode) return { values, types };
+
+    for (const child of argumentsNode.children) {
+      if (child.type === 'argument') {
+        const valueNode = child.namedChild(0);
+        if (valueNode) {
+          const value = this.getNodeText(valueNode, content);
+          values.push(value);
+
+          const inferredType = this.inferParameterType(valueNode, content, typeMap);
+          types.push(inferredType);
+        }
+      }
+    }
+
+    return { values, types };
+  }
+
+  private inferParameterType(node: Parser.SyntaxNode, content: string, typeMap: Map<string, string>): string {
+    switch (node.type) {
+      case 'integer':
+        return 'int';
+      case 'float':
+        return 'float';
+      case 'string':
+      case 'encapsed_string':
+        return 'string';
+      case 'true':
+      case 'false':
+        return 'bool';
+      case 'null':
+        return 'null';
+      case 'array_creation_expression':
+        return 'array';
+      case 'object_creation_expression':
+        const classNode = node.childForFieldName('class');
+        if (classNode) {
+          return this.getNodeText(classNode, content);
+        }
+        return 'object';
+      case 'variable_name':
+      case 'variable':
+        const varName = this.getNodeText(node, content).replace('$', '');
+        return typeMap.get(varName) || 'mixed';
+      default:
+        return 'mixed';
+    }
+  }
+
+  private generateQualifiedContext(
+    namespace: string | null,
+    currentClass: string | null,
+    callingObject: string,
+    methodName: string
+  ): string {
+    const parts: string[] = [];
+
+    if (namespace && currentClass) {
+      parts.push(`${namespace}\\${currentClass}`);
+    } else if (currentClass) {
+      parts.push(currentClass);
+    }
+
+    if (callingObject) {
+      parts.push(callingObject);
+    }
+
+    if (methodName) {
+      parts.push(methodName);
+    }
+
+    return parts.join('::');
+  }
+
+  private generateCallInstanceId(currentClass: string | null, methodName: string, row: number, column: number): string {
+    const className = currentClass || 'global';
+    return `${className}_${methodName}_${row}_${column}`;
   }
 }

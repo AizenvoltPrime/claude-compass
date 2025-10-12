@@ -1887,21 +1887,44 @@ export class McpTools {
 
   private determineFramework(symbol: any): string {
     const filePath = symbol.file?.path || '';
+    const symbolName = symbol.name || '';
 
-    // Laravel detection
+    if (filePath === '[Framework:unknown]' || !filePath) {
+      return this.detectFrameworkByPattern(symbolName);
+    }
+
     if (filePath.includes('app/') || filePath.endsWith('.php')) return 'laravel';
 
-    // Vue.js detection
     if (filePath.endsWith('.vue')) return 'vue';
 
-    // React detection
     if (filePath.includes('components/') && filePath.endsWith('.tsx')) return 'react';
 
-    // Node.js detection
     if (filePath.includes('server/') || filePath.includes('api/')) return 'node';
 
-    // Enhanced Godot detection
     if (this.isGodotFile(filePath)) return 'godot';
+
+    return 'unknown';
+  }
+
+  private detectFrameworkByPattern(symbolName: string): string {
+    const laravelFacades = [
+      'Log::', 'DB::', 'Cache::', 'Queue::', 'Event::', 'Storage::', 'Mail::',
+      'Auth::', 'Session::', 'Cookie::', 'Crypt::', 'Hash::', 'Config::',
+      'View::', 'Route::', 'Redirect::', 'Response::', 'Request::', 'Validator::'
+    ];
+
+    for (const facade of laravelFacades) {
+      if (symbolName.includes(facade)) {
+        return 'laravel';
+      }
+    }
+
+    const laravelMethods = ['::create', '::find', '::where', '::all', '::first', '::save', '::update', '::delete'];
+    for (const method of laravelMethods) {
+      if (symbolName.endsWith(method)) {
+        return 'laravel';
+      }
+    }
 
     return 'unknown';
   }
@@ -2721,20 +2744,30 @@ export class McpTools {
       // Create one dependency entry for each matching original dependency
       // This ensures multiple calls from the same caller at different lines are all captured
       if (matchingDeps.length > 0) {
-        return matchingDeps.map(originalDep => ({
-          from: fromName,
-          to: qualifiedToName,
-          type: impactType,
-          line_number: originalDep.line_number || 0,
-          file_path: originalDep.from_symbol?.file?.path || '',
-          relationship_context: item.relationship_context,
-          qualified_context: originalDep.qualified_context,
-          parameter_types: originalDep.parameter_types,
-          call_instance_id: originalDep.call_instance_id,
-          calling_object: originalDep.calling_object,
-          resolved_class: originalDep.resolved_class,
-          parameter_context: originalDep.parameter_context,
-        }));
+        return matchingDeps.map(originalDep => {
+          // Determine which symbol contains the relevant data
+          // If item.id matches to_symbol.id, it's a dependency (get to_symbol data)
+          // If item.id matches from_symbol.id, it's a caller (get from_symbol data)
+          const isMatchedInToSymbol = originalDep.to_symbol?.id === item.id;
+          const relevantSymbol = isMatchedInToSymbol
+            ? originalDep.to_symbol
+            : originalDep.from_symbol;
+
+          return {
+            from: fromName,
+            to: qualifiedToName,
+            type: impactType,
+            line_number: originalDep.line_number || 0,
+            file_path: relevantSymbol?.file?.path || item.file_path || '',
+            relationship_context: item.relationship_context,
+            qualified_context: originalDep.qualified_context,
+            parameter_types: originalDep.parameter_types,
+            call_instance_id: originalDep.call_instance_id,
+            calling_object: originalDep.calling_object,
+            resolved_class: originalDep.resolved_class,
+            parameter_context: originalDep.parameter_context,
+          };
+        });
       }
 
       // Fallback if no matching dependency found
