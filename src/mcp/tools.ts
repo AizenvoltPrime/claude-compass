@@ -341,6 +341,8 @@ export interface ImpactItem {
   // Call chain visualization fields (Enhancement 1)
   call_chain?: string;
   depth?: number;
+  // Line number for precise deduplication
+  line_number?: number;
 }
 
 export interface TestImpactItem {
@@ -1133,10 +1135,33 @@ export class McpTools {
 
       // Build SimplifiedDependency array
       const simplifiedDeps: SimplifiedDependency[] = dependencies.map(dep => {
+        // Validate data quality - these should always exist from database query
+        if (!dep.from_symbol?.file?.path) {
+          this.logger.error('Missing from_symbol file path in dependency', {
+            from_symbol_id: dep.from_symbol_id,
+            to_symbol_id: dep.to_symbol_id,
+            line_number: dep.line_number,
+          });
+        }
+        if (!dep.to_symbol?.file?.path) {
+          this.logger.error('Missing to_symbol file path in dependency', {
+            from_symbol_id: dep.from_symbol_id,
+            to_symbol_id: dep.to_symbol_id,
+            line_number: dep.line_number,
+          });
+        }
+        if (!dep.from_symbol?.name) {
+          this.logger.error('Missing from_symbol name in dependency', {
+            from_symbol_id: dep.from_symbol_id,
+            to_symbol_id: dep.to_symbol_id,
+            line_number: dep.line_number,
+          });
+        }
+
         const toName = dep.to_symbol?.name || 'unknown';
         const toFile = dep.to_symbol?.file?.path;
         const fromFile = dep.from_symbol?.file?.path;
-        const fromName = dep.from_symbol?.name || symbol.name;
+        const fromName = dep.from_symbol?.name || 'unknown';
 
         // Always qualify both fields when file paths are available
         const qualifiedFromName =
@@ -1264,6 +1289,7 @@ export class McpTools {
             relationship_context: this.getRelationshipContext(dep),
             direction: 'dependency',
             framework: framework,
+            line_number: dep.line_number,
           });
 
           if (framework) frameworksAffected.add(framework);
@@ -1283,6 +1309,7 @@ export class McpTools {
             relationship_context: this.getRelationshipContext(caller),
             direction: 'caller',
             framework: framework,
+            line_number: caller.line_number,
           });
 
           if (framework) frameworksAffected.add(framework);
@@ -2485,8 +2512,8 @@ export class McpTools {
     const deduplicatedItems: ImpactItem[] = [];
 
     for (const item of items) {
-      // Create composite key: id + file_path + relationship_type for precise deduplication
-      const compositeKey = `${item.id}:${item.file_path}:${item.relationship_type || 'unknown'}`;
+      // Create composite key: id + file_path + relationship_type + line_number for precise deduplication
+      const compositeKey = `${item.id}:${item.file_path}:${item.relationship_type || 'unknown'}:${item.line_number || 'unknown'}`;
 
       if (!seen.has(compositeKey)) {
         seen.add(compositeKey);
@@ -2529,33 +2556,50 @@ export class McpTools {
     originalDependencies: any[]
   ): SimplifiedDependency[] {
     return impactItems.map(item => {
-      // Find matching original dependency for line number and file path
-      const matchingDep = originalDependencies.find(dep => {
-        const symbolId = dep.to_symbol?.id || dep.from_symbol?.id;
-        return symbolId === item.id;
-      });
-
-      // Get file paths for qualification logic
-      const fromFile = matchingDep?.from_symbol?.file?.path;
-      const toFile = matchingDep?.to_symbol?.file?.path || targetSymbolFilePath;
+      // Validate that we have the necessary data
+      if (!item.line_number) {
+        this.logger.error('ImpactItem missing line_number', {
+          item_id: item.id,
+          item_name: item.name,
+          direction: item.direction,
+        });
+      }
+      if (!item.file_path) {
+        this.logger.error('ImpactItem missing file_path', {
+          item_id: item.id,
+          item_name: item.name,
+          direction: item.direction,
+        });
+      }
+      if (!targetSymbolFilePath) {
+        this.logger.error('Target symbol missing file path', {
+          target_name: targetSymbolName,
+        });
+      }
 
       // Determine correct from/to based on direction
       // - 'dependency': target calls item (target -> item)
+      //   - ImpactItem.file_path = item's file (to_symbol.file.path)
+      //   - targetSymbolFilePath = target's file (from)
       // - 'caller': item calls target (item -> target)
-      let from: string, to: string;
+      //   - ImpactItem.file_path = item's file (from_symbol.file.path)
+      //   - targetSymbolFilePath = target's file (to)
+      let from: string, to: string, filePath: string | undefined;
       if (item.direction === 'dependency') {
-        from = fromFile ? `${this.getClassNameFromPath(fromFile)}.${targetSymbolName}` : targetSymbolName;
-        to = toFile ? `${this.getClassNameFromPath(toFile)}.${item.name}` : item.name;
+        from = targetSymbolFilePath
+          ? `${this.getClassNameFromPath(targetSymbolFilePath)}.${targetSymbolName}`
+          : targetSymbolName;
+        to = item.file_path ? `${this.getClassNameFromPath(item.file_path)}.${item.name}` : item.name;
+        filePath = targetSymbolFilePath; // Where the call happens (from side)
       } else if (item.direction === 'caller') {
-        from = fromFile ? `${this.getClassNameFromPath(fromFile)}.${item.name}` : item.name;
-        to = toFile ? `${this.getClassNameFromPath(toFile)}.${targetSymbolName}` : targetSymbolName;
+        from = item.file_path ? `${this.getClassNameFromPath(item.file_path)}.${item.name}` : item.name;
+        to = targetSymbolFilePath
+          ? `${this.getClassNameFromPath(targetSymbolFilePath)}.${targetSymbolName}`
+          : targetSymbolName;
+        filePath = item.file_path; // Where the call happens (from side)
       } else {
         throw new Error(`Invalid direction field in ImpactItem: ${item.direction}`);
       }
-
-      // Use file_path from the dependency record's from_symbol (where the call happens)
-      // to ensure file_path and line_number match
-      let filePath = fromFile;
 
       // Format framework symbols without file paths
       if (!filePath && item.framework) {
@@ -2568,7 +2612,7 @@ export class McpTools {
         from,
         to,
         type: item.relationship_type as DependencyType,
-        line_number: matchingDep?.line_number,
+        line_number: item.line_number,
         file_path: filePath,
       };
 
