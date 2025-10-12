@@ -695,7 +695,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
     const baseTypes = this.extractBaseTypes(node, content);
     const isGodotClass = this.isGodotClass(baseTypes);
     const isPartial = modifiers.includes('partial');
@@ -765,7 +765,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
     const returnType = this.extractReturnType(node, content);
     const parameters = this.extractParameters(node, content);
     const isGodotLifecycle = CSharpParser.GODOT_LIFECYCLE_METHODS.has(name);
@@ -789,13 +789,17 @@ export class CSharpParser extends ChunkedParser {
     const methodQualifiedName = this.buildQualifiedName(context, name);
     const description = this.extractXmlDocComment(node, content);
 
+    // Interface members are implicitly public
+    const isInterfaceMember = this.isInsideInterface(node);
+    const isExported = isInterfaceMember || modifiers.includes('public');
+
     const symbol: ParsedSymbol = {
       name,
       qualified_name: methodQualifiedName,
       symbol_type: SymbolType.METHOD,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
+      is_exported: isExported,
       visibility,
       signature: this.buildMethodSignature(name, modifiers, returnType, parameters),
       description,
@@ -820,7 +824,7 @@ export class CSharpParser extends ChunkedParser {
     const typeNode = variableDeclaration.childForFieldName('type');
     const fieldType = typeNode ? this.getNodeText(typeNode, content) : 'object';
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
 
     // Check for Godot Export attribute
     const hasExportAttribute = this.hasAttribute(node, 'Export', content);
@@ -1218,7 +1222,7 @@ export class CSharpParser extends ChunkedParser {
     const name = this.getNodeText(nameNode, content);
     const propertyType = typeNode ? this.getNodeText(typeNode, content) : 'object';
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
 
     // Add to type map
     context.typeMap.set(name, {
@@ -1230,12 +1234,16 @@ export class CSharpParser extends ChunkedParser {
 
     const description = this.extractXmlDocComment(node, content);
 
+    // Interface members are implicitly public
+    const isInterfaceMember = this.isInsideInterface(node);
+    const isExported = isInterfaceMember || modifiers.includes('public');
+
     symbols.push({
       name,
       symbol_type: SymbolType.PROPERTY,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
+      is_exported: isExported,
       visibility,
       signature: `${modifiers.join(' ')} ${propertyType} ${name}`.trim(),
       description,
@@ -1514,7 +1522,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
     const baseTypes = this.extractBaseTypes(node, content);
 
     context.currentClass = name;
@@ -1569,7 +1577,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
     const description = this.extractXmlDocComment(node, content);
 
     symbols.push({
@@ -1607,7 +1615,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
     const description = this.extractXmlDocComment(node, content);
 
     symbols.push({
@@ -1668,7 +1676,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
 
     // Check if this is a Godot signal
     // Check for Signal attribute for potential delegate signals
@@ -1702,7 +1710,7 @@ export class CSharpParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
     const parameters = this.extractParameters(node, content);
     const description = this.extractXmlDocComment(node, content);
 
@@ -1731,7 +1739,7 @@ export class CSharpParser extends ChunkedParser {
     if (!variableDeclaration) return;
 
     const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers);
+    const visibility = this.getVisibility(modifiers, node);
 
     const declaratorNodes = this.findNodesOfType(variableDeclaration, 'variable_declarator');
     for (const declarator of declaratorNodes) {
@@ -1930,11 +1938,31 @@ export class CSharpParser extends ChunkedParser {
     return modifiers;
   }
 
-  private getVisibility(modifiers: string[]): Visibility {
+  private getVisibility(modifiers: string[], node?: Parser.SyntaxNode): Visibility {
+    // Interface members are implicitly public in C#
+    if (node && this.isInsideInterface(node)) {
+      return Visibility.PUBLIC;
+    }
+
     if (modifiers.includes('public')) return Visibility.PUBLIC;
     if (modifiers.includes('protected')) return Visibility.PROTECTED;
     if (modifiers.includes('internal')) return Visibility.PUBLIC; // Map internal to public for now
     return Visibility.PRIVATE;
+  }
+
+  private isInsideInterface(node: Parser.SyntaxNode): boolean {
+    let current = node.parent;
+    while (current) {
+      if (current.type === 'interface_declaration') {
+        return true;
+      }
+      // Stop at class or struct declarations
+      if (current.type === 'class_declaration' || current.type === 'struct_declaration') {
+        return false;
+      }
+      current = current.parent;
+    }
+    return false;
   }
 
   private extractBaseTypes(node: Parser.SyntaxNode, content: string): string[] {
