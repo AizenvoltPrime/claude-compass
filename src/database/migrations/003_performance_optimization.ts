@@ -17,10 +17,6 @@ import type { Knex } from 'knex';
 export async function up(knex: Knex): Promise<void> {
   console.log('⚡ Creating performance optimizations...');
 
-  // Enable required extensions for advanced search
-  await knex.raw('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-  await knex.raw('CREATE EXTENSION IF NOT EXISTS btree_gin');
-
   // === FULL-TEXT SEARCH INDEXES ===
 
   // Full-text search on symbol names with trigram support
@@ -134,7 +130,7 @@ export async function up(knex: Knex): Promise<void> {
     $$ LANGUAGE plpgsql
   `);
 
-  // Function to notify cache invalidation
+  // Function to notify cache invalidation and refresh materialized views
   await knex.raw(`
     CREATE OR REPLACE FUNCTION notify_dependency_change() RETURNS trigger AS $$
     BEGIN
@@ -159,6 +155,9 @@ export async function up(knex: Knex): Promise<void> {
           )::text
         );
       END IF;
+
+      -- Refresh materialized views to keep stats current
+      PERFORM refresh_dependency_stats();
 
       RETURN COALESCE(NEW, OLD);
     END;

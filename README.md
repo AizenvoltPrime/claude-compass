@@ -16,7 +16,6 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 - Blast radius of changes
 - Cross-stack connections (Vue ↔ Laravel)
 - Background job dependencies
-- Test coverage relationships
 
 **Result**: AI suggestions that look good but break critical batch jobs, APIs, and system integrations.
 
@@ -46,7 +45,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - Detect Vue components, Laravel routes, background jobs
 - Map API calls between frontend and backend
-- Track test coverage relationships
+- Track cross-stack dependencies (Vue ↔ Laravel)
 
 ### Supported Frameworks
 
@@ -64,9 +63,6 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 **Advanced Features:**
 
 - ✅ **Background Jobs** - Bull, BullMQ, Agenda, Bee, Kue, Worker Threads
-- ✅ **Test Frameworks** - Jest, Vitest, Cypress, Playwright with coverage analysis
-- ✅ **ORM Systems** - Prisma, TypeORM, Sequelize, Mongoose, MikroORM
-- ✅ **Package Managers** - npm, yarn, pnpm with monorepo support
 - ✅ **Enhanced Search** - Hybrid embedding+lexical search with vector similarity
 - ✅ **Impact Analysis** - Comprehensive blast radius calculation
 
@@ -109,7 +105,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - **File Graph**: Import/export relationships
 - **Symbol Graph**: Function calls, inheritance, references
-- **Framework Graphs**: Routes, dependency injection, jobs, ORM entities
+- **Framework Graphs**: Routes, components, background jobs, cross-stack API connections
 
 ## How the Analyze Command Works
 
@@ -436,7 +432,7 @@ List all dependencies of a specific symbol.
 
 #### 6. `impact_of`
 
-Comprehensive impact analysis - calculate blast radius across all frameworks including routes, jobs, and tests.
+Comprehensive impact analysis - calculate blast radius across all frameworks including routes and jobs.
 
 **Parameters:**
 
@@ -449,7 +445,7 @@ Comprehensive impact analysis - calculate blast radius across all frameworks inc
 - `detail_level`: Response detail level (default: `standard`)
   - Options: `summary`, `standard`, `full`
 
-**Returns:** Comprehensive impact analysis with blast radius, affected symbols, routes, jobs, and tests
+**Returns:** Comprehensive impact analysis with blast radius, affected symbols, routes, and jobs
 
 ### Usage Examples
 

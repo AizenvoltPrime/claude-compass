@@ -5,7 +5,6 @@ import type { Knex } from 'knex';
  *
  * Key features:
  * - Optimized indexes for full-table queries
- * - Clean data_contracts schema with correct column names
  * - All framework support included from start
  * - Materialized views and performance optimizations
  */
@@ -14,7 +13,6 @@ export async function up(knex: Knex): Promise<void> {
 
   // Enable required extensions first
   await knex.raw('CREATE EXTENSION IF NOT EXISTS vector');
-  await knex.raw('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
   await knex.raw('CREATE EXTENSION IF NOT EXISTS pg_trgm');
   await knex.raw('CREATE EXTENSION IF NOT EXISTS btree_gin');
 
