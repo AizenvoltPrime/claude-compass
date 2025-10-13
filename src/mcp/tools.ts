@@ -9,10 +9,26 @@ import {
 } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
 import { transitiveAnalyzer, TransitiveAnalysisOptions } from '../graph/transitive-analyzer';
+import { MIN_DEPTH, MAX_DEPTH, DEFAULT_DEPENDENCY_DEPTH, DEFAULT_IMPACT_DEPTH, TRANSITIVE_ANALYSIS_THRESHOLD } from './constants';
 
 const logger = createComponentLogger('mcp-tools');
 
 // Input validation helpers
+function validateMaxDepthParameter(value: any): void {
+  if (value === undefined) return;
+
+  if (typeof value !== 'number') {
+    throw new Error('max_depth must be a number');
+  }
+
+  if (!Number.isInteger(value)) {
+    throw new Error('max_depth must be an integer');
+  }
+
+  if (value < MIN_DEPTH || value > MAX_DEPTH) {
+    throw new Error(`max_depth must be between ${MIN_DEPTH} and ${MAX_DEPTH}`);
+  }
+}
 function validateGetFileArgs(args: any): GetFileArgs {
   if (!args.file_id && !args.file_path) {
     throw new Error('Either file_id or file_path must be provided');
@@ -118,12 +134,7 @@ function validateWhoCallsArgs(args: any): WhoCallsArgs {
   if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
     throw new Error('include_cross_stack must be a boolean');
   }
-  if (args.analysis_type !== undefined) {
-    const validTypes = ['quick', 'standard', 'comprehensive'];
-    if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
-      throw new Error('analysis_type must be one of: quick, standard, comprehensive');
-    }
-  }
+  validateMaxDepthParameter(args.max_depth);
   return args as WhoCallsArgs;
 }
 
@@ -137,12 +148,7 @@ function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   if (args.include_cross_stack !== undefined && typeof args.include_cross_stack !== 'boolean') {
     throw new Error('include_cross_stack must be a boolean');
   }
-  if (args.analysis_type !== undefined) {
-    const validTypes = ['quick', 'standard', 'comprehensive'];
-    if (typeof args.analysis_type !== 'string' || !validTypes.includes(args.analysis_type)) {
-      throw new Error('analysis_type must be one of: quick, standard, comprehensive');
-    }
-  }
+  validateMaxDepthParameter(args.max_depth);
   return args as ListDependenciesArgs;
 }
 
@@ -159,13 +165,7 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
   if (args.frameworks !== undefined && !Array.isArray(args.frameworks)) {
     throw new Error('frameworks must be an array');
   }
-  if (args.max_depth !== undefined) {
-    const maxDepth = Number(args.max_depth);
-    if (isNaN(maxDepth) || maxDepth < 1 || maxDepth > 20) {
-      throw new Error('max_depth must be a number between 1 and 20');
-    }
-    args.max_depth = maxDepth;
-  }
+  validateMaxDepthParameter(args.max_depth);
   return args as ImpactOfArgs;
 }
 
@@ -303,14 +303,14 @@ export interface WhoCallsArgs {
   symbol_id: number;
   dependency_type?: string;
   include_cross_stack?: boolean;
-  analysis_type?: 'quick' | 'standard' | 'comprehensive';
+  max_depth?: number; // Transitive depth (default 1, min 1, max 20)
 }
 
 export interface ListDependenciesArgs {
   symbol_id: number;
   dependency_type?: string;
   include_cross_stack?: boolean;
-  analysis_type?: 'quick' | 'standard' | 'comprehensive';
+  max_depth?: number; // Transitive depth (default 1, min 1, max 20)
 }
 
 // Comprehensive impact analysis interface
@@ -383,28 +383,6 @@ export class McpTools {
 
   private getDefaultRepoId(): number | undefined {
     return this.defaultRepoId;
-  }
-
-  // Helper method to get analysis settings based on analysis_type (per PARAMETER_REDUNDANCY_ANALYSIS)
-  private getAnalysisSettings(analysisType: 'quick' | 'standard' | 'comprehensive') {
-    switch (analysisType) {
-      case 'quick':
-        return {
-          maxDepth: 2,
-          includeIndirect: false, // quick analysis skips transitive
-        };
-      case 'comprehensive':
-        return {
-          maxDepth: 10,
-          includeIndirect: true,
-        };
-      case 'standard':
-      default:
-        return {
-          maxDepth: 5,
-          includeIndirect: true,
-        };
-    }
   }
 
   /**
@@ -789,6 +767,7 @@ export class McpTools {
    * @param args.symbol_id - The ID of the symbol to find callers for
    * @param args.dependency_type - Optional type of dependency relationship to find
    * @param args.include_cross_stack - Include cross-stack callers (Vue ↔ Laravel)
+   * @param args.max_depth - Transitive analysis depth (default: 1, min: 1, max: 20)
    * @returns Simple dependency list with caller information
    */
   async whoCalls(args: any) {
@@ -843,26 +822,26 @@ export class McpTools {
 
       let transitiveResults: any[] = [];
 
-      // Use analysis_type to determine smart defaults (replaces include_indirect parameter per PARAMETER_REDUNDANCY_ANALYSIS)
-      const analysisType = validatedArgs.analysis_type || 'standard';
-      const analysisSettings = this.getAnalysisSettings(analysisType);
+      // Use explicit max_depth parameter
+      const maxDepth = validatedArgs.max_depth !== undefined ? validatedArgs.max_depth : DEFAULT_DEPENDENCY_DEPTH;
 
+      // Only perform transitive analysis if max_depth > 1
       const skipTransitive =
-        callers.length > 20 ||
+        maxDepth === 1 ||
+        callers.length > TRANSITIVE_ANALYSIS_THRESHOLD ||
         validatedArgs.include_cross_stack ||
-        !analysisSettings.includeIndirect ||
         validatedArgs.dependency_type; // Skip transitive when user requests specific dependency type
 
-      // Include indirect callers based on analysis_type
-      if (!skipTransitive && analysisSettings.includeIndirect) {
+      // Include indirect callers if max_depth > 1
+      if (!skipTransitive) {
         try {
           const transitiveOptions: TransitiveAnalysisOptions = {
-            maxDepth: analysisSettings.maxDepth,
+            maxDepth: maxDepth,
             includeTypes: validatedArgs.dependency_type
               ? [validatedArgs.dependency_type as DependencyType]
               : undefined,
             includeCrossStack: false,
-            showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+            showCallChains: true,
           };
 
           const transitiveResult = await transitiveAnalyzer.getTransitiveCallers(
@@ -872,37 +851,35 @@ export class McpTools {
 
           transitiveResults = transitiveResult.results;
 
-          // Always include indirect dependencies (include_indirect parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-          if (true) {
-            const transitiveDependencies = transitiveResult.results
-              .map(result => {
-                const firstDep = result.dependencies[0];
-                if (!firstDep?.from_symbol) return null;
+          // Include indirect dependencies
+          const transitiveDependencies = transitiveResult.results
+            .map(result => {
+              const firstDep = result.dependencies[0];
+              if (!firstDep?.from_symbol) return null;
 
-                return {
-                  id: result.symbolId,
-                  from_symbol_id: result.symbolId,
-                  to_symbol_id: firstDep.to_symbol_id,
-                  dependency_type: firstDep.dependency_type,
-                  line_number: firstDep.line_number,
-                  created_at: new Date(),
-                  updated_at: new Date(),
-                  from_symbol: firstDep.from_symbol,
-                  to_symbol: firstDep.to_symbol,
-                  call_chain: result.call_chain,
-                  path: result.path,
-                  depth: result.depth,
-                };
-              })
-              .filter(Boolean);
+              return {
+                id: result.symbolId,
+                from_symbol_id: result.symbolId,
+                to_symbol_id: firstDep.to_symbol_id,
+                dependency_type: firstDep.dependency_type,
+                line_number: firstDep.line_number,
+                created_at: new Date(),
+                updated_at: new Date(),
+                from_symbol: firstDep.from_symbol,
+                to_symbol: firstDep.to_symbol,
+                call_chain: result.call_chain,
+                path: result.path,
+                depth: result.depth,
+              };
+            })
+            .filter(Boolean);
 
-            // Deduplicate before merging to prevent duplicate relationships
-            const deduplicatedTransitive = this.deduplicateRelationships(
-              transitiveDependencies,
-              callers
-            );
-            callers = [...callers, ...deduplicatedTransitive];
-          }
+          // Deduplicate before merging to prevent duplicate relationships
+          const deduplicatedTransitive = this.deduplicateRelationships(
+            transitiveDependencies,
+            callers
+          );
+          callers = [...callers, ...deduplicatedTransitive];
         } catch (error) {
           this.logger.error('Enhanced transitive caller analysis failed', {
             symbol_id: validatedArgs.symbol_id,
@@ -1007,6 +984,7 @@ export class McpTools {
    * @param args.symbol_id - The ID of the symbol to list dependencies for
    * @param args.dependency_type - Optional type of dependency relationship to list
    * @param args.include_cross_stack - Include cross-stack dependencies (Vue ↔ Laravel)
+   * @param args.max_depth - Transitive analysis depth (default: 1, min: 1, max: 20)
    * @returns Simple dependency list with dependency information
    */
   async listDependencies(args: any) {
@@ -1059,25 +1037,25 @@ export class McpTools {
 
       let transitiveResults: any[] = [];
 
-      // Use analysis_type to determine smart defaults (replaces include_indirect parameter per PARAMETER_REDUNDANCY_ANALYSIS)
-      const analysisType = validatedArgs.analysis_type || 'standard';
-      const analysisSettings = this.getAnalysisSettings(analysisType);
+      // Use explicit max_depth parameter
+      const maxDepth = validatedArgs.max_depth !== undefined ? validatedArgs.max_depth : DEFAULT_DEPENDENCY_DEPTH;
 
+      // Only perform transitive analysis if max_depth > 1
       const skipTransitive =
-        dependencies.length > 20 ||
-        validatedArgs.include_cross_stack ||
-        !analysisSettings.includeIndirect;
+        maxDepth === 1 ||
+        dependencies.length > TRANSITIVE_ANALYSIS_THRESHOLD ||
+        validatedArgs.include_cross_stack;
 
-      // Include indirect dependencies based on analysis_type
-      if (!skipTransitive && analysisSettings.includeIndirect) {
+      // Include indirect dependencies if max_depth > 1
+      if (!skipTransitive) {
         try {
           const transitiveOptions: TransitiveAnalysisOptions = {
-            maxDepth: analysisSettings.maxDepth,
+            maxDepth: maxDepth,
             includeTypes: validatedArgs.dependency_type
               ? [validatedArgs.dependency_type as DependencyType]
               : undefined,
             includeCrossStack: false,
-            showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+            showCallChains: true,
           };
 
           const transitiveResult = (await Promise.race([
@@ -1090,38 +1068,35 @@ export class McpTools {
 
           transitiveResults = transitiveResult.results;
 
-          // If include_indirect is true, merge transitive results with direct dependencies
-          // Always include indirect dependencies (include_indirect parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
-          if (true) {
-            const transitiveDependencies = transitiveResult.results
-              .map(result => {
-                const firstDep = result.dependencies[0];
-                if (!firstDep?.to_symbol) return null;
+          // Include indirect dependencies
+          const transitiveDependencies = transitiveResult.results
+            .map(result => {
+              const firstDep = result.dependencies[0];
+              if (!firstDep?.to_symbol) return null;
 
-                return {
-                  id: result.symbolId,
-                  from_symbol_id: firstDep.from_symbol_id,
-                  to_symbol_id: result.symbolId,
-                  dependency_type: firstDep.dependency_type,
-                  line_number: firstDep.line_number,
-                  created_at: new Date(),
-                  updated_at: new Date(),
-                  from_symbol: firstDep.from_symbol,
-                  to_symbol: firstDep.to_symbol,
-                  call_chain: result.call_chain,
-                  path: result.path,
-                  depth: result.depth,
-                };
-              })
-              .filter(Boolean);
+              return {
+                id: result.symbolId,
+                from_symbol_id: firstDep.from_symbol_id,
+                to_symbol_id: result.symbolId,
+                dependency_type: firstDep.dependency_type,
+                line_number: firstDep.line_number,
+                created_at: new Date(),
+                updated_at: new Date(),
+                from_symbol: firstDep.from_symbol,
+                to_symbol: firstDep.to_symbol,
+                call_chain: result.call_chain,
+                path: result.path,
+                depth: result.depth,
+              };
+            })
+            .filter(Boolean);
 
-            // Deduplicate before merging to prevent duplicate relationships
-            const deduplicatedTransitive = this.deduplicateRelationships(
-              transitiveDependencies,
-              dependencies
-            );
-            dependencies = [...dependencies, ...deduplicatedTransitive];
-          }
+          // Deduplicate before merging to prevent duplicate relationships
+          const deduplicatedTransitive = this.deduplicateRelationships(
+            transitiveDependencies,
+            dependencies
+          );
+          dependencies = [...dependencies, ...deduplicatedTransitive];
         } catch (error) {
           this.logger.error('Enhanced transitive dependency analysis failed', {
             symbol_id: validatedArgs.symbol_id,
@@ -1320,7 +1295,7 @@ export class McpTools {
       const deduplicatedDirectImpact = this.deduplicateImpactItems(directImpact);
 
       // Transitive impact analysis
-      const maxDepth = validatedArgs.max_depth || 5;
+      const maxDepth = validatedArgs.max_depth || DEFAULT_IMPACT_DEPTH;
 
       try {
         const transitiveOptions: TransitiveAnalysisOptions = {

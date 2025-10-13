@@ -52,6 +52,32 @@ interface PhpParseState {
 
 
 /**
+ * PHP-specific node types for closure/anonymous function detection
+ */
+const PHP_CLOSURE_NODE_TYPES = new Set([
+  'anonymous_function_creation_expression',
+  'anonymous_function',
+  'arrow_function',
+]);
+
+/**
+ * PHP call type indicators for qualified context formatting
+ */
+const PHP_CALL_PATTERNS = {
+  instanceCallPrefixes: ['$this->', '$'],
+  staticCallSuffix: '::',
+  instanceAccessOperator: '->',
+  staticAccessOperator: '::',
+  namespaceOperator: '\\',
+  newOperator: 'new',
+} as const;
+
+/**
+ * Maximum length for parameter representation before truncation
+ */
+const MAX_PARAMETER_LENGTH = 200;
+
+/**
  * PHP-specific parser using Tree-sitter with chunked parsing support
  */
 export class PHPParser extends ChunkedParser {
@@ -1709,7 +1735,7 @@ export class PHPParser extends ChunkedParser {
       if (child.type === 'argument') {
         const valueNode = child.namedChild(0);
         if (valueNode) {
-          const value = this.getNodeText(valueNode, content);
+          const value = this.getParameterRepresentation(valueNode, content);
           values.push(value);
 
           const inferredType = this.inferParameterType(valueNode, content, typeMap);
@@ -1721,7 +1747,65 @@ export class PHPParser extends ChunkedParser {
     return { values, types };
   }
 
+  private getParameterRepresentation(node: Parser.SyntaxNode, content: string): string {
+    if (this.isClosureOrAnonymousFunction(node)) {
+      const useClause = this.extractClosureUseClause(node, content);
+      return useClause ? `function() use (${useClause})` : 'closure';
+    }
+
+    const closureChild = this.findClosureInNode(node);
+    if (closureChild) {
+      const useClause = this.extractClosureUseClause(closureChild, content);
+      return useClause ? `function() use (${useClause})` : 'closure';
+    }
+
+    const value = this.getNodeText(node, content);
+
+    if (value.length > MAX_PARAMETER_LENGTH) {
+      return value.substring(0, MAX_PARAMETER_LENGTH) + '...';
+    }
+
+    return value;
+  }
+
+  private findClosureInNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    if (this.isClosureOrAnonymousFunction(node)) {
+      return node;
+    }
+
+    for (const child of node.children) {
+      if (this.isClosureOrAnonymousFunction(child)) {
+        return child;
+      }
+    }
+
+    return null;
+  }
+
+  private isClosureOrAnonymousFunction(node: Parser.SyntaxNode): boolean {
+    return PHP_CLOSURE_NODE_TYPES.has(node.type);
+  }
+
+  private extractClosureUseClause(node: Parser.SyntaxNode, content: string): string | null {
+    if (!PHP_CLOSURE_NODE_TYPES.has(node.type)) {
+      return null;
+    }
+
+    for (const child of node.children) {
+      if (child.type === 'anonymous_function_use_clause') {
+        const useText = this.getNodeText(child, content);
+        return useText.replace(/^use\s*\(\s*/, '').replace(/\s*\)\s*$/, '');
+      }
+    }
+
+    return null;
+  }
+
   private inferParameterType(node: Parser.SyntaxNode, content: string, typeMap: Map<string, string>): string {
+    if (this.isClosureOrAnonymousFunction(node)) {
+      return 'callable';
+    }
+
     switch (node.type) {
       case 'integer':
         return 'int';
@@ -1758,23 +1842,59 @@ export class PHPParser extends ChunkedParser {
     callingObject: string,
     methodName: string
   ): string {
-    const parts: string[] = [];
+    const { namespaceOperator, staticAccessOperator, instanceAccessOperator, newOperator, staticCallSuffix } = PHP_CALL_PATTERNS;
+
+    let context = '';
 
     if (namespace && currentClass) {
-      parts.push(`${namespace}\\${currentClass}`);
+      context = `${namespace}${namespaceOperator}${currentClass}`;
     } else if (currentClass) {
-      parts.push(currentClass);
+      context = currentClass;
     }
 
-    if (callingObject) {
-      parts.push(callingObject);
+    if (callingObject && callingObject.trim()) {
+      const cleanedObject = callingObject.trim();
+
+      if (cleanedObject === newOperator) {
+        return methodName ? `${newOperator} ${methodName}` : newOperator;
+      }
+
+      if (cleanedObject.endsWith(staticCallSuffix)) {
+        const staticClass = cleanedObject.slice(0, -staticCallSuffix.length);
+        return methodName ? `${staticClass}${staticAccessOperator}${methodName}` : staticClass;
+      }
+      else if (this.isInstanceCall(cleanedObject)) {
+        if (context) {
+          return `${context}${staticAccessOperator}${cleanedObject}${instanceAccessOperator}${methodName}`;
+        } else {
+          return `${cleanedObject}${instanceAccessOperator}${methodName}`;
+        }
+      }
+      else {
+        if (context) {
+          return `${context}${staticAccessOperator}${cleanedObject}${staticAccessOperator}${methodName}`;
+        } else {
+          return `${cleanedObject}${staticAccessOperator}${methodName}`;
+        }
+      }
     }
 
-    if (methodName) {
-      parts.push(methodName);
+    if (methodName && !callingObject) {
+      if (context) {
+        return `${context}${staticAccessOperator}${methodName}`;
+      } else {
+        return methodName;
+      }
     }
 
-    return parts.join('::');
+    return context;
+  }
+
+  private isInstanceCall(callingObject: string): boolean {
+    const { instanceCallPrefixes, instanceAccessOperator } = PHP_CALL_PATTERNS;
+
+    return instanceCallPrefixes.some(prefix => callingObject.startsWith(prefix)) ||
+           callingObject.includes(instanceAccessOperator);
   }
 
   private generateCallInstanceId(currentClass: string | null, methodName: string, row: number, column: number): string {

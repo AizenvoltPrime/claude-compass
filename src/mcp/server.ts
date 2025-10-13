@@ -155,6 +155,7 @@ export class ClaudeCompassMCPServer {
                 },
               },
               required: ['symbol_id'],
+              additionalProperties: false,
             },
           },
           {
@@ -189,12 +190,12 @@ export class ClaudeCompassMCPServer {
                     ],
                   },
                   description:
-                    'Framework-aware entity types (Phase 6A enhancement - replaces Laravel-specific tools)',
+                    'Framework-aware entity types (replaces Laravel-specific tools)',
                 },
                 framework: {
                   type: 'string',
                   enum: ['laravel', 'vue', 'react', 'node'],
-                  description: 'Filter by framework type (Phase 6A enhancement)',
+                  description: 'Filter by framework type',
                 },
                 is_exported: {
                   type: 'boolean',
@@ -243,8 +244,16 @@ export class ClaudeCompassMCPServer {
                   description: 'Include cross-stack callers (Vue ↔ Laravel)',
                   default: false,
                 },
+                max_depth: {
+                  type: 'number',
+                  description: 'Transitive analysis depth (default: 1, min: 1, max: 20)',
+                  default: 1,
+                  minimum: 1,
+                  maximum: 20,
+                },
               },
               required: ['symbol_id'],
+              additionalProperties: false,
             },
           },
           {
@@ -277,9 +286,16 @@ export class ClaudeCompassMCPServer {
                   description: 'Include cross-stack dependencies (Vue ↔ Laravel)',
                   default: false,
                 },
-                // REMOVED: analysis_type - no longer needed with simple dependency lists (Phase 4)
+                max_depth: {
+                  type: 'number',
+                  description: 'Transitive analysis depth (default: 1, min: 1, max: 20)',
+                  default: 1,
+                  minimum: 1,
+                  maximum: 20,
+                },
               },
               required: ['symbol_id'],
+              additionalProperties: false,
             },
           },
           {
@@ -367,7 +383,7 @@ export class ClaudeCompassMCPServer {
             return this.formatErrorResponse(-32601, `Unknown tool: ${name}`, request.params);
         }
 
-        // Apply Phase 1 performance optimizations
+        // Apply performance optimizations
         response = optimizeResponsePayload(response);
 
         // Apply compression if payload is large enough

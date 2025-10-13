@@ -331,8 +331,8 @@ describe('Enhanced MCP Tools Search', () => {
     });
   });
 
-  describe('Analysis Type Parameter Tests', () => {
-    test('should accept analysis_type parameter in who_calls', async () => {
+  describe('Max Depth Parameter Tests', () => {
+    test('should accept max_depth parameter in who_calls', async () => {
       // First create a test symbol
       const vueFile = await dbService.createFile({
         repo_id: repoId,
@@ -352,7 +352,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       const result = await mcpTools.whoCalls({
         symbol_id: testSymbol.id,
-        analysis_type: 'quick'
+        max_depth: 2
       });
 
       expect(result.content).toBeDefined();
@@ -360,7 +360,7 @@ describe('Enhanced MCP Tools Search', () => {
       expect(response.query_info.symbol).toBe('testMethod');
     });
 
-    test('should accept analysis_type parameter in listDependencies', async () => {
+    test('should accept max_depth parameter in listDependencies', async () => {
       // Create a test symbol with dependencies
       const jsFile = await dbService.createFile({
         repo_id: repoId,
@@ -380,7 +380,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       const result = await mcpTools.listDependencies({
         symbol_id: testSymbol.id,
-        analysis_type: 'comprehensive'
+        max_depth: 10
       });
 
       expect(result.content).toBeDefined();
@@ -388,7 +388,7 @@ describe('Enhanced MCP Tools Search', () => {
       expect(response.query_info.symbol).toBe('TestService');
     });
 
-    test('should accept analysis_type parameter in impact_of', async () => {
+    test('should accept max_depth parameter in impact_of', async () => {
       const vueFile = await dbService.createFile({
         repo_id: repoId,
         path: '/test/enhanced-mcp-search/ImpactComponent.vue',
@@ -407,7 +407,7 @@ describe('Enhanced MCP Tools Search', () => {
 
       const result = await mcpTools.impactOf({
         symbol_id: testSymbol.id,
-        analysis_type: 'standard'
+        max_depth: 5
       });
 
       expect(result.content).toBeDefined();
@@ -605,29 +605,29 @@ describe('Enhanced MCP Tools Search', () => {
       }).rejects.toThrow('search_mode must be one of: auto, exact, vector, qualified');
     });
 
-    test('should validate analysis_type values for who_calls', async () => {
+    test('should validate max_depth range for who_calls', async () => {
       await expect(async () => {
         await mcpTools.whoCalls({
           symbol_id: 1,
-          analysis_type: 'invalid'
+          max_depth: 25 // exceeds maximum of 20
         });
       }).rejects.toThrow();
     });
 
-    test('should validate analysis_type values for listDependencies', async () => {
+    test('should validate max_depth range for listDependencies', async () => {
       await expect(async () => {
         await mcpTools.listDependencies({
           symbol_id: 1,
-          analysis_type: 'invalid'
+          max_depth: 0 // below minimum of 1
         });
       }).rejects.toThrow();
     });
 
-    test('should validate analysis_type values for impact_of', async () => {
+    test('should validate max_depth range for impact_of', async () => {
       await expect(async () => {
         await mcpTools.impactOf({
           symbol_id: 1,
-          analysis_type: 'invalid'
+          max_depth: -1 // below minimum of 1
         });
       }).rejects.toThrow();
     });

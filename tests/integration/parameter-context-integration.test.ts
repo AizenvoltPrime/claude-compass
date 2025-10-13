@@ -225,7 +225,7 @@ describe('Parameter Context Integration Tests', () => {
     // Test whoCalls with call chain visualization
     const whoCallsResult = await mcpTools.whoCalls({
       symbol_id: target.id,
-      analysis_type: 'standard'
+      max_depth: 5
     });
 
     const response = JSON.parse(whoCallsResult.content[0].text);
