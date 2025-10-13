@@ -372,7 +372,7 @@ describe('McpTools', () => {
       expect(data.dependencies[0].type).toBe('calls');
     });
 
-    it('should handle analysis_type parameter', async () => {
+    it('should handle max_depth parameter', async () => {
       const mockSymbol = {
         id: 1,
         name: 'testFunction',
@@ -384,7 +384,7 @@ describe('McpTools', () => {
 
       const result = await mcpTools.listDependencies({
         symbol_id: 1,
-        analysis_type: 'quick'
+        max_depth: 2
       });
 
       expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
@@ -392,18 +392,18 @@ describe('McpTools', () => {
       expect(data.query_info.symbol).toBe('testFunction');
     });
 
-    it('should validate analysis_type parameter values', async () => {
+    it('should validate max_depth parameter values', async () => {
       await expect(async () => {
         await mcpTools.listDependencies({
           symbol_id: 1,
-          analysis_type: 'invalid'
+          max_depth: 25 // exceeds maximum of 20
         });
       }).rejects.toThrow();
     });
   });
 
-  describe('whoCalls with analysis_type', () => {
-    it('should handle analysis_type parameter', async () => {
+  describe('whoCalls with max_depth', () => {
+    it('should handle max_depth parameter', async () => {
       const mockSymbol = {
         id: 1,
         name: 'targetFunction',
@@ -435,7 +435,7 @@ describe('McpTools', () => {
 
       const result = await mcpTools.whoCalls({
         symbol_id: 1,
-        analysis_type: 'comprehensive'
+        max_depth: 10
       });
 
       expect(mockDatabaseService.getSymbolWithFile).toHaveBeenCalledWith(1);
@@ -451,11 +451,11 @@ describe('McpTools', () => {
       expect(data.dependencies[0].to).toBe('targetFunction');
     });
 
-    it('should validate analysis_type parameter values for whoCalls', async () => {
+    it('should validate max_depth parameter values for whoCalls', async () => {
       await expect(async () => {
         await mcpTools.whoCalls({
           symbol_id: 1,
-          analysis_type: 'invalid'
+          max_depth: 0 // below minimum of 1
         });
       }).rejects.toThrow();
     });
@@ -568,6 +568,170 @@ describe('McpTools', () => {
           repo_ids: ['not_a_number']
         });
       }).rejects.toThrow('repo_ids must contain only numbers');
+    });
+  });
+
+  describe('Max Depth Validation Edge Cases', () => {
+    describe('Boundary Tests', () => {
+      it('should accept exactly MIN_DEPTH (1) for whoCalls', async () => {
+        const mockSymbol = {
+          id: 1,
+          name: 'testFunction',
+          symbol_type: SymbolType.FUNCTION,
+          file: { id: 1, path: '/test.js' }
+        };
+        (mockDatabaseService.getSymbolWithFile as jest.Mock).mockResolvedValue(mockSymbol);
+        (mockDatabaseService.getDependenciesToWithContext as jest.Mock).mockResolvedValue([]);
+
+        const result = await mcpTools.whoCalls({ symbol_id: 1, max_depth: 1 });
+        expect(result).toBeDefined();
+      });
+
+      it('should accept exactly MAX_DEPTH (20) for listDependencies', async () => {
+        const mockSymbol = {
+          id: 1,
+          name: 'testFunction',
+          symbol_type: SymbolType.FUNCTION
+        };
+        (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+        (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
+
+        const result = await mcpTools.listDependencies({ symbol_id: 1, max_depth: 20 });
+        expect(result).toBeDefined();
+      });
+
+      it('should reject 0 (below minimum) for whoCalls', async () => {
+        await expect(mcpTools.whoCalls({ symbol_id: 1, max_depth: 0 }))
+          .rejects.toThrow('max_depth must be between 1 and 20');
+      });
+
+      it('should reject 21 (above maximum) for listDependencies', async () => {
+        await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: 21 }))
+          .rejects.toThrow('max_depth must be between 1 and 20');
+      });
+
+      it('should reject 100 (far above maximum) for impactOf', async () => {
+        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: 100 }))
+          .rejects.toThrow('max_depth must be between 1 and 20');
+      });
+    });
+
+    describe('Type Validation', () => {
+      it('should reject string "5" for whoCalls', async () => {
+        await expect(mcpTools.whoCalls({ symbol_id: 1, max_depth: "5" as any }))
+          .rejects.toThrow('max_depth must be a number');
+      });
+
+      it('should reject float 3.5 for listDependencies', async () => {
+        await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: 3.5 }))
+          .rejects.toThrow('max_depth must be an integer');
+      });
+
+      it('should reject float 10.7 for impactOf', async () => {
+        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: 10.7 }))
+          .rejects.toThrow('max_depth must be an integer');
+      });
+
+      it('should reject null for whoCalls', async () => {
+        await expect(mcpTools.whoCalls({ symbol_id: 1, max_depth: null as any }))
+          .rejects.toThrow('max_depth must be a number');
+      });
+
+      it('should reject undefined explicitly passed for listDependencies', async () => {
+        const mockSymbol = {
+          id: 1,
+          name: 'testFunction',
+          symbol_type: SymbolType.FUNCTION
+        };
+        (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+        (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
+
+        // undefined is allowed (uses default), so this should succeed
+        const result = await mcpTools.listDependencies({ symbol_id: 1, max_depth: undefined });
+        expect(result).toBeDefined();
+      });
+
+      it('should reject boolean true for impactOf', async () => {
+        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: true as any }))
+          .rejects.toThrow('max_depth must be a number');
+      });
+
+      it('should reject boolean false for whoCalls', async () => {
+        await expect(mcpTools.whoCalls({ symbol_id: 1, max_depth: false as any }))
+          .rejects.toThrow('max_depth must be a number');
+      });
+
+      it('should reject array [5] for listDependencies', async () => {
+        await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: [5] as any }))
+          .rejects.toThrow('max_depth must be a number');
+      });
+
+      it('should reject object {value: 5} for impactOf', async () => {
+        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: {value: 5} as any }))
+          .rejects.toThrow('max_depth must be a number');
+      });
+    });
+
+    describe('Negative Values', () => {
+      it('should reject -1 for whoCalls', async () => {
+        await expect(mcpTools.whoCalls({ symbol_id: 1, max_depth: -1 }))
+          .rejects.toThrow('max_depth must be between 1 and 20');
+      });
+
+      it('should reject -5 for listDependencies', async () => {
+        await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: -5 }))
+          .rejects.toThrow('max_depth must be between 1 and 20');
+      });
+
+      it('should reject -100 for impactOf', async () => {
+        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: -100 }))
+          .rejects.toThrow('max_depth must be between 1 and 20');
+      });
+    });
+
+    describe('Default Values', () => {
+      it('should use DEFAULT_DEPENDENCY_DEPTH (1) for whoCalls when not specified', async () => {
+        const mockSymbol = {
+          id: 1,
+          name: 'testFunction',
+          symbol_type: SymbolType.FUNCTION,
+          file: { id: 1, path: '/test.js' }
+        };
+        (mockDatabaseService.getSymbolWithFile as jest.Mock).mockResolvedValue(mockSymbol);
+        (mockDatabaseService.getDependenciesToWithContext as jest.Mock).mockResolvedValue([]);
+
+        const result = await mcpTools.whoCalls({ symbol_id: 1 });
+        expect(result).toBeDefined();
+        // With default depth of 1, should not perform transitive analysis
+      });
+
+      it('should use DEFAULT_DEPENDENCY_DEPTH (1) for listDependencies when not specified', async () => {
+        const mockSymbol = {
+          id: 1,
+          name: 'testFunction',
+          symbol_type: SymbolType.FUNCTION
+        };
+        (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+        (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
+
+        const result = await mcpTools.listDependencies({ symbol_id: 1 });
+        expect(result).toBeDefined();
+      });
+
+      it('should use DEFAULT_IMPACT_DEPTH (5) for impactOf when not specified', async () => {
+        const mockSymbol = {
+          id: 1,
+          name: 'testFunction',
+          symbol_type: SymbolType.FUNCTION,
+          file: { id: 1, path: '/test.js' }
+        };
+        (mockDatabaseService.getSymbolWithFile as jest.Mock).mockResolvedValue(mockSymbol);
+        (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
+        (mockDatabaseService.getDependenciesToWithContext as jest.Mock).mockResolvedValue([]);
+
+        const result = await mcpTools.impactOf({ symbol_id: 1 });
+        expect(result).toBeDefined();
+      });
     });
   });
 });

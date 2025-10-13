@@ -417,18 +417,6 @@ describe('Tool Consolidation Validation', () => {
   });
 
   describe('Phase 3 Parameter Consolidation Tests', () => {
-    test('should handle analysis_type parameter in searchCode', async () => {
-      const result = await mcpTools.searchCode({
-        query: 'User',
-        repo_ids: [repoId],
-        analysis_type: 'quick'
-      });
-
-      const response = JSON.parse(result.content[0].text);
-      expect(response.results.length).toBeGreaterThanOrEqual(0);
-      expect(Array.isArray(response.results)).toBe(true);
-    });
-
     test('should handle search_mode enum replacing use_vector', async () => {
       const searchModes = ['auto', 'exact', 'vector', 'qualified'];
 
@@ -521,8 +509,7 @@ describe('Tool Consolidation Validation', () => {
         query: 'User',
         repo_ids: [repoId],
         entity_types: ['model', 'component'],
-        search_mode: 'auto',
-        analysis_type: 'standard'
+        search_mode: 'auto'
       });
 
       const response = JSON.parse(result.content[0].text);
@@ -683,7 +670,6 @@ describe('Tool Consolidation Validation', () => {
         repo_ids: [repoId],
         entity_types: ['route', 'model', 'controller', 'component', 'job'],
         search_mode: 'auto',
-        analysis_type: 'standard',
         is_exported: true
       });
 
