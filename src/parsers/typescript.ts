@@ -31,6 +31,19 @@ export class TypeScriptParser extends JavaScriptParser {
     /declare\s+(?:const|let|var|function|class|interface|namespace)\s+[^;]+;?\s*\n/g,
   ];
 
+  private static readonly TS_MODIFIER_KEYWORDS = new Set([
+    'async',
+    'static',
+    'get',
+    'set',
+    'abstract',
+    'public',
+    'private',
+    'protected',
+    'readonly',
+    'export',
+  ]);
+
   constructor() {
     super();
     this.parser = new Parser();
@@ -182,19 +195,11 @@ export class TypeScriptParser extends JavaScriptParser {
     return signature;
   }
 
-  private extractModifiers(node: Parser.SyntaxNode, content: string): string[] {
+  protected extractModifiers(node: Parser.SyntaxNode): string[] {
     const modifiers: string[] = [];
 
-    // Look for modifier nodes
     for (const child of node.children) {
-      if (child.type === 'abstract' ||
-          child.type === 'public' ||
-          child.type === 'private' ||
-          child.type === 'protected' ||
-          child.type === 'static' ||
-          child.type === 'readonly' ||
-          child.type === 'async' ||
-          child.type === 'export') {
+      if (TypeScriptParser.TS_MODIFIER_KEYWORDS.has(child.type)) {
         modifiers.push(child.type);
       }
     }
@@ -203,18 +208,16 @@ export class TypeScriptParser extends JavaScriptParser {
   }
 
   private extractVisibility(node: Parser.SyntaxNode, content: string): Visibility | undefined {
-    const modifiers = this.extractModifiers(node, content);
+    const modifiers = this.extractModifiers(node);
     return this.getVisibilityFromModifiers(modifiers);
   }
 
   protected isSymbolExported(node: Parser.SyntaxNode, symbolName: string, content: string): boolean {
-    // Check for export keyword in modifiers
-    const modifiers = this.extractModifiers(node, content);
+    const modifiers = this.extractModifiers(node);
     if (modifiers.includes('export')) {
       return true;
     }
 
-    // Fall back to parent class implementation
     return super.isSymbolExported(node, symbolName, content);
   }
 
