@@ -69,7 +69,7 @@
     },
     "statusLine": {
         "type": "command",
-        "command": "bun x ccusage statusline"
+        "command": "uv run .claude/scripts/statusline.py"
     },
     "enableAllProjectMcpServers": true,
     "enabledMcpjsonServers": [

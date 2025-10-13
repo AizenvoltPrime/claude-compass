@@ -102,7 +102,7 @@ def main():
     # - Claude Sonnet 4: ~200k context window
     # - Conservative limit: 100k tokens
     # - Stricter limit: 50k tokens
-    TOKEN_LIMIT = 160000
+    TOKEN_LIMIT = 165000
 
     if context_tokens >= TOKEN_LIMIT:
         # Exceeded context limit - block the operation
