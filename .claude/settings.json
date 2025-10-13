@@ -85,6 +85,23 @@
                         "type": "command",
                         "command": "uv run /home/astefanopoulos/Documents/claude-compass/.claude/hooks/tool-validator.py",
                         "timeout": 5
+                    },
+                    {
+                        "type": "command",
+                        "command": "uv run .claude/hooks/token-limit-guardian.py",
+                        "timeout": 5
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Bash|Grep|Glob|Read|Edit|MultiEdit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "uv run .claude/hooks/token-limit-guardian.py",
+                        "timeout": 5
                     }
                 ]
             }
@@ -92,6 +109,11 @@
         "UserPromptSubmit": [
             {
                 "hooks": [
+                    {
+                        "type": "command",
+                        "command": "uv run .claude/hooks/token-limit-guardian.py",
+                        "timeout": 5
+                    },
                     {
                         "type": "command",
                         "command": "uv run .claude/hooks/task_hard_prep_hook.py"
