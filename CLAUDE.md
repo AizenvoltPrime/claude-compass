@@ -184,7 +184,8 @@ Setup file: `tests/setup.ts` initializes test database
 - Implement proper error handling instead of silent failures
 - Address root causes rather than symptoms
 - Maintain high code quality standards throughout development
-- Never write verbose comments
+- Never use inline comments
+- Always write self-documenting code with clear naming and structure. Use concise documentation comments for methods, classes, and properties to describe their purpose
 
 ## Common Patterns
 

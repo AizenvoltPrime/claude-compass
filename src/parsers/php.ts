@@ -86,6 +86,15 @@ export class PHPParser extends ChunkedParser {
     /\bstatic\s+function\s+\w+\s*\([^)]*\)(?:\s*:\s*[\w\\|]+)?\s*$/,
   ];
 
+  private static readonly MODIFIER_KEYWORDS = new Set([
+    'public',
+    'protected',
+    'private',
+    'static',
+    'abstract',
+    'final',
+  ]);
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(PHP);
@@ -544,7 +553,10 @@ export class PHPParser extends ChunkedParser {
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
-    const signature = this.extractFunctionSignature(node, content);
+    const modifiers = this.extractModifiers(node);
+    const paramsNode = node.childForFieldName('parameters');
+    const params = paramsNode ? this.getNodeText(paramsNode, content) : '()';
+    const signature = this.buildMethodSignature(name, modifiers, params);
     const visibility = this.extractVisibility(node, content);
     const description = this.extractPhpDocComment(node, content);
 
@@ -674,6 +686,28 @@ export class PHPParser extends ChunkedParser {
     }
 
     return signature;
+  }
+
+  private extractModifiers(node: Parser.SyntaxNode): string[] {
+    const modifiers: string[] = [];
+
+    for (const child of node.children) {
+      if (child.type === 'visibility_modifier' && child.childCount > 0) {
+        const visibilityType = child.child(0)?.type;
+        if (visibilityType && PHPParser.MODIFIER_KEYWORDS.has(visibilityType)) {
+          modifiers.push(visibilityType);
+        }
+      } else if (PHPParser.MODIFIER_KEYWORDS.has(child.type)) {
+        modifiers.push(child.type);
+      }
+    }
+
+    return modifiers;
+  }
+
+  private buildMethodSignature(name: string, modifiers: string[], params: string): string {
+    const modifierString = modifiers.length > 0 ? modifiers.join(' ') + ' ' : '';
+    return `${modifierString}function ${name}${params}`;
   }
 
   private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {

@@ -43,6 +43,18 @@ export class JavaScriptParser extends ChunkedParser {
     /}\s*\n/g,
   ];
 
+  private static readonly MODIFIER_KEYWORDS = new Set([
+    'async',
+    'static',
+    'get',
+    'set',
+  ]);
+
+  private static readonly MAX_VARIABLE_VALUE_LENGTH = 100;
+  private static readonly MAX_CALL_SIGNATURE_LENGTH = 100;
+  private static readonly MAX_ARGUMENT_TEXT_LENGTH = 30;
+  private static readonly ELLIPSIS_LENGTH = 3;
+
   constructor() {
     const parser = new Parser();
     parser.setLanguage(JavaScript);
@@ -427,16 +439,29 @@ export class JavaScriptParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
     let symbolType = SymbolType.VARIABLE;
+    let signature: string | undefined;
 
-    // Check if it's an arrow function
-    if (
-      valueNode &&
-      (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression')
-    ) {
-      symbolType = SymbolType.FUNCTION;
+    if (valueNode) {
+      if (valueNode.type === 'arrow_function') {
+        symbolType = SymbolType.FUNCTION;
+        signature = this.buildArrowFunctionSignature(valueNode, content);
+      } else if (valueNode.type === 'function_expression') {
+        symbolType = SymbolType.FUNCTION;
+        signature = this.buildFunctionExpressionSignature(valueNode, content);
+      } else if (valueNode.type === 'call_expression') {
+        signature = this.buildCallExpressionSignature(valueNode, content);
+      } else if (valueNode.type === 'object') {
+        signature = '{...}';
+      } else if (valueNode.type === 'array') {
+        signature = '[...]';
+      } else {
+        const valueText = this.getNodeText(valueNode, content);
+        signature = valueText.length > JavaScriptParser.MAX_VARIABLE_VALUE_LENGTH
+          ? valueText.substring(0, JavaScriptParser.MAX_VARIABLE_VALUE_LENGTH) + '...'
+          : valueText;
+      }
     }
 
-    // Check if it's a constant
     const parent = node.parent;
     if (parent && parent.type === 'variable_declaration') {
       const kind = parent.childForFieldName('kind');
@@ -453,7 +478,7 @@ export class JavaScriptParser extends ChunkedParser {
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
-      signature: valueNode ? this.getNodeText(valueNode, content) : undefined,
+      signature,
       description,
     };
   }
@@ -503,20 +528,21 @@ export class JavaScriptParser extends ChunkedParser {
 
     const name = this.getNodeText(nameNode, content);
 
-    // Skip constructor methods - they are part of the class definition
     if (name === 'constructor') {
       return null;
     }
 
-    const signature = this.extractFunctionSignature(node, content);
+    const modifiers = this.extractModifiers(node);
+    const paramsNode = node.childForFieldName('parameters');
+    const params = paramsNode ? this.getNodeText(paramsNode, content) : '()';
+    const signature = this.buildMethodSignature(name, modifiers, params);
     const description = this.extractJSDocComment(node, content);
 
-    // Determine visibility
     let visibility: Visibility | undefined;
     if (name.startsWith('#')) {
       visibility = Visibility.PRIVATE;
     } else if (name.startsWith('_')) {
-      visibility = Visibility.PRIVATE; // Convention-based privacy
+      visibility = Visibility.PRIVATE;
     }
 
     return {
@@ -524,7 +550,7 @@ export class JavaScriptParser extends ChunkedParser {
       symbol_type: SymbolType.METHOD,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: false, // Methods are not directly exported
+      is_exported: false,
       visibility,
       signature,
       description,
@@ -542,7 +568,7 @@ export class JavaScriptParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: false,
       visibility: Visibility.PRIVATE,
-      signature: this.getNodeText(node, content).substring(0, 100),
+      signature: this.buildArrowFunctionSignature(node, content),
     };
   }
 
@@ -801,6 +827,129 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     return signature;
+  }
+
+  private buildArrowFunctionSignature(node: Parser.SyntaxNode, content: string): string {
+    let signature = '';
+
+    for (const child of node.children) {
+      if (child.type === 'async') {
+        signature += 'async ';
+        break;
+      }
+    }
+
+    const paramsNode = node.childForFieldName('parameters');
+    if (paramsNode) {
+      signature += this.getNodeText(paramsNode, content);
+    } else {
+      for (const child of node.children) {
+        if (child.type === 'identifier') {
+          signature += this.getNodeText(child, content);
+          break;
+        }
+      }
+    }
+
+    signature += ' => ';
+
+    const bodyNode = node.childForFieldName('body');
+    if (bodyNode) {
+      if (bodyNode.type === 'statement_block') {
+        signature += '{...}';
+      } else {
+        signature += '...';
+      }
+    }
+
+    return signature;
+  }
+
+  private buildFunctionExpressionSignature(node: Parser.SyntaxNode, content: string): string {
+    let signature = '';
+
+    for (const child of node.children) {
+      if (child.type === 'async') {
+        signature += 'async ';
+        break;
+      }
+    }
+
+    signature += 'function';
+
+    const nameNode = node.childForFieldName('name');
+    if (nameNode) {
+      signature += ' ' + this.getNodeText(nameNode, content);
+    }
+
+    const paramsNode = node.childForFieldName('parameters');
+    if (paramsNode) {
+      signature += this.getNodeText(paramsNode, content);
+    }
+
+    return signature;
+  }
+
+  private buildCallExpressionSignature(
+    node: Parser.SyntaxNode,
+    content: string,
+    maxLength: number = JavaScriptParser.MAX_CALL_SIGNATURE_LENGTH
+  ): string {
+    const functionNode = node.childForFieldName('function');
+    if (!functionNode) return '';
+
+    let signature = this.getNodeText(functionNode, content);
+    signature += '(';
+
+    const argsNode = node.childForFieldName('arguments');
+    if (argsNode) {
+      const args: string[] = [];
+      for (let i = 0; i < argsNode.namedChildCount; i++) {
+        const arg = argsNode.namedChild(i);
+        if (arg) {
+          const argText = this.getNodeText(arg, content);
+          if (argText.length > JavaScriptParser.MAX_ARGUMENT_TEXT_LENGTH) {
+            if (arg.type === 'string') {
+              args.push('"..."');
+            } else if (arg.type === 'object') {
+              args.push('{...}');
+            } else if (arg.type === 'array') {
+              args.push('[...]');
+            } else {
+              args.push('...');
+            }
+          } else {
+            args.push(argText);
+          }
+        }
+      }
+      signature += args.join(', ');
+    }
+
+    signature += ')';
+
+    if (signature.length > maxLength) {
+      signature = signature.substring(0, maxLength - JavaScriptParser.ELLIPSIS_LENGTH) + '...';
+    }
+
+    return signature;
+  }
+
+  protected extractModifiers(node: Parser.SyntaxNode): string[] {
+    const modifiers: string[] = [];
+
+    for (const child of node.children) {
+      if (JavaScriptParser.MODIFIER_KEYWORDS.has(child.type)) {
+        modifiers.push(child.type);
+      }
+    }
+
+    return modifiers;
+  }
+
+  private buildMethodSignature(name: string, modifiers: string[], params: string): string {
+    const modifierString = modifiers.length > 0 ? modifiers.join(' ') + ' ' : '';
+    return `${modifierString}${name}${params}`;
   }
 
   /**
