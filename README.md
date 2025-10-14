@@ -379,7 +379,7 @@ Search for code symbols with framework awareness and hybrid search capabilities 
   - `vector`: Vector similarity search only (embedding-based)
   - `qualified`: Namespace-aware search (qualified names)
 
-**Returns:** List of matching symbols with framework context (limit: 100 results)
+**Returns:** List of matching symbols with framework context (limit: 30 results)
 
 #### 2. `get_file`
 
@@ -406,7 +406,7 @@ Get details about a specific symbol including its dependencies.
 
 #### 4. `who_calls`
 
-Find all symbols that call or reference a specific symbol.
+Find all symbols that call or reference a specific symbol. Supports transitive analysis to find indirect callers.
 
 **Parameters:**
 
@@ -414,12 +414,16 @@ Find all symbols that call or reference a specific symbol.
 - `dependency_type`: Type of dependency relationship (default: `calls`)
   - Options: `calls`, `imports`, `inherits`, `implements`, `references`, `exports`, `api_call`, `shares_schema`, `frontend_backend`
 - `include_cross_stack`: Include cross-stack callers (Vue ↔ Laravel) (boolean, default: false)
+- `max_depth`: Transitive analysis depth (default: 1, min: 1, max: 20)
+  - Controls how deep to search for indirect callers (e.g., depth 2 finds A→B→target)
+  - Depth 1 returns only direct callers
+  - Higher values find more indirect relationships but increase query time
 
-**Returns:** List of symbols that call or reference the target symbol
+**Returns:** List of symbols that call or reference the target symbol, including call chains for transitive results
 
 #### 5. `list_dependencies`
 
-List all dependencies of a specific symbol.
+List all dependencies of a specific symbol. Supports transitive analysis to find indirect dependencies.
 
 **Parameters:**
 
@@ -427,12 +431,16 @@ List all dependencies of a specific symbol.
 - `dependency_type`: Type of dependency relationship
   - Options: `calls`, `imports`, `inherits`, `implements`, `references`, `exports`, `api_call`, `shares_schema`, `frontend_backend`
 - `include_cross_stack`: Include cross-stack dependencies (Vue ↔ Laravel) (boolean, default: false)
+- `max_depth`: Transitive analysis depth (default: 1, min: 1, max: 20)
+  - Controls how deep to search for indirect dependencies (e.g., depth 2 finds target→B→C)
+  - Depth 1 returns only direct dependencies
+  - Higher values find more indirect relationships but increase query time
 
-**Returns:** List of dependencies with relationship information
+**Returns:** List of dependencies with relationship information, including call chains for transitive results
 
 #### 6. `impact_of`
 
-Comprehensive impact analysis - calculate blast radius across all frameworks including routes and jobs.
+Comprehensive impact analysis - calculate blast radius across all frameworks including routes and jobs. Uses deep transitive analysis to find all affected code.
 
 **Parameters:**
 
@@ -440,12 +448,17 @@ Comprehensive impact analysis - calculate blast radius across all frameworks inc
 - `frameworks`: Multi-framework impact analysis (default: all detected frameworks)
   - Options: `vue`, `laravel`, `react`, `node`
 - `max_depth`: Transitive analysis depth (default: 5, min: 1, max: 20)
-- `page_size`: Number of results per page (default: 1000, max: 5000)
-- `cursor`: Pagination cursor for next page
-- `detail_level`: Response detail level (default: `standard`)
-  - Options: `summary`, `standard`, `full`
+  - Controls how deep to trace impact through the dependency graph
+  - Higher values provide more comprehensive impact analysis
+  - Default of 5 balances thoroughness with performance
 
-**Returns:** Comprehensive impact analysis with blast radius, affected symbols, routes, and jobs
+**Returns:** Comprehensive impact analysis with categorized results:
+- `direct_impact`: Symbols directly related to the target
+- `indirect_impact`: Symbols indirectly affected through transitive dependencies
+- `routes_affected`: Web routes that may be impacted
+- `jobs_affected`: Background jobs that may be impacted
+- `tests_affected`: Test files that should be run
+- `summary`: Aggregate metrics including total counts and frameworks affected
 
 ### Usage Examples
 
@@ -464,19 +477,25 @@ const vectorResults = await mcpClient.callTool('search_code', {
   search_mode: 'vector', // Vector similarity - finds login, auth, verify, etc.
 });
 
-// Get comprehensive impact analysis
+// Get comprehensive impact analysis with deep transitive search
 const impact = await mcpClient.callTool('impact_of', {
   symbol_id: 123,
   frameworks: ['vue', 'laravel'],
-  max_depth: 10,
-  detail_level: 'full',
+  max_depth: 10, // Deep analysis to find all indirect impacts
 });
 
-// Find who calls a specific function
+// Find who calls a specific function (with transitive analysis)
 const callers = await mcpClient.callTool('who_calls', {
   symbol_id: 456,
   dependency_type: 'calls',
   include_cross_stack: true,
+  max_depth: 3, // Find callers up to 3 levels deep (A→B→C→target)
+});
+
+// List dependencies with indirect relationships
+const dependencies = await mcpClient.callTool('list_dependencies', {
+  symbol_id: 789,
+  max_depth: 2, // Find direct dependencies and one level of indirect
 });
 ```
 
