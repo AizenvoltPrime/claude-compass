@@ -363,6 +363,10 @@ export class PHPParser extends ChunkedParser {
           if (importInfo) imports.push(importInfo);
           break;
         }
+        case 'assignment_expression': {
+          this.trackPropertyAssignment(node, content, context.typeMap);
+          break;
+        }
       }
 
       for (let i = 0; i < node.namedChildCount; i++) {
@@ -1683,6 +1687,39 @@ export class PHPParser extends ChunkedParser {
         const typeName = this.getNodeText(typeNode, content);
         const paramName = this.getNodeText(nameNode, content).replace('$', '');
         typeMap.set(paramName, typeName);
+      }
+    }
+  }
+
+  private trackPropertyAssignment(node: Parser.SyntaxNode, content: string, typeMap: Map<string, string>): void {
+    const leftNode = node.childForFieldName('left');
+    const rightNode = node.childForFieldName('right');
+
+    if (!leftNode || !rightNode) return;
+
+    if (leftNode.type === 'member_access_expression') {
+      const objectNode = leftNode.childForFieldName('object');
+      const nameNode = leftNode.childForFieldName('name');
+
+      if (!objectNode || !nameNode) return;
+
+      const objectText = this.getNodeText(objectNode, content);
+      if (objectText !== '$this') return;
+
+      const propertyName = this.getNodeText(nameNode, content);
+
+      if (rightNode.type === 'object_creation_expression') {
+        const classNode = rightNode.namedChild(0);
+        if (classNode && (classNode.type === 'name' || classNode.type === 'qualified_name')) {
+          let className = this.getNodeText(classNode, content);
+
+          if (classNode.type === 'qualified_name') {
+            const parts = className.split('\\');
+            className = parts[parts.length - 1];
+          }
+
+          typeMap.set(propertyName, className);
+        }
       }
     }
   }
