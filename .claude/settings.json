@@ -85,11 +85,6 @@
                         "type": "command",
                         "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/tool-validator.py",
                         "timeout": 5
-                    },
-                    {
-                        "type": "command",
-                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/token-limit-guardian.py",
-                        "timeout": 5
                     }
                 ]
             }
@@ -97,13 +92,7 @@
         "PostToolUse": [
             {
                 "matcher": "Bash|Grep|Glob|Read|Edit|MultiEdit|Write",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/token-limit-guardian.py",
-                        "timeout": 5
-                    }
-                ]
+                "hooks": []
             }
         ],
         "UserPromptSubmit": [
@@ -112,11 +101,6 @@
                     {
                         "type": "command",
                         "command": "uv run .claude/hooks/task_hard_prep_hook.py"
-                    },
-                    {
-                        "type": "command",
-                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/token-limit-guardian.py",
-                        "timeout": 5
                     }
                 ]
             }
