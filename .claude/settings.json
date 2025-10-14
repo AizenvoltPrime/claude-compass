@@ -69,7 +69,7 @@
     },
     "statusLine": {
         "type": "command",
-        "command": "uv run .claude/scripts/statusline.py"
+        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/statusline.py"
     },
     "enableAllProjectMcpServers": true,
     "enabledMcpjsonServers": [
@@ -83,12 +83,12 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "uv run /home/astefanopoulos/Documents/claude-compass/.claude/hooks/tool-validator.py",
+                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/tool-validator.py",
                         "timeout": 5
                     },
                     {
                         "type": "command",
-                        "command": "uv run .claude/hooks/token-limit-guardian.py",
+                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/token-limit-guardian.py",
                         "timeout": 5
                     }
                 ]
@@ -100,7 +100,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "uv run .claude/hooks/token-limit-guardian.py",
+                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/token-limit-guardian.py",
                         "timeout": 5
                     }
                 ]
@@ -111,12 +111,12 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "uv run .claude/hooks/token-limit-guardian.py",
-                        "timeout": 5
+                        "command": "uv run .claude/hooks/task_hard_prep_hook.py"
                     },
                     {
                         "type": "command",
-                        "command": "uv run .claude/hooks/task_hard_prep_hook.py"
+                        "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/token-limit-guardian.py",
+                        "timeout": 5
                     }
                 ]
             }
