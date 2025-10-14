@@ -1334,23 +1334,31 @@ export class McpTools {
         });
       }
 
+      // Collect all impacted symbol IDs for route/job/test analysis
+      const allImpactedIds = new Set<number>([
+        validatedArgs.symbol_id, // Include the original symbol
+        ...deduplicatedDirectImpact.map(item => item.id),
+        ...transitiveImpact.map(item => item.id)
+      ]);
+      const impactedSymbolIds = Array.from(allImpactedIds);
+
       // Always include route, job, and test impact analysis (parameters removed per PARAMETER_REDUNDANCY_ANALYSIS)
       try {
-        const routes = await this.getImpactedRoutes(validatedArgs.symbol_id, frameworksAffected);
+        const routes = await this.getImpactedRoutes(impactedSymbolIds);
         routeImpact.push(...routes);
       } catch (error) {
         this.logger.warn('Route impact analysis failed', { error: (error as Error).message });
       }
 
       try {
-        const jobs = await this.getImpactedJobs(validatedArgs.symbol_id);
+        const jobs = await this.getImpactedJobs(impactedSymbolIds);
         jobImpact.push(...jobs);
       } catch (error) {
         this.logger.warn('Job impact analysis failed', { error: (error as Error).message });
       }
 
       try {
-        const tests = await this.getImpactedTests(validatedArgs.symbol_id);
+        const tests = await this.getImpactedTests(impactedSymbolIds);
         testImpact.push(...tests);
       } catch (error) {
         this.logger.warn('Test impact analysis failed', { error: (error as Error).message });
@@ -2001,34 +2009,21 @@ export class McpTools {
 
   // Helper methods for impact analysis
   private async getImpactedRoutes(
-    symbolId: number,
-    frameworks: Set<string>
+    impactedSymbolIds: number[]
   ): Promise<RouteImpactItem[]> {
     const routes: RouteImpactItem[] = [];
 
     try {
-      const repositories = await this.dbService.getAllRepositories();
+      // Graph-based query: find routes whose handlers are in the impact chain
+      const routeRecords = await this.dbService.getRoutesForSymbols(impactedSymbolIds);
 
-      for (const repo of repositories) {
-        for (const framework of frameworks) {
-          if (framework === 'laravel' || framework === 'node') {
-            const frameworkRoutes = await this.dbService.getRoutesByFramework(repo.id, framework);
-
-            for (const route of frameworkRoutes) {
-              if (route.handler_symbol_id) {
-                const isRelated = await this.isSymbolRelated(symbolId, route.handler_symbol_id);
-                if (isRelated) {
-                  routes.push({
-                    id: route.id,
-                    path: route.path || '',
-                    method: route.method || 'GET',
-                    framework: route.framework_type || framework,
-                  });
-                }
-              }
-            }
-          }
-        }
+      for (const route of routeRecords) {
+        routes.push({
+          id: route.id,
+          path: route.path || '',
+          method: route.method || 'GET',
+          framework: route.framework_type || 'unknown',
+        });
       }
     } catch (error) {
       this.logger.warn('Failed to analyze route impact', { error: (error as Error).message });
@@ -2037,28 +2032,19 @@ export class McpTools {
     return routes;
   }
 
-  private async getImpactedJobs(symbolId: number): Promise<JobImpactItem[]> {
+  private async getImpactedJobs(impactedSymbolIds: number[]): Promise<JobImpactItem[]> {
     const jobs: JobImpactItem[] = [];
 
     try {
-      const jobSymbols = await this.dbService.searchSymbols('job', undefined);
-      const filteredJobs = jobSymbols.filter(
-        symbol =>
-          symbol.symbol_type === 'class' &&
-          (symbol.name?.toLowerCase().includes('job') ||
-            symbol.file?.path?.includes('jobs/') ||
-            symbol.file?.path?.includes('Jobs/'))
-      );
+      // Graph-based query: find jobs that are in the impact chain
+      const jobRecords = await this.dbService.getJobsForSymbols(impactedSymbolIds);
 
-      for (const jobSymbol of filteredJobs) {
-        const isRelated = await this.isSymbolRelated(symbolId, jobSymbol.id);
-        if (isRelated) {
-          jobs.push({
-            id: jobSymbol.id,
-            name: jobSymbol.name,
-            type: 'background_job',
-          });
-        }
+      for (const job of jobRecords) {
+        jobs.push({
+          id: job.id,
+          name: job.name,
+          type: job.entity_type || 'background_job',
+        });
       }
     } catch (error) {
       this.logger.warn('Failed to analyze job impact', { error: (error as Error).message });
@@ -2067,31 +2053,20 @@ export class McpTools {
     return jobs;
   }
 
-  private async getImpactedTests(symbolId: number): Promise<TestImpactItem[]> {
+  private async getImpactedTests(impactedSymbolIds: number[]): Promise<TestImpactItem[]> {
     const tests: TestImpactItem[] = [];
 
     try {
-      const testSymbols = await this.dbService.searchSymbols('test', undefined);
-      const filteredTests = testSymbols.filter(
-        symbol =>
-          symbol.file?.is_test ||
-          symbol.file?.path?.includes('test') ||
-          symbol.file?.path?.includes('Test') ||
-          symbol.file?.path?.includes('spec') ||
-          symbol.file?.path?.includes('.test.') ||
-          symbol.file?.path?.includes('.spec.')
-      );
+      // Graph-based query: find tests that are in the impact chain
+      const testRecords = await this.dbService.getTestsForSymbols(impactedSymbolIds);
 
-      for (const testSymbol of filteredTests) {
-        const isRelated = await this.isSymbolRelated(symbolId, testSymbol.id);
-        if (isRelated) {
-          tests.push({
-            id: testSymbol.id,
-            name: testSymbol.name,
-            file_path: testSymbol.file?.path || '',
-            test_type: this.determineTestType(testSymbol.file?.path || ''),
-          });
-        }
+      for (const test of testRecords) {
+        tests.push({
+          id: test.id,
+          name: test.name,
+          file_path: test.file_path || '',
+          test_type: this.determineTestType(test.file_path || ''),
+        });
       }
     } catch (error) {
       this.logger.warn('Failed to analyze test impact', { error: (error as Error).message });

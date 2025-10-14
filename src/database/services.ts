@@ -35,6 +35,9 @@ import {
   RouteSearchOptions,
   ComponentSearchOptions,
   ComposableSearchOptions,
+  RouteImpactRecord,
+  JobImpactRecord,
+  TestImpactRecord,
   // Phase 6 imports - Enhanced Search
   SymbolSearchOptions,
   VectorSearchOptions,
@@ -4180,6 +4183,63 @@ export class DatabaseService {
     })) as SymbolWithFile[];
 
     return result;
+  }
+
+  /**
+   * Get routes impacted by the given symbol IDs (graph-based query)
+   */
+  async getRoutesForSymbols(symbolIds: number[]): Promise<RouteImpactRecord[]> {
+    if (symbolIds.length === 0) return [];
+
+    return await this.db('routes')
+      .whereIn('handler_symbol_id', symbolIds)
+      .select('id', 'path', 'method', 'framework_type', 'handler_symbol_id');
+  }
+
+  /**
+   * Get jobs impacted by the given symbol IDs (graph-based query)
+   *
+   * Performance Note: LIKE queries on base_class and path may require table scans.
+   * Consider adding indexes on these columns if this becomes a bottleneck.
+   */
+  async getJobsForSymbols(symbolIds: number[]): Promise<JobImpactRecord[]> {
+    if (symbolIds.length === 0) return [];
+
+    return await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .whereIn('symbols.id', symbolIds)
+      .where(function() {
+        this.where('symbols.entity_type', 'job')
+          .orWhere('symbols.base_class', 'like', '%Job%')
+          .orWhere('files.path', 'like', '%/Jobs/%')
+          .orWhere('files.path', 'like', '%/jobs/%');
+      })
+      .select('symbols.id', 'symbols.name', 'symbols.entity_type', 'files.path as file_path')
+      .distinct();
+  }
+
+  /**
+   * Get tests impacted by the given symbol IDs (graph-based query)
+   *
+   * Performance Note: LIKE queries on path may require table scans.
+   * Consider adding indexes on the path column with trigram support for better performance.
+   */
+  async getTestsForSymbols(symbolIds: number[]): Promise<TestImpactRecord[]> {
+    if (symbolIds.length === 0) return [];
+
+    return await this.db('symbols')
+      .join('files', 'symbols.file_id', 'files.id')
+      .whereIn('symbols.id', symbolIds)
+      .where(function() {
+        // Primary check: is_test flag (most efficient)
+        this.where('files.is_test', true)
+          // Fallback: common test file patterns (simplified to avoid redundancy)
+          .orWhere('files.path', 'like', '%.test.%')  // Covers foo.test.js, foo.test.ts
+          .orWhere('files.path', 'like', '%.spec.%')  // Covers foo.spec.js, foo.spec.ts
+          .orWhere('files.path', 'like', '%Test.php'); // Covers FooTest.php (PHP convention)
+      })
+      .select('symbols.id', 'symbols.name', 'files.path as file_path', 'symbols.entity_type')
+      .distinct();
   }
 }
 

@@ -9,6 +9,7 @@ import {
   ParseOptions,
   ParseError
 } from './base';
+import { FrameworkParseOptions } from './base-framework';
 import {
   ChunkedParser,
   MergedParseResult,
@@ -203,7 +204,7 @@ export class PHPParser extends ChunkedParser {
 
     try {
       this.clearNodeCache();
-      const result = this.performSinglePassExtraction(tree.rootNode, content, filePath);
+      const result = this.performSinglePassExtraction(tree.rootNode, content, filePath, options as FrameworkParseOptions);
       const errors = this.extractErrors(tree.rootNode, content, tree);
 
       return {
@@ -220,7 +221,7 @@ export class PHPParser extends ChunkedParser {
     }
   }
 
-  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string, filePath?: string): {
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string, filePath?: string, options?: FrameworkParseOptions): {
     symbols: ParsedSymbol[];
     dependencies: ParsedDependency[];
     imports: ParsedImport[];
@@ -237,6 +238,7 @@ export class PHPParser extends ChunkedParser {
       typeMap: new Map<string, string>(),
       parentClass: null as string | null,
       filePath: filePath || '',
+      options: options,
     };
 
     const traverse = (node: Parser.SyntaxNode): void => {
@@ -472,7 +474,7 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractClassSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null; filePath?: string }): ParsedSymbol | null {
+  private extractClassSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null; filePath?: string; options?: FrameworkParseOptions }): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -497,7 +499,9 @@ export class PHPParser extends ChunkedParser {
       name,
       baseClasses,
       context.filePath || '',
-      undefined // Auto-detect framework from file path and base classes
+      undefined, // Auto-detect framework
+      context.currentNamespace || undefined, // Pass namespace for framework detection
+      context.options?.repositoryFrameworks // Pass repository frameworks from options
     );
 
     return {

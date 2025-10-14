@@ -28,6 +28,7 @@ export interface FrameworkParseOptions extends ParseOptions {
     projectRoot?: string;
     configPath?: string;
   };
+  repositoryFrameworks?: string[]; // Detected frameworks for the entire repository
   detectFrameworkEntities?: boolean;
   skipFrameworkAnalysis?: boolean;
 }

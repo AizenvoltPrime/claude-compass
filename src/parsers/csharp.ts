@@ -9,6 +9,7 @@ import {
   ParseOptions,
   ParseError,
 } from './base';
+import { FrameworkParseOptions } from './base-framework';
 import { createComponentLogger } from '../utils/logger';
 import { entityClassifier } from '../utils/entity-classifier';
 import {
@@ -76,6 +77,7 @@ interface ASTContext {
   isPartialClass: boolean;
   currentMethodParameters: Map<string, string>;
   filePath?: string; // File path for entity classification
+  options?: FrameworkParseOptions; // Parse options including repository frameworks
 }
 
 /**
@@ -380,6 +382,7 @@ export class CSharpParser extends ChunkedParser {
       // Initialize context for single-pass traversal
       const context = this.initializeASTContext();
       context.filePath = filePath; // Store file path for entity classification
+      context.options = options as FrameworkParseOptions; // Store options for framework detection
       const godotContext = this.initializeGodotContext();
 
       // Single traversal to extract everything
@@ -722,7 +725,9 @@ export class CSharpParser extends ChunkedParser {
       name,
       baseTypes,
       context.filePath || '',
-      undefined // Auto-detect framework from file path and base classes
+      undefined, // Auto-detect framework
+      context.currentNamespace, // Pass namespace for framework detection
+      context.options?.repositoryFrameworks // Pass repository frameworks from options
     );
 
     // Store class framework in context so methods can inherit it
@@ -1554,7 +1559,9 @@ export class CSharpParser extends ChunkedParser {
       name,
       baseTypes,
       context.filePath || '',
-      undefined // Auto-detect framework from file path and base classes
+      undefined, // Auto-detect framework
+      context.currentNamespace, // Pass namespace for framework detection
+      context.options?.repositoryFrameworks // Pass repository frameworks from options
     );
 
     // Store interface framework in context so methods can inherit it

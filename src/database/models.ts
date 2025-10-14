@@ -604,6 +604,31 @@ export interface ComponentTree extends Component {
   parent?: Component;
 }
 
+/**
+ * Impact analysis return types
+ */
+export interface RouteImpactRecord {
+  id: number;
+  path: string;
+  method: string;
+  framework_type: string;
+  handler_symbol_id?: number;
+}
+
+export interface JobImpactRecord {
+  id: number;
+  name: string;
+  entity_type: string;
+  file_path?: string;
+}
+
+export interface TestImpactRecord {
+  id: number;
+  name: string;
+  file_path: string;
+  entity_type?: string;
+}
+
 // Framework entity dependency relationships
 export interface ComposableDependency {
   id: number;

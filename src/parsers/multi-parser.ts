@@ -109,6 +109,17 @@ export class MultiParser {
         return this.createEmptyResult(filePath, []);
       }
 
+      // Enhance options with detected repository frameworks
+      // Extract framework names from DetectedFramework objects
+      const frameworkNames = detectionResult?.frameworks
+        ? detectionResult.frameworks.map(f => typeof f === 'string' ? f : f.name)
+        : options.frameworks || [];
+
+      const enhancedOptions: MultiParseOptions = {
+        ...options,
+        repositoryFrameworks: frameworkNames,
+      };
+
       // Parse with each applicable parser in parallel
       const parsePromises = applicableParsers.map(async (parserName) => {
         try {
@@ -130,9 +141,9 @@ export class MultiParser {
           let result: ParseFileResult;
 
           if (parser instanceof BaseFrameworkParser) {
-            result = await parser.parseFile(filePath, content, options);
+            result = await parser.parseFile(filePath, content, enhancedOptions);
           } else if (parser instanceof BaseParser) {
-            const baseResult = await parser.parseFile(filePath, content, options);
+            const baseResult = await parser.parseFile(filePath, content, enhancedOptions);
             result = {
               filePath,
               ...baseResult,
