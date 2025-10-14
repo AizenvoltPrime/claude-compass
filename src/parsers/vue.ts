@@ -240,6 +240,23 @@ export class VueParser extends BaseFrameworkParser {
       symbols.push(...templateSymbols);
     }
 
+    const hasComponentSymbol = symbols.some(s => s.symbol_type === 'component');
+
+    if (!hasComponentSymbol) {
+      const componentName = this.extractComponentName(filePath);
+      const totalLines = (content.match(/\n/g) || []).length + 1;
+      const componentSymbol: ParsedSymbol = {
+        name: componentName,
+        symbol_type: SymbolType.COMPONENT,
+        start_line: 1,
+        end_line: totalLines,
+        is_exported: true,
+        signature: `component ${componentName}`,
+        description: undefined,
+      };
+      symbols.push(componentSymbol);
+    }
+
     // Detect framework entities
     const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
 
