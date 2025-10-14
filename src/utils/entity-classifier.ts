@@ -99,6 +99,8 @@ export class EntityTypeClassifier {
    * @param baseClasses - Array of base classes/interfaces
    * @param filePath - File path (for directory/extension rules)
    * @param framework - Framework context (godot, laravel, vue, react)
+   * @param namespace - Qualified namespace for the symbol
+   * @param repoFrameworks - Frameworks detected at repository level
    * @returns Classification result with entity_type and base_class
    */
   classify(
@@ -106,13 +108,15 @@ export class EntityTypeClassifier {
     name: string,
     baseClasses: string[],
     filePath: string,
-    framework?: string
+    framework?: string,
+    namespace?: string,
+    repoFrameworks?: string[]
   ): ClassificationResult {
     const baseClass = baseClasses.length > 0 ? baseClasses[0] : null;
 
     // Auto-detect framework if not provided
     if (!framework) {
-      framework = this.detectFramework(filePath, baseClasses);
+      framework = this.detectFramework(filePath, baseClasses, namespace, repoFrameworks);
     }
 
     // Collect all matching rules with their priorities
@@ -230,27 +234,78 @@ export class EntityTypeClassifier {
   }
 
   /**
-   * Auto-detect framework from file path and base classes
+   * Auto-detect framework from file path, namespace, and base classes
+   *
+   * Design Decision: PHP Framework Detection
+   * ----------------------------------------
+   * PHP files return `undefined` for framework when Laravel namespaces are not detected,
+   * while C# files return `'csharp'` as a fallback. This is intentional:
+   *
+   * - C#: File extension (.cs) definitively indicates C# language. Returning 'csharp'
+   *   is always correct, even if no specific framework (like Godot) is detected.
+   *
+   * - PHP: File extension (.php) only indicates PHP language, but could be Laravel,
+   *   Symfony, plain PHP, or other frameworks. Returning `undefined` prevents false
+   *   positives from name-based heuristics (e.g., a C# controller named "FooController"
+   *   being incorrectly tagged as Laravel).
+   *
+   * We prioritize **qualified namespaces** (e.g., `Illuminate\` for Laravel, `Godot.`
+   * for Godot) as the most reliable framework detection mechanism, avoiding simple
+   * name pattern matching that leads to cross-language false positives.
    */
-  private detectFramework(filePath: string, baseClasses: string[]): string | undefined {
-    // Framework detection based ONLY on base class inheritance
-    // No file path checks - if you inherit from a framework class, you're using that framework
+  private detectFramework(
+    filePath: string,
+    baseClasses: string[],
+    namespace?: string,
+    repoFrameworks?: string[]
+  ): string | undefined {
+    const ext = filePath.substring(filePath.lastIndexOf('.'));
 
-    // Godot detection (C# game engine)
-    if (this.hasGodotBaseClass(baseClasses)) return 'godot';
-
-    // Laravel detection (PHP framework)
-    if (baseClasses.some(bc => ['Model', 'Controller', 'Job', 'Middleware', 'Eloquent'].includes(bc))) {
-      return 'laravel';
+    // PHP: Check Laravel namespace (definitive) - namespace check is primary, repo hint is secondary
+    if (ext === '.php') {
+      // Check for Laravel by qualified namespace (most reliable)
+      if (this.hasLaravelNamespace(namespace, baseClasses)) {
+        return 'laravel';
+      }
+      // If repo says it's Laravel but namespace doesn't confirm, still return undefined
+      // This prevents false positives from simple name matching
+      return undefined; // PHP but framework cannot be determined - don't guess!
     }
 
-    // Vue detection (special case: .vue files are components by definition, not based on inheritance)
-    if (filePath.endsWith('.vue')) return 'vue';
+    // C#: Check Godot namespace (definitive)
+    if (ext === '.cs') {
+      // Check for Godot by qualified namespace or base classes
+      if (namespace?.startsWith('Godot.') || this.hasGodotBaseClass(baseClasses)) {
+        return 'godot';
+      }
+      // Fallback to generic C# (always safe for C# files)
+      return 'csharp';
+    }
+
+    // Vue/React: File extension is definitive
+    if (ext === '.vue') return 'vue';
+    if (ext === '.jsx' || ext === '.tsx') {
+      return repoFrameworks?.find(f => ['react', 'nextjs'].includes(f));
+    }
 
     // Godot scene files (special case: .tscn files are always Godot scenes)
-    if (filePath.endsWith('.tscn') || filePath.endsWith('.godot')) return 'godot';
+    if (ext === '.tscn' || ext === '.godot') return 'godot';
 
     return undefined;
+  }
+
+  /**
+   * Check if namespace or base classes indicate Laravel framework
+   */
+  private hasLaravelNamespace(namespace?: string, baseClasses?: string[]): boolean {
+    // Check qualified namespace (definitive)
+    if (namespace?.startsWith('Illuminate\\')) return true;
+
+    // Check qualified base classes (definitive)
+    if (baseClasses?.some(bc => bc.startsWith('Illuminate\\'))) return true;
+
+    // Otherwise: cannot determine (don't assume!)
+    return false;
   }
 
   /**
