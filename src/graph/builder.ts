@@ -321,7 +321,8 @@ export class GraphBuilder {
           );
 
           // Query database for actual API call counts after all storage operations
-          const apiCallStats: any = await this.dbService.knex('api_calls as ac')
+          const apiCallStats: any = await this.dbService
+            .knex('api_calls as ac')
             .join('symbols as s', 'ac.caller_symbol_id', 's.id')
             .join('files as f', 's.file_id', 'f.id')
             .where('ac.repo_id', repository.id)
@@ -337,7 +338,8 @@ export class GraphBuilder {
           const tsApiCallCount = parseInt(apiCallStats?.ts_calls as string) || 0;
 
           // Query for backend API endpoint count
-          const backendEndpointCount = await this.dbService.knex('routes')
+          const backendEndpointCount = await this.dbService
+            .knex('routes')
             .where('repo_id', repository.id)
             .where('framework_type', 'laravel')
             .count('* as count')
@@ -379,7 +381,7 @@ export class GraphBuilder {
               vueApiCalls: 0,
               typescriptApiCalls: 0,
               backendEndpoints: 0,
-              dataContracts: 0
+              dataContracts: 0,
             },
           });
 
@@ -1077,7 +1079,7 @@ export class GraphBuilder {
       return fs.stat(file.path).catch(error => {
         this.logger.error('Failed to stat file', {
           path: file.path,
-          error: (error as Error).message
+          error: (error as Error).message,
         });
         return null;
       });
@@ -1158,7 +1160,7 @@ export class GraphBuilder {
 
     this.logger.info('Generating embeddings for symbols', {
       repositoryId,
-      symbolCount: totalSymbols
+      symbolCount: totalSymbols,
     });
 
     const embeddingService = getEmbeddingService();
@@ -1256,7 +1258,8 @@ export class GraphBuilder {
               const desc = descriptionTexts[idx];
               return desc ? `${name} ${desc}` : name;
             });
-            const combinedEmbeddings = await embeddingService.generateBatchEmbeddings(combinedTexts);
+            const combinedEmbeddings =
+              await embeddingService.generateBatchEmbeddings(combinedTexts);
 
             const batchDuration = Date.now() - batchStart;
 
@@ -1300,11 +1303,13 @@ export class GraphBuilder {
                 total: totalSymbols,
                 progress: `${percentComplete}%`,
                 reason: resetDecision.reason,
-                gpuMemory: resetDecision.memoryInfo ? {
-                  used: `${resetDecision.memoryInfo.used}MB`,
-                  total: `${resetDecision.memoryInfo.total}MB`,
-                  utilization: `${resetDecision.memoryInfo.utilizationPercent.toFixed(1)}%`,
-                } : undefined,
+                gpuMemory: resetDecision.memoryInfo
+                  ? {
+                      used: `${resetDecision.memoryInfo.used}MB`,
+                      total: `${resetDecision.memoryInfo.total}MB`,
+                      utilization: `${resetDecision.memoryInfo.utilizationPercent.toFixed(1)}%`,
+                    }
+                  : undefined,
               });
 
               const resetStart = Date.now();
@@ -1355,8 +1360,8 @@ export class GraphBuilder {
               batchProcessed = true;
             }
           }
-        }  // end retry while loop
-      }  // end batch while loop
+        } // end retry while loop
+      } // end batch while loop
 
       // Fetch next chunk (or wait for pre-fetched chunk)
       if (nextChunkPromise) {
@@ -1374,37 +1379,92 @@ export class GraphBuilder {
       totalBatches: finalState.totalBatches,
       finalBatchSize: finalState.currentBatchSize,
       initialBatchSize: finalState.initialBatchSize,
-      baselineProcessingTime: finalState.baselineProcessingTime ? `${Math.round(finalState.baselineProcessingTime)}ms` : 'N/A',
-      recentAvgProcessingTime: finalState.recentAvgProcessingTime ? `${Math.round(finalState.recentAvgProcessingTime)}ms` : 'N/A',
+      baselineProcessingTime: finalState.baselineProcessingTime
+        ? `${Math.round(finalState.baselineProcessingTime)}ms`
+        : 'N/A',
+      recentAvgProcessingTime: finalState.recentAvgProcessingTime
+        ? `${Math.round(finalState.recentAvgProcessingTime)}ms`
+        : 'N/A',
     });
   }
 
   private findFileForEntity(
     filePath: string,
-    filesMap: Map<string, any>,
-    normalizedFilesMap: Map<string, any>,
-    allFiles: any[]
-  ): any | null {
+    filesMap: Map<string, File>,
+    normalizedFilesMap: Map<string, File>,
+    allFiles: File[]
+  ): File | null {
     let matchingFile = filesMap.get(filePath);
 
-    if (!matchingFile) {
-      matchingFile = normalizedFilesMap.get(path.normalize(filePath));
+    if (matchingFile) {
+      return matchingFile;
     }
 
-    if (!matchingFile) {
-      const parseResultBasename = path.basename(filePath);
-      matchingFile = allFiles.find(f => {
-        const dbPathBasename = path.basename(f.path);
-        if (dbPathBasename === parseResultBasename) {
-          const parseResultDir = path.dirname(filePath);
-          const dbPathDir = path.dirname(f.path);
-          return (
-            parseResultDir.endsWith(dbPathDir) ||
-            dbPathDir.endsWith(parseResultDir) ||
-            path.basename(parseResultDir) === path.basename(dbPathDir)
-          );
-        }
+    const normalizedPath = path.normalize(filePath);
+    matchingFile = normalizedFilesMap.get(normalizedPath);
+
+    if (matchingFile) {
+      return matchingFile;
+    }
+
+    const parseResultBasename = path.basename(filePath);
+    const parseResultDir = path.dirname(filePath);
+    const normalizedDir = path.normalize(parseResultDir);
+
+    matchingFile = allFiles.find(f => {
+      const dbPathBasename = path.basename(f.path);
+
+      if (dbPathBasename !== parseResultBasename) {
         return false;
+      }
+
+      const dbPathDir = path.dirname(f.path);
+      const normalizedDbDir = path.normalize(dbPathDir);
+
+      if (normalizedDir === normalizedDbDir) {
+        return true;
+      }
+
+      const parseResultDirParts = normalizedDir.split(path.sep).filter(Boolean);
+      const dbPathDirParts = normalizedDbDir.split(path.sep).filter(Boolean);
+
+      const minLength = Math.min(parseResultDirParts.length, dbPathDirParts.length);
+
+      if (minLength >= 3) {
+        const parseResultLast3 = parseResultDirParts.slice(-3).join(path.sep);
+        const dbPathLast3 = dbPathDirParts.slice(-3).join(path.sep);
+
+        if (parseResultLast3 === dbPathLast3) {
+          return true;
+        }
+      }
+
+      if (minLength >= 2) {
+        const parseResultLast2 = parseResultDirParts.slice(-2).join(path.sep);
+        const dbPathLast2 = dbPathDirParts.slice(-2).join(path.sep);
+
+        if (parseResultLast2 === dbPathLast2) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+
+    if (!matchingFile) {
+      this.logger.debug('File lookup failed for entity', {
+        requestedPath: filePath,
+        normalizedPath,
+        basename: parseResultBasename,
+        directory: parseResultDir,
+        normalizedDirectory: normalizedDir,
+        availableFilesWithSameBasename: allFiles
+          .filter(f => path.basename(f.path) === parseResultBasename)
+          .map(f => ({
+            path: f.path,
+            normalized: path.normalize(f.path),
+            dir: path.dirname(f.path),
+          })),
       });
     }
 
@@ -1489,7 +1549,7 @@ export class GraphBuilder {
               s.name === entity.name || entity.name.includes(s.name) || s.name.includes(entity.name)
           );
 
-          if (!matchingSymbol) {
+          if (!matchingSymbol && entity.type !== 'api_call') {
             const matchingFile = this.findFileForEntity(
               parseResult.filePath,
               filesMap,
@@ -1516,13 +1576,26 @@ export class GraphBuilder {
               continue;
             }
 
-            const entityLine = (entity.metadata as any)?.line || 1;
+            const symbolTypeMap: Record<string, SymbolType> = {
+              component: SymbolType.COMPONENT,
+              composable: SymbolType.FUNCTION,
+              hook: SymbolType.FUNCTION,
+              route: SymbolType.FUNCTION,
+              store: SymbolType.CLASS,
+            };
+
+            const symbolType = symbolTypeMap[entity.type] || SymbolType.FUNCTION;
+
+            const entityMetadata = entity.metadata as { line?: number; endLine?: number } | undefined;
+            const entityStartLine = entityMetadata?.line || 1;
+            const entityEndLine = entityMetadata?.endLine || entityStartLine + 5;
+
             const syntheticSymbol = await this.dbService.createSymbol({
               file_id: matchingFile.id,
               name: entity.name,
-              symbol_type: 'component' as any,
-              start_line: entityLine,
-              end_line: entityLine,
+              symbol_type: symbolType,
+              start_line: entityStartLine,
+              end_line: entityEndLine,
               is_exported: true,
               signature: `${entity.type} ${entity.name}`,
               description: entity.description,
