@@ -174,30 +174,6 @@ export interface SimplifiedSymbolResponse {
 }
 
 /**
- * Simple cross-stack relationship for Vue ↔ Laravel analysis
- */
-export interface SimpleCrossStackRelationship {
-  from_component: string;
-  to_endpoint: string;
-  relationship_type: 'api_call' | 'data_binding' | 'route_reference';
-  method?: string; // HTTP method for API calls
-  url_pattern?: string; // Route pattern
-  line_number?: number;
-}
-
-/**
- * Simplified API call interface
- */
-export interface SimpleApiCall {
-  component: string;
-  method: string; // HTTP method (GET, POST, etc.)
-  url: string; // Request URL or pattern
-  controller_method?: string; // Laravel controller method
-  route_name?: string; // Laravel route name
-  line_number?: number;
-}
-
-/**
  * Response format for simplified dependency list
  */
 export interface FlatDependencyResponse {

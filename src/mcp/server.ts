@@ -329,6 +329,63 @@ export class ClaudeCompassMCPServer {
               additionalProperties: false,
             },
           },
+          {
+            name: 'identify_modules',
+            description:
+              'Discover architectural modules using community detection (Louvain algorithm). Finds clusters of symbols that work closely together, representing natural boundaries like "Authentication", "Payment", etc.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                repo_id: {
+                  type: 'number',
+                  description: 'Repository ID to analyze (optional if default repo is set)',
+                },
+                min_module_size: {
+                  type: 'number',
+                  description: 'Minimum number of symbols per module',
+                  default: 3,
+                },
+                resolution: {
+                  type: 'number',
+                  description: 'Resolution parameter for community detection (higher = more modules)',
+                  default: 1.0,
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          {
+            name: 'trace_flow',
+            description:
+              'Find execution paths between two symbols. Can find shortest path or all paths up to max_depth. Useful for understanding how code flows from point A to B.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                start_symbol_id: {
+                  type: 'number',
+                  description: 'Starting symbol ID',
+                },
+                end_symbol_id: {
+                  type: 'number',
+                  description: 'Ending symbol ID',
+                },
+                find_all_paths: {
+                  type: 'boolean',
+                  description: 'If true, finds all paths; if false, finds shortest path',
+                  default: false,
+                },
+                max_depth: {
+                  type: 'number',
+                  description: 'Maximum path depth to search',
+                  default: 10,
+                  minimum: 1,
+                  maximum: 20,
+                },
+              },
+              required: ['start_symbol_id', 'end_symbol_id'],
+              additionalProperties: false,
+            },
+          },
         ],
       };
     });
@@ -377,6 +434,14 @@ export class ClaudeCompassMCPServer {
 
           case 'impact_of':
             response = await this.tools.impactOf(args);
+            break;
+
+          case 'identify_modules':
+            response = await this.tools.identifyModules(args);
+            break;
+
+          case 'trace_flow':
+            response = await this.tools.traceFlow(args);
             break;
 
           default:

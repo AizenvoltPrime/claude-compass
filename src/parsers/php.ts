@@ -78,6 +78,16 @@ const PHP_CALL_PATTERNS = {
  */
 const MAX_PARAMETER_LENGTH = 200;
 
+interface PHPParsingContext {
+  currentNamespace: string | null;
+  currentClass: string | null;
+  typeMap: Map<string, string>;
+  parentClass: string | null;
+  filePath: string;
+  useStatements: ParsedImport[];
+  options?: FrameworkParseOptions;
+}
+
 /**
  * PHP-specific parser using Tree-sitter with chunked parsing support
  */
@@ -232,12 +242,13 @@ export class PHPParser extends ChunkedParser {
     const imports: ParsedImport[] = [];
     const exports: ParsedExport[] = [];
 
-    const context = {
-      currentNamespace: null as string | null,
-      currentClass: null as string | null,
+    const context: PHPParsingContext = {
+      currentNamespace: null,
+      currentClass: null,
       typeMap: new Map<string, string>(),
-      parentClass: null as string | null,
+      parentClass: null,
       filePath: filePath || '',
+      useStatements: [],
       options: options,
     };
 
@@ -362,7 +373,10 @@ export class PHPParser extends ChunkedParser {
         }
         case 'namespace_use_declaration': {
           const importInfo = this.extractUseStatement(node, content);
-          if (importInfo) imports.push(importInfo);
+          if (importInfo) {
+            imports.push(importInfo);
+            context.useStatements.push(importInfo);
+          }
           break;
         }
         case 'assignment_expression': {
@@ -761,7 +775,7 @@ export class PHPParser extends ChunkedParser {
   private extractCallDependency(
     node: Parser.SyntaxNode,
     content: string,
-    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+    context: PHPParsingContext
   ): ParsedDependency | null {
     const functionNode = node.childForFieldName('function');
     if (!functionNode) return null;
@@ -798,7 +812,7 @@ export class PHPParser extends ChunkedParser {
   private extractMethodCallDependency(
     node: Parser.SyntaxNode,
     content: string,
-    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+    context: PHPParsingContext
   ): ParsedDependency | null {
     const memberNode = node.childForFieldName('name');
     if (!memberNode) return null;
@@ -828,7 +842,7 @@ export class PHPParser extends ChunkedParser {
   private extractNewDependency(
     node: Parser.SyntaxNode,
     content: string,
-    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+    context: PHPParsingContext
   ): ParsedDependency | null {
     const classNode = node.childForFieldName('class');
     if (!classNode) return null;
@@ -864,7 +878,7 @@ export class PHPParser extends ChunkedParser {
   private extractScopedCallDependency(
     node: Parser.SyntaxNode,
     content: string,
-    context: { currentNamespace: string | null; currentClass: string | null; typeMap: Map<string, string>; parentClass: string | null }
+    context: PHPParsingContext
   ): ParsedDependency | null {
     const children = node.children;
     if (children.length < 3) return null;
@@ -878,14 +892,78 @@ export class PHPParser extends ChunkedParser {
     const methodName = this.getNodeText(methodNode, content);
     const callerName = this.findContainingFunction(node, content);
     const callingObject = `${className}::`;
-    const resolvedClass = className === 'self' || className === 'static' ? context.currentClass : className === 'parent' ? context.parentClass : className;
+
+    let resolvedClass: string | null;
+    let fullyQualifiedName: string | null = null;
+
+    if (className === 'self' || className === 'static') {
+      resolvedClass = context.currentClass;
+      if (context.currentNamespace && context.currentClass) {
+        fullyQualifiedName = `${context.currentNamespace}\\${context.currentClass}`;
+      }
+    } else if (className === 'parent') {
+      resolvedClass = context.parentClass;
+      if (context.currentNamespace && context.parentClass) {
+        fullyQualifiedName = `${context.currentNamespace}\\${context.parentClass}`;
+      }
+    } else {
+      resolvedClass = className;
+
+      const normalizedClassName = className.replace(/^\\/, '');
+
+      if (process.env.CLAUDE_COMPASS_DEBUG === 'true' && className === 'Personnel') {
+        console.log('[PHP Parser Debug] Resolving Personnel static call', {
+          className,
+          normalizedClassName,
+          useStatementsCount: context.useStatements.length,
+          useStatements: context.useStatements.map(u => u.imported_names),
+          currentNamespace: context.currentNamespace,
+          filePath: context.filePath
+        });
+      }
+
+      for (const useStmt of context.useStatements) {
+        if (!useStmt.imported_names) continue;
+
+        for (const importedName of useStmt.imported_names) {
+          const parts = importedName.split('\\');
+          const lastPart = parts[parts.length - 1];
+
+          if (lastPart === normalizedClassName || importedName === normalizedClassName) {
+            fullyQualifiedName = importedName;
+            break;
+          }
+
+          if (importedName.endsWith(`\\${normalizedClassName}`)) {
+            fullyQualifiedName = importedName;
+            break;
+          }
+        }
+        if (fullyQualifiedName) break;
+      }
+
+      if (!fullyQualifiedName && context.currentNamespace) {
+        fullyQualifiedName = `${context.currentNamespace}\\${className}`;
+      } else if (!fullyQualifiedName) {
+        fullyQualifiedName = className;
+      }
+
+      if (process.env.CLAUDE_COMPASS_DEBUG === 'true' && className === 'Personnel') {
+        console.log('[PHP Parser Debug] Final FQN for Personnel', {
+          fullyQualifiedName,
+          toQualifiedName: fullyQualifiedName ? `${fullyQualifiedName}::${methodName}` : undefined
+        });
+      }
+    }
+
     const { values: parameters, types: parameterTypes } = this.extractCallParameters(node, content, context.typeMap);
     const qualifiedContext = this.generateQualifiedContext(context.currentNamespace, context.currentClass, callingObject, methodName);
     const callInstanceId = this.generateCallInstanceId(context.currentClass, methodName, node.startPosition.row, node.startPosition.column);
 
     return {
       from_symbol: callerName,
-      to_symbol: `${className}::${methodName}`,
+      to_symbol: methodName,
+      to_qualified_name: fullyQualifiedName ? `${fullyQualifiedName}::${methodName}` : undefined,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
       calling_object: callingObject,

@@ -941,10 +941,19 @@ export class CSharpParser extends ChunkedParser {
     );
     const qualifiedContext = this.buildQualifiedContext(methodCall);
 
+    const fullyQualifiedClassName = methodCall.resolvedClass
+      ? this.resolveClassNameWithUsings(methodCall.resolvedClass, context)
+      : undefined;
+
+    const toQualifiedName = fullyQualifiedClassName
+      ? `${fullyQualifiedClassName}::${methodCall.methodName}`
+      : undefined;
+
     // Create dependency entry
     dependencies.push({
       from_symbol: callerName,
       to_symbol: methodCall.fullyQualifiedName,
+      to_qualified_name: toQualifiedName,
       dependency_type: DependencyType.CALLS,
       line_number: node.startPosition.row + 1,
       calling_object: methodCall.callingObject || undefined,
@@ -1117,6 +1126,29 @@ export class CSharpParser extends ChunkedParser {
     // Try parameter resolution (TODO: Add parameter type tracking)
 
     return typeInfo?.type;
+  }
+
+  private resolveClassNameWithUsings(className: string, context: ASTContext): string {
+    if (!className) return className;
+
+    if (className.includes('.')) {
+      return className;
+    }
+
+    if (context.currentNamespace && this.isDefinedInCurrentNamespace(className, context)) {
+      return `${context.currentNamespace}.${className}`;
+    }
+
+    for (const usingDirective of context.usingDirectives) {
+      const potentialFqn = `${usingDirective}.${className}`;
+      return potentialFqn;
+    }
+
+    return className;
+  }
+
+  private isDefinedInCurrentNamespace(className: string, context: ASTContext): boolean {
+    return false;
   }
 
   private generateCallInstanceId(methodName: string, lineNumber: number): string {

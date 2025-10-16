@@ -9,15 +9,12 @@
 import {
   Symbol,
   SymbolWithFile,
-  ApiCall,
   DataContract,
   CreateApiCall,
   CreateDataContract,
   DependencyType,
   Route,
   Component,
-  Composable,
-  ORMEntity,
   File as DbFile,
 } from '../database/models';
 import { FrameworkEntity } from '../parsers/base';
@@ -260,7 +257,6 @@ export class CrossStackGraphBuilder {
     };
   }
 
-
   /**
    * Build data contract graph from TypeScript interfaces and PHP DTOs
    */
@@ -425,59 +421,6 @@ export class CrossStackGraphBuilder {
   }
 
   /**
-   * Convert Composable objects to FrameworkEntity objects
-   */
-  private convertComposablesToFrameworkEntities(composables: Composable[]): FrameworkEntity[] {
-    return composables.map(composable => ({
-      type: 'composable',
-      name: `Composable_${composable.id}`,
-      filePath: `composable_${composable.id}`,
-      framework: composable.composable_type === 'vue-composable' ? 'vue' : 'react',
-      metadata: {
-        id: composable.id,
-        symbolId: composable.symbol_id,
-        composableType: composable.composable_type,
-        returns: composable.returns || [],
-        dependencies: composable.dependencies || [],
-        reactiveRefs: composable.reactive_refs || [],
-        dependencyArray: composable.dependency_array || [],
-      },
-      properties: {
-        composableType: composable.composable_type,
-        returns: composable.returns,
-        dependencies: composable.dependencies,
-      },
-    }));
-  }
-
-  /**
-   * Convert ORMEntity objects to FrameworkEntity objects
-   */
-  private convertORMEntitiesToFrameworkEntities(ormEntities: ORMEntity[]): FrameworkEntity[] {
-    return ormEntities.map(entity => ({
-      type: 'orm_entity',
-      name: entity.entity_name,
-      filePath: `orm_entity_${entity.id}`,
-      framework: entity.orm_type || 'unknown',
-      metadata: {
-        id: entity.id,
-        symbolId: entity.symbol_id,
-        entityName: entity.entity_name,
-        tableName: entity.table_name,
-        ormType: entity.orm_type,
-        schemaFileId: entity.schema_file_id,
-        fields: entity.fields || {},
-        indexes: entity.indexes || [],
-      },
-      properties: {
-        entityName: entity.entity_name,
-        tableName: entity.table_name,
-        ormType: entity.orm_type,
-      },
-    }));
-  }
-
-  /**
    * Build comprehensive full-stack feature graph
    * Performance optimized with streaming for large datasets
    */
@@ -638,7 +581,6 @@ export class CrossStackGraphBuilder {
       throw error;
     }
   }
-
 
   /**
    * Store cross-stack relationships in database
@@ -1199,50 +1141,6 @@ export class CrossStackGraphBuilder {
   }
 
   /**
-   * Detect and store new data contracts for a repository
-   */
-  private async detectAndStoreDataContracts(repoId: number): Promise<void> {
-    try {
-      // Get TypeScript interfaces and PHP DTOs
-      const typescriptInterfaces = [
-        ...(await this.database.getSymbolsByType(repoId, 'interface')),
-        ...(await this.database.getSymbolsByType(repoId, 'type_alias')),
-      ];
-      const phpClasses = await this.database.getSymbolsByType(repoId, 'class');
-      const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
-      const phpDtos = [...phpClasses, ...phpInterfaces]; // PHP DTOs are typically classes or interfaces
-
-      // Detect data contract relationships between TypeScript interfaces and PHP DTOs
-      if (typescriptInterfaces.length > 0 && phpDtos.length > 0) {
-        // Detect schema matches between TypeScript and PHP types
-        const dataContractMatches = this.detectDataContractMatches(typescriptInterfaces, phpDtos);
-
-        // Create data contracts in database
-        if (dataContractMatches.length > 0) {
-          const dataContractsToCreate = dataContractMatches.map(match => ({
-            repo_id: repoId,
-            name: `${match.typescriptInterface.name}_${match.phpDto.name}`,
-            frontend_type_id: match.typescriptInterface.id,
-            backend_type_id: match.phpDto.id,
-            schema_definition: JSON.stringify({
-              compatibility: 'compatible', // Simplified compatibility
-            }),
-            drift_detected: false,
-          }));
-
-          await this.database.createDataContracts(dataContractsToCreate);
-        }
-      }
-    } catch (error) {
-      this.logger.error('Failed to detect and store data contracts', {
-        repoId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Continue execution even if data contract detection fails
-    }
-  }
-
-  /**
    * Detect data contract matches between TypeScript interfaces and PHP DTOs
    */
   private detectDataContractMatches(
@@ -1396,305 +1294,6 @@ export class CrossStackGraphBuilder {
     }
 
     return frontendCandidates[0];
-  }
-
-  /**
-   * Store detected relationships in database
-   */
-  private async storeDetectedRelationships(repoId: number, relationships: any[]): Promise<void> {
-    if (relationships.length === 0) {
-      return;
-    }
-
-    const startTime = Date.now();
-    let apiCallsToCreate = []; // Declare in broader scope
-
-    try {
-      // OPTIMIZATION: Batch fetch all required data to avoid N+1 queries
-
-      // Get unique component names for batch lookup
-      const componentNames = Array.from(
-        new Set(relationships.map(r => r.vueApiCall.componentName).filter(Boolean))
-      );
-
-      // Batch fetch all component symbols
-      // Use lexical search for exact identifier matching (not full-text search)
-      const allComponentSymbols = [];
-      for (const componentName of componentNames) {
-        const symbols = await this.database.lexicalSearchSymbols(componentName, repoId);
-        const componentSymbols = symbols.filter(
-          s =>
-            s.symbol_type === 'component' ||
-            s.symbol_type === 'variable' ||
-            s.symbol_type === 'function' ||
-            s.symbol_type === 'class' ||
-            s.symbol_type === 'method'
-        );
-        allComponentSymbols.push(...componentSymbols);
-      }
-
-      const componentMap = new Map<string, SymbolWithFile[]>();
-      allComponentSymbols.forEach(symbol => {
-        if (!componentMap.has(symbol.name)) {
-          componentMap.set(symbol.name, []);
-        }
-        componentMap.get(symbol.name)!.push(symbol);
-      });
-
-      // Batch fetch all Laravel routes once
-      const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
-      const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
-
-      // Create route lookup map
-      const routeMap = new Map();
-      laravelRoutes.forEach(route => {
-        const key = `${route.metadata.path}|${route.metadata.method}`;
-        routeMap.set(key, route);
-      });
-
-      let processed = 0;
-      let skipped = 0;
-
-      // Process relationships using cached data
-      for (const relationship of relationships) {
-        try {
-          const candidates = componentMap.get(relationship.vueApiCall.componentName) || [];
-          const componentSymbol = this.selectBestMatchingSymbol(
-            candidates,
-            relationship.vueApiCall.filePath
-          );
-
-          if (candidates.length > 1) {
-            const selectedPath = componentSymbol
-              ? (componentSymbol as any).file_path || componentSymbol.file?.path
-              : null;
-            this.logger.debug('Multiple symbol candidates found, applied heuristics', {
-              componentName: relationship.vueApiCall.componentName,
-              candidatesCount: candidates.length,
-              selected: componentSymbol ? `${componentSymbol.name} (${selectedPath})` : 'null',
-              apiCallFile: relationship.vueApiCall.filePath,
-            });
-          }
-
-          if (candidates.length > 0 && !componentSymbol) {
-            this.logger.warn(
-              'Symbol candidates exist but selection returned null (no frontend matches)',
-              {
-                componentName: relationship.vueApiCall.componentName,
-                candidatesCount: candidates.length,
-                candidatePaths: candidates.map(c => (c as any).file_path || c.file?.path),
-                apiCallFile: relationship.vueApiCall.filePath,
-              }
-            );
-          }
-
-          // Lookup route from cache (handle null laravelRoute for unmatched API calls)
-          let matchingRoute = null;
-          if (relationship.laravelRoute) {
-            const routeKey = `${relationship.laravelRoute.path}|${relationship.laravelRoute.method}`;
-            matchingRoute = routeMap.get(routeKey);
-          }
-
-          if (componentSymbol) {
-            // Always create API call if we have a valid caller symbol
-            // The endpoint_symbol_id can be null if there's no matching route
-            let endpointSymbolId = null;
-
-            if (matchingRoute && matchingRoute.metadata.id) {
-              if (matchingRoute.metadata.handlerSymbolId) {
-                const handlerSymbol = await this.database.getSymbol(
-                  matchingRoute.metadata.handlerSymbolId
-                );
-                if (handlerSymbol) {
-                  endpointSymbolId = matchingRoute.metadata.handlerSymbolId;
-                } else {
-                  this.logger.warn('Route exists but handler symbol not found', {
-                    url: relationship.vueApiCall.url,
-                    method: relationship.vueApiCall.method,
-                    routePath: matchingRoute.metadata.path,
-                    handlerSymbolId: matchingRoute.metadata.handlerSymbolId,
-                  });
-                }
-              } else {
-                this.logger.warn('Route exists but has no handlerSymbolId', {
-                  url: relationship.vueApiCall.url,
-                  method: relationship.vueApiCall.method,
-                  routePath: matchingRoute.metadata.path,
-                  routeId: matchingRoute.metadata.id,
-                });
-              }
-            }
-
-            // Create API call record (endpoint_symbol_id may be null if no route match)
-            // This ensures all extracted API calls are stored, even if they can't be matched
-            // to a backend route (e.g., external APIs, /sanctum endpoints, etc.)
-            const apiCallData = {
-              repo_id: repoId,
-              caller_symbol_id: componentSymbol.id,
-              endpoint_symbol_id: endpointSymbolId,
-              http_method: relationship.vueApiCall.method,
-              endpoint_path: relationship.vueApiCall.url,
-              call_type: 'axios', // Default call type
-            };
-            apiCallsToCreate.push(apiCallData);
-            processed++;
-
-            if (!matchingRoute) {
-              this.logger.debug('API call created without backend route match', {
-                url: relationship.vueApiCall.url,
-                method: relationship.vueApiCall.method,
-                caller: relationship.vueApiCall.componentName,
-              });
-            }
-          } else {
-            this.logger.warn('Could not find caller symbol for API call', {
-              componentName: relationship.vueApiCall.componentName,
-              vueUrl: relationship.vueApiCall.url,
-            });
-            skipped++;
-          }
-        } catch (error) {
-          this.logger.warn('Failed to process relationship', {
-            error: error.message,
-            relationship: relationship.vueApiCall?.url,
-          });
-          skipped++;
-        }
-      }
-
-      const processingTime = Date.now() - startTime;
-
-      this.logger.info('Relationship processing completed', {
-        totalRelationships: relationships.length,
-        processed,
-        skipped,
-        processingTimeMs: processingTime,
-        apiCallsToCreate: apiCallsToCreate.length,
-      });
-    } catch (error) {
-      this.logger.error('Failed to batch process relationships', {
-        error: error.message,
-        relationshipsCount: relationships.length,
-      });
-      throw error;
-    }
-
-    // Create API calls in database
-    if (apiCallsToCreate.length > 0) {
-      try {
-        // Validate all symbol IDs exist before insertion
-        const allSymbolIds = Array.from(
-          new Set([
-            ...apiCallsToCreate.map(call => call.caller_symbol_id),
-            ...apiCallsToCreate
-              .map(call => call.endpoint_symbol_id)
-              .filter(id => id !== null && id !== undefined),
-          ])
-        );
-
-        // Check that all symbols exist in the database
-        const validSymbolIds = new Set();
-        for (const symbolId of allSymbolIds) {
-          try {
-            const symbol = await this.database.getSymbol(symbolId);
-            if (symbol) {
-              validSymbolIds.add(symbolId);
-            }
-          } catch (symbolError) {
-            // Skip invalid symbol
-          }
-        }
-
-        // Filter out API calls with invalid symbol references
-        const validApiCalls = apiCallsToCreate.filter(call => {
-          const callerValid = validSymbolIds.has(call.caller_symbol_id);
-          const endpointValid =
-            call.endpoint_symbol_id === null ||
-            call.endpoint_symbol_id === undefined ||
-            validSymbolIds.has(call.endpoint_symbol_id);
-
-          if (!callerValid || !endpointValid) {
-            this.logger.warn('Invalid API call filtered out', {
-              callerSymbolId: call.caller_symbol_id,
-              callerValid,
-              endpointSymbolId: call.endpoint_symbol_id,
-              endpointValid,
-              url: call.url,
-              method: call.method,
-            });
-            return false;
-          }
-          return true;
-        });
-
-        if (validApiCalls.length === 0) {
-          this.logger.warn('No valid API calls to create after symbol validation', {
-            totalAttempted: apiCallsToCreate.length,
-            validSymbolCount: validSymbolIds.size,
-          });
-          return;
-        }
-
-        // First, deduplicate within the current batch to avoid internal conflicts
-        const batchDeduplicatedApiCalls = [];
-        const seenKeys = new Set();
-
-        for (const apiCall of validApiCalls) {
-          const uniqueKey = `${apiCall.caller_symbol_id}-${apiCall.endpoint_path}-${apiCall.http_method}`;
-          if (!seenKeys.has(uniqueKey)) {
-            seenKeys.add(uniqueKey);
-            batchDeduplicatedApiCalls.push(apiCall);
-          }
-        }
-
-        // Now check for existing API calls to avoid unique constraint violations
-        const uniqueApiCalls = [];
-        for (const apiCall of batchDeduplicatedApiCalls) {
-          try {
-            // Check if this API call already exists
-            const existingApiCalls = await this.database.getApiCallsByEndpoint(
-              repoId,
-              apiCall.endpoint_path,
-              apiCall.http_method
-            );
-            const duplicate = existingApiCalls.find(
-              existing =>
-                existing.caller_symbol_id === apiCall.caller_symbol_id &&
-                existing.endpoint_path === apiCall.endpoint_path &&
-                existing.http_method === apiCall.http_method
-            );
-
-            if (!duplicate) {
-              uniqueApiCalls.push(apiCall);
-            }
-          } catch (checkError) {
-            // If we can't check for duplicates, include the API call anyway
-            uniqueApiCalls.push(apiCall);
-          }
-        }
-
-        if (uniqueApiCalls.length === 0) {
-          return;
-        }
-
-        // Attempt database insertion with comprehensive error handling
-        await this.database.createApiCalls(uniqueApiCalls);
-
-        this.logger.info('Successfully stored API call relationships', {
-          stored: uniqueApiCalls.length,
-        });
-      } catch (error) {
-        // Log comprehensive error information
-        this.logger.error('Failed to create API calls in database', {
-          error: error.message,
-          count: apiCallsToCreate.length,
-        });
-
-        // Continue execution instead of throwing to avoid breaking the entire process
-      }
-    } else {
-      this.logger.warn('No valid API call relationships to store');
-    }
   }
 
   /**
