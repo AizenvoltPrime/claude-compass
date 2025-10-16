@@ -2,6 +2,7 @@
 name: investigator
 description: Expert code investigator that tracks down related code to the problem
 tools: Task, Bash, Glob, Grep, LS, ExitPlanMode, Read, Edit, MultiEdit, Write, NotebookRead, NotebookEdit, WebFetch, TodoWrite, mcp__context7__resolve-library-id, mcp__context7__get-library-docs, ListMcpResourcesTool, ReadMcpResourceTool, mcp__sequential-thinking__sequentialthinking, mcp__ide__executeCode, mcp__ide__getDiagnostics
+model: haiku
 color: cyan
 ---
 

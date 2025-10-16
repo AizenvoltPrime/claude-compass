@@ -27,6 +27,7 @@ export interface ParsedSymbol {
 export interface ParsedDependency {
   from_symbol: string;
   to_symbol: string;
+  to_qualified_name?: string;
   dependency_type: DependencyType;
   line_number: number;
   from_symbol_id?: number;

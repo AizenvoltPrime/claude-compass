@@ -10,7 +10,12 @@ import {
   ParseOptions
 } from './base';
 import { ChunkedParseOptions } from './chunked-parser';
-import { SymbolType, Visibility } from '../database/models';
+import { SymbolType, Visibility, DependencyType } from '../database/models';
+
+interface TypeScriptParsingContext {
+  imports: ParsedImport[];
+  filePath: string;
+}
 
 /**
  * TypeScript-specific parser extending JavaScript parser
@@ -55,13 +60,13 @@ export class TypeScriptParser extends JavaScriptParser {
     return ['.ts', '.tsx'];
   }
 
-  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string): {
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string, filePath?: string): {
     symbols: ParsedSymbol[];
     dependencies: ParsedDependency[];
     imports: ParsedImport[];
     exports: ParsedExport[];
   } {
-    const result = super.performSinglePassExtraction(rootNode, content);
+    const result = super.performSinglePassExtraction(rootNode, content, filePath);
 
     const tsSymbols: ParsedSymbol[] = [];
 
@@ -107,9 +112,19 @@ export class TypeScriptParser extends JavaScriptParser {
 
     traverse(rootNode);
 
+    const context: TypeScriptParsingContext = {
+      imports: result.imports,
+      filePath: filePath || ''
+    };
+
+    const enhancedDependencies = this.enhanceDependenciesWithImportResolution(
+      result.dependencies,
+      context
+    );
+
     return {
       symbols: [...result.symbols, ...tsSymbols],
-      dependencies: result.dependencies,
+      dependencies: enhancedDependencies,
       imports: result.imports,
       exports: result.exports,
     };
@@ -286,5 +301,50 @@ export class TypeScriptParser extends JavaScriptParser {
 
     // Use parent implementation for smaller files
     return super.parseFile(filePath, content, options);
+  }
+
+  private enhanceDependenciesWithImportResolution(
+    dependencies: ParsedDependency[],
+    context: TypeScriptParsingContext
+  ): ParsedDependency[] {
+    const importMap = this.buildImportMap(context.imports);
+
+    return dependencies.map(dep => {
+      const toSymbol = dep.to_symbol;
+      const moduleSource = importMap.get(toSymbol);
+
+      if (moduleSource) {
+        return {
+          ...dep,
+          to_qualified_name: `${moduleSource}::${toSymbol}`
+        };
+      }
+
+      return dep;
+    });
+  }
+
+  private buildImportMap(imports: ParsedImport[]): Map<string, string> {
+    const importMap = new Map<string, string>();
+
+    for (const importStmt of imports) {
+      if (!importStmt.imported_names || importStmt.imported_names.length === 0) {
+        continue;
+      }
+
+      const source = importStmt.source;
+
+      for (const importedName of importStmt.imported_names) {
+        if (importStmt.import_type === 'named') {
+          importMap.set(importedName, source);
+        } else if (importStmt.import_type === 'default') {
+          importMap.set(importedName, source);
+        } else if (importStmt.import_type === 'namespace') {
+          importMap.set(importedName, source);
+        }
+      }
+    }
+
+    return importMap;
   }
 }

@@ -23,6 +23,7 @@ export interface SymbolEdge {
   to: number;
   type: DependencyType;
   lineNumber: number;
+  to_qualified_name?: string;
   parameter_context?: string;
   call_instance_id?: string;
   parameter_types?: string[];
@@ -64,7 +65,8 @@ export class SymbolGraphBuilder {
     dependenciesMap: Map<number, ParsedDependency[]>,
     files: File[] = [],
     importsMap: Map<number, ParsedImport[]> = new Map(),
-    exportsMap: Map<number, ParsedExport[]> = new Map()
+    exportsMap: Map<number, ParsedExport[]> = new Map(),
+    repositoryPath?: string
   ): Promise<SymbolGraphData> {
     this.resetLogDeduplication();
     const nodes = this.createSymbolNodes(symbols);
@@ -76,6 +78,17 @@ export class SymbolGraphBuilder {
     // Initialize symbol resolver with file context if available
     if (files.length > 0) {
       this.symbolResolver.initialize(files, symbols, importsMap, exportsMap);
+
+      if (repositoryPath) {
+        await this.symbolResolver.buildGlobalSymbolIndex(files, symbols);
+        await this.symbolResolver.registerAutoloaderConfig(repositoryPath);
+        logger.info('Global symbol index and autoloader configs initialized', {
+          repositoryPath,
+          symbolCount: symbols.length,
+          fileCount: files.length
+        });
+      }
+
       this.symbolResolver.getResolutionStats();
     }
 
@@ -97,7 +110,7 @@ export class SymbolGraphBuilder {
     // Get all valid symbol IDs from the graph nodes
     const validSymbolIds = new Set(symbolGraph.nodes.map(node => node.id));
 
-    // Create a map from symbol ID to qualified name for stable references
+    // Create a map from symbol ID to qualified name for stable references (fallback)
     const symbolIdToQualifiedName = new Map<number, string | undefined>();
     symbolGraph.nodes.forEach(node => {
       symbolIdToQualifiedName.set(node.id, node.qualifiedName);
@@ -111,7 +124,7 @@ export class SymbolGraphBuilder {
       .map(edge => ({
         from_symbol_id: edge.from,
         to_symbol_id: edge.to,
-        to_qualified_name: symbolIdToQualifiedName.get(edge.to),
+        to_qualified_name: edge.to_qualified_name || symbolIdToQualifiedName.get(edge.to),
         dependency_type: edge.type,
         line_number: edge.lineNumber,
         // comprehensive relationship data (Phase 3)
@@ -432,6 +445,7 @@ export class SymbolGraphBuilder {
             to: resolution.toSymbol.id,
             type: resolution.originalDependency.dependency_type,
             lineNumber: resolution.originalDependency.line_number,
+            to_qualified_name: resolution.originalDependency.to_qualified_name,
             // comprehensive relationship data (Phase 3)
             // Preserve parameter context fields
             parameter_context: resolution.originalDependency.parameter_context,
@@ -534,6 +548,7 @@ export class SymbolGraphBuilder {
                   to: targetSymbol.id,
                   type: dep.dependency_type,
                   lineNumber: dep.line_number,
+                  to_qualified_name: dep.to_qualified_name,
                   // comprehensive relationship data (Phase 3)
                   // Preserve parameter context fields from fallback resolution
                   parameter_context: dep.parameter_context,
@@ -629,6 +644,7 @@ export class SymbolGraphBuilder {
               to: targetSymbol.id,
               type: dep.dependency_type,
               lineNumber: dep.line_number,
+              to_qualified_name: dep.to_qualified_name,
               // comprehensive relationship data (Phase 3)
               // Preserve parameter context fields from legacy resolution
               parameter_context: dep.parameter_context,

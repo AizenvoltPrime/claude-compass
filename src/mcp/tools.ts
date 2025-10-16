@@ -8,8 +8,19 @@ import {
   SimplifiedSymbolResponse,
 } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
-import { transitiveAnalyzer, TransitiveAnalysisOptions } from '../graph/transitive-analyzer';
-import { MIN_DEPTH, MAX_DEPTH, DEFAULT_DEPENDENCY_DEPTH, DEFAULT_IMPACT_DEPTH, TRANSITIVE_ANALYSIS_THRESHOLD } from './constants';
+import {
+  transitiveAnalyzer,
+  TransitiveAnalysisOptions,
+  symbolImportanceRanker,
+  SymbolForRanking,
+} from '../graph/transitive-analyzer';
+import {
+  MIN_DEPTH,
+  MAX_DEPTH,
+  DEFAULT_DEPENDENCY_DEPTH,
+  DEFAULT_IMPACT_DEPTH,
+  TRANSITIVE_ANALYSIS_THRESHOLD,
+} from './constants';
 
 const logger = createComponentLogger('mcp-tools');
 
@@ -169,118 +180,6 @@ function validateImpactOfArgs(args: any): ImpactOfArgs {
   return args as ImpactOfArgs;
 }
 
-/**
- * Groups dependencies by call site (line number and method name) to reduce verbosity
- * while preserving all polymorphic relationship information
- */
-function groupDependenciesByCallSite(dependencies: any[]): any {
-  const groupedByLine = new Map<number, any>();
-
-  for (const dep of dependencies) {
-    const lineNumber = dep.line_number;
-    const methodName = dep.to_symbol?.name;
-
-    if (!methodName) continue;
-
-    const lineKey = `line_${lineNumber}`;
-
-    if (!groupedByLine.has(lineNumber)) {
-      groupedByLine.set(lineNumber, {
-        line_number: lineNumber,
-        method_call: methodName,
-        calls: [],
-        references: [],
-        relationship_count: 0,
-        seenRelationships: new Set<string>(), // Track unique relationships
-      });
-    }
-
-    const group = groupedByLine.get(lineNumber)!;
-
-    // Classify relationship type based on file path and dependency type
-    const relationType = classifyRelationshipType(dep);
-
-    const relationshipInfo = {
-      id: dep.id,
-      type: relationType,
-      target: dep.to_symbol.file_path
-        ? `${getClassFromFilePath(dep.to_symbol.file_path)}.${methodName}`
-        : methodName,
-      file_path: dep.to_symbol.file_path,
-    };
-
-    // Create unique key for deduplication based on structural equivalence
-    const relationshipKey = `${relationshipInfo.id}:${relationType}:${relationshipInfo.target}:${relationshipInfo.file_path}`;
-
-    // Skip if we've already seen this relationship
-    if (group.seenRelationships.has(relationshipKey)) {
-      continue;
-    }
-    group.seenRelationships.add(relationshipKey);
-
-    // Group by dependency type
-    if (dep.type === 'calls' || dep.dependency_type === 'calls') {
-      group.calls.push(relationshipInfo);
-    } else if (dep.type === 'references' || dep.dependency_type === 'references') {
-      group.references.push(relationshipInfo);
-    } else {
-      // Default to calls for other types
-      group.calls.push(relationshipInfo);
-    }
-
-    group.relationship_count++;
-  }
-
-  // Convert to object format
-  const result: any = {};
-  for (const [lineNumber, group] of groupedByLine) {
-    const lineKey = `line_${lineNumber}`;
-
-    // Remove internal tracking fields
-    delete group.relationship_count;
-    delete group.seenRelationships;
-
-    result[lineKey] = group;
-  }
-
-  return result;
-}
-
-/**
- * Classifies the type of relationship based on file path and context
- */
-function classifyRelationshipType(dependency: any): string {
-  const filePath = dependency.to_symbol?.file_path || '';
-  const fileName = filePath.split('/').pop() || '';
-
-  // Interface detection
-  if (fileName.startsWith('I') && fileName.includes('.cs')) {
-    return 'interface';
-  }
-
-  // Abstract class detection
-  if (fileName.toLowerCase().includes('abstract')) {
-    return 'abstract';
-  }
-
-  // Implementation detection (concrete classes)
-  if (fileName.includes('.cs') && !fileName.startsWith('I')) {
-    return 'implementation';
-  }
-
-  // Self-reference detection could be added based on calling context
-  // For now, default to implementation
-  return 'implementation';
-}
-
-/**
- * Extracts class name from file path
- */
-function getClassFromFilePath(filePath: string): string {
-  const fileName = filePath.split('/').pop() || '';
-  return fileName.replace(/\.(cs|ts|js|php)$/, '');
-}
-
 export interface GetFileArgs {
   file_id?: number;
   file_path?: string;
@@ -343,6 +242,8 @@ export interface ImpactItem {
   depth?: number;
   // Line number for precise deduplication
   line_number?: number;
+  // Fully qualified name for resolved symbols (e.g., "App\Models\Personnel::create")
+  to_qualified_name?: string;
 }
 
 export interface TestImpactItem {
@@ -703,6 +604,38 @@ export class McpTools {
       });
     }
 
+    // Rank search results by importance (database operations, business logic > logging, error handling)
+    try {
+      const symbolsForRanking: SymbolForRanking[] = filteredSymbols.map((symbol: any) => ({
+        id: symbol.id,
+        name: symbol.name,
+        symbol_type: symbol.symbol_type,
+        file_path: symbol.file?.path,
+        depth: undefined, // Search results don't have depth
+      }));
+
+      if (symbolsForRanking.length > 0) {
+        const ranked = await symbolImportanceRanker.rankSymbols(symbolsForRanking);
+        const scoreMap = new Map(ranked.map(r => [r.id, r.importance_score]));
+
+        filteredSymbols = filteredSymbols.sort((a: any, b: any) => {
+          const scoreA = scoreMap.get(a.id) || 0;
+          const scoreB = scoreMap.get(b.id) || 0;
+          return scoreB - scoreA;
+        });
+
+        this.logger.debug('Ranked search results by importance', {
+          totalResults: filteredSymbols.length,
+          topResult: filteredSymbols[0]?.name,
+          topScore: scoreMap.get(filteredSymbols[0]?.id),
+        });
+      }
+    } catch (error) {
+      this.logger.warn('Search result importance ranking failed, using original order', {
+        error: (error as Error).message,
+      });
+    }
+
     // Apply default limit (optimized for AI assistant cognitive load and response time)
     const limit = 30;
     if (filteredSymbols.length > limit) {
@@ -823,7 +756,8 @@ export class McpTools {
       let transitiveResults: any[] = [];
 
       // Use explicit max_depth parameter
-      const maxDepth = validatedArgs.max_depth !== undefined ? validatedArgs.max_depth : DEFAULT_DEPENDENCY_DEPTH;
+      const maxDepth =
+        validatedArgs.max_depth !== undefined ? validatedArgs.max_depth : DEFAULT_DEPENDENCY_DEPTH;
 
       // Only perform transitive analysis if max_depth > 1
       const skipTransitive =
@@ -891,6 +825,41 @@ export class McpTools {
       // Apply symbol consolidation to handle interface/implementation relationships
       callers = this.consolidateRelatedSymbols(callers);
 
+      // Rank callers by importance (database operations, business logic > logging, error handling)
+      try {
+        const symbolsForRanking: SymbolForRanking[] = callers
+          .filter(caller => caller.from_symbol)
+          .map(caller => ({
+            id: caller.from_symbol.id,
+            name: caller.from_symbol.name,
+            symbol_type: caller.from_symbol.symbol_type,
+            file_path: caller.from_symbol.file?.path,
+            depth: caller.depth,
+          }));
+
+        if (symbolsForRanking.length > 0) {
+          const ranked = await symbolImportanceRanker.rankSymbols(symbolsForRanking);
+          const scoreMap = new Map(ranked.map(r => [r.id, r.importance_score]));
+
+          callers = callers.sort((a, b) => {
+            if (!a.from_symbol || !b.from_symbol) return 0;
+            const scoreA = scoreMap.get(a.from_symbol.id) || 0;
+            const scoreB = scoreMap.get(b.from_symbol.id) || 0;
+            return scoreB - scoreA;
+          });
+
+          this.logger.debug('Ranked callers by importance', {
+            totalCallers: callers.length,
+            topCaller: callers[0]?.from_symbol?.name,
+            topScore: scoreMap.get(callers[0]?.from_symbol?.id),
+          });
+        }
+      } catch (error) {
+        this.logger.warn('Caller importance ranking failed, using original order', {
+          error: (error as Error).message,
+        });
+      }
+
       // Build SimplifiedDependency array
       const dependencies: SimplifiedDependency[] = callers.map(caller => {
         const toName = symbol.name;
@@ -904,7 +873,11 @@ export class McpTools {
             ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
             : fromName;
 
-        const qualifiedToName = toFile ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
+        const qualifiedToName = caller.to_qualified_name
+          ? caller.to_qualified_name
+          : toFile
+            ? `${this.getClassNameFromPath(toFile)}.${toName}`
+            : toName;
 
         // Build SimplifiedDependency object
         const dep: SimplifiedDependency = {
@@ -1038,7 +1011,8 @@ export class McpTools {
       let transitiveResults: any[] = [];
 
       // Use explicit max_depth parameter
-      const maxDepth = validatedArgs.max_depth !== undefined ? validatedArgs.max_depth : DEFAULT_DEPENDENCY_DEPTH;
+      const maxDepth =
+        validatedArgs.max_depth !== undefined ? validatedArgs.max_depth : DEFAULT_DEPENDENCY_DEPTH;
 
       // Only perform transitive analysis if max_depth > 1
       const skipTransitive =
@@ -1108,8 +1082,43 @@ export class McpTools {
       // Apply symbol consolidation to handle interface/implementation relationships
       dependencies = this.consolidateRelatedSymbols(dependencies);
 
+      // Rank dependencies by importance (database operations, business logic > logging, error handling)
+      try {
+        const symbolsForRanking: SymbolForRanking[] = dependencies
+          .filter((dep: any) => dep.to_symbol)
+          .map((dep: any) => ({
+            id: dep.to_symbol.id,
+            name: dep.to_symbol.name,
+            symbol_type: dep.to_symbol.symbol_type,
+            file_path: dep.to_symbol.file?.path,
+            depth: dep.depth,
+          }));
+
+        if (symbolsForRanking.length > 0) {
+          const ranked = await symbolImportanceRanker.rankSymbols(symbolsForRanking);
+          const scoreMap = new Map(ranked.map(r => [r.id, r.importance_score]));
+
+          dependencies = dependencies.sort((a: any, b: any) => {
+            if (!a.to_symbol || !b.to_symbol) return 0;
+            const scoreA = scoreMap.get(a.to_symbol.id) || 0;
+            const scoreB = scoreMap.get(b.to_symbol.id) || 0;
+            return scoreB - scoreA;
+          });
+
+          this.logger.debug('Ranked dependencies by importance', {
+            totalDeps: dependencies.length,
+            topDep: dependencies[0]?.to_symbol?.name,
+            topScore: scoreMap.get(dependencies[0]?.to_symbol?.id),
+          });
+        }
+      } catch (error) {
+        this.logger.warn('Dependency importance ranking failed, using original order', {
+          error: (error as Error).message,
+        });
+      }
+
       // Build SimplifiedDependency array
-      const simplifiedDeps: SimplifiedDependency[] = dependencies.map(dep => {
+      const simplifiedDeps: SimplifiedDependency[] = dependencies.map((dep: any) => {
         // Validate data quality - these should always exist from database query
         if (!dep.from_symbol?.file?.path) {
           this.logger.error('Missing from_symbol file path in dependency', {
@@ -1144,8 +1153,11 @@ export class McpTools {
             ? `${this.getClassNameFromPath(fromFile)}.${fromName}`
             : fromName;
 
-        const qualifiedToName =
-          toFile && toName !== 'unknown' ? `${this.getClassNameFromPath(toFile)}.${toName}` : toName;
+        const qualifiedToName = dep.to_qualified_name
+          ? dep.to_qualified_name
+          : toFile && toName !== 'unknown'
+            ? `${this.getClassNameFromPath(toFile)}.${toName}`
+            : toName;
 
         // Build SimplifiedDependency object
         const simplifiedDep: SimplifiedDependency = {
@@ -1250,6 +1262,10 @@ export class McpTools {
         validatedArgs.symbol_id
       );
 
+      // Fetch cross-stack API call dependencies
+      const apiCallDependencies = await this.fetchApiCallDependencies(validatedArgs.symbol_id);
+      const apiCallCallers = await this.fetchApiCallCallers(validatedArgs.symbol_id);
+
       // Process direct dependencies and callers
       for (const dep of directDependencies) {
         if (dep.to_symbol) {
@@ -1265,6 +1281,7 @@ export class McpTools {
             direction: 'dependency',
             framework: framework,
             line_number: dep.line_number,
+            to_qualified_name: dep.to_qualified_name,
           });
 
           if (framework) frameworksAffected.add(framework);
@@ -1291,8 +1308,89 @@ export class McpTools {
         }
       }
 
+      // Process cross-stack API call dependencies (outgoing API calls)
+      for (const apiCall of apiCallDependencies) {
+        if (apiCall.endpoint_symbol) {
+          const framework = this.determineFramework(apiCall.endpoint_symbol);
+          directImpact.push({
+            id: apiCall.endpoint_symbol.id,
+            name: apiCall.endpoint_symbol.name,
+            type: apiCall.endpoint_symbol.symbol_type,
+            file_path: apiCall.endpoint_symbol.file?.path,
+            impact_type: 'cross_stack',
+            relationship_type: 'api_call',
+            relationship_context: `${apiCall.http_method} ${apiCall.endpoint_path}`,
+            direction: 'dependency',
+            framework: framework,
+            line_number: apiCall.line_number,
+          });
+
+          if (framework) frameworksAffected.add(framework);
+        }
+      }
+
+      // Process cross-stack API call callers (incoming API calls)
+      for (const apiCall of apiCallCallers) {
+        if (apiCall.caller_symbol) {
+          const framework = this.determineFramework(apiCall.caller_symbol);
+          directImpact.push({
+            id: apiCall.caller_symbol.id,
+            name: apiCall.caller_symbol.name,
+            type: apiCall.caller_symbol.symbol_type,
+            file_path: apiCall.caller_symbol.file?.path,
+            impact_type: 'cross_stack',
+            relationship_type: 'api_call',
+            relationship_context: `${apiCall.http_method} ${apiCall.endpoint_path}`,
+            direction: 'caller',
+            framework: framework,
+            line_number: apiCall.line_number,
+          });
+
+          if (framework) frameworksAffected.add(framework);
+        }
+      }
+
       // Deduplicate direct impact items after processing both dependencies and callers
       const deduplicatedDirectImpact = this.deduplicateImpactItems(directImpact);
+
+      // Rank direct impact by importance (ensures critical operations like Personnel::create appear first)
+      let rankedDirectImpact = deduplicatedDirectImpact;
+      try {
+        const symbolsForRanking: SymbolForRanking[] = deduplicatedDirectImpact.map(item => ({
+          id: item.id,
+          name: item.name,
+          symbol_type: item.type,
+          file_path: item.file_path,
+          depth: 1, // Direct dependencies are depth 1
+          qualified_name: item.to_qualified_name, // Pass FQN for better database operation detection
+        }));
+
+        if (symbolsForRanking.length > 0) {
+          const ranked = await symbolImportanceRanker.rankSymbols(symbolsForRanking);
+          const scoreMap = new Map(ranked.map(r => [r.id, r.importance_score]));
+
+          // Sort direct impact by importance score (highest first)
+          rankedDirectImpact = deduplicatedDirectImpact.sort((a, b) => {
+            const scoreA = scoreMap.get(a.id) || 0;
+            const scoreB = scoreMap.get(b.id) || 0;
+            return scoreB - scoreA;
+          });
+
+          this.logger.info('Ranked direct impact by importance', {
+            totalSymbols: rankedDirectImpact.length,
+            topSymbol: rankedDirectImpact[0]?.name,
+            topScore: scoreMap.get(rankedDirectImpact[0]?.id),
+            top3: rankedDirectImpact.slice(0, 3).map(item => ({
+              name: item.name,
+              score: scoreMap.get(item.id),
+            })),
+          });
+        }
+      } catch (error) {
+        this.logger.warn('Direct impact ranking failed, using original order', {
+          error: (error as Error).message,
+        });
+      }
 
       // Transitive impact analysis
       const maxDepth = validatedArgs.max_depth || DEFAULT_IMPACT_DEPTH;
@@ -1302,6 +1400,7 @@ export class McpTools {
           maxDepth,
           includeTypes: undefined,
           showCallChains: true, // Always true (show_call_chains parameter removed per PARAMETER_REDUNDANCY_ANALYSIS)
+          includeCrossStack: true, // Enable cross-stack traversal through API calls
         };
 
         const transitiveResult = await transitiveAnalyzer.getTransitiveDependencies(
@@ -1337,8 +1436,8 @@ export class McpTools {
       // Collect all impacted symbol IDs for route/job/test analysis
       const allImpactedIds = new Set<number>([
         validatedArgs.symbol_id, // Include the original symbol
-        ...deduplicatedDirectImpact.map(item => item.id),
-        ...transitiveImpact.map(item => item.id)
+        ...rankedDirectImpact.map(item => item.id),
+        ...transitiveImpact.map(item => item.id),
       ]);
       const impactedSymbolIds = Array.from(allImpactedIds);
 
@@ -1364,16 +1463,52 @@ export class McpTools {
         this.logger.warn('Test impact analysis failed', { error: (error as Error).message });
       }
 
+      // Rank transitive impact by importance (graph centrality + semantic weights)
+      // This ensures critical operations like Personnel::create appear before logging/error handlers
+      let rankedTransitiveImpact = transitiveImpact;
+      try {
+        const symbolsForRanking: SymbolForRanking[] = transitiveImpact.map(item => ({
+          id: item.id,
+          name: item.name,
+          symbol_type: item.type,
+          file_path: item.file_path,
+          depth: item.depth,
+          qualified_name: item.to_qualified_name, // Pass FQN for better database operation detection
+        }));
+
+        const ranked = await symbolImportanceRanker.rankSymbols(symbolsForRanking);
+
+        // Create a map of id -> importance_score for efficient lookup
+        const scoreMap = new Map(ranked.map(r => [r.id, r.importance_score]));
+
+        // Sort transitiveImpact by importance score (highest first)
+        rankedTransitiveImpact = transitiveImpact.sort((a, b) => {
+          const scoreA = scoreMap.get(a.id) || 0;
+          const scoreB = scoreMap.get(b.id) || 0;
+          return scoreB - scoreA;
+        });
+
+        this.logger.info('Ranked transitive impact by importance', {
+          totalSymbols: rankedTransitiveImpact.length,
+          topSymbol: rankedTransitiveImpact[0]?.name,
+          topScore: scoreMap.get(rankedTransitiveImpact[0]?.id),
+        });
+      } catch (error) {
+        this.logger.warn('Importance ranking failed, using original order', {
+          error: (error as Error).message,
+        });
+      }
+
       // Deduplicate transitive impact items, excluding those already in direct impact
       const deduplicatedTransitiveImpact = this.deduplicateImpactItems(
-        transitiveImpact.filter(
-          item => !deduplicatedDirectImpact.some(directItem => directItem.id === item.id)
+        rankedTransitiveImpact.filter(
+          item => !rankedDirectImpact.some(directItem => directItem.id === item.id)
         )
       );
 
       // Convert ImpactItems to SimplifiedDependencies
       const directImpactDeps: SimplifiedDependency[] = this.convertImpactItemsToSimplifiedDeps(
-        deduplicatedDirectImpact,
+        rankedDirectImpact,
         symbol.name,
         symbol.file?.path,
         [...directDependencies, ...directCallers]
@@ -1835,7 +1970,6 @@ export class McpTools {
     return symbol.framework;
   }
 
-
   /**
    * Classify the impact type based on relationship type and context
    * Provides more granular classification than just cross_stack vs direct
@@ -1967,30 +2101,6 @@ export class McpTools {
     return isFromService || isToService;
   }
 
-  /**
-   * Determines whether to replace an existing impact item with a new one
-   * Prioritizes by impact type specificity
-   */
-  private shouldReplaceImpactItem(existing: ImpactItem, candidate: ImpactItem): boolean {
-    // Priority: More specific impact type
-    // Priority order: direct > delegation > interface_contract > implementation > cross_stack > indirect
-    const impactTypePriority = {
-      direct: 6,
-      delegation: 5,
-      interface_contract: 4,
-      implementation: 3,
-      cross_stack: 2,
-      indirect: 1,
-    };
-
-    const existingPriority =
-      impactTypePriority[existing.impact_type as keyof typeof impactTypePriority] || 0;
-    const candidatePriority =
-      impactTypePriority[candidate.impact_type as keyof typeof impactTypePriority] || 0;
-
-    return candidatePriority > existingPriority;
-  }
-
   // Helper methods for enhanced search
   private mapEntityTypeToSymbolType(entityType: string): SymbolType | null {
     switch (entityType) {
@@ -2008,9 +2118,7 @@ export class McpTools {
   }
 
   // Helper methods for impact analysis
-  private async getImpactedRoutes(
-    impactedSymbolIds: number[]
-  ): Promise<RouteImpactItem[]> {
+  private async getImpactedRoutes(impactedSymbolIds: number[]): Promise<RouteImpactItem[]> {
     const routes: RouteImpactItem[] = [];
 
     try {
@@ -2075,22 +2183,6 @@ export class McpTools {
     return tests;
   }
 
-  private async isSymbolRelated(symbolId: number, targetSymbolId: number): Promise<boolean> {
-    if (symbolId === targetSymbolId) return true;
-
-    try {
-      const dependencies = await this.dbService.getDependenciesFrom(targetSymbolId);
-      const callers = await this.dbService.getDependenciesTo(targetSymbolId);
-
-      return (
-        dependencies.some(dep => dep.to_symbol_id === symbolId) ||
-        callers.some(caller => caller.from_symbol_id === symbolId)
-      );
-    } catch (error) {
-      return false;
-    }
-  }
-
   private determineTestType(filePath: string): string {
     if (filePath.includes('.test.') || filePath.includes('test/')) return 'unit';
     if (filePath.includes('.spec.') || filePath.includes('spec/')) return 'spec';
@@ -2107,63 +2199,6 @@ export class McpTools {
       result.dependency_type === DependencyType.SHARES_SCHEMA ||
       result.dependency_type === DependencyType.FRONTEND_BACKEND
     );
-  }
-
-  private analyzeCallPattern(dependency: any): string {
-    // Analyze the calling pattern based on enhanced context
-    if (!dependency.calling_object && !dependency.qualified_context) {
-      return 'direct_call';
-    }
-
-    if (dependency.calling_object) {
-      if (dependency.calling_object.includes('this.') || dependency.calling_object === 'this') {
-        return 'instance_method_call';
-      }
-      if (dependency.calling_object.startsWith('_') || dependency.calling_object.startsWith('m_')) {
-        return 'private_field_call';
-      }
-      if (
-        dependency.calling_object.includes('Service') ||
-        dependency.calling_object.includes('Manager')
-      ) {
-        return 'service_injection_call';
-      }
-      return 'object_method_call';
-    }
-
-    if (dependency.qualified_context) {
-      if (dependency.qualified_context.includes('.')) {
-        return 'qualified_method_call';
-      }
-    }
-
-    return 'unknown_pattern';
-  }
-
-  private isCrossFileCall(dependency: any, targetSymbol: any): boolean {
-    // Check if the call crosses file boundaries
-    if (!dependency.from_symbol?.file?.path || !targetSymbol?.file?.path) {
-      return false;
-    }
-
-    return dependency.from_symbol.file.path !== targetSymbol.file.path;
-  }
-
-  // mergeAndRankResults method removed (unused and contained deprecated parameters per PARAMETER_REDUNDANCY_ANALYSIS)
-
-  private calculateRiskLevel(
-    directImpact: ImpactItem[],
-    transitiveImpact: ImpactItem[],
-    routeImpact: RouteImpactItem[],
-    jobImpact: JobImpactItem[]
-  ): string {
-    const totalImpact =
-      directImpact.length + transitiveImpact.length + routeImpact.length + jobImpact.length;
-
-    if (totalImpact > 20) return 'critical';
-    if (totalImpact > 10) return 'high';
-    if (totalImpact > 5) return 'medium';
-    return 'low';
   }
 
   /**
@@ -2204,24 +2239,6 @@ export class McpTools {
   }
 
   /**
-   * Deduplicate call chains to prevent identical entries in transitive analysis
-   */
-  private deduplicateCallChains(callChains: any[]): any[] {
-    const uniqueChains = new Map<string, any>();
-
-    for (const chain of callChains) {
-      // Create key based on symbol_id and call_chain content
-      const key = `${chain.symbol_id}:${chain.call_chain}:${chain.depth}`;
-
-      if (!uniqueChains.has(key)) {
-        uniqueChains.set(key, chain);
-      }
-    }
-
-    return Array.from(uniqueChains.values());
-  }
-
-  /**
    * Consolidate symbols that represent the same logical entity (interface + implementations)
    */
   private consolidateRelatedSymbols(relationships: any[]): any[] {
@@ -2245,144 +2262,6 @@ export class McpTools {
     }
 
     return Array.from(uniqueRelationships.values());
-  }
-
-  /**
-   * Get parameter context analysis for a symbol
-   * Enhancement 2: Context-Specific Analysis
-   */
-  private async getParameterContextAnalysis(symbolId: number): Promise<any> {
-    try {
-      const analysis = await this.dbService.groupCallsByParameterContext(symbolId);
-
-      if (analysis.totalCalls === 0) {
-        return undefined; // No parameter context data available
-      }
-
-      return {
-        method_name: analysis.methodName,
-        total_calls: analysis.totalCalls,
-        total_variations: analysis.parameterVariations.length,
-        parameter_variations: analysis.parameterVariations.map(variation => ({
-          parameters: variation.parameter_context,
-          call_count: variation.call_count,
-          usage_locations: variation.callers.map(caller => ({
-            caller: caller.caller_name,
-            file: caller.file_path,
-            line: caller.line_number,
-          })),
-          call_instance_ids: variation.call_instance_ids,
-          parameter_types: variation.parameter_types,
-        })),
-        insights: this.generateParameterInsights(analysis.parameterVariations),
-      };
-    } catch (error) {
-      this.logger.warn('Parameter context analysis failed', {
-        symbolId,
-        error: (error as Error).message,
-      });
-      return undefined;
-    }
-  }
-
-  /**
-   * Generate advanced insights about parameter usage patterns
-   * Enhanced with pattern complexity analysis and risk assessment
-   */
-  private generateParameterInsights(variations: any[]): string[] {
-    const insights: string[] = [];
-
-    if (variations.length === 0) {
-      insights.push('No parameter usage data available');
-      return insights;
-    }
-
-    if (variations.length === 1) {
-      const single = variations[0];
-      insights.push(
-        `Method consistently called with pattern: "${single.parameter_context}" (${single.call_count} calls)`
-      );
-    } else {
-      insights.push(`Method called with ${variations.length} different parameter patterns`);
-    }
-
-    // Advanced null usage analysis
-    const nullUsageVariations = variations.filter(v =>
-      v.parameter_context.toLowerCase().includes('null')
-    );
-    if (nullUsageVariations.length > 0) {
-      const nullCallCount = nullUsageVariations.reduce((sum, v) => sum + v.call_count, 0);
-      const totalCalls = variations.reduce((sum, v) => sum + v.call_count, 0);
-      const nullPercentage = Math.round((nullCallCount / totalCalls) * 100);
-      insights.push(
-        `${nullUsageVariations.length} pattern(s) use null parameters (${nullPercentage}% of all calls)`
-      );
-    }
-
-    // Enhanced frequency analysis with statistical significance
-    if (variations.length > 1) {
-      const sortedByFrequency = [...variations].sort((a, b) => b.call_count - a.call_count);
-      const mostCommon = sortedByFrequency[0];
-      const secondMostCommon = sortedByFrequency[1];
-      const totalCalls = variations.reduce((sum, v) => sum + v.call_count, 0);
-
-      // Check if all patterns have exactly equal frequency
-      const allEqual = variations.every(v => v.call_count === mostCommon.call_count);
-
-      if (allEqual) {
-        insights.push(`All parameter patterns used equally (${mostCommon.call_count} calls each)`);
-      } else {
-        // Only claim "most common" when there's a statistically significant difference (>20% more calls)
-        const significanceThreshold = Math.max(1, Math.ceil(totalCalls * 0.2));
-
-        if (mostCommon.call_count >= secondMostCommon.call_count + significanceThreshold) {
-          const dominancePercentage = Math.round((mostCommon.call_count / totalCalls) * 100);
-          insights.push(
-            `Most common pattern: "${mostCommon.parameter_context}" (${mostCommon.call_count} calls, ${dominancePercentage}%)`
-          );
-        } else {
-          // When frequencies are similar, report the distribution more accurately
-          const freqGroups = new Map<number, string[]>();
-          variations.forEach(v => {
-            if (!freqGroups.has(v.call_count)) {
-              freqGroups.set(v.call_count, []);
-            }
-            freqGroups.get(v.call_count)!.push(`"${v.parameter_context}"`);
-          });
-
-          const freqDescription = Array.from(freqGroups.entries())
-            .sort(([a], [b]) => b - a)
-            .map(([count, patterns]) => `${patterns.length} pattern(s) with ${count} calls`)
-            .join(', ');
-
-          insights.push(`Similar usage frequency: ${freqDescription}`);
-        }
-      }
-    }
-
-    // Pattern complexity analysis
-    const complexPatterns = variations.filter(v => {
-      const paramCount = v.parameter_context.split(',').length;
-      return paramCount > 3 || v.parameter_context.length > 50;
-    });
-    if (complexPatterns.length > 0) {
-      insights.push(
-        `${complexPatterns.length} pattern(s) have high complexity (many parameters or long expressions)`
-      );
-    }
-
-    // Parameter consistency assessment
-    const uniqueParameterCounts = new Set(
-      variations.map(v => v.parameter_context.split(',').length)
-    );
-    if (uniqueParameterCounts.size > 1) {
-      const counts = Array.from(uniqueParameterCounts).sort((a, b) => a - b);
-      insights.push(
-        `Parameter count varies: ${counts.join(', ')} parameters across different calls`
-      );
-    }
-
-    return insights;
   }
 
   /**
@@ -2475,27 +2354,6 @@ export class McpTools {
   }
 
   /**
-   * Deduplicate impact dependency objects using composite keys
-   * This prevents identical dependencies from appearing multiple times in the final output
-   */
-  private deduplicateImpactDependencies(dependencies: any[]): any[] {
-    const seen = new Set<string>();
-    const deduplicatedDependencies: any[] = [];
-
-    for (const dep of dependencies) {
-      // Create composite key: from + to + type + line_number + file_path for precise deduplication
-      const compositeKey = `${dep.from}:${dep.to}:${dep.type}:${dep.line_number}:${dep.file_path}`;
-
-      if (!seen.has(compositeKey)) {
-        seen.add(compositeKey);
-        deduplicatedDependencies.push(dep);
-      }
-    }
-
-    return deduplicatedDependencies;
-  }
-
-  /**
    * Convert ImpactItems to SimplifiedDependencies for new impact response format
    * Fixed: Correctly handles direction (dependency vs caller) and uses consistent file paths
    */
@@ -2539,10 +2397,20 @@ export class McpTools {
         from = targetSymbolFilePath
           ? `${this.getClassNameFromPath(targetSymbolFilePath)}.${targetSymbolName}`
           : targetSymbolName;
-        to = item.file_path ? `${this.getClassNameFromPath(item.file_path)}.${item.name}` : item.name;
+
+        // Use to_qualified_name if available, otherwise fall back to path-based extraction
+        if (item.to_qualified_name) {
+          to = item.to_qualified_name;
+        } else {
+          to = item.file_path
+            ? `${this.getClassNameFromPath(item.file_path)}.${item.name}`
+            : item.name;
+        }
         filePath = targetSymbolFilePath; // Where the call happens (from side)
       } else if (item.direction === 'caller') {
-        from = item.file_path ? `${this.getClassNameFromPath(item.file_path)}.${item.name}` : item.name;
+        from = item.file_path
+          ? `${this.getClassNameFromPath(item.file_path)}.${item.name}`
+          : item.name;
         to = targetSymbolFilePath
           ? `${this.getClassNameFromPath(targetSymbolFilePath)}.${targetSymbolName}`
           : targetSymbolName;
@@ -2553,8 +2421,7 @@ export class McpTools {
 
       // Format framework symbols without file paths
       if (!filePath && item.framework) {
-        const frameworkName =
-          item.framework.charAt(0).toUpperCase() + item.framework.slice(1);
+        const frameworkName = item.framework.charAt(0).toUpperCase() + item.framework.slice(1);
         filePath = `[${frameworkName} Framework]`;
       }
 
@@ -2577,90 +2444,355 @@ export class McpTools {
   }
 
   /**
-   * Create impact dependency objects with actual line numbers from dependency records
-   * Enhanced with better symbol resolution and context preservation
-   */
-  private createImpactDependencies(
-    impactItems: ImpactItem[],
-    targetSymbolName: string,
-    targetFilePath: string,
-    impactType: string,
-    originalDependencies: any[]
-  ): any[] {
-    return impactItems.flatMap(item => {
-      // Find ALL matching dependencies (not just the first one)
-      const matchingDeps = originalDependencies.filter(dep => {
-        const symbolId = dep.to_symbol?.id || dep.from_symbol?.id;
-        const symbolName = dep.to_symbol?.name || dep.from_symbol?.name;
-        const filePath = dep.to_symbol?.file?.path || dep.from_symbol?.file?.path;
-
-        // Multi-criteria matching for better accuracy
-        return symbolId === item.id || (symbolName === item.name && filePath === item.file_path);
-      });
-
-      // Apply same qualification logic as who_calls:
-      // If from and to have same name but different files, qualify the "to" name
-      const fromName = item.name;
-      const shouldQualifyTo = fromName === targetSymbolName && item.file_path !== targetFilePath;
-      const qualifiedToName =
-        shouldQualifyTo && targetFilePath
-          ? `${this.getClassNameFromPath(targetFilePath)}.${targetSymbolName}`
-          : targetSymbolName;
-
-      // Create one dependency entry for each matching original dependency
-      // This ensures multiple calls from the same caller at different lines are all captured
-      if (matchingDeps.length > 0) {
-        return matchingDeps.map(originalDep => {
-          // Determine which symbol contains the relevant data
-          // If item.id matches to_symbol.id, it's a dependency (get to_symbol data)
-          // If item.id matches from_symbol.id, it's a caller (get from_symbol data)
-          const isMatchedInToSymbol = originalDep.to_symbol?.id === item.id;
-          const relevantSymbol = isMatchedInToSymbol
-            ? originalDep.to_symbol
-            : originalDep.from_symbol;
-
-          return {
-            from: fromName,
-            to: qualifiedToName,
-            type: impactType,
-            line_number: originalDep.line_number || 0,
-            file_path: relevantSymbol?.file?.path || item.file_path || '',
-            relationship_context: item.relationship_context,
-            qualified_context: originalDep.qualified_context,
-            parameter_types: originalDep.parameter_types,
-            call_instance_id: originalDep.call_instance_id,
-            calling_object: originalDep.calling_object,
-            resolved_class: originalDep.resolved_class,
-            parameter_context: originalDep.parameter_context,
-          };
-        });
-      }
-
-      // Fallback if no matching dependency found
-      return [
-        {
-          from: fromName,
-          to: qualifiedToName,
-          type: impactType,
-          line_number: 0,
-          file_path: item.file_path,
-          relationship_context: item.relationship_context,
-          qualified_context: undefined,
-          parameter_types: undefined,
-          call_instance_id: undefined,
-          calling_object: undefined,
-          resolved_class: undefined,
-          parameter_context: undefined,
-        },
-      ];
-    });
-  }
-
-  /**
    * Extract class name from file path for qualified naming
    */
   private getClassNameFromPath(filePath: string): string {
     const fileName = filePath.split('/').pop() || '';
     return fileName.replace(/\.(cs|js|ts|php|vue)$/, '');
+  }
+
+  /**
+   * Core Tool 7: identifyModules - Discover architectural modules using community detection
+   * Uses Louvain algorithm to find clusters of symbols that work closely together
+   *
+   * @param args.repo_id - Repository ID to analyze (optional if default repo is set)
+   * @param args.min_module_size - Minimum number of symbols per module (default: 3)
+   * @param args.resolution - Resolution parameter for community detection (default: 1.0)
+   * @returns List of modules with their symbols, cohesion metrics, and metadata
+   */
+  async identifyModules(args: any) {
+    try {
+      const repoId = args.repo_id || this.getDefaultRepoId();
+      if (!repoId) {
+        throw new Error('repo_id is required when no default repository is set');
+      }
+
+      const minModuleSize = args.min_module_size || 3;
+      const resolution = args.resolution || 1.0;
+
+      const { communityDetector } = await import('../graph/community-detector');
+      const result = await communityDetector.detectModules(repoId, {
+        minModuleSize,
+        resolution,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                modules: result.modules.map(module => ({
+                  id: module.id,
+                  name: module.name,
+                  symbol_count: module.symbols.length,
+                  symbols: module.symbols,
+                  cohesion: {
+                    internal_edges: module.internalEdges,
+                    external_edges: module.externalEdges,
+                    modularity: module.modularity,
+                  },
+                  files: module.files,
+                  frameworks: module.frameworks,
+                })),
+                summary: {
+                  total_modules: result.modules.length,
+                  total_modularity: result.totalModularity,
+                  execution_time_ms: result.executionTimeMs,
+                },
+                usage_guidance:
+                  'Use module IDs to focus analysis on specific architectural boundaries. ' +
+                  'High modularity (>0.7) indicates well-separated concerns. ' +
+                  'Low external_edges suggest good encapsulation.',
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      this.logger.error('identifyModules failed', {
+        error: (error as Error).message,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                error: (error as Error).message,
+                args,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  }
+
+  /**
+   * Fetch outgoing API call dependencies (frontend → backend)
+   * Returns API calls where the given symbol is the caller
+   */
+  private async fetchApiCallDependencies(symbolId: number): Promise<any[]> {
+    const results = await this.dbService
+      .knex('api_calls')
+      .leftJoin('symbols as caller_symbols', 'api_calls.caller_symbol_id', 'caller_symbols.id')
+      .leftJoin('files as caller_files', 'caller_symbols.file_id', 'caller_files.id')
+      .leftJoin(
+        'symbols as endpoint_symbols',
+        'api_calls.endpoint_symbol_id',
+        'endpoint_symbols.id'
+      )
+      .leftJoin('files as endpoint_files', 'endpoint_symbols.file_id', 'endpoint_files.id')
+      .where('api_calls.caller_symbol_id', symbolId)
+      .select(
+        'api_calls.id',
+        'api_calls.caller_symbol_id',
+        'api_calls.endpoint_symbol_id',
+        'api_calls.http_method',
+        'api_calls.endpoint_path',
+        'api_calls.line_number',
+        'endpoint_symbols.id as endpoint_symbol_id',
+        'endpoint_symbols.name as endpoint_symbol_name',
+        'endpoint_symbols.symbol_type as endpoint_symbol_type',
+        'endpoint_files.path as endpoint_file_path'
+      );
+
+    return results.map(row => ({
+      http_method: row.http_method,
+      endpoint_path: row.endpoint_path,
+      line_number: row.line_number,
+      endpoint_symbol: {
+        id: row.endpoint_symbol_id,
+        name: row.endpoint_symbol_name,
+        symbol_type: row.endpoint_symbol_type,
+        file: {
+          path: row.endpoint_file_path,
+        },
+      },
+    }));
+  }
+
+  /**
+   * Fetch incoming API call callers (backend ← frontend)
+   * Returns API calls where the given symbol is the endpoint
+   */
+  private async fetchApiCallCallers(symbolId: number): Promise<any[]> {
+    const results = await this.dbService
+      .knex('api_calls')
+      .leftJoin('symbols as caller_symbols', 'api_calls.caller_symbol_id', 'caller_symbols.id')
+      .leftJoin('files as caller_files', 'caller_symbols.file_id', 'caller_files.id')
+      .leftJoin(
+        'symbols as endpoint_symbols',
+        'api_calls.endpoint_symbol_id',
+        'endpoint_symbols.id'
+      )
+      .leftJoin('files as endpoint_files', 'endpoint_symbols.file_id', 'endpoint_files.id')
+      .where('api_calls.endpoint_symbol_id', symbolId)
+      .select(
+        'api_calls.id',
+        'api_calls.caller_symbol_id',
+        'api_calls.endpoint_symbol_id',
+        'api_calls.http_method',
+        'api_calls.endpoint_path',
+        'api_calls.line_number',
+        'caller_symbols.id as caller_symbol_id',
+        'caller_symbols.name as caller_symbol_name',
+        'caller_symbols.symbol_type as caller_symbol_type',
+        'caller_files.path as caller_file_path'
+      );
+
+    return results.map(row => ({
+      http_method: row.http_method,
+      endpoint_path: row.endpoint_path,
+      line_number: row.line_number,
+      caller_symbol: {
+        id: row.caller_symbol_id,
+        name: row.caller_symbol_name,
+        symbol_type: row.caller_symbol_type,
+        file: {
+          path: row.caller_file_path,
+        },
+      },
+    }));
+  }
+
+  /**
+   * Core Tool 8: traceFlow - Find execution paths between two symbols
+   * Uses pathfinding algorithms to understand how code flows from point A to B
+   *
+   * @param args.start_symbol_id - Starting symbol ID
+   * @param args.end_symbol_id - Ending symbol ID
+   * @param args.find_all_paths - If true, finds all paths; if false, finds shortest path (default: false)
+   * @param args.max_depth - Maximum path depth to search (default: 10)
+   * @returns Paths with call chains and distance metrics
+   */
+  async traceFlow(args: any) {
+    try {
+      if (!args.start_symbol_id || typeof args.start_symbol_id !== 'number') {
+        throw new Error('start_symbol_id is required and must be a number');
+      }
+      if (!args.end_symbol_id || typeof args.end_symbol_id !== 'number') {
+        throw new Error('end_symbol_id is required and must be a number');
+      }
+
+      const findAllPaths = args.find_all_paths || false;
+      const maxDepth = args.max_depth || 10;
+
+      const { transitiveAnalyzer } = await import('../graph/transitive-analyzer');
+
+      const startSymbol = await this.dbService.getSymbolWithFile(args.start_symbol_id);
+      const endSymbol = await this.dbService.getSymbolWithFile(args.end_symbol_id);
+
+      if (!startSymbol || !endSymbol) {
+        throw new Error('Start or end symbol not found');
+      }
+
+      // Enable cross-stack traversal to find paths across frontend-backend boundaries
+      const traversalOptions = {
+        includeCrossStack: true,
+        includeTypes: [
+          DependencyType.CALLS,
+          DependencyType.IMPORTS,
+          DependencyType.API_CALL,
+          DependencyType.SHARES_SCHEMA,
+          DependencyType.FRONTEND_BACKEND,
+        ],
+      };
+
+      if (findAllPaths) {
+        const paths = await transitiveAnalyzer.findAllPaths(
+          args.start_symbol_id,
+          args.end_symbol_id,
+          maxDepth,
+          traversalOptions
+        );
+
+        const formattedPaths = await Promise.all(
+          paths.map(async path => ({
+            path_ids: path,
+            distance: path.length - 1,
+            call_chain: await transitiveAnalyzer.formatCallChain(path),
+          }))
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  start_symbol: {
+                    id: startSymbol.id,
+                    name: startSymbol.name,
+                    file_path: startSymbol.file?.path,
+                  },
+                  end_symbol: {
+                    id: endSymbol.id,
+                    name: endSymbol.name,
+                    file_path: endSymbol.file?.path,
+                  },
+                  paths: formattedPaths,
+                  total_paths: paths.length,
+                  analysis_type: 'all_paths',
+                  max_depth: maxDepth,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } else {
+        const result = await transitiveAnalyzer.findShortestPath(
+          args.start_symbol_id,
+          args.end_symbol_id,
+          traversalOptions
+        );
+
+        if (!result) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    start_symbol: {
+                      id: startSymbol.id,
+                      name: startSymbol.name,
+                      file_path: startSymbol.file?.path,
+                    },
+                    end_symbol: {
+                      id: endSymbol.id,
+                      name: endSymbol.name,
+                      file_path: endSymbol.file?.path,
+                    },
+                    path: null,
+                    message: 'No path found between symbols',
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
+        const callChain = await transitiveAnalyzer.formatCallChain(result.path);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  start_symbol: {
+                    id: startSymbol.id,
+                    name: startSymbol.name,
+                    file_path: startSymbol.file?.path,
+                  },
+                  end_symbol: {
+                    id: endSymbol.id,
+                    name: endSymbol.name,
+                    file_path: endSymbol.file?.path,
+                  },
+                  path: {
+                    symbol_ids: result.path,
+                    distance: result.distance,
+                    call_chain: callChain,
+                  },
+                  analysis_type: 'shortest_path',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    } catch (error) {
+      this.logger.error('traceFlow failed', {
+        error: (error as Error).message,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                error: (error as Error).message,
+                args,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
   }
 }

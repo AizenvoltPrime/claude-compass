@@ -252,7 +252,8 @@ export class GraphBuilder {
           dependenciesMap,
           dbFiles,
           importsMap,
-          exportsMap
+          exportsMap,
+          repository.path
         ),
       ]);
 
@@ -706,7 +707,8 @@ export class GraphBuilder {
       dependenciesMap,
       dbFiles,
       importsMap,
-      exportsMap
+      exportsMap,
+      repository.path
     );
 
     await this.persistVirtualFrameworkSymbols(repository, symbolGraph, symbols);

@@ -266,7 +266,10 @@ export class TransitiveAnalyzer {
         );
       }
     } catch (error) {
-      logger.error('Error traversing cross-stack callers', { symbolId, error: error.message });
+      logger.error('Error traversing cross-stack callers', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       visited.delete(symbolId);
     }
@@ -366,7 +369,10 @@ export class TransitiveAnalyzer {
         );
       }
     } catch (error) {
-      logger.error('Error traversing callers', { symbolId, error: error.message });
+      logger.error('Error traversing callers', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       visited.delete(symbolId);
     }
@@ -432,7 +438,10 @@ export class TransitiveAnalyzer {
         );
       }
     } catch (error) {
-      logger.error('Error traversing dependencies', { symbolId, error: error.message });
+      logger.error('Error traversing dependencies', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       visited.delete(symbolId);
     }
@@ -498,7 +507,8 @@ export class TransitiveAnalyzer {
    * Get cross-stack callers (symbols from different language stacks that call this symbol)
    */
   private async getCrossStackCallers(symbolId: number): Promise<DependencyWithSymbols[]> {
-    const query = this.db('dependencies')
+    // Query 1: Check dependencies table for cross-stack dependencies
+    const depsQuery = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
@@ -524,9 +534,34 @@ export class TransitiveAnalyzer {
       )
       .orderBy('dependencies.id', 'desc');
 
-    const results = await query;
+    // Query 2: Check api_calls table for frontend-backend API calls
+    const apiCallsQuery = this.db('api_calls')
+      .leftJoin('symbols as caller_symbols', 'api_calls.caller_symbol_id', 'caller_symbols.id')
+      .leftJoin('files as caller_files', 'caller_symbols.file_id', 'caller_files.id')
+      .leftJoin('symbols as endpoint_symbols', 'api_calls.endpoint_symbol_id', 'endpoint_symbols.id')
+      .leftJoin('files as endpoint_files', 'endpoint_symbols.file_id', 'endpoint_files.id')
+      .where('api_calls.endpoint_symbol_id', symbolId)
+      .select(
+        'api_calls.id',
+        'api_calls.caller_symbol_id as from_symbol_id',
+        'api_calls.endpoint_symbol_id as to_symbol_id',
+        'api_calls.line_number',
+        'api_calls.created_at',
+        'api_calls.updated_at',
+        'caller_symbols.name as from_symbol_name',
+        'caller_symbols.symbol_type as from_symbol_type',
+        'caller_files.path as from_file_path',
+        'caller_files.language as from_language',
+        'endpoint_symbols.name as to_symbol_name',
+        'endpoint_symbols.symbol_type as to_symbol_type',
+        'endpoint_files.path as to_file_path',
+        'endpoint_files.language as to_language'
+      );
 
-    return results.map(row => ({
+    const [depsResults, apiCallsResults] = await Promise.all([depsQuery, apiCallsQuery]);
+
+    // Transform dependencies table results
+    const depsFormatted = depsResults.map(row => ({
       id: row.id,
       from_symbol_id: row.from_symbol_id,
       to_symbol_id: row.to_symbol_id,
@@ -560,7 +595,47 @@ export class TransitiveAnalyzer {
               : undefined,
           }
         : undefined,
-    })) as DependencyWithSymbols[];
+    }));
+
+    // Transform api_calls table results
+    const apiCallsFormatted = apiCallsResults.map(row => ({
+      id: row.id,
+      from_symbol_id: row.from_symbol_id,
+      to_symbol_id: row.to_symbol_id,
+      dependency_type: DependencyType.API_CALL,
+      line_number: row.line_number,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      from_symbol: row.from_symbol_id
+        ? {
+            id: row.from_symbol_id,
+            name: row.from_symbol_name,
+            symbol_type: row.from_symbol_type,
+            file: row.from_file_path
+              ? {
+                  path: row.from_file_path,
+                  language: row.from_language,
+                }
+              : undefined,
+          }
+        : undefined,
+      to_symbol: row.to_symbol_id
+        ? {
+            id: row.to_symbol_id,
+            name: row.to_symbol_name,
+            symbol_type: row.to_symbol_type,
+            file: row.to_file_path
+              ? {
+                  path: row.to_file_path,
+                  language: row.to_language,
+                }
+              : undefined,
+          }
+        : undefined,
+    }));
+
+    // Combine both results
+    return [...depsFormatted, ...apiCallsFormatted] as DependencyWithSymbols[];
   }
 
   /**
@@ -697,7 +772,8 @@ export class TransitiveAnalyzer {
     symbolId: number,
     options: TransitiveAnalysisOptions
   ): Promise<DependencyWithSymbols[]> {
-    let query = this.db('dependencies')
+    // Query 1: Get dependencies from dependencies table
+    let depsQuery = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
       .leftJoin('symbols as to_symbols', 'dependencies.to_symbol_id', 'to_symbols.id')
@@ -717,17 +793,48 @@ export class TransitiveAnalyzer {
 
     // Apply dependency type filters
     if (options.includeTypes && options.includeTypes.length > 0) {
-      query = query.whereIn('dependencies.dependency_type', options.includeTypes);
+      depsQuery = depsQuery.whereIn('dependencies.dependency_type', options.includeTypes);
     }
 
     if (options.excludeTypes && options.excludeTypes.length > 0) {
-      query = query.whereNotIn('dependencies.dependency_type', options.excludeTypes);
+      depsQuery = depsQuery.whereNotIn('dependencies.dependency_type', options.excludeTypes);
     }
 
-    const results = await query;
+    // Query 2: Get API call dependencies from api_calls table (if cross-stack is enabled)
+    const shouldIncludeApiCalls =
+      options.includeCrossStack ||
+      (options.includeTypes && options.includeTypes.includes(DependencyType.API_CALL));
 
-    // Transform results to match expected format
-    return results.map(row => ({
+    let apiCallsResults: any[] = [];
+    if (shouldIncludeApiCalls) {
+      const apiCallsQuery = this.db('api_calls')
+        .leftJoin('symbols as caller_symbols', 'api_calls.caller_symbol_id', 'caller_symbols.id')
+        .leftJoin('files as caller_files', 'caller_symbols.file_id', 'caller_files.id')
+        .leftJoin('symbols as endpoint_symbols', 'api_calls.endpoint_symbol_id', 'endpoint_symbols.id')
+        .leftJoin('files as endpoint_files', 'endpoint_symbols.file_id', 'endpoint_files.id')
+        .where('api_calls.caller_symbol_id', symbolId)
+        .select(
+          'api_calls.id',
+          'api_calls.caller_symbol_id as from_symbol_id',
+          'api_calls.endpoint_symbol_id as to_symbol_id',
+          'api_calls.line_number',
+          'api_calls.created_at',
+          'api_calls.updated_at',
+          'caller_symbols.name as from_symbol_name',
+          'caller_symbols.symbol_type as from_symbol_type',
+          'caller_files.path as from_file_path',
+          'endpoint_symbols.name as to_symbol_name',
+          'endpoint_symbols.symbol_type as to_symbol_type',
+          'endpoint_files.path as to_file_path'
+        );
+
+      apiCallsResults = await apiCallsQuery;
+    }
+
+    const depsResults = await depsQuery;
+
+    // Transform dependencies table results
+    const depsFormatted = depsResults.map(row => ({
       id: row.id,
       from_symbol_id: row.from_symbol_id,
       to_symbol_id: row.to_symbol_id,
@@ -759,7 +866,45 @@ export class TransitiveAnalyzer {
               : undefined,
           }
         : undefined,
-    })) as DependencyWithSymbols[];
+    }));
+
+    // Transform api_calls table results
+    const apiCallsFormatted = apiCallsResults.map(row => ({
+      id: row.id,
+      from_symbol_id: row.from_symbol_id,
+      to_symbol_id: row.to_symbol_id,
+      dependency_type: DependencyType.API_CALL,
+      line_number: row.line_number,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      from_symbol: row.from_symbol_id
+        ? {
+            id: row.from_symbol_id,
+            name: row.from_symbol_name,
+            symbol_type: row.from_symbol_type,
+            file: row.from_file_path
+              ? {
+                  path: row.from_file_path,
+                }
+              : undefined,
+          }
+        : undefined,
+      to_symbol: row.to_symbol_id
+        ? {
+            id: row.to_symbol_id,
+            name: row.to_symbol_name,
+            symbol_type: row.to_symbol_type,
+            file: row.to_file_path
+              ? {
+                  path: row.to_file_path,
+                }
+              : undefined,
+          }
+        : undefined,
+    }));
+
+    // Combine both results
+    return [...depsFormatted, ...apiCallsFormatted] as DependencyWithSymbols[];
   }
 
   /**
@@ -775,6 +920,12 @@ export class TransitiveAnalyzer {
       // Resolve symbol names efficiently in batch
       const symbolNames = await this.resolveSymbolNames(path);
 
+      // Resolve API call metadata for edges in the path
+      const apiCallMetadata = await this.resolveApiCallMetadata(path);
+
+      // Resolve qualified names for edges in the path
+      const edgeQualifiedNames = await this.resolveEdgeQualifiedNames(path);
+
       // Build the call chain string
       const chainParts: string[] = [];
 
@@ -789,13 +940,28 @@ export class TransitiveAnalyzer {
 
         let part = symbolInfo.name;
 
-        // Add class context for methods
-        if (symbolInfo.className && symbolInfo.className !== symbolInfo.name) {
-          part = `${symbolInfo.className}.${symbolInfo.name}`;
+        // Check if we have a qualified name from the previous edge
+        if (i > 0) {
+          const fromSymbolId = path[i - 1];
+          const edgeKey = `${fromSymbolId}->${symbolId}`;
+          const qualifiedName = edgeQualifiedNames.get(edgeKey);
+
+          if (qualifiedName) {
+            // Use the fully qualified name from the database
+            part = qualifiedName;
+          } else if (symbolInfo.className && symbolInfo.className !== symbolInfo.name) {
+            // Fallback to class context for methods
+            part = `${symbolInfo.className}.${symbolInfo.name}`;
+          }
+        } else {
+          // First symbol in chain - use class context if available
+          if (symbolInfo.className && symbolInfo.className !== symbolInfo.name) {
+            part = `${symbolInfo.className}.${symbolInfo.name}`;
+          }
         }
 
-        // Add parentheses for functions/methods
-        if (symbolInfo.isCallable) {
+        // Add parentheses for functions/methods (unless FQN already includes them)
+        if (symbolInfo.isCallable && !part.includes('(')) {
           part += '()';
         }
 
@@ -805,6 +971,18 @@ export class TransitiveAnalyzer {
         }
 
         chainParts.push(part);
+
+        // Add API call metadata between symbols if it exists
+        if (i < path.length - 1) {
+          const fromSymbolId = symbolId;
+          const toSymbolId = path[i + 1];
+          const edgeKey = `${fromSymbolId}->${toSymbolId}`;
+          const apiCall = apiCallMetadata.get(edgeKey);
+
+          if (apiCall) {
+            chainParts.push(`[${apiCall.httpMethod} ${apiCall.endpointPath}]`);
+          }
+        }
       }
 
       return chainParts.join(' → ');
@@ -815,6 +993,108 @@ export class TransitiveAnalyzer {
       });
       return `Call chain [${path.join(' → ')}]`;
     }
+  }
+
+  /**
+   * Resolve API call metadata for edges in the path
+   * Returns a map keyed by "fromSymbolId->toSymbolId" with HTTP method and endpoint path
+   */
+  private async resolveApiCallMetadata(path: number[]): Promise<
+    Map<string, { httpMethod: string; endpointPath: string }>
+  > {
+    const metadataMap = new Map();
+
+    if (path.length < 2) {
+      return metadataMap;
+    }
+
+    // Build list of edges to query
+    const edges: Array<{ from: number; to: number }> = [];
+    for (let i = 0; i < path.length - 1; i++) {
+      edges.push({ from: path[i], to: path[i + 1] });
+    }
+
+    if (edges.length === 0) {
+      return metadataMap;
+    }
+
+    // Query api_calls table for all edges in the path
+    let query = this.db('api_calls').select(
+      'caller_symbol_id',
+      'endpoint_symbol_id',
+      'http_method',
+      'endpoint_path'
+    );
+
+    // Build OR condition for all edges
+    query = query.where(function () {
+      for (const edge of edges) {
+        this.orWhere(function () {
+          this.where('caller_symbol_id', edge.from).andWhere('endpoint_symbol_id', edge.to);
+        });
+      }
+    });
+
+    const results = await query;
+
+    for (const row of results) {
+      const edgeKey = `${row.caller_symbol_id}->${row.endpoint_symbol_id}`;
+      metadataMap.set(edgeKey, {
+        httpMethod: row.http_method,
+        endpointPath: row.endpoint_path,
+      });
+    }
+
+    return metadataMap;
+  }
+
+  /**
+   * Resolve qualified names for edges in the path
+   * Returns a map keyed by "fromSymbolId->toSymbolId" with the to_qualified_name
+   */
+  private async resolveEdgeQualifiedNames(path: number[]): Promise<Map<string, string>> {
+    const qualifiedNameMap = new Map();
+
+    if (path.length < 2) {
+      return qualifiedNameMap;
+    }
+
+    // Build list of edges to query
+    const edges: Array<{ from: number; to: number }> = [];
+    for (let i = 0; i < path.length - 1; i++) {
+      edges.push({ from: path[i], to: path[i + 1] });
+    }
+
+    if (edges.length === 0) {
+      return qualifiedNameMap;
+    }
+
+    // Query dependencies table for all edges in the path
+    let query = this.db('dependencies').select(
+      'from_symbol_id',
+      'to_symbol_id',
+      'to_qualified_name'
+    );
+
+    // Build OR condition for all edges
+    query = query.where(function () {
+      for (const edge of edges) {
+        this.orWhere(function () {
+          this.where('from_symbol_id', edge.from).andWhere('to_symbol_id', edge.to);
+        });
+      }
+    });
+
+    const results = await query;
+
+    for (const row of results) {
+      if (row.to_qualified_name) {
+        const edgeKey = `${row.from_symbol_id}->${row.to_symbol_id}`;
+        qualifiedNameMap.set(edgeKey, row.to_qualified_name);
+      }
+    }
+
+    return qualifiedNameMap;
   }
 
   /**
@@ -911,6 +1191,207 @@ export class TransitiveAnalyzer {
   }
 
   /**
+   * Find the shortest path between two symbols using Dijkstra's algorithm
+   * Returns the path as an array of symbol IDs and the total distance
+   */
+  async findShortestPath(
+    startSymbolId: number,
+    endSymbolId: number,
+    options: TransitiveAnalysisOptions = {}
+  ): Promise<{ path: number[]; distance: number } | null> {
+    const startTime = Date.now();
+    logger.info('Finding shortest path', { startSymbolId, endSymbolId, includeCrossStack: options.includeCrossStack });
+
+    // Priority queue implementation using array (for simplicity)
+    // For production, consider using a proper priority queue library
+    const distances = new Map<number, number>();
+    const previous = new Map<number, number | null>();
+    const visited = new Set<number>();
+    const unvisited: Array<{ symbolId: number; distance: number }> = [];
+
+    // Initialize
+    distances.set(startSymbolId, 0);
+    previous.set(startSymbolId, null);
+    unvisited.push({ symbolId: startSymbolId, distance: 0 });
+
+    while (unvisited.length > 0) {
+      // Get node with minimum distance
+      unvisited.sort((a, b) => a.distance - b.distance);
+      const current = unvisited.shift()!;
+
+      // Found the target
+      if (current.symbolId === endSymbolId) {
+        const path = this.reconstructPath(previous, endSymbolId);
+        logger.info('Shortest path found', {
+          pathLength: path.length,
+          distance: current.distance,
+          executionTimeMs: Date.now() - startTime,
+        });
+        return { path, distance: current.distance };
+      }
+
+      // Already visited
+      if (visited.has(current.symbolId)) {
+        continue;
+      }
+
+      visited.add(current.symbolId);
+
+      // Get neighbors (dependencies) with cross-stack support
+      // Note: getDirectDependencies already handles cross-stack API calls when includeCrossStack is enabled
+      const dependencies = await this.getDirectDependencies(current.symbolId, options);
+
+      for (const dep of dependencies) {
+        if (!dep.to_symbol) continue;
+
+        const neighborId = dep.to_symbol.id;
+        const newDistance = current.distance + 1; // Each edge has weight 1
+
+        if (!distances.has(neighborId) || newDistance < distances.get(neighborId)!) {
+          distances.set(neighborId, newDistance);
+          previous.set(neighborId, current.symbolId);
+          unvisited.push({ symbolId: neighborId, distance: newDistance });
+        }
+      }
+
+      // Also check callers (bidirectional search) with cross-stack support
+      const callers = await this.getDirectCallers(current.symbolId, options);
+
+      // Get cross-stack callers if enabled
+      let crossStackCallers: typeof callers = [];
+      if (options.includeCrossStack) {
+        crossStackCallers = await this.getCrossStackCallers(current.symbolId);
+      }
+
+      const allCallers = [...callers, ...crossStackCallers];
+
+      for (const caller of allCallers) {
+        if (!caller.from_symbol) continue;
+
+        const neighborId = caller.from_symbol.id;
+        const newDistance = current.distance + 1;
+
+        if (!distances.has(neighborId) || newDistance < distances.get(neighborId)!) {
+          distances.set(neighborId, newDistance);
+          previous.set(neighborId, current.symbolId);
+          unvisited.push({ symbolId: neighborId, distance: newDistance });
+        }
+      }
+    }
+
+    logger.warn('No path found', { startSymbolId, endSymbolId });
+    return null;
+  }
+
+  /**
+   * Find all paths between two symbols (up to maxDepth)
+   * Useful for comprehensive impact analysis
+   */
+  async findAllPaths(
+    startSymbolId: number,
+    endSymbolId: number,
+    maxDepth: number = 10,
+    options: TransitiveAnalysisOptions = {}
+  ): Promise<number[][]> {
+    const startTime = Date.now();
+    logger.info('Finding all paths', { startSymbolId, endSymbolId, maxDepth, includeCrossStack: options.includeCrossStack });
+
+    const allPaths: number[][] = [];
+    const visited = new Set<number>();
+
+    await this.dfsAllPaths(
+      startSymbolId,
+      endSymbolId,
+      [startSymbolId],
+      visited,
+      allPaths,
+      maxDepth,
+      options
+    );
+
+    logger.info('All paths found', {
+      pathCount: allPaths.length,
+      executionTimeMs: Date.now() - startTime,
+    });
+
+    return allPaths;
+  }
+
+  /**
+   * DFS helper for finding all paths
+   */
+  private async dfsAllPaths(
+    current: number,
+    target: number,
+    currentPath: number[],
+    visited: Set<number>,
+    allPaths: number[][],
+    remainingDepth: number,
+    options: TransitiveAnalysisOptions = {}
+  ): Promise<void> {
+    // Found target
+    if (current === target) {
+      allPaths.push([...currentPath]);
+      return;
+    }
+
+    // Reached max depth
+    if (remainingDepth <= 0) {
+      return;
+    }
+
+    // Already visited (cycle detection)
+    if (visited.has(current)) {
+      return;
+    }
+
+    visited.add(current);
+
+    try {
+      // Explore dependencies with cross-stack support
+      // Note: getDirectDependencies already handles cross-stack API calls when includeCrossStack is enabled
+      const dependencies = await this.getDirectDependencies(current, options);
+
+      for (const dep of dependencies) {
+        if (!dep.to_symbol) continue;
+
+        const nextId = dep.to_symbol.id;
+        await this.dfsAllPaths(
+          nextId,
+          target,
+          [...currentPath, nextId],
+          new Set(visited),
+          allPaths,
+          remainingDepth - 1,
+          options
+        );
+      }
+    } catch (error) {
+      logger.error('Error in DFS all paths', {
+        current,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      visited.delete(current);
+    }
+  }
+
+  /**
+   * Reconstruct path from previous pointers
+   */
+  private reconstructPath(previous: Map<number, number | null>, endId: number): number[] {
+    const path: number[] = [];
+    let current: number | null = endId;
+
+    while (current !== null) {
+      path.unshift(current);
+      current = previous.get(current) || null;
+    }
+
+    return path;
+  }
+
+  /**
    * Clear the internal cache
    */
   clearCache(): void {
@@ -928,5 +1409,494 @@ export class TransitiveAnalyzer {
   }
 }
 
+/**
+ * Configuration for importance ranking weights
+ */
+export interface ImportanceRankingConfig {
+  betweennessWeight: number;
+  degreeWeight: number;
+  eigenvectorWeight: number;
+  closenessWeight: number;
+  semanticWeight: number;
+}
+
+/**
+ * Default importance ranking configuration
+ * Prioritizes betweenness (bridge functions) and semantic meaning
+ */
+export const DEFAULT_IMPORTANCE_CONFIG: ImportanceRankingConfig = {
+  betweennessWeight: 0.3,
+  degreeWeight: 0.2,
+  eigenvectorWeight: 0.15,
+  closenessWeight: 0.1,
+  semanticWeight: 0.25,
+};
+
+/**
+ * Symbol metadata for importance calculation
+ */
+export interface SymbolForRanking {
+  id: number;
+  name: string;
+  symbol_type: string;
+  file_path?: string;
+  depth?: number;
+  qualified_name?: string; // FQN like "App\Models\Personnel::create"
+}
+
+/**
+ * SymbolImportanceRanker calculates importance scores for symbols using
+ * graph centrality metrics combined with semantic analysis. This helps AI
+ * agents prioritize critical code paths over noise (logging, error handling).
+ *
+ * The scoring methodology combines four centrality metrics with semantic analysis:
+ * - **Betweenness Centrality**: Measures bridge symbols connecting different modules
+ * - **Degree Centrality**: Counts direct dependencies (in-degree weighted 1.5x)
+ * - **Eigenvector Centrality**: Considers importance of callers (PageRank-style)
+ * - **Closeness Centrality**: Measures reachability within the dependency graph
+ * - **Semantic Weight**: Boosts core business logic, penalizes utilities/logging
+ *
+ * Each metric is normalized to 0-1 and weighted according to the configuration.
+ * The final score ranges from 0 (unimportant) to 1 (critical).
+ *
+ * @example
+ * ```typescript
+ * const ranker = new SymbolImportanceRanker({
+ *   betweennessWeight: 0.3,
+ *   degreeWeight: 0.25,
+ *   eigenvectorWeight: 0.25,
+ *   closenessWeight: 0.1,
+ *   semanticWeight: 0.1
+ * });
+ *
+ * const score = await ranker.calculateImportance({
+ *   id: 123,
+ *   name: 'processPayment',
+ *   symbol_type: 'function'
+ * });
+ *
+ * console.log(`Importance: ${(score * 100).toFixed(1)}%`);
+ * ```
+ */
+export class SymbolImportanceRanker {
+  private db: Knex;
+  private config: ImportanceRankingConfig;
+  private centralityCache: Map<string, number> = new Map();
+
+  constructor(config: ImportanceRankingConfig = DEFAULT_IMPORTANCE_CONFIG) {
+    this.db = getDatabaseConnection();
+    this.config = config;
+  }
+
+  /**
+   * Calculate composite importance score for a symbol.
+   *
+   * Combines multiple centrality metrics with semantic analysis to produce
+   * a single importance score. Uses caching to avoid redundant calculations.
+   *
+   * @param symbol - Symbol metadata including ID, name, and type
+   * @returns Importance score between 0 (unimportant) and 1 (critical)
+   */
+  async calculateImportance(symbol: SymbolForRanking): Promise<number> {
+    // Calculate all metrics
+    const semantic = this.calculateSemanticWeight(symbol);
+    const betweenness = await this.calculateBetweennessCentrality(symbol.id);
+    const degree = await this.calculateDegreeCentrality(symbol.id);
+    const eigenvector = await this.calculateEigenvectorCentrality(symbol.id);
+    const closeness = await this.calculateClosenessCentrality(symbol.id);
+
+    // Base composite score with increased semantic weight
+    let compositeScore =
+      this.config.betweennessWeight * betweenness +
+      this.config.degreeWeight * degree +
+      this.config.eigenvectorWeight * eigenvector +
+      this.config.closenessWeight * closeness +
+      this.config.semanticWeight * semantic;
+
+    // Database operation multiplier (language-agnostic)
+    // Boosts score rather than overriding it completely
+    const isDatabaseOp = this.isDatabaseOperation(symbol);
+    if (isDatabaseOp) {
+      // Multiply score by 2.5x for database operations
+      // This preserves centrality information while heavily prioritizing data persistence
+      compositeScore *= 2.5;
+
+      // Add depth penalty to prefer shallower operations
+      const depthPenalty = (symbol.depth || 0) * 0.02;
+      compositeScore = Math.max(compositeScore - depthPenalty, 0);
+    }
+
+    // Normalize to 0-1 range (composite can exceed 1.0 with multiplier)
+    return Math.min(compositeScore, 1.0);
+  }
+
+  /**
+   * Detect if a symbol represents a database operation (language-agnostic)
+   * Checks for data persistence patterns across PHP, C#, TypeScript, GDScript
+   */
+  private isDatabaseOperation(symbol: SymbolForRanking): boolean {
+    const name = symbol.name.toLowerCase();
+    const filePath = symbol.file_path?.toLowerCase() || '';
+    const qualifiedName = symbol.qualified_name || symbol.name;
+
+    // Language detection from file path AND qualified name
+    let language = this.detectLanguage(filePath);
+
+    // If language is unknown, try to detect from qualified name patterns
+    if (language === 'unknown' && qualifiedName !== symbol.name) {
+      language = this.detectLanguageFromQualifiedName(qualifiedName);
+    }
+
+    // Database operation keywords (language-agnostic)
+    const dbOperations = /\b(create|insert|update|save|persist|delete|remove|destroy|upsert)\b/i;
+
+    // Check for database operation keywords in name
+    if (!dbOperations.test(name)) {
+      return false;
+    }
+
+    // Language-specific patterns
+    switch (language) {
+      case 'php':
+        // Laravel Eloquent: Model::create, Model::update, Model::save
+        // PDO: $pdo->exec, $stmt->execute
+        return (
+          /::(create|insert|update|save|delete|destroy|upsert)\b/i.test(qualifiedName) || // Check FQN for static calls (allows PHP namespaces with backslashes)
+          /\\models\\/i.test(qualifiedName) || // Laravel Models namespace (case insensitive)
+          /\/models\//i.test(filePath) || // Path contains /models/ directory
+          /\b(eloquent|repository)\b/i.test(filePath) || // Path-based detection
+          name.includes('repository') // Repository pattern
+        );
+
+      case 'csharp':
+        // Entity Framework: context.SaveChanges, dbSet.Add
+        // Dapper: connection.Execute
+        return (
+          /\b(savechanges|add|update|remove|delete|insert|executesql|execute)\b/i.test(name) ||
+          /\b(repository|dbcontext|database|entity)\b/i.test(filePath) ||
+          name.includes('repository') ||
+          name.includes('db')
+        );
+
+      case 'typescript':
+      case 'javascript':
+        // Prisma: prisma.user.create
+        // TypeORM: repository.save, manager.save
+        // Mongoose: model.create, document.save
+        return (
+          name.includes('repository') ||
+          name.includes('prisma') ||
+          name.includes('orm') ||
+          /\b(model|schema|entity|collection)\b/i.test(filePath)
+        );
+
+      case 'gdscript':
+        // Godot doesn't have traditional databases but has save/load operations
+        // ResourceSaver.save, ConfigFile.save
+        return (
+          /(save|load)_(resource|scene|config|data|game)/i.test(name) ||
+          /resource_?saver|config_?file/i.test(name)
+        );
+
+      default:
+        // Fallback: Check for common patterns
+        return (
+          name.includes('repository') ||
+          name.includes('db') ||
+          name.includes('database') ||
+          name.includes('persist')
+        );
+    }
+  }
+
+  /**
+   * Detect programming language from file path
+   */
+  private detectLanguage(filePath: string): string {
+    if (/\.php$/i.test(filePath)) return 'php';
+    if (/\.cs$/i.test(filePath)) return 'csharp';
+    if (/\.ts$/i.test(filePath)) return 'typescript';
+    if (/\.js$/i.test(filePath)) return 'javascript';
+    if (/\.gd$/i.test(filePath)) return 'gdscript';
+    return 'unknown';
+  }
+
+  /**
+   * Detect programming language from qualified name patterns
+   * Used when file path is unknown (e.g., framework built-ins)
+   */
+  private detectLanguageFromQualifiedName(qualifiedName: string): string {
+    // PHP: Uses backslash for namespace separators
+    // Example: App\Models\Personnel::create, Illuminate\Support\Facades\Log
+    if (qualifiedName.includes('\\')) {
+      return 'php';
+    }
+
+    // C#: Uses dot notation with PascalCase, often has generics <T>
+    // Example: System.Collections.Generic.List<T>, MyApp.Services.UserService
+    // C# methods use dot, not ::
+    if (/^[A-Z][a-zA-Z0-9]*(\.[A-Z][a-zA-Z0-9]*)+/.test(qualifiedName) && !qualifiedName.includes('::')) {
+      return 'csharp';
+    }
+
+    // Java: Uses dot notation with lowercase package names
+    // Example: com.example.models.User, java.util.List
+    if (/^[a-z]+(\.[a-z]+)+\.[A-Z]/.test(qualifiedName)) {
+      return 'java';
+    }
+
+    // TypeScript/JavaScript: Module paths or simple names
+    // Example: @/models/User, ../utils/helper
+    if (qualifiedName.includes('@/') || qualifiedName.includes('../')) {
+      return 'typescript';
+    }
+
+    return 'unknown';
+  }
+
+  /**
+   * Rank a list of symbols by importance, highest first
+   */
+  async rankSymbols(symbols: SymbolForRanking[]): Promise<Array<SymbolForRanking & { importance_score: number }>> {
+    const rankedSymbols = await Promise.all(
+      symbols.map(async (symbol) => ({
+        ...symbol,
+        importance_score: await this.calculateImportance(symbol),
+      }))
+    );
+
+    return rankedSymbols.sort((a, b) => b.importance_score - a.importance_score);
+  }
+
+  /**
+   * Calculate betweenness centrality (approximation)
+   * High score = bridge/bottleneck functions that connect many paths
+   */
+  private async calculateBetweennessCentrality(symbolId: number): Promise<number> {
+    const cacheKey = `betweenness:${symbolId}`;
+    const cached = this.centralityCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    try {
+      // Approximation: Count how many unique caller-dependency pairs this symbol bridges
+      // A true betweenness calculation requires all-pairs shortest paths (expensive)
+      // This heuristic identifies symbols that are called by many AND call many
+      const [callersCount, depsCount] = await Promise.all([
+        this.db('dependencies')
+          .where('to_symbol_id', symbolId)
+          .countDistinct('from_symbol_id as count')
+          .first()
+          .then((r) => Number(r?.count || 0)),
+        this.db('dependencies')
+          .where('from_symbol_id', symbolId)
+          .countDistinct('to_symbol_id as count')
+          .first()
+          .then((r) => Number(r?.count || 0)),
+      ]);
+
+      // Bridge score = product of callers and dependencies (normalized)
+      const bridgeScore = Math.sqrt(callersCount * depsCount);
+      const normalized = Math.min(bridgeScore / 10, 1.0); // Normalize to 0-1
+
+      this.centralityCache.set(cacheKey, normalized);
+      return normalized;
+    } catch (error) {
+      logger.warn('Failed to calculate betweenness centrality', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate degree centrality (in-degree + out-degree)
+   * High score = widely used or highly connected functions
+   */
+  private async calculateDegreeCentrality(symbolId: number): Promise<number> {
+    const cacheKey = `degree:${symbolId}`;
+    const cached = this.centralityCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    try {
+      const [inDegree, outDegree] = await Promise.all([
+        this.db('dependencies')
+          .where('to_symbol_id', symbolId)
+          .count('* as count')
+          .first()
+          .then((r) => Number(r?.count || 0)),
+        this.db('dependencies')
+          .where('from_symbol_id', symbolId)
+          .count('* as count')
+          .first()
+          .then((r) => Number(r?.count || 0)),
+      ]);
+
+      // In-degree is more important (widely used functions)
+      const totalDegree = inDegree * 1.5 + outDegree;
+      const normalized = Math.min(totalDegree / 20, 1.0); // Normalize to 0-1
+
+      this.centralityCache.set(cacheKey, normalized);
+      return normalized;
+    } catch (error) {
+      logger.warn('Failed to calculate degree centrality', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate eigenvector centrality (approximation)
+   * High score = connected to other important nodes
+   */
+  private async calculateEigenvectorCentrality(symbolId: number): Promise<number> {
+    const cacheKey = `eigenvector:${symbolId}`;
+    const cached = this.centralityCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    try {
+      // Approximation: Sum the in-degrees of direct callers
+      // True eigenvector centrality requires iterative power method (expensive)
+      const callerImportance = await this.db('dependencies as d1')
+        .where('d1.to_symbol_id', symbolId)
+        .leftJoin('dependencies as d2', 'd1.from_symbol_id', 'd2.to_symbol_id')
+        .count('d2.id as caller_degree')
+        .first()
+        .then((r) => Number(r?.caller_degree || 0));
+
+      const normalized = Math.min(callerImportance / 50, 1.0); // Normalize to 0-1
+
+      this.centralityCache.set(cacheKey, normalized);
+      return normalized;
+    } catch (error) {
+      logger.warn('Failed to calculate eigenvector centrality', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate closeness centrality (approximation)
+   * High score = can quickly reach or be reached by many symbols
+   */
+  private async calculateClosenessCentrality(symbolId: number): Promise<number> {
+    const cacheKey = `closeness:${symbolId}`;
+    const cached = this.centralityCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    try {
+      // Approximation: Count reachable symbols within depth 2
+      // True closeness requires all-pairs shortest paths (expensive)
+      const reachableCount = await this.db.raw(
+        `
+        WITH RECURSIVE reachable AS (
+          SELECT DISTINCT to_symbol_id as symbol_id, 1 as depth
+          FROM dependencies
+          WHERE from_symbol_id = ?
+
+          UNION
+
+          SELECT DISTINCT d.to_symbol_id, r.depth + 1
+          FROM reachable r
+          JOIN dependencies d ON r.symbol_id = d.from_symbol_id
+          WHERE r.depth < 2
+        )
+        SELECT COUNT(DISTINCT symbol_id) as count FROM reachable
+      `,
+        [symbolId]
+      );
+
+      const count = Number(reachableCount.rows[0]?.count || 0);
+      const normalized = Math.min(count / 30, 1.0); // Normalize to 0-1
+
+      this.centralityCache.set(cacheKey, normalized);
+      return normalized;
+    } catch (error) {
+      logger.warn('Failed to calculate closeness centrality', {
+        symbolId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate semantic importance based on symbol type and name
+   * High score = database operations, business logic
+   * Low score = logging, error handling, framework utilities
+   */
+  private calculateSemanticWeight(symbol: SymbolForRanking): number {
+    let score = 0;
+
+    // Type-based weights
+    const typeWeights: Record<string, number> = {
+      method: 0.6,
+      function: 0.6,
+      class: 0.7,
+      interface: 0.5,
+      variable: 0.3,
+      property: 0.3,
+    };
+    score += typeWeights[symbol.symbol_type] || 0.5;
+
+    // Name-based semantic analysis
+    const name = symbol.name.toLowerCase();
+
+    // Database operations get base semantic score
+    // The multiplier in calculateImportance will boost these further
+    if (/\b(create|insert|update|save|persist|delete|remove|destroy|upsert)\b/.test(name)) {
+      score += 0.4;
+    }
+
+    // Business logic operations
+    if (/\b(process|calculate|validate|transform|handle|execute|perform)\b/.test(name)) {
+      score += 0.3;
+    }
+
+    // Service/controller operations
+    if (symbol.file_path?.includes('/Service') || symbol.file_path?.includes('/Controller')) {
+      score += 0.2;
+    }
+
+    // Penalize logging and error handling
+    if (/\b(log|logger|debug|trace|info|warn|error)\b/i.test(name)) {
+      score -= 0.5;
+    }
+
+    // Penalize framework utilities (language-agnostic)
+    if (/^(response|json|getMessage|getDetails|getResourceName|print|console)\b/i.test(name)) {
+      score -= 0.3;
+    }
+
+    // Depth bonus (shallower = more important)
+    if (symbol.depth !== undefined) {
+      score += Math.max(0, (1 - symbol.depth / 5) * 0.2);
+    }
+
+    // Normalize to 0-1 range
+    return Math.max(0, Math.min(1, score));
+  }
+
+  /**
+   * Clear centrality cache
+   */
+  clearCache(): void {
+    this.centralityCache.clear();
+  }
+
+  /**
+   * Update ranking configuration
+   */
+  updateConfig(config: Partial<ImportanceRankingConfig>): void {
+    this.config = { ...this.config, ...config };
+    this.centralityCache.clear(); // Clear cache when config changes
+  }
+}
+
 // Export singleton instance
 export const transitiveAnalyzer = new TransitiveAnalyzer();
+export const symbolImportanceRanker = new SymbolImportanceRanker();

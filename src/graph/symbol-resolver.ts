@@ -2,6 +2,7 @@ import { Symbol, File, SymbolType } from '../database/models';
 import { ParsedDependency, ParsedImport, ParsedExport } from '../parsers/base';
 import { createComponentLogger } from '../utils/logger';
 import { frameworkSymbolRegistry } from '../parsers/framework-symbols';
+import { autoloaderRegistry } from '../config/autoloader-resolver';
 
 const logger = createComponentLogger('symbol-resolver');
 
@@ -31,6 +32,10 @@ export class SymbolResolver {
   private virtualSymbols: Map<number, Symbol> = new Map();
   private logger: any;
 
+  private globalSymbolIndex: Map<string, { fileId: number; symbolId: number; filePath: string }> = new Map();
+  private filePathToIdMap: Map<string, number> = new Map();
+  private symbolIdToSymbolMap: Map<number, Symbol> = new Map();
+
   constructor() {
     this.logger = logger;
   }
@@ -51,6 +56,21 @@ export class SymbolResolver {
    */
   public clearFieldTypeMap(): void {
     this.fieldTypeMap.clear();
+  }
+
+  /**
+   * Clear context-specific maps to prevent memory leaks.
+   * Call this periodically during batch processing or between repositories.
+   * Preserves globalSymbolIndex which should persist across processing.
+   */
+  public clearContextMaps(): void {
+    this.fieldTypeMap.clear();
+    this.virtualSymbols.clear();
+    this.fileContexts.clear();
+    this.symbolsByName.clear();
+    this.exportedSymbols.clear();
+    this.filePathToIdMap.clear();
+    this.symbolIdToSymbolMap.clear();
   }
 
   /**
@@ -387,8 +407,9 @@ export class SymbolResolver {
 
     for (const method of candidateMethods) {
       if (method.qualified_name) {
-        const endsWithPattern = method.qualified_name === expectedQualifiedNameEnding ||
-                                method.qualified_name.endsWith(`.${expectedQualifiedNameEnding}`);
+        const endsWithPattern =
+          method.qualified_name === expectedQualifiedNameEnding ||
+          method.qualified_name.endsWith(`.${expectedQualifiedNameEnding}`);
 
         if (endsWithPattern) {
           return method;
@@ -406,8 +427,7 @@ export class SymbolResolver {
 
       if (classSymbol) {
         const isMethodInClass =
-          method.start_line >= classSymbol.start_line &&
-          method.end_line <= classSymbol.end_line;
+          method.start_line >= classSymbol.start_line && method.end_line <= classSymbol.end_line;
 
         if (isMethodInClass) {
           return method;
@@ -747,43 +767,6 @@ export class SymbolResolver {
   }
 
   /**
-   * Check if a symbol is explicitly imported in the file
-   */
-  private isExplicitlyImported(
-    sourceContext: SymbolResolutionContext,
-    symbolName: string
-  ): boolean {
-    return sourceContext.imports.some(imp => this.importIncludesSymbol(imp, symbolName));
-  }
-
-  /**
-   * Check if this is a store method resolution
-   */
-  private isStoreMethodResolution(
-    sourceContext: SymbolResolutionContext,
-    targetSymbol: Symbol
-  ): boolean {
-    // Check if target symbol is a method in a store file
-    if (targetSymbol.symbol_type !== 'method' && targetSymbol.symbol_type !== 'function') {
-      return false;
-    }
-
-    // Check if source file imports any store factories
-    for (const importDecl of sourceContext.imports) {
-      const storeFactoryName = this.getStoreFactoryFromImport(importDecl);
-      if (storeFactoryName) {
-        const storeName = this.getStoreNameFromFactory(storeFactoryName);
-        const targetFileContext = this.fileContexts.get(targetSymbol.file_id);
-        if (targetFileContext && this.isStoreFile(targetFileContext.filePath, storeName)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  /**
    * Resolve framework-provided symbols (PHPUnit assertions, Laravel methods, etc.)
    */
   private resolveFrameworkSymbol(
@@ -937,5 +920,155 @@ export class SymbolResolver {
       exportedSymbols: this.exportedSymbols.size,
       ambiguousExports: ambiguousCount,
     };
+  }
+
+  async buildGlobalSymbolIndex(files: File[], symbols: Symbol[]): Promise<void> {
+    this.globalSymbolIndex.clear();
+    this.filePathToIdMap.clear();
+    this.symbolIdToSymbolMap.clear();
+
+    for (const file of files) {
+      this.filePathToIdMap.set(file.path, file.id);
+    }
+
+    for (const symbol of symbols) {
+      this.symbolIdToSymbolMap.set(symbol.id, symbol);
+
+      if (symbol.qualified_name) {
+        this.globalSymbolIndex.set(symbol.qualified_name, {
+          fileId: symbol.file_id,
+          symbolId: symbol.id,
+          filePath: files.find(f => f.id === symbol.file_id)?.path || ''
+        });
+      }
+
+      if (symbol.name && symbol.symbol_type === SymbolType.CLASS) {
+        const fileContext = files.find(f => f.id === symbol.file_id);
+        if (fileContext) {
+          const key = `${fileContext.path}::${symbol.name}`;
+          this.globalSymbolIndex.set(key, {
+            fileId: symbol.file_id,
+            symbolId: symbol.id,
+            filePath: fileContext.path
+          });
+        }
+      }
+    }
+
+    logger.info('Global symbol index built', {
+      totalSymbols: this.globalSymbolIndex.size,
+      files: files.length
+    });
+  }
+
+  async registerAutoloaderConfig(repositoryPath: string): Promise<void> {
+    await autoloaderRegistry.discoverAndLoadConfigs(repositoryPath);
+    const stats = autoloaderRegistry.getStats();
+    logger.info('Autoloader configs loaded', stats);
+  }
+
+  resolveNamespaceToFile(fqn: string, contextFilePath: string, language: 'php' | 'typescript' | 'csharp'): string | null {
+    switch (language) {
+      case 'php':
+        return autoloaderRegistry.resolvePhpClass(fqn, contextFilePath);
+      case 'typescript':
+        return autoloaderRegistry.resolveTypeScriptImport(fqn, contextFilePath);
+      case 'csharp':
+        return autoloaderRegistry.resolveCsharpNamespace(fqn, contextFilePath);
+      default:
+        return null;
+    }
+  }
+
+  resolvePHPClassName(className: string, useStatements: ParsedImport[], currentNamespace: string | null): string | null {
+    const normalizedClassName = className.replace(/^\\/, '');
+
+    for (const useStmt of useStatements) {
+      if (!useStmt.imported_names) continue;
+
+      for (const importedName of useStmt.imported_names) {
+        const parts = importedName.split('\\');
+        const lastPart = parts[parts.length - 1];
+
+        if (lastPart === normalizedClassName || importedName === normalizedClassName) {
+          return importedName;
+        }
+
+        if (importedName.endsWith(`\\${normalizedClassName}`)) {
+          return importedName;
+        }
+      }
+    }
+
+    if (currentNamespace) {
+      return `${currentNamespace}\\${normalizedClassName}`;
+    }
+
+    return normalizedClassName;
+  }
+
+  resolvePHPStaticCall(
+    className: string,
+    methodName: string,
+    useStatements: ParsedImport[],
+    currentNamespace: string | null,
+    contextFilePath: string
+  ): Symbol | null {
+    const fqn = this.resolvePHPClassName(className, useStatements, currentNamespace);
+    if (!fqn) return null;
+
+    const methodFqn = `${fqn}::${methodName}`;
+    const indexEntry = this.globalSymbolIndex.get(methodFqn);
+
+    if (indexEntry) {
+      return this.symbolIdToSymbolMap.get(indexEntry.symbolId) || null;
+    }
+
+    const resolvedPath = this.resolveNamespaceToFile(fqn, contextFilePath, 'php');
+    if (!resolvedPath) {
+      logger.debug('Could not resolve PHP class to file', { fqn, contextFilePath });
+      return null;
+    }
+
+    const fileId = this.filePathToIdMap.get(resolvedPath);
+    if (!fileId) {
+      logger.debug('No file ID for resolved path', { resolvedPath });
+      return null;
+    }
+
+    const fileContext = this.fileContexts.get(fileId);
+    if (!fileContext) {
+      logger.debug('No file context for resolved file', { fileId, resolvedPath });
+      return null;
+    }
+
+    const method = fileContext.symbols.find(
+      s => s.name === methodName && (s.symbol_type === SymbolType.METHOD || s.symbol_type === SymbolType.FUNCTION)
+    );
+
+    if (method) {
+      logger.debug('Resolved PHP static call via autoloader', {
+        className,
+        methodName,
+        fqn,
+        resolvedPath,
+        methodId: method.id
+      });
+    }
+
+    return method || null;
+  }
+
+  getSymbolByQualifiedName(qualifiedName: string): Symbol | null {
+    const indexEntry = this.globalSymbolIndex.get(qualifiedName);
+    if (!indexEntry) return null;
+
+    return this.symbolIdToSymbolMap.get(indexEntry.symbolId) || null;
+  }
+
+  clearGlobalIndex(): void {
+    this.globalSymbolIndex.clear();
+    this.filePathToIdMap.clear();
+    this.symbolIdToSymbolMap.clear();
   }
 }

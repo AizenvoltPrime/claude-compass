@@ -62,6 +62,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 **Advanced Features:**
 
+- ✅ **Symbol Resolution** - Automatic FQN resolution via autoloader configs (PSR-4, tsconfig paths, C# namespaces)
 - ✅ **Background Jobs** - Bull, BullMQ, Agenda, Bee, Kue, Worker Threads
 - ✅ **Enhanced Search** - Hybrid embedding+lexical search with vector similarity
 - ✅ **Impact Analysis** - Comprehensive blast radius calculation
