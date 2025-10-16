@@ -32,7 +32,6 @@ import { LaravelRoute, LaravelController, EloquentModel } from '../parsers/larav
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
 import { CrossStackGraphBuilder } from './cross-stack-builder';
-import { GodotRelationshipBuilder } from './godot-relationship-builder';
 import { createComponentLogger } from '../utils/logger';
 import { FileSizeManager, FileSizePolicy, DEFAULT_POLICY } from '../config/file-size-policy';
 import { EncodingConverter } from '../utils/encoding-converter';
@@ -157,7 +156,6 @@ export class GraphBuilder {
   private fileGraphBuilder: FileGraphBuilder;
   private symbolGraphBuilder: SymbolGraphBuilder;
   private crossStackGraphBuilder: CrossStackGraphBuilder;
-  private godotRelationshipBuilder: GodotRelationshipBuilder;
   private logger: any;
 
   constructor(dbService: DatabaseService) {
@@ -165,7 +163,6 @@ export class GraphBuilder {
     this.fileGraphBuilder = new FileGraphBuilder();
     this.symbolGraphBuilder = new SymbolGraphBuilder();
     this.crossStackGraphBuilder = new CrossStackGraphBuilder(dbService);
-    this.godotRelationshipBuilder = new GodotRelationshipBuilder(dbService);
     this.logger = logger;
   }
 
@@ -1754,52 +1751,6 @@ export class GraphBuilder {
                 }
               }
             }
-          } else if (this.isGodotScript(entity)) {
-            // Handle Godot script entities
-            const scriptEntity = entity as any;
-            await this.dbService.storeGodotScript({
-              repo_id: repositoryId,
-              script_path: parseResult.filePath,
-              class_name: scriptEntity.className || scriptEntity.name,
-              base_class: scriptEntity.baseClass,
-              is_autoload: scriptEntity.isAutoload || false,
-              signals: scriptEntity.signals || [],
-              exports: scriptEntity.exports || [],
-              metadata: {
-                attachedScenes: scriptEntity.attachedScenes || [],
-              },
-            });
-          } else if (this.isGodotAutoload(entity)) {
-            // Handle Godot autoload entities
-            const autoloadEntity = entity as any;
-
-            // Find the script entity first
-            const scriptEntity = await this.dbService.findGodotScriptByPath(
-              repositoryId,
-              autoloadEntity.scriptPath
-            );
-
-            await this.dbService.storeGodotAutoload({
-              repo_id: repositoryId,
-              autoload_name: autoloadEntity.autoloadName || autoloadEntity.name,
-              script_path: autoloadEntity.scriptPath,
-              script_id: scriptEntity?.id,
-              metadata: {
-                className: autoloadEntity.className,
-              },
-            });
-
-            // Create autoload-script relationship if script exists
-            if (scriptEntity) {
-              await this.dbService.createGodotRelationship({
-                repo_id: repositoryId,
-                relationship_type: 'autoload_reference' as any,
-                from_entity_type: 'autoload' as any,
-                from_entity_id: scriptEntity.id, // We'd need the autoload ID here
-                to_entity_type: 'script' as any,
-                to_entity_id: scriptEntity.id,
-              });
-            }
           } else if (entity.type === 'api_call') {
             // API calls from Vue components - these will be extracted later by cross-stack builder
             // API calls will be processed by cross-stack builder
@@ -1840,9 +1791,7 @@ export class GraphBuilder {
             entity =>
               (entity as any).framework === 'godot' ||
               this.isGodotScene(entity) ||
-              this.isGodotNode(entity) ||
-              this.isGodotScript(entity) ||
-              this.isGodotAutoload(entity)
+              this.isGodotNode(entity)
           );
           godotEntities.push(...godotFrameworkEntities);
         }
@@ -1860,8 +1809,6 @@ export class GraphBuilder {
 
       // Retrieve stored Godot entities from database with proper IDs
       const storedScenes = await this.dbService.getGodotScenesByRepository(repositoryId);
-      const storedScripts = await this.dbService.getGodotScriptsByRepository(repositoryId);
-      const storedAutoloads = await this.dbService.getGodotAutoloadsByRepository(repositoryId);
 
       // Get all nodes from all scenes
       const storedNodes: any[] = [];
@@ -1946,25 +1893,6 @@ export class GraphBuilder {
         }
       }
 
-      // Convert to framework entities format expected by the relationship builder
-      const storedGodotEntities = [
-        ...storedScenes.map((scene: any) => ({ ...scene, type: 'godot_scene' })),
-        ...storedNodes.map((node: any) => ({ ...node, type: 'godot_node' })),
-        ...storedScripts.map((script: any) => ({ ...script, type: 'godot_script' })),
-        ...storedAutoloads.map((autoload: any) => ({ ...autoload, type: 'godot_autoload' })),
-      ];
-
-      // Use the GodotRelationshipBuilder to create relationships with stored entities
-      const relationships = await this.godotRelationshipBuilder.buildRelationships(
-        repositoryId,
-        storedGodotEntities
-      );
-
-      this.logger.info('Godot framework relationships built successfully', {
-        repositoryId,
-        relationshipsCreated: relationships.length,
-        relationshipTypes: [...new Set(relationships.map(r => r.relationship_type))],
-      });
     } catch (error) {
       this.logger.error('Failed to build Godot relationships', {
         repositoryId,
@@ -2219,14 +2147,6 @@ export class GraphBuilder {
 
   private isGodotNode(entity: any): boolean {
     return entity.type === 'godot_node' && entity.framework === 'godot';
-  }
-
-  private isGodotScript(entity: any): boolean {
-    return entity.type === 'godot_script' && entity.framework === 'godot';
-  }
-
-  private isGodotAutoload(entity: any): boolean {
-    return entity.type === 'godot_autoload' && entity.framework === 'godot';
   }
 
   private isGodotResource(entity: any): boolean {

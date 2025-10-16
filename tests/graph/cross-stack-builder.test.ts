@@ -212,7 +212,8 @@ describe('CrossStackGraphBuilder', () => {
             ],
           },
           drift_detected: false,
-          last_verified: new Date(),
+          created_at: new Date(),
+          updated_at: new Date(),
         },
       ];
 
@@ -276,7 +277,8 @@ describe('CrossStackGraphBuilder', () => {
               frontend_type_id: 1,
               backend_type_id: 2,
               drift_detected: false,
-              last_verified: new Date(),
+              created_at: new Date(),
+              updated_at: new Date(),
             },
           ] as DataContract[],
         }
