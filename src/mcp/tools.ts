@@ -158,28 +158,22 @@ export class McpTools {
           case 'node':
             symbols.push(...(await this.godotSearch.searchNodes(validatedArgs.query, repoIds)));
             break;
-          case 'script':
-            if (validatedArgs.framework === 'godot') {
-              symbols.push(...(await this.godotSearch.searchScripts(validatedArgs.query, repoIds)));
-            } else {
-              const symbolType = mapEntityTypeToSymbolType(entityType);
-              if (symbolType) {
-                searchOptions.symbolTypes = [symbolType];
-              }
-              const standardSymbols = await performSearchByMode(
-                this.dbService,
-                validatedArgs.query,
-                repoIds[0] || defaultRepoId,
-                searchOptions,
-                validatedArgs.search_mode || 'auto'
-              );
-              symbols.push(...standardSymbols);
+          case 'script': {
+            const symbolType = mapEntityTypeToSymbolType(entityType);
+            if (symbolType) {
+              searchOptions.symbolTypes = [symbolType];
             }
+            const standardSymbols = await performSearchByMode(
+              this.dbService,
+              validatedArgs.query,
+              repoIds[0] || defaultRepoId,
+              searchOptions,
+              validatedArgs.search_mode || 'auto'
+            );
+            symbols.push(...standardSymbols);
             break;
-          case 'autoload':
-            symbols.push(...(await this.godotSearch.searchAutoloads(validatedArgs.query, repoIds)));
-            break;
-          default:
+          }
+          default: {
             const symbolType = mapEntityTypeToSymbolType(entityType);
             if (symbolType) {
               searchOptions.symbolTypes = [symbolType];
@@ -195,6 +189,7 @@ export class McpTools {
               validatedArgs.search_mode || 'auto'
             );
             symbols.push(...standardSymbols);
+          }
         }
       }
     } else {

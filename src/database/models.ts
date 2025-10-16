@@ -36,8 +36,8 @@ export interface Symbol {
   qualified_name?: string;
   parent_symbol_id?: number;
   symbol_type: SymbolType;
-  entity_type?: string; // Semantic/framework-aware type (component, service, manager, model, etc.)
-  base_class?: string; // Inheritance information (Node, Control, Model, Resource, etc.)
+  entity_type?: string;
+  base_class?: string;
   start_line?: number;
   end_line?: number;
   is_exported: boolean;
@@ -45,6 +45,13 @@ export interface Symbol {
   signature?: string;
   description?: string;
   framework?: string;
+  namespace?: string;
+  metadata?: Record<string, any>;
+  raw_source?: string;
+  search_vector?: any;
+  combined_embedding?: number[];
+  embeddings_updated_at?: Date;
+  embedding_model?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -52,13 +59,18 @@ export interface Symbol {
 export interface Dependency {
   id: number;
   from_symbol_id: number;
-  to_symbol_id: number | null; // Nullable for unresolved qualified name references
-  to_qualified_name?: string; // Stable reference that survives symbol deletion/recreation
+  to_symbol_id: number | null;
+  to_qualified_name?: string;
   dependency_type: DependencyType;
   line_number?: number;
   parameter_context?: string;
   call_instance_id?: string;
   parameter_types?: string[];
+  calling_object?: string;
+  qualified_context?: string;
+  resolved_class?: string;
+  raw_text?: string;
+  metadata?: Record<string, any>;
   created_at: Date;
   updated_at: Date;
 }
@@ -223,12 +235,12 @@ export enum Visibility {
   PROTECTED = 'protected',
 }
 
-// File dependency for file-to-file relationships (imports, requires, etc.)
 export interface FileDependency {
   id: number;
   from_file_id: number;
   to_file_id: number;
   dependency_type: DependencyType;
+  import_path?: string;
   line_number?: number;
   created_at: Date;
   updated_at: Date;
@@ -299,12 +311,15 @@ export interface CreateSymbol {
   visibility?: Visibility;
   signature?: string;
   description?: string;
+  namespace?: string;
+  metadata?: Record<string, any>;
+  raw_source?: string;
 }
 
 export interface CreateDependency {
   from_symbol_id: number;
-  to_symbol_id: number | null; // Nullable when only qualified name is known
-  to_qualified_name?: string; // Stable reference for incremental analysis
+  to_symbol_id: number | null;
+  to_qualified_name?: string;
   dependency_type: DependencyType;
   line_number?: number;
   parameter_context?: string;
@@ -312,7 +327,9 @@ export interface CreateDependency {
   parameter_types?: string[];
   calling_object?: string;
   qualified_context?: string;
-  resolved_class?: string; // C# resolved class name - moved from CreateEnhancedDependency
+  resolved_class?: string;
+  raw_text?: string;
+  metadata?: Record<string, any>;
 }
 
 // Enhanced dependency creation interface with rich context for advanced C# analysis
@@ -326,6 +343,7 @@ export interface CreateFileDependency {
   from_file_id: number;
   to_file_id: number;
   dependency_type: DependencyType;
+  import_path?: string;
   line_number?: number;
 }
 
@@ -622,7 +640,10 @@ export interface ApiCall {
   endpoint_symbol_id?: number | null;
   http_method: string;
   endpoint_path: string;
+  line_number?: number;
+  raw_call?: string;
   call_type: string;
+  metadata?: Record<string, any>;
   created_at: Date;
   updated_at: Date;
 }
@@ -633,9 +654,10 @@ export interface DataContract {
   name: string;
   frontend_type_id: number;
   backend_type_id: number;
-  schema_definition: any;
+  schema_definition?: any;
   drift_detected: boolean;
-  last_verified: Date;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface JobQueue {
@@ -839,6 +861,8 @@ export interface CreateApiCall {
   endpoint_path: string;
   call_type: string;
   line_number?: number | null;
+  raw_call?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface CreateDataContract {
@@ -856,11 +880,13 @@ export interface GodotScene {
   id: number;
   repo_id: number;
   scene_path: string;
-  scene_name: string;
-  root_node_id?: number;
+  scene_name?: string;
+  symbol_id?: number;
+  script_path?: string;
   node_count: number;
   has_script: boolean;
-  metadata: Record<string, any>;
+  nodes?: any[];
+  metadata?: Record<string, any>;
   created_at: Date;
   updated_at: Date;
 }
@@ -878,79 +904,16 @@ export interface GodotNode {
   updated_at: Date;
 }
 
-export interface GodotScript {
-  id: number;
-  repo_id: number;
-  script_path: string;
-  class_name: string;
-  base_class?: string;
-  is_autoload: boolean;
-  signals: Array<{
-    name: string;
-    parameters: Array<{ name: string; type?: string }>;
-    line: number;
-  }>;
-  exports: Array<{
-    name: string;
-    type: string;
-    defaultValue?: any;
-    exportType?: string;
-    line: number;
-  }>;
-  metadata: Record<string, any>;
-  created_at: Date;
-  updated_at: Date;
-}
 
-export interface GodotAutoload {
-  id: number;
-  repo_id: number;
-  autoload_name: string;
-  script_path: string;
-  script_id?: number;
-  metadata: Record<string, any>;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface GodotRelationship {
-  id: number;
-  repo_id: number;
-  relationship_type: GodotRelationshipType;
-  from_entity_type: GodotEntityType;
-  from_entity_id: number;
-  to_entity_type: GodotEntityType;
-  to_entity_id: number;
-  resource_id?: string;
-  metadata: Record<string, any>;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export enum GodotRelationshipType {
-  SCENE_SCRIPT_ATTACHMENT = 'scene_script_attachment',
-  SCENE_RESOURCE_REFERENCE = 'scene_resource_reference',
-  NODE_HIERARCHY = 'node_hierarchy',
-  SIGNAL_CONNECTION = 'signal_connection',
-  AUTOLOAD_REFERENCE = 'autoload_reference',
-  SCRIPT_INHERITANCE = 'script_inheritance',
-}
-
-export enum GodotEntityType {
-  SCENE = 'scene',
-  NODE = 'node',
-  SCRIPT = 'script',
-  AUTOLOAD = 'autoload',
-}
-
-// Input types for creating Godot records
 export interface CreateGodotScene {
   repo_id: number;
   scene_path: string;
-  scene_name: string;
-  root_node_id?: number;
+  scene_name?: string;
+  symbol_id?: number;
+  script_path?: string;
   node_count?: number;
   has_script?: boolean;
+  nodes?: any[];
   metadata?: Record<string, any>;
 }
 
@@ -964,45 +927,6 @@ export interface CreateGodotNode {
   properties?: Record<string, any>;
 }
 
-export interface CreateGodotScript {
-  repo_id: number;
-  script_path: string;
-  class_name: string;
-  base_class?: string;
-  is_autoload?: boolean;
-  signals?: Array<{
-    name: string;
-    parameters: Array<{ name: string; type?: string }>;
-    line: number;
-  }>;
-  exports?: Array<{
-    name: string;
-    type: string;
-    defaultValue?: any;
-    exportType?: string;
-    line: number;
-  }>;
-  metadata?: Record<string, any>;
-}
-
-export interface CreateGodotAutoload {
-  repo_id: number;
-  autoload_name: string;
-  script_path: string;
-  script_id?: number;
-  metadata?: Record<string, any>;
-}
-
-export interface CreateGodotRelationship {
-  repo_id: number;
-  relationship_type: GodotRelationshipType;
-  from_entity_type: GodotEntityType;
-  from_entity_id: number;
-  to_entity_type: GodotEntityType;
-  to_entity_id: number;
-  resource_id?: string;
-  metadata?: Record<string, any>;
-}
 
 // Query result types with relationships for Godot entities
 export interface GodotSceneWithNodes extends GodotScene {
@@ -1012,26 +936,9 @@ export interface GodotSceneWithNodes extends GodotScene {
 }
 
 export interface GodotNodeWithScript extends GodotNode {
-  script?: GodotScript;
   scene?: GodotScene;
   parent?: GodotNode;
   children?: GodotNode[];
-}
-
-export interface GodotScriptWithScenes extends GodotScript {
-  attached_scenes?: GodotScene[];
-  repository?: Repository;
-}
-
-export interface GodotRelationshipWithEntities extends GodotRelationship {
-  from_scene?: GodotScene;
-  from_node?: GodotNode;
-  from_script?: GodotScript;
-  from_autoload?: GodotAutoload;
-  to_scene?: GodotScene;
-  to_node?: GodotNode;
-  to_script?: GodotScript;
-  to_autoload?: GodotAutoload;
 }
 
 // Search options for Godot entities
@@ -1051,20 +958,3 @@ export interface GodotNodeSearchOptions {
   limit?: number;
 }
 
-export interface GodotScriptSearchOptions {
-  query?: string;
-  repo_id?: number;
-  base_class?: string;
-  is_autoload?: boolean;
-  limit?: number;
-}
-
-export interface GodotRelationshipSearchOptions {
-  repo_id?: number;
-  relationship_type?: GodotRelationshipType;
-  from_entity_type?: GodotEntityType;
-  from_entity_id?: number;
-  to_entity_type?: GodotEntityType;
-  to_entity_id?: number;
-  limit?: number;
-}

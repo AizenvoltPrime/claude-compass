@@ -324,7 +324,7 @@ export class CrossStackGraphBuilder {
           evidence: ['schema_structure_match'],
           metadata: {
             driftDetected: contract.drift_detected,
-            lastVerified: contract.last_verified,
+            lastUpdated: contract.updated_at,
           },
         });
       }
