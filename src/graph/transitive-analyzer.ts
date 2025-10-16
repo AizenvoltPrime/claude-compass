@@ -79,7 +79,6 @@ export class TransitiveAnalyzer {
     if (includeCrossStack) {
       return this.traverseCallersWithCrossStack(symbolId, options);
     } else {
-      // Use existing traverseCallers implementation
       return this.traverseCallersOriginal(symbolId, options);
     }
   }
@@ -127,14 +126,12 @@ export class TransitiveAnalyzer {
   ): Promise<TransitiveAnalysisResult> {
     const startTime = Date.now();
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
-    // Process all dependencies for comprehensive analysis
 
     const visited = new Set<number>();
     const cycles = new Set<string>();
     const results: TransitiveResult[] = [];
     let maxDepthReached = 0;
 
-    // Include cross-stack dependency types in the traversal
     const enhancedOptions: TransitiveAnalysisOptions = {
       ...options,
       includeTypes: options.includeTypes
@@ -204,17 +201,15 @@ export class TransitiveAnalyzer {
     visited.add(symbolId);
 
     try {
-      // Get both regular and cross-stack callers
       const regularCallers = await this.getDirectCallers(symbolId, options);
       const crossStackCallers = await this.getCrossStackCallers(symbolId);
 
-      // Process regular callers
       for (const caller of regularCallers) {
         if (!caller.from_symbol) continue;
 
         const fromSymbolId = caller.from_symbol.id;
         const newPath = [...currentPath, symbolId];
-        // Add this result
+
         results.push({
           symbolId: fromSymbolId,
           path: newPath,
@@ -222,8 +217,6 @@ export class TransitiveAnalyzer {
           dependencies: [caller],
         });
 
-        // Recurse to find callers of this caller
-        // Create new visited set copy for each recursive path to avoid cross-contamination
         const newVisited = new Set(visited);
         await this.traverseCallersWithCrossStackSupport(
           fromSymbolId,
@@ -237,15 +230,12 @@ export class TransitiveAnalyzer {
         );
       }
 
-      // Process cross-stack callers
       for (const caller of crossStackCallers) {
         if (!caller.from_symbol) continue;
 
         const fromSymbolId = caller.from_symbol.id;
         const newPath = [...currentPath, symbolId];
 
-        // Process all cross-stack relationships
-        // Add this result
         results.push({
           symbolId: fromSymbolId,
           path: newPath,
@@ -253,7 +243,6 @@ export class TransitiveAnalyzer {
           dependencies: [caller],
         });
 
-        // Recurse to find callers of this cross-stack caller
         await this.traverseCallersWithCrossStackSupport(
           fromSymbolId,
           newPath,
@@ -339,7 +328,6 @@ export class TransitiveAnalyzer {
     visited.add(symbolId);
 
     try {
-      // Get direct callers from database
       const callers = await this.getDirectCallers(symbolId, options);
 
       for (const caller of callers) {
@@ -347,7 +335,7 @@ export class TransitiveAnalyzer {
 
         const fromSymbolId = caller.from_symbol.id;
         const newPath = [...currentPath, symbolId];
-        // Add this result
+
         results.push({
           symbolId: fromSymbolId,
           path: newPath,
@@ -355,7 +343,6 @@ export class TransitiveAnalyzer {
           dependencies: [caller],
         });
 
-        // Recurse to find callers of this caller
         const newVisited = new Set(visited);
         await this.traverseCallers(
           fromSymbolId,
@@ -408,7 +395,6 @@ export class TransitiveAnalyzer {
     visited.add(symbolId);
 
     try {
-      // Get direct dependencies from database
       const dependencies = await this.getDirectDependencies(symbolId, options);
 
       for (const dependency of dependencies) {
@@ -416,7 +402,7 @@ export class TransitiveAnalyzer {
 
         const toSymbolId = dependency.to_symbol.id;
         const newPath = [...currentPath, symbolId];
-        // Add this result
+
         results.push({
           symbolId: toSymbolId,
           path: newPath,
@@ -424,7 +410,6 @@ export class TransitiveAnalyzer {
           dependencies: [dependency],
         });
 
-        // Recurse to find dependencies of this dependency
         const newVisited = new Set(visited);
         await this.traverseDependencies(
           toSymbolId,
@@ -457,7 +442,6 @@ export class TransitiveAnalyzer {
     const startTime = Date.now();
     const maxDepth = Math.min(options.maxDepth || this.DEFAULT_MAX_DEPTH, this.MAX_ABSOLUTE_DEPTH);
 
-    // Get frontend impact (if this is a backend symbol)
     const frontendOptions: TransitiveAnalysisOptions = {
       maxDepth,
       includeCrossStack: true,
@@ -472,7 +456,6 @@ export class TransitiveAnalyzer {
       ? await this.getTransitiveCallers(symbolId, frontendOptions)
       : { results: [], maxDepthReached: 0, totalPaths: 0, cyclesDetected: 0, executionTimeMs: 0 };
 
-    // Get backend impact (if this is a frontend symbol)
     const backendOptions: TransitiveAnalysisOptions = {
       maxDepth,
       includeCrossStack: true,
@@ -487,7 +470,6 @@ export class TransitiveAnalyzer {
       ? await this.getTransitiveDependencies(symbolId, backendOptions)
       : { results: [], maxDepthReached: 0, totalPaths: 0, cyclesDetected: 0, executionTimeMs: 0 };
 
-    // Get direct cross-stack relationships
     const crossStackRelationships = await this.getCrossStackRelationships(symbolId);
 
     const executionTime = Date.now() - startTime;
@@ -507,7 +489,6 @@ export class TransitiveAnalyzer {
    * Get cross-stack callers (symbols from different language stacks that call this symbol)
    */
   private async getCrossStackCallers(symbolId: number): Promise<DependencyWithSymbols[]> {
-    // Query 1: Check dependencies table for cross-stack dependencies
     const depsQuery = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
@@ -534,7 +515,6 @@ export class TransitiveAnalyzer {
       )
       .orderBy('dependencies.id', 'desc');
 
-    // Query 2: Check api_calls table for frontend-backend API calls
     const apiCallsQuery = this.db('api_calls')
       .leftJoin('symbols as caller_symbols', 'api_calls.caller_symbol_id', 'caller_symbols.id')
       .leftJoin('files as caller_files', 'caller_symbols.file_id', 'caller_files.id')
@@ -560,7 +540,6 @@ export class TransitiveAnalyzer {
 
     const [depsResults, apiCallsResults] = await Promise.all([depsQuery, apiCallsQuery]);
 
-    // Transform dependencies table results
     const depsFormatted = depsResults.map(row => ({
       id: row.id,
       from_symbol_id: row.from_symbol_id,
@@ -642,7 +621,6 @@ export class TransitiveAnalyzer {
    * Get cross-stack relationships for a symbol
    */
   private async getCrossStackRelationships(symbolId: number): Promise<CrossStackRelationship[]> {
-    // Get relationships where this symbol is either source or target
     const query = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
@@ -729,7 +707,6 @@ export class TransitiveAnalyzer {
 
     const results = await query;
 
-    // Transform results to match expected format
     return results.map(row => ({
       id: row.id,
       from_symbol_id: row.from_symbol_id,
@@ -772,7 +749,6 @@ export class TransitiveAnalyzer {
     symbolId: number,
     options: TransitiveAnalysisOptions
   ): Promise<DependencyWithSymbols[]> {
-    // Query 1: Get dependencies from dependencies table
     let depsQuery = this.db('dependencies')
       .leftJoin('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .leftJoin('files as from_files', 'from_symbols.file_id', 'from_files.id')
@@ -800,7 +776,6 @@ export class TransitiveAnalyzer {
       depsQuery = depsQuery.whereNotIn('dependencies.dependency_type', options.excludeTypes);
     }
 
-    // Query 2: Get API call dependencies from api_calls table (if cross-stack is enabled)
     const shouldIncludeApiCalls =
       options.includeCrossStack ||
       (options.includeTypes && options.includeTypes.includes(DependencyType.API_CALL));
@@ -833,7 +808,6 @@ export class TransitiveAnalyzer {
 
     const depsResults = await depsQuery;
 
-    // Transform dependencies table results
     const depsFormatted = depsResults.map(row => ({
       id: row.id,
       from_symbol_id: row.from_symbol_id,
@@ -917,16 +891,10 @@ export class TransitiveAnalyzer {
     }
 
     try {
-      // Resolve symbol names efficiently in batch
       const symbolNames = await this.resolveSymbolNames(path);
-
-      // Resolve API call metadata for edges in the path
       const apiCallMetadata = await this.resolveApiCallMetadata(path);
-
-      // Resolve qualified names for edges in the path
       const edgeQualifiedNames = await this.resolveEdgeQualifiedNames(path);
 
-      // Build the call chain string
       const chainParts: string[] = [];
 
       for (let i = 0; i < path.length; i++) {
@@ -940,39 +908,32 @@ export class TransitiveAnalyzer {
 
         let part = symbolInfo.name;
 
-        // Check if we have a qualified name from the previous edge
         if (i > 0) {
           const fromSymbolId = path[i - 1];
           const edgeKey = `${fromSymbolId}->${symbolId}`;
           const qualifiedName = edgeQualifiedNames.get(edgeKey);
 
           if (qualifiedName) {
-            // Use the fully qualified name from the database
             part = qualifiedName;
           } else if (symbolInfo.className && symbolInfo.className !== symbolInfo.name) {
-            // Fallback to class context for methods
             part = `${symbolInfo.className}.${symbolInfo.name}`;
           }
         } else {
-          // First symbol in chain - use class context if available
           if (symbolInfo.className && symbolInfo.className !== symbolInfo.name) {
             part = `${symbolInfo.className}.${symbolInfo.name}`;
           }
         }
 
-        // Add parentheses for functions/methods (unless FQN already includes them)
         if (symbolInfo.isCallable && !part.includes('(')) {
           part += '()';
         }
 
-        // Add file context for cross-file calls
         if (i > 0 && symbolInfo.filePath !== symbolNames.get(path[i - 1])?.filePath) {
           part += ` (${this.getShortFilePath(symbolInfo.filePath)})`;
         }
 
         chainParts.push(part);
 
-        // Add API call metadata between symbols if it exists
         if (i < path.length - 1) {
           const fromSymbolId = symbolId;
           const toSymbolId = path[i + 1];
@@ -1008,7 +969,6 @@ export class TransitiveAnalyzer {
       return metadataMap;
     }
 
-    // Build list of edges to query
     const edges: Array<{ from: number; to: number }> = [];
     for (let i = 0; i < path.length - 1; i++) {
       edges.push({ from: path[i], to: path[i + 1] });
@@ -1018,7 +978,6 @@ export class TransitiveAnalyzer {
       return metadataMap;
     }
 
-    // Query api_calls table for all edges in the path
     let query = this.db('api_calls').select(
       'caller_symbol_id',
       'endpoint_symbol_id',
@@ -1026,7 +985,6 @@ export class TransitiveAnalyzer {
       'endpoint_path'
     );
 
-    // Build OR condition for all edges
     query = query.where(function () {
       for (const edge of edges) {
         this.orWhere(function () {
@@ -1059,7 +1017,6 @@ export class TransitiveAnalyzer {
       return qualifiedNameMap;
     }
 
-    // Build list of edges to query
     const edges: Array<{ from: number; to: number }> = [];
     for (let i = 0; i < path.length - 1; i++) {
       edges.push({ from: path[i], to: path[i + 1] });
@@ -1069,14 +1026,12 @@ export class TransitiveAnalyzer {
       return qualifiedNameMap;
     }
 
-    // Query dependencies table for all edges in the path
     let query = this.db('dependencies').select(
       'from_symbol_id',
       'to_symbol_id',
       'to_qualified_name'
     );
 
-    // Build OR condition for all edges
     query = query.where(function () {
       for (const edge of edges) {
         this.orWhere(function () {
@@ -1133,7 +1088,6 @@ export class TransitiveAnalyzer {
     for (const row of results) {
       const isCallable = ['function', 'method'].includes(row.symbol_type);
 
-      // Extract class name from signature for methods
       let className: string | undefined;
       if (row.symbol_type === 'method' && row.signature) {
         const match = row.signature.match(/class\s+(\w+)/);
@@ -1172,9 +1126,6 @@ export class TransitiveAnalyzer {
       return results;
     }
 
-    // Call chain formatting with comprehensive data
-
-    // Format call chains for all results
     const enhancedResults = await Promise.all(
       results.map(async result => {
         const fullPath = [...result.path, result.symbolId];
@@ -1202,24 +1153,19 @@ export class TransitiveAnalyzer {
     const startTime = Date.now();
     logger.info('Finding shortest path', { startSymbolId, endSymbolId, includeCrossStack: options.includeCrossStack });
 
-    // Priority queue implementation using array (for simplicity)
-    // For production, consider using a proper priority queue library
     const distances = new Map<number, number>();
     const previous = new Map<number, number | null>();
     const visited = new Set<number>();
     const unvisited: Array<{ symbolId: number; distance: number }> = [];
 
-    // Initialize
     distances.set(startSymbolId, 0);
     previous.set(startSymbolId, null);
     unvisited.push({ symbolId: startSymbolId, distance: 0 });
 
     while (unvisited.length > 0) {
-      // Get node with minimum distance
       unvisited.sort((a, b) => a.distance - b.distance);
       const current = unvisited.shift()!;
 
-      // Found the target
       if (current.symbolId === endSymbolId) {
         const path = this.reconstructPath(previous, endSymbolId);
         logger.info('Shortest path found', {
@@ -1230,22 +1176,19 @@ export class TransitiveAnalyzer {
         return { path, distance: current.distance };
       }
 
-      // Already visited
       if (visited.has(current.symbolId)) {
         continue;
       }
 
       visited.add(current.symbolId);
 
-      // Get neighbors (dependencies) with cross-stack support
-      // Note: getDirectDependencies already handles cross-stack API calls when includeCrossStack is enabled
       const dependencies = await this.getDirectDependencies(current.symbolId, options);
 
       for (const dep of dependencies) {
         if (!dep.to_symbol) continue;
 
         const neighborId = dep.to_symbol.id;
-        const newDistance = current.distance + 1; // Each edge has weight 1
+        const newDistance = current.distance + 1;
 
         if (!distances.has(neighborId) || newDistance < distances.get(neighborId)!) {
           distances.set(neighborId, newDistance);
@@ -1254,10 +1197,8 @@ export class TransitiveAnalyzer {
         }
       }
 
-      // Also check callers (bidirectional search) with cross-stack support
       const callers = await this.getDirectCallers(current.symbolId, options);
 
-      // Get cross-stack callers if enabled
       let crossStackCallers: typeof callers = [];
       if (options.includeCrossStack) {
         crossStackCallers = await this.getCrossStackCallers(current.symbolId);
@@ -1329,18 +1270,15 @@ export class TransitiveAnalyzer {
     remainingDepth: number,
     options: TransitiveAnalysisOptions = {}
   ): Promise<void> {
-    // Found target
     if (current === target) {
       allPaths.push([...currentPath]);
       return;
     }
 
-    // Reached max depth
     if (remainingDepth <= 0) {
       return;
     }
 
-    // Already visited (cycle detection)
     if (visited.has(current)) {
       return;
     }
@@ -1348,8 +1286,6 @@ export class TransitiveAnalyzer {
     visited.add(current);
 
     try {
-      // Explore dependencies with cross-stack support
-      // Note: getDirectDependencies already handles cross-stack API calls when includeCrossStack is enabled
       const dependencies = await this.getDirectDependencies(current, options);
 
       for (const dep of dependencies) {
@@ -1513,20 +1449,14 @@ export class SymbolImportanceRanker {
       this.config.closenessWeight * closeness +
       this.config.semanticWeight * semantic;
 
-    // Database operation multiplier (language-agnostic)
-    // Boosts score rather than overriding it completely
     const isDatabaseOp = this.isDatabaseOperation(symbol);
     if (isDatabaseOp) {
-      // Multiply score by 2.5x for database operations
-      // This preserves centrality information while heavily prioritizing data persistence
       compositeScore *= 2.5;
 
-      // Add depth penalty to prefer shallower operations
       const depthPenalty = (symbol.depth || 0) * 0.02;
       compositeScore = Math.max(compositeScore - depthPenalty, 0);
     }
 
-    // Normalize to 0-1 range (composite can exceed 1.0 with multiplier)
     return Math.min(compositeScore, 1.0);
   }
 
@@ -1539,38 +1469,29 @@ export class SymbolImportanceRanker {
     const filePath = symbol.file_path?.toLowerCase() || '';
     const qualifiedName = symbol.qualified_name || symbol.name;
 
-    // Language detection from file path AND qualified name
     let language = this.detectLanguage(filePath);
 
-    // If language is unknown, try to detect from qualified name patterns
     if (language === 'unknown' && qualifiedName !== symbol.name) {
       language = this.detectLanguageFromQualifiedName(qualifiedName);
     }
 
-    // Database operation keywords (language-agnostic)
     const dbOperations = /\b(create|insert|update|save|persist|delete|remove|destroy|upsert)\b/i;
 
-    // Check for database operation keywords in name
     if (!dbOperations.test(name)) {
       return false;
     }
 
-    // Language-specific patterns
     switch (language) {
       case 'php':
-        // Laravel Eloquent: Model::create, Model::update, Model::save
-        // PDO: $pdo->exec, $stmt->execute
         return (
-          /::(create|insert|update|save|delete|destroy|upsert)\b/i.test(qualifiedName) || // Check FQN for static calls (allows PHP namespaces with backslashes)
-          /\\models\\/i.test(qualifiedName) || // Laravel Models namespace (case insensitive)
-          /\/models\//i.test(filePath) || // Path contains /models/ directory
-          /\b(eloquent|repository)\b/i.test(filePath) || // Path-based detection
-          name.includes('repository') // Repository pattern
+          /::(create|insert|update|save|delete|destroy|upsert)\b/i.test(qualifiedName) ||
+          /\\models\\/i.test(qualifiedName) ||
+          /\/models\//i.test(filePath) ||
+          /\b(eloquent|repository)\b/i.test(filePath) ||
+          name.includes('repository')
         );
 
       case 'csharp':
-        // Entity Framework: context.SaveChanges, dbSet.Add
-        // Dapper: connection.Execute
         return (
           /\b(savechanges|add|update|remove|delete|insert|executesql|execute)\b/i.test(name) ||
           /\b(repository|dbcontext|database|entity)\b/i.test(filePath) ||
@@ -1580,9 +1501,6 @@ export class SymbolImportanceRanker {
 
       case 'typescript':
       case 'javascript':
-        // Prisma: prisma.user.create
-        // TypeORM: repository.save, manager.save
-        // Mongoose: model.create, document.save
         return (
           name.includes('repository') ||
           name.includes('prisma') ||
@@ -1591,15 +1509,12 @@ export class SymbolImportanceRanker {
         );
 
       case 'gdscript':
-        // Godot doesn't have traditional databases but has save/load operations
-        // ResourceSaver.save, ConfigFile.save
         return (
           /(save|load)_(resource|scene|config|data|game)/i.test(name) ||
           /resource_?saver|config_?file/i.test(name)
         );
 
       default:
-        // Fallback: Check for common patterns
         return (
           name.includes('repository') ||
           name.includes('db') ||
@@ -1621,32 +1536,19 @@ export class SymbolImportanceRanker {
     return 'unknown';
   }
 
-  /**
-   * Detect programming language from qualified name patterns
-   * Used when file path is unknown (e.g., framework built-ins)
-   */
   private detectLanguageFromQualifiedName(qualifiedName: string): string {
-    // PHP: Uses backslash for namespace separators
-    // Example: App\Models\Personnel::create, Illuminate\Support\Facades\Log
     if (qualifiedName.includes('\\')) {
       return 'php';
     }
 
-    // C#: Uses dot notation with PascalCase, often has generics <T>
-    // Example: System.Collections.Generic.List<T>, MyApp.Services.UserService
-    // C# methods use dot, not ::
     if (/^[A-Z][a-zA-Z0-9]*(\.[A-Z][a-zA-Z0-9]*)+/.test(qualifiedName) && !qualifiedName.includes('::')) {
       return 'csharp';
     }
 
-    // Java: Uses dot notation with lowercase package names
-    // Example: com.example.models.User, java.util.List
     if (/^[a-z]+(\.[a-z]+)+\.[A-Z]/.test(qualifiedName)) {
       return 'java';
     }
 
-    // TypeScript/JavaScript: Module paths or simple names
-    // Example: @/models/User, ../utils/helper
     if (qualifiedName.includes('@/') || qualifiedName.includes('../')) {
       return 'typescript';
     }
@@ -1678,9 +1580,6 @@ export class SymbolImportanceRanker {
     if (cached !== undefined) return cached;
 
     try {
-      // Approximation: Count how many unique caller-dependency pairs this symbol bridges
-      // A true betweenness calculation requires all-pairs shortest paths (expensive)
-      // This heuristic identifies symbols that are called by many AND call many
       const [callersCount, depsCount] = await Promise.all([
         this.db('dependencies')
           .where('to_symbol_id', symbolId)
@@ -1694,9 +1593,8 @@ export class SymbolImportanceRanker {
           .then((r) => Number(r?.count || 0)),
       ]);
 
-      // Bridge score = product of callers and dependencies (normalized)
       const bridgeScore = Math.sqrt(callersCount * depsCount);
-      const normalized = Math.min(bridgeScore / 10, 1.0); // Normalize to 0-1
+      const normalized = Math.min(bridgeScore / 10, 1.0);
 
       this.centralityCache.set(cacheKey, normalized);
       return normalized;
@@ -1732,9 +1630,8 @@ export class SymbolImportanceRanker {
           .then((r) => Number(r?.count || 0)),
       ]);
 
-      // In-degree is more important (widely used functions)
       const totalDegree = inDegree * 1.5 + outDegree;
-      const normalized = Math.min(totalDegree / 20, 1.0); // Normalize to 0-1
+      const normalized = Math.min(totalDegree / 20, 1.0);
 
       this.centralityCache.set(cacheKey, normalized);
       return normalized;
@@ -1757,8 +1654,6 @@ export class SymbolImportanceRanker {
     if (cached !== undefined) return cached;
 
     try {
-      // Approximation: Sum the in-degrees of direct callers
-      // True eigenvector centrality requires iterative power method (expensive)
       const callerImportance = await this.db('dependencies as d1')
         .where('d1.to_symbol_id', symbolId)
         .leftJoin('dependencies as d2', 'd1.from_symbol_id', 'd2.to_symbol_id')
@@ -1766,7 +1661,7 @@ export class SymbolImportanceRanker {
         .first()
         .then((r) => Number(r?.caller_degree || 0));
 
-      const normalized = Math.min(callerImportance / 50, 1.0); // Normalize to 0-1
+      const normalized = Math.min(callerImportance / 50, 1.0);
 
       this.centralityCache.set(cacheKey, normalized);
       return normalized;
@@ -1789,8 +1684,6 @@ export class SymbolImportanceRanker {
     if (cached !== undefined) return cached;
 
     try {
-      // Approximation: Count reachable symbols within depth 2
-      // True closeness requires all-pairs shortest paths (expensive)
       const reachableCount = await this.db.raw(
         `
         WITH RECURSIVE reachable AS (
@@ -1811,7 +1704,7 @@ export class SymbolImportanceRanker {
       );
 
       const count = Number(reachableCount.rows[0]?.count || 0);
-      const normalized = Math.min(count / 30, 1.0); // Normalize to 0-1
+      const normalized = Math.min(count / 30, 1.0);
 
       this.centralityCache.set(cacheKey, normalized);
       return normalized;
@@ -1832,7 +1725,6 @@ export class SymbolImportanceRanker {
   private calculateSemanticWeight(symbol: SymbolForRanking): number {
     let score = 0;
 
-    // Type-based weights
     const typeWeights: Record<string, number> = {
       method: 0.6,
       function: 0.6,
@@ -1843,41 +1735,32 @@ export class SymbolImportanceRanker {
     };
     score += typeWeights[symbol.symbol_type] || 0.5;
 
-    // Name-based semantic analysis
     const name = symbol.name.toLowerCase();
 
-    // Database operations get base semantic score
-    // The multiplier in calculateImportance will boost these further
     if (/\b(create|insert|update|save|persist|delete|remove|destroy|upsert)\b/.test(name)) {
       score += 0.4;
     }
 
-    // Business logic operations
     if (/\b(process|calculate|validate|transform|handle|execute|perform)\b/.test(name)) {
       score += 0.3;
     }
 
-    // Service/controller operations
     if (symbol.file_path?.includes('/Service') || symbol.file_path?.includes('/Controller')) {
       score += 0.2;
     }
 
-    // Penalize logging and error handling
     if (/\b(log|logger|debug|trace|info|warn|error)\b/i.test(name)) {
       score -= 0.5;
     }
 
-    // Penalize framework utilities (language-agnostic)
     if (/^(response|json|getMessage|getDetails|getResourceName|print|console)\b/i.test(name)) {
       score -= 0.3;
     }
 
-    // Depth bonus (shallower = more important)
     if (symbol.depth !== undefined) {
       score += Math.max(0, (1 - symbol.depth / 5) * 0.2);
     }
 
-    // Normalize to 0-1 range
     return Math.max(0, Math.min(1, score));
   }
 
@@ -1893,10 +1776,9 @@ export class SymbolImportanceRanker {
    */
   updateConfig(config: Partial<ImportanceRankingConfig>): void {
     this.config = { ...this.config, ...config };
-    this.centralityCache.clear(); // Clear cache when config changes
+    this.centralityCache.clear();
   }
 }
 
-// Export singleton instance
 export const transitiveAnalyzer = new TransitiveAnalyzer();
 export const symbolImportanceRanker = new SymbolImportanceRanker();
