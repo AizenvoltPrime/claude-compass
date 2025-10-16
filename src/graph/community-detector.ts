@@ -80,19 +80,10 @@ export class CommunityDetector {
 
     logger.info('Starting community detection', { repoId, minModuleSize, resolution });
 
-    // Step 1: Build adjacency graph from dependencies
     const graph = await this.buildAdjacencyGraph(repoId);
-
-    // Step 2: Apply Louvain algorithm
     const communities = this.louvainCommunityDetection(graph, resolution);
-
-    // Step 3: Convert communities to modules with metadata
     const modules = await this.enrichCommunities(communities, graph, repoId);
-
-    // Step 4: Calculate total modularity score
     const totalModularity = this.calculateModularity(graph, communities);
-
-    // Step 5: Filter small modules
     const filteredModules = modules.filter(m => m.symbols.length >= minModuleSize);
 
     logger.info('Community detection complete', {
@@ -131,7 +122,6 @@ export class CommunityDetector {
         graph.set(dep.to_symbol_id, new Set());
       }
 
-      // Create undirected edges for community detection
       graph.get(dep.from_symbol_id)!.add(dep.to_symbol_id);
       graph.get(dep.to_symbol_id)!.add(dep.from_symbol_id);
     }
@@ -154,7 +144,6 @@ export class CommunityDetector {
   ): Map<number, number> {
     const communities = new Map<number, number>();
 
-    // Phase 1: Initialize each node in its own community
     let communityId = 0;
     for (const node of graph.keys()) {
       communities.set(node, communityId++);
@@ -164,7 +153,6 @@ export class CommunityDetector {
     let iteration = 0;
     const maxIterations = CommunityDetector.MAX_LOUVAIN_ITERATIONS;
 
-    // Phase 2: Iteratively move nodes to communities that increase modularity
     while (improved && iteration < maxIterations) {
       improved = false;
       iteration++;
@@ -176,7 +164,6 @@ export class CommunityDetector {
         let bestCommunity = currentCommunity;
         let bestModularityGain = 0;
 
-        // Try moving node to each neighbor community
         for (const [neighborCommunity, _] of neighborCommunities) {
           const modularityGain = this.calculateModularityGain(
             node,
@@ -193,7 +180,6 @@ export class CommunityDetector {
           }
         }
 
-        // Move node if we found a better community
         if (bestCommunity !== currentCommunity) {
           communities.set(node, bestCommunity);
           improved = true;
@@ -203,7 +189,6 @@ export class CommunityDetector {
       logger.debug('Louvain iteration complete', { iteration, improved });
     }
 
-    // Normalize community IDs to be sequential
     return this.normalizeCommunityIds(communities);
   }
 
@@ -255,7 +240,6 @@ export class CommunityDetector {
       }
     }
 
-    // Simplified modularity gain calculation
     const gain = (internalEdges - externalEdges) * resolution;
     return gain;
   }
@@ -270,7 +254,7 @@ export class CommunityDetector {
     const totalEdges = Array.from(graph.values()).reduce(
       (sum, neighbors) => sum + neighbors.size,
       0
-    ) / 2; // Divide by 2 because edges are counted twice in undirected graph
+    ) / 2;
 
     if (totalEdges === 0) {
       return 0;
@@ -279,7 +263,6 @@ export class CommunityDetector {
     let modularity = 0;
     const communityGroups = new Map<number, Set<number>>();
 
-    // Group nodes by community
     for (const [node, community] of communities) {
       if (!communityGroups.has(community)) {
         communityGroups.set(community, new Set());
@@ -287,7 +270,6 @@ export class CommunityDetector {
       communityGroups.get(community)!.add(node);
     }
 
-    // Calculate modularity for each community
     for (const nodes of communityGroups.values()) {
       let internalEdges = 0;
       let totalDegree = 0;
@@ -303,7 +285,7 @@ export class CommunityDetector {
         }
       }
 
-      internalEdges /= 2; // Edges counted twice
+      internalEdges /= 2;
       const expectedEdges = (totalDegree * totalDegree) / (4 * totalEdges);
       modularity += (internalEdges - expectedEdges) / totalEdges;
     }
@@ -339,7 +321,6 @@ export class CommunityDetector {
     graph: Map<number, Set<number>>,
     repoId: number
   ): Promise<Module[]> {
-    // Group symbols by community
     const communityGroups = new Map<number, Set<number>>();
     for (const [symbolId, communityId] of communities) {
       if (!communityGroups.has(communityId)) {
@@ -351,7 +332,6 @@ export class CommunityDetector {
     const modules: Module[] = [];
 
     for (const [communityId, symbolIds] of communityGroups) {
-      // Get symbol metadata
       const symbols = await this.db('symbols')
         .join('files', 'symbols.file_id', 'files.id')
         .whereIn('symbols.id', Array.from(symbolIds))
@@ -365,17 +345,13 @@ export class CommunityDetector {
         continue;
       }
 
-      // Calculate edge statistics
       const { internalEdges, externalEdges } = this.calculateEdgeStats(
         symbolIds,
         graph,
         communities
       );
 
-      // Determine module name from dominant file path or symbol names
       const moduleName = this.inferModuleName(symbols);
-
-      // Extract unique files and frameworks
       const files = [...new Set(symbols.map(s => s.path))];
       const frameworks = this.detectFrameworks(files);
 
@@ -427,7 +403,6 @@ export class CommunityDetector {
       return 'Unknown Module';
     }
 
-    // Extract common directory from file paths
     const paths = symbols.map(s => s.path);
     const commonPath = this.findCommonPath(paths);
 
