@@ -9,8 +9,11 @@ import {
   ParseResult,
   ParseOptions
 } from './base';
+import { FrameworkParseOptions } from './base-framework';
 import { ChunkedParseOptions } from './chunked-parser';
 import { SymbolType, Visibility, DependencyType } from '../database/models';
+import { entityClassifier } from '../utils/entity-classifier';
+import { FrameworkDetector } from './utils/framework-detector';
 
 interface TypeScriptParsingContext {
   imports: ParsedImport[];
@@ -21,6 +24,9 @@ interface TypeScriptParsingContext {
  * TypeScript-specific parser extending JavaScript parser
  */
 export class TypeScriptParser extends JavaScriptParser {
+  private currentFilePath: string = '';
+  private currentOptions: ParseOptions | undefined;
+
   private static readonly TS_BOUNDARY_PATTERNS = [
     /interface\s+\w+(?:\s*<[^>]*>)?(?:\s+extends\s+[^{]+)?\s*{[^}]*}\s*\n/g,
     /type\s+\w+(?:\s*<[^>]*>)?\s*=\s*[^;]+;\s*\n/g,
@@ -56,17 +62,40 @@ export class TypeScriptParser extends JavaScriptParser {
     this.language = 'typescript';
   }
 
+  /**
+   * Build qualified name from namespace and parent context
+   */
+  private buildQualifiedName(
+    namespace: string | undefined,
+    parentName: string | undefined,
+    symbolName: string
+  ): string {
+    const parts: string[] = [];
+
+    if (namespace) {
+      parts.push(namespace);
+    }
+
+    if (parentName) {
+      parts.push(parentName);
+    }
+
+    parts.push(symbolName);
+
+    return parts.join('::');
+  }
+
   getSupportedExtensions(): string[] {
     return ['.ts', '.tsx'];
   }
 
-  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string, filePath?: string): {
+  protected performSinglePassExtraction(rootNode: Parser.SyntaxNode, content: string, filePath?: string, options?: FrameworkParseOptions): {
     symbols: ParsedSymbol[];
     dependencies: ParsedDependency[];
     imports: ParsedImport[];
     exports: ParsedExport[];
   } {
-    const result = super.performSinglePassExtraction(rootNode, content, filePath);
+    const result = super.performSinglePassExtraction(rootNode, content, filePath, options);
 
     const tsSymbols: ParsedSymbol[] = [];
 
@@ -138,9 +167,28 @@ export class TypeScriptParser extends JavaScriptParser {
     const name = this.getNodeText(nameNode, content);
     const description = this.extractJSDocComment(node, content);
 
+    const extendsNode = node.childForFieldName('extends');
+    const extendsClasses = extendsNode ? [this.getNodeText(extendsNode, content)] : [];
+
+    const frameworkContext = (this.currentOptions as any)?.frameworkContext?.framework;
+
+    const classification = entityClassifier.classify(
+      'interface',
+      name,
+      extendsClasses,
+      this.currentFilePath,
+      frameworkContext,
+      undefined,
+      (this.currentOptions as any)?.repositoryFrameworks
+    );
+
     return {
       name,
+      qualified_name: this.buildQualifiedName(undefined, undefined, name),
       symbol_type: SymbolType.INTERFACE,
+      entity_type: classification.entityType,
+      framework: classification.framework,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
@@ -156,9 +204,24 @@ export class TypeScriptParser extends JavaScriptParser {
     const name = this.getNodeText(nameNode, content);
     const description = this.extractJSDocComment(node, content);
 
+    const frameworkContext = (this.currentOptions as any)?.frameworkContext?.framework;
+
+    const classification = entityClassifier.classify(
+      'type_alias',
+      name,
+      [],
+      this.currentFilePath,
+      frameworkContext,
+      undefined,
+      (this.currentOptions as any)?.repositoryFrameworks
+    );
+
     return {
       name,
+      qualified_name: this.buildQualifiedName(undefined, undefined, name),
       symbol_type: SymbolType.TYPE_ALIAS,
+      entity_type: classification.entityType,
+      framework: classification.framework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
@@ -174,9 +237,24 @@ export class TypeScriptParser extends JavaScriptParser {
     const name = this.getNodeText(nameNode, content);
     const description = this.extractJSDocComment(node, content);
 
+    const frameworkContext = (this.currentOptions as any)?.frameworkContext?.framework;
+
+    const classification = entityClassifier.classify(
+      'enum',
+      name,
+      [],
+      this.currentFilePath,
+      frameworkContext,
+      undefined,
+      (this.currentOptions as any)?.repositoryFrameworks
+    );
+
     return {
       name,
+      qualified_name: this.buildQualifiedName(undefined, undefined, name),
       symbol_type: SymbolType.ENUM,
+      entity_type: classification.entityType,
+      framework: classification.framework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
@@ -284,10 +362,29 @@ export class TypeScriptParser extends JavaScriptParser {
   }
 
   /**
+   * Detect Vue patterns in file content to auto-set framework context
+   */
+
+  /**
    * Override parseFile to handle TypeScript-specific chunking
    */
   async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
-    const validatedOptions = this.validateOptions(options);
+    this.currentFilePath = filePath;
+
+    // Auto-detect Vue framework if not already set
+    const repositoryFrameworks = options?.repositoryFrameworks;
+    if (!options?.frameworkContext?.framework && FrameworkDetector.detectVue(content, repositoryFrameworks)) {
+      this.currentOptions = {
+        ...options,
+        frameworkContext: {
+          framework: 'vue',
+        },
+      } as any;
+    } else {
+      this.currentOptions = options;
+    }
+
+    const validatedOptions = this.validateOptions(this.currentOptions);
     const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
     // Enhanced TypeScript chunking threshold (higher due to type complexity)
@@ -295,12 +392,12 @@ export class TypeScriptParser extends JavaScriptParser {
 
     // Always use chunking for large TypeScript files
     if (content.length > tsChunkThreshold) {
-      const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
+      const chunkedResult = await this.parseFileInChunks(filePath, content, { ...chunkedOptions, ...(this.currentOptions as any) });
       return this.convertMergedResult(chunkedResult);
     }
 
     // Use parent implementation for smaller files
-    return super.parseFile(filePath, content, options);
+    return super.parseFile(filePath, content, this.currentOptions);
   }
 
   private enhanceDependenciesWithImportResolution(

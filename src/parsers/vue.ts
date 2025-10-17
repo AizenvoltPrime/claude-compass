@@ -81,6 +81,8 @@ export class VueParser extends BaseFrameworkParser {
   } | null = null;
   private singlePassCacheKey: string = '';
   private axiosIdentifiers: Set<string> = new Set(['axios']);
+  private currentFilePath: string = '';
+  private currentOptions: FrameworkParseOptions | undefined;
 
   constructor(parser: Parser) {
     super(parser, 'vue');
@@ -92,6 +94,18 @@ export class VueParser extends BaseFrameworkParser {
     // Create parser instances for delegation (handles JSDoc extraction)
     this.jsParser = new JavaScriptParser();
     this.tsParser = new TypeScriptParser();
+  }
+
+  /**
+   * Build qualified name for symbols within Vue components
+   */
+  private buildQualifiedName(symbolName: string): string {
+    if (!this.currentFilePath) {
+      return symbolName;
+    }
+
+    const componentName = this.extractComponentName(this.currentFilePath);
+    return `${componentName}::${symbolName}`;
   }
 
   /**
@@ -166,6 +180,9 @@ export class VueParser extends BaseFrameworkParser {
     content: string,
     options: FrameworkParseOptions
   ): Promise<ParseFileResult> {
+    this.currentFilePath = filePath;
+    this.currentOptions = options;
+
     const sections = this.extractSFCSections(content);
 
     // Extract symbols, imports, etc. from script section
@@ -182,7 +199,14 @@ export class VueParser extends BaseFrameworkParser {
         const isTypeScript = sections.scriptLang === 'ts' || content.includes('lang="ts"');
 
         // Check if script content needs chunking (force chunking for large scripts regardless of options)
-        const forceChunkingOptions = { ...options, enableChunking: true };
+        const forceChunkingOptions: FrameworkParseOptions = {
+          ...options,
+          enableChunking: true,
+          frameworkContext: {
+            framework: 'vue',
+          },
+        };
+
         if (scriptContent && this.shouldUseChunking(scriptContent, forceChunkingOptions)) {
           // Create a temporary script file path for chunked parsing
           const scriptFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
@@ -191,7 +215,7 @@ export class VueParser extends BaseFrameworkParser {
           const chunkedResult = await this.parseFileInChunks(
             scriptFilePath,
             scriptContent,
-            options
+            forceChunkingOptions
           );
 
           symbols = chunkedResult.symbols;
@@ -204,8 +228,15 @@ export class VueParser extends BaseFrameworkParser {
           const tempFilePath = filePath.replace('.vue', isTypeScript ? '.ts' : '.js');
           const parser = isTypeScript ? this.tsParser : this.jsParser;
 
+          const vueFrameworkOptions: FrameworkParseOptions = {
+            ...options,
+            frameworkContext: {
+              framework: 'vue',
+            },
+          };
+
           try {
-            const parseResult = await parser.parseFile(tempFilePath, scriptContent!, options);
+            const parseResult = await parser.parseFile(tempFilePath, scriptContent!, vueFrameworkOptions);
             symbols = parseResult.symbols;
             imports = parseResult.imports;
             exports = parseResult.exports;
@@ -223,7 +254,7 @@ export class VueParser extends BaseFrameworkParser {
 
         // Extract template symbols using lightweight parsing
         if (sections.template) {
-          const templateSymbols = this.extractTemplateSymbols(sections.template);
+          const templateSymbols = this.extractTemplateSymbols(sections.template, filePath, options);
           symbols.push(...templateSymbols);
         }
       } catch (error) {
@@ -236,7 +267,7 @@ export class VueParser extends BaseFrameworkParser {
       }
     } else if (sections.template) {
       // Handle template-only Vue files
-      const templateSymbols = this.extractTemplateSymbols(sections.template);
+      const templateSymbols = this.extractTemplateSymbols(sections.template, filePath, options);
       symbols.push(...templateSymbols);
     }
 
@@ -245,9 +276,23 @@ export class VueParser extends BaseFrameworkParser {
     if (!hasComponentSymbol) {
       const componentName = this.extractComponentName(filePath);
       const totalLines = (content.match(/\n/g) || []).length + 1;
+
+      const classification = entityClassifier.classify(
+        'component',
+        componentName,
+        [],
+        filePath,
+        'vue',
+        undefined,
+        options?.repositoryFrameworks
+      );
+
       const componentSymbol: ParsedSymbol = {
         name: componentName,
+        qualified_name: componentName,
         symbol_type: SymbolType.COMPONENT,
+        entity_type: classification.entityType,
+        framework: 'vue',
         start_line: 1,
         end_line: totalLines,
         is_exported: true,
@@ -284,6 +329,9 @@ export class VueParser extends BaseFrameworkParser {
     content: string,
     options: FrameworkParseOptions
   ): Promise<ParseFileResult> {
+    this.currentFilePath = filePath;
+    this.currentOptions = options;
+
     const sections = this.extractSFCSections(content);
 
     // Extract symbols, imports, etc. from script section
@@ -312,7 +360,7 @@ export class VueParser extends BaseFrameworkParser {
 
         // Extract template symbols using lightweight parsing
         if (sections.template) {
-          const templateSymbols = this.extractTemplateSymbols(sections.template);
+          const templateSymbols = this.extractTemplateSymbols(sections.template, filePath, options);
           symbols.push(...templateSymbols);
         }
       } catch (error) {
@@ -325,7 +373,7 @@ export class VueParser extends BaseFrameworkParser {
       }
     } else if (sections.template) {
       // Handle template-only Vue files
-      const templateSymbols = this.extractTemplateSymbols(sections.template);
+      const templateSymbols = this.extractTemplateSymbols(sections.template, filePath, options);
       symbols.push(...templateSymbols);
     }
 
@@ -1380,7 +1428,7 @@ export class VueParser extends BaseFrameworkParser {
 
         // Extract template symbols using lightweight parsing
         if (sections.template) {
-          const templateSymbols = this.extractTemplateSymbols(sections.template);
+          const templateSymbols = this.extractTemplateSymbols(sections.template, filePath, options);
           scriptSymbols.push(...templateSymbols);
         }
       }
@@ -4221,18 +4269,44 @@ export class VueParser extends BaseFrameworkParser {
 
         if (nameNode?.text) {
           if (valueNode?.type === 'arrow_function') {
+            const classification = entityClassifier.classify(
+              'function',
+              nameNode.text,
+              [],
+              this.currentFilePath,
+              'vue',
+              undefined,
+              this.currentOptions?.repositoryFrameworks
+            );
+
             symbols.push({
               name: nameNode.text,
+              qualified_name: this.buildQualifiedName(nameNode.text),
               symbol_type: 'function',
+              entity_type: classification.entityType,
+              framework: 'vue',
               start_line: node.startPosition?.row + 1 || 1,
               end_line: node.endPosition?.row + 1 || 1,
               is_exported: false,
               signature: this.getVueNodeText(node),
             });
           } else {
+            const classification = entityClassifier.classify(
+              'variable',
+              nameNode.text,
+              [],
+              this.currentFilePath,
+              'vue',
+              undefined,
+              this.currentOptions?.repositoryFrameworks
+            );
+
             symbols.push({
               name: nameNode.text,
+              qualified_name: this.buildQualifiedName(nameNode.text),
               symbol_type: 'variable',
+              entity_type: classification.entityType,
+              framework: 'vue',
               start_line: node.startPosition?.row + 1 || 1,
               end_line: node.endPosition?.row + 1 || 1,
               is_exported: false,
@@ -4254,9 +4328,22 @@ export class VueParser extends BaseFrameworkParser {
         }
 
         if (nameNode?.text) {
+          const classification = entityClassifier.classify(
+            'function',
+            nameNode.text,
+            [],
+            this.currentFilePath,
+            'vue',
+            undefined,
+            this.currentOptions?.repositoryFrameworks
+          );
+
           symbols.push({
             name: nameNode.text,
+            qualified_name: this.buildQualifiedName(nameNode.text),
             symbol_type: 'function',
+            entity_type: classification.entityType,
+            framework: 'vue',
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
@@ -4285,9 +4372,22 @@ export class VueParser extends BaseFrameworkParser {
         }
 
         if (nameNode?.text) {
+          const classification = entityClassifier.classify(
+            'interface',
+            nameNode.text,
+            [],
+            this.currentFilePath,
+            'vue',
+            undefined,
+            this.currentOptions?.repositoryFrameworks
+          );
+
           symbols.push({
             name: nameNode.text,
+            qualified_name: this.buildQualifiedName(nameNode.text),
             symbol_type: 'interface',
+            entity_type: classification.entityType,
+            framework: 'vue',
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
@@ -4300,9 +4400,22 @@ export class VueParser extends BaseFrameworkParser {
       if (node.type === 'type_alias_declaration') {
         const nameNode = node.child(1);
         if (nameNode?.text) {
+          const classification = entityClassifier.classify(
+            'type_alias',
+            nameNode.text,
+            [],
+            this.currentFilePath,
+            'vue',
+            undefined,
+            this.currentOptions?.repositoryFrameworks
+          );
+
           symbols.push({
             name: nameNode.text,
+            qualified_name: this.buildQualifiedName(nameNode.text),
             symbol_type: 'type_alias',
+            entity_type: classification.entityType,
+            framework: 'vue',
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
@@ -4315,9 +4428,22 @@ export class VueParser extends BaseFrameworkParser {
       if (node.type === 'class_declaration') {
         const nameNode = node.child(1);
         if (nameNode?.text) {
+          const classification = entityClassifier.classify(
+            'class',
+            nameNode.text,
+            [],
+            this.currentFilePath,
+            'vue',
+            undefined,
+            this.currentOptions?.repositoryFrameworks
+          );
+
           symbols.push({
             name: nameNode.text,
+            qualified_name: this.buildQualifiedName(nameNode.text),
             symbol_type: 'class',
+            entity_type: classification.entityType,
+            framework: 'vue',
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
             is_exported: false,
@@ -4359,9 +4485,23 @@ export class VueParser extends BaseFrameworkParser {
                   child &&
                   (child.type === 'arrow_function' || child.type === 'function_expression')
                 ) {
+                  const callbackName = `${functionName}_callback`;
+                  const classification = entityClassifier.classify(
+                    'function',
+                    callbackName,
+                    [],
+                    this.currentFilePath,
+                    'vue',
+                    undefined,
+                    this.currentOptions?.repositoryFrameworks
+                  );
+
                   symbols.push({
-                    name: `${functionName}_callback`,
+                    name: callbackName,
+                    qualified_name: this.buildQualifiedName(callbackName),
                     symbol_type: 'function',
+                    entity_type: classification.entityType,
+                    framework: 'vue',
                     start_line: child.startPosition?.row + 1 || 1,
                     end_line: child.endPosition?.row + 1 || 1,
                     is_exported: false,
@@ -4564,7 +4704,7 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Extract template symbols using lightweight regex patterns
    */
-  private extractTemplateSymbols(template: string): ParsedSymbol[] {
+  private extractTemplateSymbols(template: string, filePath?: string, options?: FrameworkParseOptions): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     if (!template) {
@@ -4577,9 +4717,23 @@ export class VueParser extends BaseFrameworkParser {
       let match;
       while ((match = componentRegex.exec(template)) !== null) {
         const componentName = match[1];
+
+        const classification = entityClassifier.classify(
+          'class',
+          componentName,
+          [],
+          filePath || '',
+          'vue',
+          undefined,
+          options?.repositoryFrameworks
+        );
+
         symbols.push({
           name: componentName,
           symbol_type: SymbolType.CLASS,
+          entity_type: classification.entityType,
+          framework: 'vue',
+          base_class: classification.baseClass || undefined,
           start_line: this.getLineFromIndex(template, match.index),
           end_line: this.getLineFromIndex(template, match.index),
           is_exported: false,
@@ -4591,9 +4745,23 @@ export class VueParser extends BaseFrameworkParser {
       const refRegex = /ref=["']([^"']+)["']/g;
       while ((match = refRegex.exec(template)) !== null) {
         const refName = match[1];
+
+        const classification = entityClassifier.classify(
+          'variable',
+          refName,
+          [],
+          filePath || '',
+          'vue',
+          undefined,
+          options?.repositoryFrameworks
+        );
+
         symbols.push({
           name: refName,
           symbol_type: SymbolType.VARIABLE,
+          entity_type: classification.entityType,
+          framework: 'vue',
+          base_class: classification.baseClass || undefined,
           start_line: this.getLineFromIndex(template, match.index),
           end_line: this.getLineFromIndex(template, match.index),
           is_exported: false,
@@ -4605,9 +4773,23 @@ export class VueParser extends BaseFrameworkParser {
       const vModelRegex = /v-model=["']([^"']+)["']/g;
       while ((match = vModelRegex.exec(template)) !== null) {
         const varName = match[1];
+
+        const classification = entityClassifier.classify(
+          'variable',
+          varName,
+          [],
+          filePath || '',
+          'vue',
+          undefined,
+          options?.repositoryFrameworks
+        );
+
         symbols.push({
           name: varName,
           symbol_type: SymbolType.VARIABLE,
+          entity_type: classification.entityType,
+          framework: 'vue',
+          base_class: classification.baseClass || undefined,
           start_line: this.getLineFromIndex(template, match.index),
           end_line: this.getLineFromIndex(template, match.index),
           is_exported: false,
@@ -4620,9 +4802,22 @@ export class VueParser extends BaseFrameworkParser {
       while ((match = interpolationRegex.exec(template)) !== null) {
         const varName = match[1];
         if (!this.isJavaScriptKeyword(varName)) {
+          const classification = entityClassifier.classify(
+            'variable',
+            varName,
+            [],
+            filePath || '',
+            'vue',
+            undefined,
+            options?.repositoryFrameworks
+          );
+
           symbols.push({
             name: varName,
             symbol_type: SymbolType.VARIABLE,
+            entity_type: classification.entityType,
+            framework: 'vue',
+            base_class: classification.baseClass || undefined,
             start_line: this.getLineFromIndex(template, match.index),
             end_line: this.getLineFromIndex(template, match.index),
             is_exported: false,

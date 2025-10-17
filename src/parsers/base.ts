@@ -197,6 +197,11 @@ export interface ParseError {
   severity: 'error' | 'warning';
 }
 
+export interface FrameworkContext {
+  framework: string;
+  version?: string;
+}
+
 export interface ParseOptions {
   includePrivateSymbols?: boolean;
   includeTestFiles?: boolean;
@@ -207,6 +212,8 @@ export interface ParseOptions {
   chunkOverlapLines?: number;
   preserveContext?: boolean;
   bypassSizeLimit?: boolean;
+  frameworkContext?: FrameworkContext;
+  repositoryFrameworks?: string[];
 }
 
 /**

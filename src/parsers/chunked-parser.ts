@@ -379,7 +379,21 @@ export abstract class ChunkedParser extends BaseParser {
   }
 
   /**
-   * Utility method to remove duplicate symbols across chunks
+   * Remove duplicate symbols across chunks (Layer 1 of defense-in-depth deduplication)
+   *
+   * This is the first layer of Claude Compass's defense-in-depth deduplication strategy:
+   *
+   * Layer 1 (Parser): Deduplicates by logical uniqueness using `qualified_name || name : symbol_type`
+   *   - Prevents duplicates from chunked file processing (symbols appearing in overlap regions)
+   *   - Handles semantic duplicates (same qualified name = logically the same symbol)
+   *   - Keeps the most complete symbol (with signature, exported status, metadata)
+   *
+   * Layer 2 (Database): Deduplicates by physical uniqueness using `file_id : name : symbol_type : start_line`
+   *   - Safety net that catches any parser-missed duplicates
+   *   - See: src/database/services.ts - deduplicateSymbolsForInsertion()
+   *
+   * This dual-layer approach ensures data integrity from multiple angles: chunking, concurrent
+   * parsing, and parser bugs, without relying solely on database constraints.
    */
   protected removeDuplicateSymbols(symbols: ParsedSymbol[]): ParsedSymbol[] {
     const seen = new Map<string, ParsedSymbol>();

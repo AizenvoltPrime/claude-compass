@@ -18,6 +18,7 @@ import {
 } from './chunked-parser';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
 import { entityClassifier } from '../utils/entity-classifier';
+import { FrameworkDetector } from './utils/framework-detector';
 
 /**
  * PHP parsing state for syntax-aware chunking
@@ -142,8 +143,27 @@ export class PHPParser extends ChunkedParser {
     return ['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.phps'];
   }
 
+  /**
+   * Detect Laravel framework patterns in file content
+   */
+
   async parseFile(filePath: string, content: string, options?: ParseOptions): Promise<ParseResult> {
-    const validatedOptions = this.validateOptions(options);
+    // Auto-detect Laravel framework if not already set
+    const repositoryFrameworks = options?.repositoryFrameworks;
+    let enhancedOptions: ParseOptions;
+
+    if (!options?.frameworkContext?.framework && FrameworkDetector.detectLaravel(content, repositoryFrameworks)) {
+      enhancedOptions = {
+        ...options,
+        frameworkContext: {
+          framework: 'laravel',
+        },
+      } as any;
+    } else {
+      enhancedOptions = options || {};
+    }
+
+    const validatedOptions = this.validateOptions(enhancedOptions);
     const chunkedOptions = validatedOptions as ChunkedParseOptions;
 
     // Check if content is valid - handle empty files gracefully
@@ -177,13 +197,13 @@ export class PHPParser extends ChunkedParser {
     if (chunkedOptions.enableChunking !== false &&
         content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)) {
       this.wasChunked = true;
-      const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
+      const chunkedResult = await this.parseFileInChunks(filePath, content, { ...chunkedOptions, ...(enhancedOptions as any) });
       return this.convertMergedResult(chunkedResult);
     }
 
     // For smaller files or when chunking is disabled, use direct parsing
     this.wasChunked = false;
-    return this.parseFileDirectly(filePath, content, chunkedOptions);
+    return this.parseFileDirectly(filePath, content, { ...chunkedOptions, ...(enhancedOptions as any) });
   }
 
   /**
@@ -341,7 +361,7 @@ export class PHPParser extends ChunkedParser {
           break;
         }
         case 'property_declaration': {
-          const propertySymbols = this.extractPropertySymbols(node, content);
+          const propertySymbols = this.extractPropertySymbols(node, content, context);
           symbols.push(...propertySymbols);
           this.trackPropertyTypes(node, content, context.typeMap);
           break;
@@ -501,14 +521,15 @@ export class PHPParser extends ChunkedParser {
     const baseClasses = this.extractBaseClasses(node, content);
 
     // Classify entity type using configuration-driven classifier
+    const frameworkContext = (context.options as any)?.frameworkContext?.framework;
     const classification = entityClassifier.classify(
       'class',
       name,
       baseClasses,
       context.filePath || '',
-      undefined, // Auto-detect framework
-      context.currentNamespace || undefined, // Pass namespace for framework detection
-      context.options?.repositoryFrameworks // Pass repository frameworks from options
+      frameworkContext,
+      context.currentNamespace || undefined,
+      context.options?.repositoryFrameworks
     );
 
     return {
@@ -589,7 +610,7 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractMethodSymbol(node: Parser.SyntaxNode, content: string, context: { currentNamespace: string | null; currentClass: string | null }): ParsedSymbol | null {
+  private extractMethodSymbol(node: Parser.SyntaxNode, content: string, context: PHPParsingContext): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -607,10 +628,25 @@ export class PHPParser extends ChunkedParser {
       qualifiedName = `${classQualifiedName}::${name}`;
     }
 
+    // Classify entity type using configuration-driven classifier
+    const frameworkContext = (context.options as any)?.frameworkContext?.framework;
+    const classification = entityClassifier.classify(
+      'method',
+      name,
+      context.parentClass ? [context.parentClass] : [],
+      context.filePath,
+      frameworkContext,
+      context.currentNamespace || undefined,
+      context.options?.repositoryFrameworks
+    );
+
     return {
       name,
       qualified_name: qualifiedName,
       symbol_type: SymbolType.METHOD,
+      entity_type: classification.entityType,
+      framework: classification.framework,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: visibility === Visibility.PUBLIC,
@@ -620,7 +656,7 @@ export class PHPParser extends ChunkedParser {
     };
   }
 
-  private extractPropertySymbols(node: Parser.SyntaxNode, content: string): ParsedSymbol[] {
+  private extractPropertySymbols(node: Parser.SyntaxNode, content: string, context: PHPParsingContext): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
     const visibility = this.extractVisibility(node, content);
     const description = this.extractPhpDocComment(node, content);
@@ -631,9 +667,26 @@ export class PHPParser extends ChunkedParser {
       const nameNode = element.childForFieldName('name');
       if (nameNode) {
         const name = this.getNodeText(nameNode, content);
+        const cleanName = name.replace('$', ''); // Remove $ prefix from PHP variables
+
+        // Classify entity type using configuration-driven classifier
+        const frameworkContext = (context.options as any)?.frameworkContext?.framework;
+        const classification = entityClassifier.classify(
+          'property',
+          cleanName,
+          context.parentClass ? [context.parentClass] : [],
+          context.filePath,
+          frameworkContext,
+          context.currentNamespace || undefined,
+          context.options?.repositoryFrameworks
+        );
+
         symbols.push({
-          name: name.replace('$', ''), // Remove $ prefix from PHP variables
+          name: cleanName,
           symbol_type: SymbolType.PROPERTY,
+          entity_type: classification.entityType,
+          framework: classification.framework,
+          base_class: classification.baseClass || undefined,
           start_line: element.startPosition.row + 1,
           end_line: element.endPosition.row + 1,
           is_exported: visibility === Visibility.PUBLIC,

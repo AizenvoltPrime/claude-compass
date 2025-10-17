@@ -157,6 +157,7 @@ export class GraphBuilder {
   private symbolGraphBuilder: SymbolGraphBuilder;
   private crossStackGraphBuilder: CrossStackGraphBuilder;
   private logger: any;
+  private buildErrors: BuildError[] = [];
 
   constructor(dbService: DatabaseService) {
     this.dbService = dbService;
@@ -174,6 +175,7 @@ export class GraphBuilder {
     options: BuildOptions = {}
   ): Promise<BuildResult> {
     const startTime = Date.now();
+    this.buildErrors = []; // Reset errors for new analysis
 
     this.logger.info('Starting repository analysis', {
       path: repositoryPath,
@@ -434,7 +436,7 @@ export class GraphBuilder {
         dependenciesCreated: fileDependencies.length + symbolDependencies.length,
         fileGraph,
         symbolGraph,
-        errors,
+        errors: [...errors, ...this.buildErrors],
         totalFiles: files.length,
         totalSymbols: symbols.length,
         crossStackGraph,
@@ -568,7 +570,7 @@ export class GraphBuilder {
         dependenciesCreated: 0,
         fileGraph,
         symbolGraph,
-        errors: [],
+        errors: [...this.buildErrors],
         totalFiles: dbFiles.length,
         totalSymbols: symbols.length,
       };
@@ -636,7 +638,7 @@ export class GraphBuilder {
       dependenciesCreated: partialResult.dependenciesCreated || 0,
       fileGraph,
       symbolGraph,
-      errors: partialResult.errors || [],
+      errors: [...(partialResult.errors || []), ...this.buildErrors],
       totalFiles: dbFiles.length,
       totalSymbols: symbols.length,
     };
@@ -1543,9 +1545,20 @@ export class GraphBuilder {
             continue;
           }
 
+          const symbolTypeMap: Record<string, SymbolType> = {
+            component: SymbolType.COMPONENT,
+            composable: SymbolType.FUNCTION,
+            hook: SymbolType.FUNCTION,
+            route: SymbolType.FUNCTION,
+            store: SymbolType.CLASS,
+          };
+
+          const expectedSymbolType = symbolTypeMap[entity.type];
+
           matchingSymbol = fileSymbols.find(
             s =>
-              s.name === entity.name || entity.name.includes(s.name) || s.name.includes(entity.name)
+              s.name === entity.name &&
+              (expectedSymbolType ? s.symbol_type === expectedSymbolType : true)
           );
 
           if (!matchingSymbol && entity.type !== 'api_call') {
@@ -1644,6 +1657,21 @@ export class GraphBuilder {
             });
           } else if (this.isVueComponent(entity)) {
             const vueEntity = entity as VueComponent;
+
+            if (!matchingSymbol) {
+              const errorMessage = `Vue component symbol not found: ${vueEntity.name}`;
+              this.buildErrors.push({
+                filePath: parseResult.filePath,
+                message: errorMessage,
+              });
+              this.logger.error(errorMessage, {
+                component: vueEntity.name,
+                file: parseResult.filePath,
+                availableSymbols: fileSymbols.map(s => `${s.name} (${s.symbol_type})`),
+              });
+              continue;
+            }
+
             await this.dbService.createComponent({
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
@@ -1651,7 +1679,7 @@ export class GraphBuilder {
               props: vueEntity.props || [],
               emits: vueEntity.emits || [],
               slots: vueEntity.slots || [],
-              hooks: [],
+              hooks: vueEntity.composables || [],
               template_dependencies: vueEntity.template_dependencies || [],
             });
           } else if (this.isReactComponent(entity)) {
@@ -2490,15 +2518,35 @@ export class GraphBuilder {
     return frameworks;
   }
 
-  private async getGitHash(repositoryPath: string): Promise<string | undefined> {
+  private async getGitHash(repoPath: string): Promise<string | null> {
     try {
       const hash = execSync('git rev-parse HEAD', {
-        cwd: repositoryPath,
+        cwd: repoPath,
         encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
       }).trim();
+
+      if (!hash || hash.length !== 40 || !/^[0-9a-f]{40}$/i.test(hash)) {
+        this.logger.error('Invalid git hash format', {
+          hash: hash ? hash.substring(0, 8) : '(empty)',
+          length: hash?.length ?? 0,
+          repoPath,
+        });
+        return null;
+      }
+
+      this.logger.info('Retrieved git hash', { hash: hash.substring(0, 8), repoPath });
       return hash;
-    } catch {
-      return undefined;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('Failed to retrieve git hash', {
+        error: errorMessage,
+        repoPath,
+        isTimeout: errorMessage.includes('ETIMEDOUT'),
+        isNotGitRepo: errorMessage.includes('not a git repository'),
+      });
+      return null;
     }
   }
 
