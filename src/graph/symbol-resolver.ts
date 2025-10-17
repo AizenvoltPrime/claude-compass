@@ -506,6 +506,18 @@ export class SymbolResolver {
   }
 
   /**
+   * Public API for resolving imports by file ID and import name
+   * Used by SymbolGraphBuilder to create import dependency edges
+   */
+  public resolveImport(fileId: number, importName: string): Symbol | null {
+    const sourceContext = this.fileContexts.get(fileId);
+    if (!sourceContext) {
+      return null;
+    }
+    return this.resolveImportedSymbol(sourceContext, importName);
+  }
+
+  /**
    * Resolve symbol through import relationships
    */
   private resolveImportedSymbol(

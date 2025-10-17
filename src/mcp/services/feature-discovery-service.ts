@@ -14,6 +14,7 @@ interface FeatureSymbol {
   start_line: number;
   end_line: number;
   signature?: string;
+  base_class?: string;
 }
 
 interface FeatureRoute {
@@ -222,6 +223,7 @@ export class FeatureDiscoveryService {
       start_line: symbol.start_line,
       end_line: symbol.end_line,
       signature: symbol.signature,
+      base_class: symbol.base_class,
     };
   }
 
@@ -366,18 +368,29 @@ export class FeatureDiscoveryService {
         'files.path as file_path',
         'symbols.start_line',
         'symbols.end_line',
-        'symbols.signature'
+        'symbols.signature',
+        'symbols.base_class'
       );
 
-    return symbols.map(s => ({
-      id: s.id,
-      name: s.name,
-      type: s.type,
-      file_path: s.file_path,
-      start_line: s.start_line,
-      end_line: s.end_line,
-      signature: s.signature,
-    }));
+    const symbolMap = new Map(
+      symbols.map(s => [
+        s.id,
+        {
+          id: s.id,
+          name: s.name,
+          type: s.type,
+          file_path: s.file_path,
+          start_line: s.start_line,
+          end_line: s.end_line,
+          signature: s.signature,
+          base_class: s.base_class,
+        },
+      ])
+    );
+
+    return symbolIds
+      .map(id => symbolMap.get(id))
+      .filter((s): s is NonNullable<typeof s> => s !== undefined);
   }
 
   private async findReverseCallers(
@@ -488,6 +501,76 @@ export class FeatureDiscoveryService {
     }));
   }
 
+  private isStore(symbol: FeatureSymbol): boolean {
+    return (
+      (symbol.name.endsWith('Store') || symbol.name.toLowerCase().includes('store')) &&
+      (symbol.type === SymbolType.CLASS || symbol.type === SymbolType.VARIABLE || symbol.type === SymbolType.FUNCTION) &&
+      (symbol.file_path.endsWith('.ts') || symbol.file_path.endsWith('.js'))
+    );
+  }
+
+  private isComponent(symbol: FeatureSymbol): boolean {
+    return symbol.type === SymbolType.COMPONENT;
+  }
+
+  private isComposable(symbol: FeatureSymbol): boolean {
+    return (
+      (symbol.name.startsWith('use') && symbol.type === SymbolType.FUNCTION) ||
+      (symbol.name.startsWith('create') && symbol.name.includes('composable'))
+    );
+  }
+
+  private isController(symbol: FeatureSymbol): boolean {
+    return (
+      symbol.name.endsWith('Controller') &&
+      symbol.type === SymbolType.CLASS
+    );
+  }
+
+  private isService(symbol: FeatureSymbol): boolean {
+    return (
+      symbol.name.endsWith('Service') &&
+      symbol.type === SymbolType.CLASS
+    );
+  }
+
+  private isRequest(symbol: FeatureSymbol): boolean {
+    return (
+      symbol.name.endsWith('Request') &&
+      symbol.type === SymbolType.CLASS &&
+      symbol.file_path.endsWith('.php')
+    );
+  }
+
+  private isModel(symbol: FeatureSymbol): boolean {
+    const hasModelSignature =
+      symbol.signature?.includes('extends Model') ||
+      symbol.signature?.includes('extends Authenticatable') ||
+      symbol.signature?.includes('extends Pivot');
+
+    const hasModelBaseClass =
+      symbol.base_class === 'Model' ||
+      symbol.base_class === 'Authenticatable' ||
+      symbol.base_class === 'Pivot';
+
+    return (
+      symbol.type === SymbolType.CLASS &&
+      symbol.file_path.endsWith('.php') &&
+      !symbol.name.endsWith('Controller') &&
+      !symbol.name.endsWith('Service') &&
+      !symbol.name.endsWith('Request') &&
+      !symbol.name.endsWith('Job') &&
+      (hasModelSignature || hasModelBaseClass)
+    );
+  }
+
+  private isJob(symbol: FeatureSymbol): boolean {
+    return (
+      symbol.name.endsWith('Job') &&
+      symbol.type === SymbolType.CLASS
+    );
+  }
+
   private buildFeatureManifest(
     featureName: string,
     entryPoint: FeatureSymbol,
@@ -495,7 +578,18 @@ export class FeatureDiscoveryService {
     routes: FeatureRoute[],
     options: { includeComponents: boolean; includeRoutes: boolean; includeModels: boolean }
   ): FeatureManifest {
-    const SAMPLE_SIZE = 5;
+    /**
+     * Maximum number of symbols to return per category in the feature manifest.
+     * Increased from 5 to 50 to provide more comprehensive feature discovery results
+     * while still preventing overwhelming responses for large features.
+     *
+     * Rationale:
+     * - 5 was too limiting for real-world features (most features have >5 related files)
+     * - 50 provides good balance: comprehensive enough for most features, but capped for performance
+     * - Full counts still available in summary.total_* fields
+     * - Can be made configurable via parameters in future if needed
+     */
+    const SAMPLE_SIZE = 50;
 
     const categorized = {
       stores: [] as FeatureSymbol[],
@@ -510,21 +604,21 @@ export class FeatureDiscoveryService {
     };
 
     for (const symbol of allSymbols) {
-      if (symbol.file_path.includes('/stores/') && symbol.file_path.endsWith('Store.ts')) {
+      if (this.isStore(symbol)) {
         categorized.stores.push(symbol);
-      } else if (symbol.file_path.endsWith('.vue') || symbol.file_path.includes('/Components/')) {
+      } else if (this.isComponent(symbol)) {
         if (options.includeComponents) categorized.components.push(symbol);
-      } else if (symbol.file_path.includes('/Composables/') || (symbol.name.startsWith('use') && symbol.type === 'function')) {
+      } else if (this.isComposable(symbol)) {
         categorized.composables.push(symbol);
-      } else if (symbol.name.endsWith('Controller') && symbol.type === 'class') {
+      } else if (this.isController(symbol)) {
         categorized.controllers.push(symbol);
-      } else if (symbol.name.endsWith('Service') && symbol.type === 'class') {
+      } else if (this.isService(symbol)) {
         categorized.services.push(symbol);
-      } else if (symbol.name.endsWith('Request') && symbol.type === 'class') {
+      } else if (this.isRequest(symbol)) {
         categorized.requests.push(symbol);
-      } else if (symbol.type === SymbolType.CLASS && symbol.file_path.includes('/Models/')) {
+      } else if (this.isModel(symbol)) {
         if (options.includeModels) categorized.models.push(symbol);
-      } else if (symbol.name.endsWith('Job') && symbol.type === 'class') {
+      } else if (this.isJob(symbol)) {
         categorized.jobs.push(symbol);
       } else {
         categorized.related.push(symbol);
