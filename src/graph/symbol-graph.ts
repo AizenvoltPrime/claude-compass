@@ -92,12 +92,7 @@ export class SymbolGraphBuilder {
       this.symbolResolver.getResolutionStats();
     }
 
-    const callEdges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0, fileIdToPath);
-
-    const nodesMap = new Map(nodes.map(n => [n.id, n]));
-    const importEdges = files.length > 0 ? this.createImportEdges(symbols, importsMap, nodesMap) : [];
-
-    const edges = [...callEdges, ...importEdges];
+    const edges = this.createSymbolEdges(symbols, dependenciesMap, nodes, files.length > 0, fileIdToPath);
 
     // Extract virtual framework symbols from edges and add them to nodes
     const virtualSymbolNodes = this.extractVirtualSymbolNodes(edges, nodes);
@@ -363,48 +358,11 @@ export class SymbolGraphBuilder {
     return complexity;
   }
 
-  /**
-   * Create dependency edges from import statements
-   * Links importing symbols to imported symbols for comprehensive dependency tracking
-   * Supports refactoring, impact analysis, and unused import detection
-   */
-  private createImportEdges(
-    symbols: Symbol[],
-    importsMap: Map<number, ParsedImport[]>,
-    nodes: Map<number, SymbolNode>
-  ): SymbolEdge[] {
-    const edges: SymbolEdge[] = [];
-
-    for (const [fileId, imports] of importsMap) {
-      const fileSymbols = symbols.filter(s => s.file_id === fileId);
-      const firstSymbol = fileSymbols[0];
-
-      if (!firstSymbol) {
-        continue;
-      }
-
-      for (const importDecl of imports) {
-        if (!importDecl.imported_names || importDecl.imported_names.length === 0) {
-          continue;
-        }
-
-        for (const importedName of importDecl.imported_names) {
-          const targetSymbol = this.symbolResolver.resolveImport(fileId, importedName);
-
-          if (targetSymbol && nodes.has(targetSymbol.id)) {
-            edges.push({
-              from: firstSymbol.id,
-              to: targetSymbol.id,
-              type: DependencyType.IMPORTS,
-              lineNumber: importDecl.line_number,
-              to_qualified_name: targetSymbol.qualified_name
-            });
-          }
-        }
-      }
-    }
-
-    return edges;
+  private isImportStrategy(strategy: string): boolean {
+    return strategy.includes(':imports') ||
+           strategy.includes(':exports') ||
+           strategy === 'imports' ||
+           strategy === 'exports';
   }
 
   private resetLogDeduplication(): void {
@@ -504,6 +462,17 @@ export class SymbolGraphBuilder {
             qualified_context: resolution.originalDependency.qualified_context,
             resolved_class: resolution.originalDependency.resolved_class,
           });
+
+          // Create additional IMPORTS edge if resolution came via imports
+          if (resolution.resolutionStrategy && this.isImportStrategy(resolution.resolutionStrategy)) {
+            edges.push({
+              from: resolution.fromSymbol.id,
+              to: resolution.toSymbol.id,
+              type: DependencyType.IMPORTS,
+              lineNumber: resolution.originalDependency.line_number,
+              to_qualified_name: resolution.originalDependency.to_qualified_name,
+            });
+          }
 
           // Mark this dependency as resolved (include line number to handle multiple calls on different lines)
           const depKey = `${resolution.fromSymbol.id}->${resolution.originalDependency.to_symbol}:${resolution.originalDependency.line_number}`;
