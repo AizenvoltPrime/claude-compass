@@ -76,7 +76,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 - Constructs dependency graphs from parsed symbols
 - Handles file, symbol, and framework relationships
-- Cross-stack builder for Vue � Laravel connections
+- Cross-stack builder for Vue ↔ Laravel connections
 - Call chain analysis and formatting
 
 **Database Layer (`src/database/`)**
@@ -90,8 +90,8 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 - Model Context Protocol server implementation
 - Tools for code search, dependency analysis, impact assessment
-- Consolidated tool interface (6 core tools)
-- Laravel and cross-stack specific tools
+- Consolidated tool interface (8 core tools)
+- Framework-aware search with Laravel, Vue, React, and Godot support
 
 **CLI (`src/cli/`)**
 
@@ -133,7 +133,7 @@ The system uses PostgreSQL with these core tables:
 - Function calls, imports/exports
 - Class inheritance, interface implementation
 - Framework-specific (API calls, route handlers)
-- Cross-stack (Vue � Laravel API)
+- Cross-stack (Vue ↔ Laravel API)
 
 **Search Capabilities**
 
@@ -192,7 +192,7 @@ Setup file: `tests/setup.ts` initializes test database
 ### Adding Language Support
 
 1. Add Tree-sitter grammar dependency
-2. Create parser in `src/parsers/languages/`
+2. Create parser in `src/parsers/`
 3. Implement chunking strategy if needed
 4. Add tests in `tests/parsers/`
 5. Register in multi-parser
@@ -205,10 +205,10 @@ CLAUDE_COMPASS_DEBUG=true ./dist/src/cli/index.js analyze /path --verbose
 
 # Debug single file parsing (for parser development and troubleshooting)
 ./dist/src/cli/index.js analyze /path/to/repo --debug-file relative/path/to/file.cs --verbose
+```
 
 ### Database Migrations
 
-Migrations in `src/database/migrations/` use Knex
-Naming: `XXX_description.ts` where XXX is sequential
-Always include both `up` and `down` methods
-```
+Migrations in `src/database/migrations/` use Knex.
+Naming: `NNN_description.ts` where NNN is a 3-digit sequential number (001, 002, 003, etc.).
+Always include both `up` and `down` methods.
