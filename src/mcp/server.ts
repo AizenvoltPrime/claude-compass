@@ -330,31 +330,6 @@ export class ClaudeCompassMCPServer {
             },
           },
           {
-            name: 'identify_modules',
-            description:
-              'Discover architectural modules using community detection (Louvain algorithm). Finds clusters of symbols that work closely together, representing natural boundaries like "Authentication", "Payment", etc.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                repo_id: {
-                  type: 'number',
-                  description: 'Repository ID to analyze (optional if default repo is set)',
-                },
-                min_module_size: {
-                  type: 'number',
-                  description: 'Minimum number of symbols per module',
-                  default: 3,
-                },
-                resolution: {
-                  type: 'number',
-                  description: 'Resolution parameter for community detection (higher = more modules)',
-                  default: 1.0,
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-          {
             name: 'trace_flow',
             description:
               'Find execution paths between two symbols. Can find shortest path or all paths up to max_depth. Useful for understanding how code flows from point A to B.',
@@ -383,6 +358,75 @@ export class ClaudeCompassMCPServer {
                 },
               },
               required: ['start_symbol_id', 'end_symbol_id'],
+              additionalProperties: false,
+            },
+          },
+          {
+            name: 'discover_feature',
+            description:
+              'Discover complete feature modules across the entire stack. Finds all related code for a feature by combining dependency analysis, naming heuristics, and cross-stack API tracing. Discovers semantic features that span frontend and backend with improved filtering, relevance scoring, and test exclusion.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                symbol_id: {
+                  type: 'number',
+                  description: 'Symbol ID to start feature discovery from (e.g., a controller method, store function, or service)',
+                },
+                include_components: {
+                  type: 'boolean',
+                  description: 'Include Vue/React components in the feature manifest',
+                  default: true,
+                },
+                include_routes: {
+                  type: 'boolean',
+                  description: 'Include API routes in the feature manifest',
+                  default: true,
+                },
+                include_models: {
+                  type: 'boolean',
+                  description: 'Include database models in the feature manifest',
+                  default: true,
+                },
+                include_tests: {
+                  type: 'boolean',
+                  description: 'Include test files and test symbols (default: false to filter out test noise)',
+                  default: false,
+                },
+                include_callers: {
+                  type: 'boolean',
+                  description: 'Include reverse dependencies (symbols that call/import the discovered symbols). Enables bidirectional discovery for symmetric results regardless of entry point (default: true)',
+                  default: true,
+                },
+                naming_depth: {
+                  type: 'number',
+                  description: 'How aggressively to match related symbols by name (1=conservative, 2=moderate, 3=aggressive)',
+                  default: 2,
+                  minimum: 1,
+                  maximum: 3,
+                },
+                max_depth: {
+                  type: 'number',
+                  description: 'Maximum depth for dependency graph traversal (lower = more focused results)',
+                  default: 3,
+                  minimum: 1,
+                  maximum: 20,
+                },
+                max_symbols: {
+                  type: 'number',
+                  description: 'Maximum number of symbols to return (prevents overwhelming responses)',
+                  default: 500,
+                  minimum: 10,
+                  maximum: 5000,
+                },
+                min_relevance_score: {
+                  type: 'number',
+                  description: 'Minimum relevance score (0.0-1.0) for including symbols, based on dependency distance',
+                  default: 0,
+                  minimum: 0,
+                  maximum: 1,
+                },
+              },
+              required: ['symbol_id'],
               additionalProperties: false,
             },
           },
@@ -436,12 +480,12 @@ export class ClaudeCompassMCPServer {
             response = await this.tools.impactOf(args);
             break;
 
-          case 'identify_modules':
-            response = await this.tools.identifyModules(args);
-            break;
-
           case 'trace_flow':
             response = await this.tools.traceFlow(args);
+            break;
+
+          case 'discover_feature':
+            response = await this.tools.discoverFeature(args);
             break;
 
           default:

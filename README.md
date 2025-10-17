@@ -357,7 +357,7 @@ npm test
 
 ## MCP Tools
 
-Claude Compass exposes 6 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, and impact assessment.
+Claude Compass exposes 8 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, impact assessment, and feature discovery.
 
 ### Available Tools
 
@@ -461,6 +461,56 @@ Comprehensive impact analysis - calculate blast radius across all frameworks inc
 - `tests_affected`: Test files that should be run
 - `summary`: Aggregate metrics including total counts and frameworks affected
 
+#### 7. `trace_flow`
+
+Find execution paths between two symbols. Can find shortest path or all paths up to max_depth. Useful for understanding how code flows from point A to B.
+
+**Parameters:**
+
+- `start_symbol_id` (required): Starting symbol ID (number)
+- `end_symbol_id` (required): Ending symbol ID (number)
+- `find_all_paths`: If true, finds all paths; if false, finds shortest path (boolean, default: false)
+- `max_depth`: Maximum path depth to search (default: 10, min: 1, max: 20)
+  - Controls how deep to search for execution paths
+  - Higher values may find longer indirect paths but increase query time
+
+**Returns:** Execution paths showing how code flows from the start symbol to the end symbol, including intermediate steps
+
+#### 8. `discover_feature`
+
+Discover complete feature modules across the entire stack. Finds all related code for a feature by combining dependency analysis, naming heuristics, and cross-stack API tracing. Discovers semantic features that span frontend and backend with improved filtering, relevance scoring, and test exclusion.
+
+**Parameters:**
+
+- `symbol_id` (required): Symbol ID to start feature discovery from (e.g., a controller method, store function, or service) (number)
+- `include_components`: Include Vue/React components in the feature manifest (boolean, default: true)
+- `include_routes`: Include API routes in the feature manifest (boolean, default: true)
+- `include_models`: Include database models in the feature manifest (boolean, default: true)
+- `include_tests`: Include test files and test symbols (boolean, default: false to filter out test noise)
+- `include_callers`: Include reverse dependencies - symbols that call/import the discovered symbols (boolean, default: true)
+  - Enables bidirectional discovery for symmetric results regardless of entry point
+- `naming_depth`: How aggressively to match related symbols by name (default: 2, min: 1, max: 3)
+  - 1 = conservative (exact matches)
+  - 2 = moderate (pattern matching)
+  - 3 = aggressive (fuzzy matching)
+- `max_depth`: Maximum depth for dependency graph traversal (default: 3, min: 1, max: 20)
+  - Lower values = more focused results
+  - Higher values = more comprehensive discovery
+- `max_symbols`: Maximum number of symbols to return (default: 500, min: 10, max: 5000)
+  - Prevents overwhelming responses with too many results
+- `min_relevance_score`: Minimum relevance score (0.0-1.0) for including symbols (default: 0)
+  - Based on dependency distance and naming similarity
+  - Higher values = only highly relevant symbols
+
+**Returns:** Feature manifest with categorized symbols:
+- `feature_name`: Inferred feature name
+- `entry_point`: The starting symbol for discovery
+- `frontend`: Categorized frontend symbols (stores, components, composables)
+- `api`: API routes related to the feature
+- `backend`: Categorized backend symbols (controllers, services, requests, models, jobs)
+- `related_symbols`: Additional related symbols
+- `summary`: Aggregate metrics including counts for each category
+
 ### Usage Examples
 
 ```typescript
@@ -497,6 +547,28 @@ const callers = await mcpClient.callTool('who_calls', {
 const dependencies = await mcpClient.callTool('list_dependencies', {
   symbol_id: 789,
   max_depth: 2, // Find direct dependencies and one level of indirect
+});
+
+// Trace execution flow between two symbols
+const flowPath = await mcpClient.callTool('trace_flow', {
+  start_symbol_id: 100,
+  end_symbol_id: 200,
+  find_all_paths: false, // Find shortest path only
+  max_depth: 10,
+});
+
+// Discover complete feature module from entry point
+const feature = await mcpClient.callTool('discover_feature', {
+  symbol_id: 350, // e.g., UserController.register
+  include_components: true,
+  include_routes: true,
+  include_models: true,
+  include_tests: false, // Exclude test files
+  include_callers: true, // Bidirectional discovery
+  naming_depth: 2, // Moderate name matching
+  max_depth: 3, // Focused results
+  max_symbols: 500,
+  min_relevance_score: 0.5, // Only highly relevant symbols
 });
 ```
 
