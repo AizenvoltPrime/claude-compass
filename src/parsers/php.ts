@@ -498,14 +498,7 @@ export class PHPParser extends ChunkedParser {
     const qualifiedName = this.buildQualifiedName(context, name);
 
     // Extract base classes for entity classification
-    const baseClasses: string[] = [];
-    const extendsNode = node.childForFieldName('base_clause');
-    if (extendsNode) {
-      const baseClassName = this.getNodeText(extendsNode, content).replace(/^extends\s+/, '').trim();
-      if (baseClassName) {
-        baseClasses.push(baseClassName);
-      }
-    }
+    const baseClasses = this.extractBaseClasses(node, content);
 
     // Classify entity type using configuration-driven classifier
     const classification = entityClassifier.classify(
@@ -718,6 +711,46 @@ export class PHPParser extends ChunkedParser {
     }
 
     return signature;
+  }
+
+  private extractBaseClasses(node: Parser.SyntaxNode, content: string): string[] {
+    const baseClasses: string[] = [];
+
+    /**
+     * Manual iteration required because Tree-sitter's PHP grammar doesn't expose
+     * base_clause as a named field. The childForFieldName('base_clause') approach
+     * doesn't work - we must iterate through namedChildren to find nodes with
+     * type === 'base_clause'. This is a limitation of the php-tree-sitter grammar.
+     */
+    let baseClauseNode: Parser.SyntaxNode | null = null;
+    for (const child of node.namedChildren) {
+      if (child.type === 'base_clause') {
+        baseClauseNode = child;
+        break;
+      }
+    }
+
+    if (baseClauseNode) {
+      // Iterate through children to find class name nodes
+      for (const child of baseClauseNode.children) {
+        if (child.type === 'name' || child.type === 'qualified_name' || child.type === 'namespace_name') {
+          const className = this.getNodeText(child, content).trim();
+          if (className) {
+            baseClasses.push(className);
+          }
+        }
+      }
+
+      // Fallback: if no named children found, get the full text and clean it
+      if (baseClasses.length === 0) {
+        const fullText = this.getNodeText(baseClauseNode, content).replace(/^extends\s+/, '').trim();
+        if (fullText) {
+          baseClasses.push(fullText);
+        }
+      }
+    }
+
+    return baseClasses;
   }
 
   private extractFunctionSignature(node: Parser.SyntaxNode, content: string): string {

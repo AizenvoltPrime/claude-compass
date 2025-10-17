@@ -51,6 +51,14 @@ export class JavaScriptParser extends ChunkedParser {
     'set',
   ]);
 
+  private static readonly COMPONENT_RENDER_FUNCTIONS = new Set([
+    'h',
+    'jsx',
+    '_jsx',
+    '_jsxs',
+    'createElement'
+  ]);
+
   private static readonly MAX_VARIABLE_VALUE_LENGTH = 100;
   private static readonly MAX_CALL_SIGNATURE_LENGTH = 100;
   private static readonly MAX_ARGUMENT_TEXT_LENGTH = 30;
@@ -576,6 +584,52 @@ export class JavaScriptParser extends ChunkedParser {
   }
 
   /**
+   * Extract component reference from render function first argument
+   * Returns component name and line number if valid component reference found
+   *
+   * Uses heuristics to distinguish React/Vue components (PascalCase) from
+   * constants (UPPER_CASE) and regular identifiers (camelCase)
+   */
+  private extractComponentReference(
+    callNode: Parser.SyntaxNode,
+    content: string
+  ): { name: string; lineNumber: number } | null {
+    const args = callNode.childForFieldName('arguments');
+    if (!args || args.namedChildCount === 0) return null;
+
+    const firstArg = args.namedChild(0);
+    if (!firstArg) return null;
+
+    if (firstArg.type !== 'identifier') return null;
+
+    const componentName = this.getNodeText(firstArg, content);
+
+    if (!this.isPascalCaseComponent(componentName)) return null;
+
+    return {
+      name: componentName,
+      lineNumber: firstArg.startPosition.row + 1
+    };
+  }
+
+  /**
+   * Check if a name follows PascalCase component naming convention
+   * Returns true for: MyComponent, Button, UserProfile
+   * Returns false for: CONSTANTS, MY_ENUM, camelCase, _private
+   */
+  private isPascalCaseComponent(name: string): boolean {
+    if (name.length === 0) return false;
+
+    if (name[0] !== name[0].toUpperCase()) return false;
+
+    if (name === name.toUpperCase()) return false;
+
+    if (name.includes('_')) return false;
+
+    return true;
+  }
+
+  /**
    * Find the containing function for a call expression node by traversing up the AST
    */
   private findContainingFunction(callNode: Parser.SyntaxNode): string {
@@ -615,9 +669,41 @@ export class JavaScriptParser extends ChunkedParser {
 
     if (functionNode.type === 'identifier') {
       functionName = this.getNodeText(functionNode, content);
+
+      if (JavaScriptParser.COMPONENT_RENDER_FUNCTIONS.has(functionName)) {
+        const componentRef = this.extractComponentReference(node, content);
+        if (componentRef) {
+          const callerName = this.findContainingFunction(node);
+          return {
+            from_symbol: callerName,
+            to_symbol: componentRef.name,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: componentRef.lineNumber,
+          };
+        }
+      }
     } else if (functionNode.type === 'member_expression') {
-      // Handle method calls like obj.method()
+      const objectNode = functionNode.childForFieldName('object');
       const propertyNode = functionNode.childForFieldName('property');
+
+      if (objectNode && propertyNode) {
+        const objectName = this.getNodeText(objectNode, content);
+        const propertyName = this.getNodeText(propertyNode, content);
+
+        if (objectName === 'React' && propertyName === 'createElement') {
+          const componentRef = this.extractComponentReference(node, content);
+          if (componentRef) {
+            const callerName = this.findContainingFunction(node);
+            return {
+              from_symbol: callerName,
+              to_symbol: componentRef.name,
+              dependency_type: DependencyType.REFERENCES,
+              line_number: componentRef.lineNumber,
+            };
+          }
+        }
+      }
+
       if (!propertyNode) return null;
       functionName = this.getNodeText(propertyNode, content);
     } else {
