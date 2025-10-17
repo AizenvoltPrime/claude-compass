@@ -337,6 +337,11 @@
           "entityType": "request",
           "description": "Form request validation"
         },
+        "FormRequest": {
+          "priority": 1,
+          "entityType": "request",
+          "description": "Form request validation"
+        },
         "Resource": {
           "priority": 1,
           "entityType": "api_resource",
@@ -346,6 +351,26 @@
           "priority": 1,
           "entityType": "notification",
           "description": "Notification class"
+        },
+        "Command": {
+          "priority": 1,
+          "entityType": "command",
+          "description": "Artisan command"
+        },
+        "Seeder": {
+          "priority": 1,
+          "entityType": "seeder",
+          "description": "Database seeder"
+        },
+        "Migration": {
+          "priority": 1,
+          "entityType": "migration",
+          "description": "Database migration"
+        },
+        "ServiceProvider": {
+          "priority": 1,
+          "entityType": "provider",
+          "description": "Service provider"
         }
       },
       "namePatterns": {
@@ -434,6 +459,43 @@
           "description": "Pinia stores"
         }
       ]
+    },
+    "function": {
+      "namePatterns": {
+        "prefix": [
+          {
+            "pattern": "^use[A-Z]",
+            "priority": 10,
+            "entityType": "composable",
+            "description": "Vue composable (use* pattern)",
+            "fileExtensions": [".ts", ".js", ".vue"]
+          }
+        ]
+      }
+    },
+    "variable": {
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Store",
+            "priority": 10,
+            "entityType": "store",
+            "description": "Pinia store"
+          }
+        ]
+      }
+    },
+    "class": {
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Service",
+            "priority": 10,
+            "entityType": "service",
+            "description": "Service class"
+          }
+        ]
+      }
     }
   },
   "react": {
@@ -453,6 +515,14 @@
             "entityType": "hook",
             "description": "React hook (useXxx pattern)"
           }
+        ],
+        "suffix": [
+          {
+            "pattern": "Provider",
+            "priority": 10,
+            "entityType": "provider",
+            "description": "React context provider"
+          }
         ]
       },
       "directoryRules": [
@@ -469,6 +539,54 @@
           "description": "Hooks directory"
         }
       ]
+    },
+    "class": {
+      "baseClassRules": {
+        "Component": {
+          "priority": 1,
+          "entityType": "component",
+          "description": "React class component"
+        },
+        "PureComponent": {
+          "priority": 1,
+          "entityType": "component",
+          "description": "React pure component"
+        }
+      }
+    }
+  },
+  "typescript": {
+    "interface": {
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Props",
+            "priority": 10,
+            "entityType": "props_interface",
+            "description": "Component props interface"
+          },
+          {
+            "pattern": "State",
+            "priority": 10,
+            "entityType": "state_interface",
+            "description": "Component state interface"
+          },
+          {
+            "pattern": "Config",
+            "priority": 10,
+            "entityType": "config",
+            "description": "Configuration interface"
+          }
+        ],
+        "prefix": [
+          {
+            "pattern": "^I[A-Z]",
+            "priority": 5,
+            "entityType": "interface",
+            "description": "Interface with I prefix convention"
+          }
+        ]
+      }
     }
   }
 }

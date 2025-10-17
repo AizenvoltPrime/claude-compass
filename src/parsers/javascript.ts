@@ -101,12 +101,22 @@ export class JavaScriptParser extends ChunkedParser {
       chunkedOptions.enableChunking !== false &&
       content.length > (chunkedOptions.chunkSize || this.DEFAULT_CHUNK_SIZE)
     ) {
-      const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
+      // Merge chunkedOptions with original options to preserve frameworkContext
+      const chunkedResult = await this.parseFileInChunks(filePath, content, {
+        ...chunkedOptions,
+        frameworkContext: options?.frameworkContext,
+        repositoryFrameworks: options?.repositoryFrameworks,
+      });
       return this.convertMergedResult(chunkedResult);
     }
 
     // For smaller files or when chunking is disabled, use direct parsing
-    return this.parseFileDirectly(filePath, content, chunkedOptions);
+    // Merge chunkedOptions with original options to preserve frameworkContext
+    return this.parseFileDirectly(filePath, content, {
+      ...chunkedOptions,
+      frameworkContext: options?.frameworkContext,
+      repositoryFrameworks: options?.repositoryFrameworks,
+    });
   }
 
   /**
@@ -141,13 +151,18 @@ export class JavaScriptParser extends ChunkedParser {
       this.clearNodeCache();
       const result = this.performSinglePassExtraction(tree.rootNode, content, filePath, options as FrameworkParseOptions);
 
+      const deduplicatedSymbols = this.removeDuplicateSymbols(result.symbols);
+      const deduplicatedDependencies = this.removeDuplicateDependencies(result.dependencies);
+      const deduplicatedImports = this.removeDuplicateImports(result.imports);
+      const deduplicatedExports = this.removeDuplicateExports(result.exports);
+
       return {
         symbols: validatedOptions.includePrivateSymbols
-          ? result.symbols
-          : result.symbols.filter(s => s.visibility !== 'private'),
-        dependencies: result.dependencies,
-        imports: result.imports,
-        exports: result.exports,
+          ? deduplicatedSymbols
+          : deduplicatedSymbols.filter(s => s.visibility !== 'private'),
+        dependencies: deduplicatedDependencies,
+        imports: deduplicatedImports,
+        exports: deduplicatedExports,
         errors: [],
       };
     } finally {
@@ -178,7 +193,7 @@ export class JavaScriptParser extends ChunkedParser {
           break;
         }
         case 'variable_declarator': {
-          const symbol = this.extractVariableSymbol(node, content);
+          const symbol = this.extractVariableSymbol(node, content, filePath, options);
           if (symbol) symbols.push(symbol);
           const valueNode = node.childForFieldName('value');
           if (valueNode?.type === 'arrow_function') {
@@ -187,12 +202,14 @@ export class JavaScriptParser extends ChunkedParser {
           break;
         }
         case 'class_declaration': {
-          const symbol = this.extractClassSymbol(node, content, filePath);
-          if (symbol) symbols.push(symbol);
+          if (this.isActualClassDeclaration(node, content)) {
+            const symbol = this.extractClassSymbol(node, content, filePath, options);
+            if (symbol) symbols.push(symbol);
+          }
           break;
         }
         case 'method_definition': {
-          const symbol = this.extractMethodSymbol(node, content);
+          const symbol = this.extractMethodSymbol(node, content, filePath, options);
           if (symbol) symbols.push(symbol);
           break;
         }
@@ -202,7 +219,7 @@ export class JavaScriptParser extends ChunkedParser {
             node.parent?.type !== 'variable_declarator' &&
             node.parent?.type !== 'assignment_expression'
           ) {
-            const symbol = this.extractArrowFunctionSymbol(node, content);
+            const symbol = this.extractArrowFunctionSymbol(node, content, filePath, options);
             if (symbol) symbols.push(symbol);
           }
           break;
@@ -306,21 +323,21 @@ export class JavaScriptParser extends ChunkedParser {
     // Extract arrow functions assigned to variables
     const variableNodes = this.findNodesOfType(rootNode, 'variable_declarator');
     for (const node of variableNodes) {
-      const symbol = this.extractVariableSymbol(node, content);
+      const symbol = this.extractVariableSymbol(node, content, undefined, undefined);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract class declarations
     const classNodes = this.findNodesOfType(rootNode, 'class_declaration');
     for (const node of classNodes) {
-      const symbol = this.extractClassSymbol(node, content);
+      const symbol = this.extractClassSymbol(node, content, undefined, undefined);
       if (symbol) symbols.push(symbol);
     }
 
     // Extract method definitions
     const methodNodes = this.findNodesOfType(rootNode, 'method_definition');
     for (const node of methodNodes) {
-      const symbol = this.extractMethodSymbol(node, content);
+      const symbol = this.extractMethodSymbol(node, content, undefined, undefined);
       if (symbol) symbols.push(symbol);
     }
 
@@ -332,7 +349,7 @@ export class JavaScriptParser extends ChunkedParser {
         node.parent?.type !== 'variable_declarator' &&
         node.parent?.type !== 'assignment_expression'
       ) {
-        const symbol = this.extractArrowFunctionSymbol(node, content);
+        const symbol = this.extractArrowFunctionSymbol(node, content, undefined, undefined);
         if (symbol) symbols.push(symbol);
       }
     }
@@ -417,15 +434,16 @@ export class JavaScriptParser extends ChunkedParser {
     const signature = this.extractFunctionSignature(node, content);
     const description = this.extractJSDocComment(node, content);
 
-    // Classify entity type using configuration-driven classifier
+    const frameworkContext = options?.frameworkContext?.framework;
+
     const classification = entityClassifier.classify(
       'function',
       name,
-      [], // Functions don't have base classes
+      [],
       filePath || '',
-      undefined, // Auto-detect framework
-      undefined, // JS has no namespace concept
-      options?.repositoryFrameworks // Pass repository frameworks from options
+      frameworkContext,
+      undefined,
+      options?.repositoryFrameworks
     );
 
     return {
@@ -442,7 +460,7 @@ export class JavaScriptParser extends ChunkedParser {
     };
   }
 
-  private extractVariableSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractVariableSymbol(node: Parser.SyntaxNode, content: string, filePath?: string, options?: FrameworkParseOptions): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     const valueNode = node.childForFieldName('value');
 
@@ -483,9 +501,24 @@ export class JavaScriptParser extends ChunkedParser {
 
     const description = this.extractJSDocComment(node, content);
 
+    const frameworkContext = options?.frameworkContext?.framework;
+
+    const classification = entityClassifier.classify(
+      symbolType === SymbolType.FUNCTION ? 'function' : 'variable',
+      name,
+      [],
+      filePath || '',
+      frameworkContext,
+      undefined,
+      options?.repositoryFrameworks
+    );
+
     return {
       name,
       symbol_type: symbolType,
+      entity_type: classification.entityType,
+      framework: classification.framework,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: this.isSymbolExported(node, name, content),
@@ -494,7 +527,7 @@ export class JavaScriptParser extends ChunkedParser {
     };
   }
 
-  private extractClassSymbol(node: Parser.SyntaxNode, content: string, filePath?: string): ParsedSymbol | null {
+  private extractClassSymbol(node: Parser.SyntaxNode, content: string, filePath?: string, options?: FrameworkParseOptions): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -511,13 +544,16 @@ export class JavaScriptParser extends ChunkedParser {
       }
     }
 
-    // Classify entity type using configuration-driven classifier
+    const frameworkContext = options?.frameworkContext?.framework;
+
     const classification = entityClassifier.classify(
       'class',
       name,
       baseClasses,
       filePath || '',
-      undefined // Auto-detect framework from file path
+      frameworkContext,
+      undefined,
+      options?.repositoryFrameworks
     );
 
     return {
@@ -533,7 +569,7 @@ export class JavaScriptParser extends ChunkedParser {
     };
   }
 
-  private extractMethodSymbol(node: Parser.SyntaxNode, content: string): ParsedSymbol | null {
+  private extractMethodSymbol(node: Parser.SyntaxNode, content: string, filePath?: string, options?: FrameworkParseOptions): ParsedSymbol | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -556,9 +592,24 @@ export class JavaScriptParser extends ChunkedParser {
       visibility = Visibility.PRIVATE;
     }
 
+    const frameworkContext = options?.frameworkContext?.framework;
+
+    const classification = entityClassifier.classify(
+      'method',
+      name,
+      [],
+      filePath || '',
+      frameworkContext,
+      undefined,
+      options?.repositoryFrameworks
+    );
+
     return {
       name,
       symbol_type: SymbolType.METHOD,
+      entity_type: classification.entityType,
+      framework: classification.framework,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: false,
@@ -570,11 +621,28 @@ export class JavaScriptParser extends ChunkedParser {
 
   private extractArrowFunctionSymbol(
     node: Parser.SyntaxNode,
-    content: string
+    content: string,
+    filePath?: string,
+    options?: FrameworkParseOptions
   ): ParsedSymbol | null {
+    const frameworkContext = options?.frameworkContext?.framework;
+
+    const classification = entityClassifier.classify(
+      'function',
+      'arrow_function',
+      [],
+      filePath || '',
+      frameworkContext,
+      undefined,
+      options?.repositoryFrameworks
+    );
+
     return {
       name: 'arrow_function',
       symbol_type: SymbolType.FUNCTION,
+      entity_type: classification.entityType,
+      framework: classification.framework,
+      base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: false,
@@ -1039,6 +1107,29 @@ export class JavaScriptParser extends ChunkedParser {
   private buildMethodSignature(name: string, modifiers: string[], params: string): string {
     const modifierString = modifiers.length > 0 ? modifiers.join(' ') + ' ' : '';
     return `${modifierString}${name}${params}`;
+  }
+
+  /**
+   * Validate that a node is actually a class declaration and not misclassified
+   * Prevents false positive class detection from import statements or other contexts
+   */
+  private isActualClassDeclaration(node: Parser.SyntaxNode, content: string): boolean {
+    const parent = node.parent;
+    if (!parent) return true;
+
+    if (parent.type === 'import_statement' || parent.type === 'import_clause' || parent.type === 'import_specifier') {
+      return false;
+    }
+
+    if (parent.type === 'export_statement') {
+      const declaration = parent.childForFieldName('declaration');
+      if (declaration && declaration.id === node.id) {
+        return true;
+      }
+    }
+
+    const nodeText = this.getNodeText(node, content);
+    return /^\s*(?:export\s+)?(?:default\s+)?class\s+/i.test(nodeText);
   }
 
   /**

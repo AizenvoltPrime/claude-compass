@@ -501,12 +501,22 @@ export class DatabaseService {
   async createSymbols(symbols: CreateSymbol[]): Promise<Symbol[]> {
     if (symbols.length === 0) return [];
 
-    // Break into smaller batches for better memory management and transaction performance
+    const deduplicated = this.deduplicateSymbolsForInsertion(symbols);
+
+    if (deduplicated.length < symbols.length) {
+      const duplicatesRemoved = symbols.length - deduplicated.length;
+      logger.info('Removed duplicate symbols before database insertion', {
+        original: symbols.length,
+        deduplicated: deduplicated.length,
+        duplicatesRemoved,
+      });
+    }
+
     const BATCH_SIZE = 50;
     const results: Symbol[] = [];
 
-    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-      const batch = symbols.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < deduplicated.length; i += BATCH_SIZE) {
+      const batch = deduplicated.slice(i, i + BATCH_SIZE);
 
       const batchResults = await this.db('symbols').insert(batch).returning('*');
       results.push(...(batchResults as Symbol[]));
@@ -3995,6 +4005,61 @@ export class DatabaseService {
       })
       .select('symbols.id', 'symbols.name', 'files.path as file_path', 'symbols.entity_type')
       .distinct();
+  }
+
+  /**
+   * Deduplicate symbols before database insertion (defense-in-depth safety net)
+   *
+   * This is the second layer of Claude Compass's defense-in-depth deduplication strategy:
+   *
+   * Layer 1 (Parser): Deduplicates by logical uniqueness using `qualified_name || name : symbol_type`
+   *   - Prevents duplicates from chunked file processing
+   *   - Handles semantic duplicates (same qualified name = same symbol)
+   *   - See: src/parsers/chunked-parser.ts - removeDuplicateSymbols()
+   *
+   * Layer 2 (Database): Deduplicates by physical uniqueness using `file_id : name : symbol_type : start_line`
+   *   - Safety net that catches parser-missed duplicates
+   *   - Prevents database constraint violations
+   *   - Uses physical location for stricter uniqueness guarantee
+   *
+   * This dual-layer approach ensures data integrity without relying solely on database constraints,
+   * preventing duplicates from multiple angles: chunking, concurrent parsing, and parser bugs.
+   *
+   * Uses file_id, name, symbol_type, and start_line as unique key
+   * Keeps the most complete symbol when duplicates are found
+   */
+  private deduplicateSymbolsForInsertion(symbols: CreateSymbol[]): CreateSymbol[] {
+    const seen = new Map<string, CreateSymbol>();
+
+    for (const symbol of symbols) {
+      const key = `${symbol.file_id}:${symbol.name}:${symbol.symbol_type}:${symbol.start_line}`;
+
+      if (!seen.has(key) || this.isMoreCompleteSymbolForInsertion(symbol, seen.get(key)!)) {
+        seen.set(key, symbol);
+      }
+    }
+
+    return Array.from(seen.values());
+  }
+
+  /**
+   * Determine if one symbol is more complete than another for deduplication
+   * Prefers symbols with signatures, exported symbols, and better metadata
+   */
+  private isMoreCompleteSymbolForInsertion(s1: CreateSymbol, s2: CreateSymbol): boolean {
+    if (s1.signature && !s2.signature) return true;
+    if (!s1.signature && s2.signature) return false;
+
+    if (s1.is_exported && !s2.is_exported) return true;
+    if (!s1.is_exported && s2.is_exported) return false;
+
+    if (s1.description && !s2.description) return true;
+    if (!s1.description && s2.description) return false;
+
+    if (s1.qualified_name && !s2.qualified_name) return true;
+    if (!s1.qualified_name && s2.qualified_name) return false;
+
+    return false;
   }
 }
 
