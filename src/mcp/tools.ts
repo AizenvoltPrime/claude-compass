@@ -9,8 +9,8 @@ import {
   SymbolService,
   DependencyService,
   ImpactService,
-  ModuleService,
   FlowService,
+  FeatureDiscoveryService,
 } from './services';
 import { LaravelSearch, VueSearch, GodotSearch } from './search';
 import {
@@ -33,8 +33,8 @@ export class McpTools {
   private symbolService: SymbolService;
   private dependencyService: DependencyService;
   private impactService: ImpactService;
-  private moduleService: ModuleService;
   private flowService: FlowService;
+  private featureDiscoveryService: FeatureDiscoveryService;
   private laravelSearch: LaravelSearch;
   private vueSearch: VueSearch;
   private godotSearch: GodotSearch;
@@ -48,8 +48,8 @@ export class McpTools {
     this.symbolService = new SymbolService(dbService);
     this.dependencyService = new DependencyService(dbService);
     this.impactService = new ImpactService(dbService);
-    this.moduleService = new ModuleService(dbService, () => this.getDefaultRepoId());
     this.flowService = new FlowService(dbService);
+    this.featureDiscoveryService = new FeatureDiscoveryService(dbService, () => this.getDefaultRepoId());
     this.laravelSearch = new LaravelSearch(dbService);
     this.vueSearch = new VueSearch(dbService);
     this.godotSearch = new GodotSearch(dbService);
@@ -328,11 +328,11 @@ export class McpTools {
     return this.impactService.impactOf(args);
   }
 
-  async identifyModules(args: any) {
-    return this.moduleService.identifyModules(args);
-  }
-
   async traceFlow(args: any) {
     return this.flowService.traceFlow(args);
+  }
+
+  async discoverFeature(args: any) {
+    return this.featureDiscoveryService.discoverFeature(args);
   }
 }

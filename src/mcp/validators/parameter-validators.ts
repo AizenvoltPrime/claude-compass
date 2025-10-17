@@ -6,8 +6,8 @@ import {
   WhoCallsArgs,
   ListDependenciesArgs,
   ImpactOfArgs,
-  IdentifyModulesArgs,
   TraceFlowArgs,
+  DiscoverFeatureArgs,
 } from '../types';
 
 export function validateMaxDepthParameter(value: any): void {
@@ -164,19 +164,6 @@ export function validateImpactOfArgs(args: any): ImpactOfArgs {
   return args as ImpactOfArgs;
 }
 
-export function validateIdentifyModulesArgs(args: any): IdentifyModulesArgs {
-  if (args.repo_id !== undefined && typeof args.repo_id !== 'number') {
-    throw new Error('repo_id must be a number');
-  }
-  if (args.min_module_size !== undefined && typeof args.min_module_size !== 'number') {
-    throw new Error('min_module_size must be a number');
-  }
-  if (args.resolution !== undefined && typeof args.resolution !== 'number') {
-    throw new Error('resolution must be a number');
-  }
-  return args as IdentifyModulesArgs;
-}
-
 export function validateTraceFlowArgs(args: any): TraceFlowArgs {
   if (!args.start_symbol_id || typeof args.start_symbol_id !== 'number') {
     throw new Error('start_symbol_id is required and must be a number');
@@ -189,4 +176,57 @@ export function validateTraceFlowArgs(args: any): TraceFlowArgs {
   }
   validateMaxDepthParameter(args.max_depth);
   return args as TraceFlowArgs;
+}
+
+export function validateDiscoverFeatureArgs(args: any): DiscoverFeatureArgs {
+  if (!args.symbol_id || typeof args.symbol_id !== 'number') {
+    throw new Error('symbol_id is required and must be a number');
+  }
+  if (args.include_components !== undefined && typeof args.include_components !== 'boolean') {
+    throw new Error('include_components must be a boolean');
+  }
+  if (args.include_routes !== undefined && typeof args.include_routes !== 'boolean') {
+    throw new Error('include_routes must be a boolean');
+  }
+  if (args.include_models !== undefined && typeof args.include_models !== 'boolean') {
+    throw new Error('include_models must be a boolean');
+  }
+  if (args.include_tests !== undefined && typeof args.include_tests !== 'boolean') {
+    throw new Error('include_tests must be a boolean');
+  }
+  if (args.include_callers !== undefined && typeof args.include_callers !== 'boolean') {
+    throw new Error('include_callers must be a boolean');
+  }
+  if (args.naming_depth !== undefined) {
+    if (typeof args.naming_depth !== 'number') {
+      throw new Error('naming_depth must be a number');
+    }
+    if (!Number.isInteger(args.naming_depth)) {
+      throw new Error('naming_depth must be an integer');
+    }
+    if (args.naming_depth < 1 || args.naming_depth > 3) {
+      throw new Error('naming_depth must be between 1 and 3');
+    }
+  }
+  if (args.max_symbols !== undefined) {
+    if (typeof args.max_symbols !== 'number') {
+      throw new Error('max_symbols must be a number');
+    }
+    if (!Number.isInteger(args.max_symbols)) {
+      throw new Error('max_symbols must be an integer');
+    }
+    if (args.max_symbols < 10 || args.max_symbols > 5000) {
+      throw new Error('max_symbols must be between 10 and 5000');
+    }
+  }
+  if (args.min_relevance_score !== undefined) {
+    if (typeof args.min_relevance_score !== 'number') {
+      throw new Error('min_relevance_score must be a number');
+    }
+    if (args.min_relevance_score < 0 || args.min_relevance_score > 1) {
+      throw new Error('min_relevance_score must be between 0 and 1');
+    }
+  }
+  validateMaxDepthParameter(args.max_depth);
+  return args as DiscoverFeatureArgs;
 }
