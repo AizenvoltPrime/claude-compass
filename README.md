@@ -335,6 +335,10 @@ npm run db:clear                              # Clear database completely (SQL m
 npm run db:clear:docker                       # Clear database with Docker reset
 npm run db:vacuum                             # Run VACUUM ANALYZE (reclaim space, update stats)
 
+# Database quality audits (comprehensive validation)
+npm run audit my_project                      # Run general audit (Laravel/Vue/React/PHP)
+npm run audit:godot my_game                   # Run Godot audit (C#/Godot games)
+
 # Clear existing repository analysis
 ./dist/src/cli/index.js clear <repository-name> --yes
 
@@ -709,6 +713,161 @@ const result = await client.callTool({
 | **Performance Gain** | **10x faster** | Minimal    | **95% reduction**        |
 
 **📚 Complete setup instructions:** [webhook-server/SETUP_GUIDE.md](./webhook-server/SETUP_GUIDE.md)
+
+## Database Quality Audits
+
+Claude Compass includes comprehensive database quality audit test suites to verify parsing accuracy, data integrity, and framework-specific entity correctness. These audits catch parser bugs, data corruption, and validation issues.
+
+### Available Audit Suites
+
+#### General Audit (`npm run audit <repo_name>`)
+
+**Comprehensive 28-test suite for all projects:**
+
+- ✅ Data integrity validation (orphaned symbols, referential integrity)
+- ✅ Required field completeness (line numbers, qualified names)
+- ✅ Duplicate detection
+- ✅ Laravel routes extraction
+- ✅ Vue/React component tracking
+- ✅ API call mapping (Vue → Laravel)
+- ✅ Dependency graph validation
+- ✅ C# symbol extraction (basic)
+
+**Best for:** Laravel, Vue, React, Next.js, PHP, TypeScript projects
+
+**Test File:** `tests/database-audit-queries.sql`
+
+#### Godot Audit (`npm run audit:godot <repo_name>`)
+
+**Specialized 34-test suite for C# Godot game projects:**
+
+- ✅ C# struct classification (critical - prevents misclassification bugs)
+- ✅ Godot scene hierarchy validation
+- ✅ Node parent relationship correctness
+- ✅ Distribution pattern analysis (catches 1:N vs N×1 hierarchy bugs)
+- ✅ Circular reference detection
+- ✅ Scene composition graph verification
+- ✅ Node properties validation
+- ✅ Game-specific quality checks
+
+**Best for:** C# Godot game projects with scene hierarchies
+
+**Test File:** `tests/database-audit-queries-godot.sql`
+
+### When to Run Audits
+
+**After Initial Analysis:**
+
+```bash
+# List available repositories
+npm run audit                    # Shows all repositories and usage help
+
+# Run appropriate audit
+npm run audit my_web_app         # For web projects (Laravel/Vue/React)
+npm run audit:godot my_game      # For Godot game projects
+```
+
+**After Parser Changes:**
+
+- Modified parser logic? Run audits to catch regressions
+- Added new language support? Verify parsing accuracy
+- Updated framework detection? Validate entity extraction
+
+**During Development:**
+
+- Debugging parser issues? Audits show exactly what's wrong
+- Investigating data quality? Comprehensive validation metrics
+- Building new features? Ensure no regressions in existing parsers
+
+### Understanding Audit Results
+
+**All Tests Passing:**
+
+```
+✅ Zero orphaned symbols
+✅ Zero true duplicates
+✅ 100% line coverage
+✅ All scene node counts match (Godot)
+✅ Crystal-Operation distribution: 28×1 (Godot)
+```
+
+**Critical Issues Found:**
+
+```
+❌ Struct misclassification: 16 structs stored as classes
+❌ Parent relationship bug: 1×28 instead of 28×1
+❌ Missing qualified names: 45% coverage for PHP classes
+```
+
+### Audit Metrics Explained
+
+**Line Coverage**: Percentage of symbols with valid `start_line` and `end_line` fields
+
+- ✅ Expected: 100%
+- ❌ Problem if: < 100% (parser not capturing line numbers)
+
+**Qualified Name Coverage**: Percentage of classes/methods with fully-qualified names
+
+- ✅ Expected: 100% for C#/PHP classes, 90%+ for methods
+- ⚠️ Acceptable: 0% for Vue/TypeScript imports (external libraries)
+
+**Parent Coverage** (Godot): Percentage of nodes with parent relationships
+
+- ✅ Expected: 80-90% (remainder are scene root nodes)
+- ❌ Problem if: < 80% (hierarchy not parsed correctly)
+
+**Distribution Patterns** (Godot): Ratio of parent-to-child relationships
+
+- ✅ Expected: N parents × 1 child each (even distribution)
+- ❌ Problem if: 1 parent × N children (hierarchy bug)
+
+### Custom Audits
+
+You can create custom audit queries by copying and modifying the test files:
+
+```bash
+# Copy general audit template
+cp tests/database-audit-queries.sql tests/my-custom-audit.sql
+
+# Edit with custom tests
+nano tests/my-custom-audit.sql
+
+# Run custom audit
+sed 's/{REPO_ID}/5/g' tests/my-custom-audit.sql | \
+  docker exec -i claude-compass-postgres psql -U claude_compass -d claude_compass
+```
+
+### Example: Listing Available Repositories
+
+```bash
+# Show usage help and list all repositories
+npm run audit
+
+# Output:
+# Usage: npm run audit <repo_name>
+#    or: npm run audit:godot <repo_name>
+#
+# Example:
+#   npm run audit my_web_app              # Run general audit
+#   npm run audit:godot my_game           # Run Godot audit
+#
+# Available repositories:
+#   - my_web_app (last indexed: 2025-10-18)
+#   - my_game (last indexed: 2025-10-18)
+```
+
+### Test Suite Architecture
+
+Both audit suites follow this structure:
+
+1. **Project Overview** - Repository metadata and file distribution
+2. **Core Integrity** - Orphans, duplicates, required fields
+3. **Symbol Quality** - Qualified names, signatures, line numbers
+4. **Framework Entities** - Routes, components, jobs, scenes
+5. **Advanced Validation** - Framework-specific correctness checks
+6. **Summary** - Aggregate metrics and pass/fail criteria
+
+**📚 For detailed test documentation, see the SQL files in `tests/` directory.**
 
 ## Success Metrics
 
