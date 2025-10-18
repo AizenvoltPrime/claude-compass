@@ -1,6 +1,6 @@
 {
   "vue": {
-    "default": {
+    "component": {
       "fileExtensionRules": [
         {
           "extension": ".vue",
@@ -8,7 +8,9 @@
           "entityType": "component",
           "description": "Vue single-file component"
         }
-      ],
+      ]
+    },
+    "default": {
       "directoryRules": [
         {
           "path": "/components/",

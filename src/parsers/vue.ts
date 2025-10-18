@@ -31,7 +31,11 @@ import {
 } from './utils/url-patterns';
 import { JavaScriptParser } from './javascript';
 import { TypeScriptParser } from './typescript';
-import { extractLeadingJSDocComment, extractDescriptionOnly, extractJSDocComment } from './utils/jsdoc-extractor';
+import {
+  extractLeadingJSDocComment,
+  extractDescriptionOnly,
+  extractJSDocComment,
+} from './utils/jsdoc-extractor';
 
 const logger = createComponentLogger('vue-parser');
 
@@ -236,7 +240,11 @@ export class VueParser extends BaseFrameworkParser {
           };
 
           try {
-            const parseResult = await parser.parseFile(tempFilePath, scriptContent!, vueFrameworkOptions);
+            const parseResult = await parser.parseFile(
+              tempFilePath,
+              scriptContent!,
+              vueFrameworkOptions
+            );
             symbols = parseResult.symbols;
             imports = parseResult.imports;
             exports = parseResult.exports;
@@ -873,7 +881,9 @@ export class VueParser extends BaseFrameworkParser {
               } else if (child.type === 'named_imports') {
                 for (const namedImport of child.children) {
                   if (namedImport.type === 'import_specifier') {
-                    const localName = namedImport.childForFieldName('name') || namedImport.children.find(c => c.type === 'identifier');
+                    const localName =
+                      namedImport.childForFieldName('name') ||
+                      namedImport.children.find(c => c.type === 'identifier');
                     if (localName) {
                       this.axiosIdentifiers.add(localName.text);
                     }
@@ -1136,8 +1146,8 @@ export class VueParser extends BaseFrameworkParser {
     let templateRefs = [];
     let dynamicComponents = [];
     let eventHandlers = [];
-    let props = [];
-    let emits = [];
+    let props: PropDefinition[] = [];
+    let emits: string[] = [];
     let lifecycle = [];
 
     try {
@@ -1148,9 +1158,15 @@ export class VueParser extends BaseFrameworkParser {
       dynamicComponents = sections.template ? this.extractDynamicComponents(sections.template) : [];
       eventHandlers = sections.template ? this.extractEventHandlers(sections.template) : [];
 
-      // Extract basic component properties
-      props = scriptTree ? this.extractProps(scriptTree, content) : [];
-      emits = scriptTree ? this.extractEmits(scriptTree, content) : [];
+      // Extract basic component properties (single-pass optimization)
+      if (scriptTree) {
+        const extracted = this.extractVuePropsAndEmits(scriptTree);
+        props = extracted.props;
+        emits = extracted.emits;
+      } else {
+        props = [];
+        emits = [];
+      }
       lifecycle = scriptTree ? this.extractLifecycleHooks(scriptTree, content) : [];
     } catch (error) {
       logger.warn(`Failed to extract Vue component metadata for ${filePath}`, { error });
@@ -1191,11 +1207,16 @@ export class VueParser extends BaseFrameworkParser {
       // Continue with default values
     }
 
-    const component: FrameworkEntity = {
+    const component: VueComponent = {
       type: 'component',
       name: componentName,
       filePath,
       description: componentDescription,
+      props,
+      emits,
+      slots: scopedSlots.map(s => s.name),
+      composables: [],
+      template_dependencies: eventHandlers.map(e => e.handler),
       metadata: {
         // Basic SFC metadata
         scriptSetup: !!sections.scriptSetup,
@@ -1204,9 +1225,7 @@ export class VueParser extends BaseFrameworkParser {
         hasStyle: !!sections.style,
         scriptLang: sections.scriptLang || (filePath.includes('.ts') ? 'ts' : 'js'),
 
-        // Component properties
-        props,
-        emits,
+        // Component lifecycle
         lifecycle,
 
         // Vue 3 built-in components
@@ -1259,7 +1278,9 @@ export class VueParser extends BaseFrameworkParser {
           cssModules: this.extractCSSModules(content),
           hasCSSModules: sections.styleModules === true,
           preprocessors: this.extractPreprocessors(content),
-          hasPreprocessors: sections.styleLang !== undefined && ['scss', 'sass', 'less', 'stylus'].includes(sections.styleLang),
+          hasPreprocessors:
+            sections.styleLang !== undefined &&
+            ['scss', 'sass', 'less', 'stylus'].includes(sections.styleLang),
           scoped: sections.styleScoped === true,
           variables: this.extractCSSVariables(content),
           hasDynamicStyling: this.hasDynamicStyling(content),
@@ -1548,51 +1569,51 @@ export class VueParser extends BaseFrameworkParser {
 
     const tree = this.parseContent(scriptContent);
 
+    const { props, emits } = this.extractVuePropsAndEmits(tree);
+
     return {
-      props: this.extractVueProps(tree),
-      emits: this.extractVueEmits(tree),
+      props,
+      emits,
       composables: this.extractVueComposables(tree),
     };
   }
 
   /**
-   * Extract Vue component props from AST
+   * Extract props from a TypeScript interface or type alias definition by traversing the AST.
+   * Searches for interface declarations or type aliases matching the given type name
+   * and extracts property definitions with their types and optionality.
+   *
+   * @param rootNode - The root AST node to search within
+   * @param typeName - The name of the interface or type alias to extract props from
+   * @returns Array of prop definitions with name, type, and required status
    */
-  private extractVueProps(tree: any): PropDefinition[] {
+  private extractPropsFromTypeDefinition(
+    rootNode: Parser.SyntaxNode,
+    typeName: string
+  ): PropDefinition[] {
     const props: PropDefinition[] = [];
 
-    if (!tree?.rootNode) return props;
-
-    // Look for props in different formats:
-    // 1. defineProps() in <script setup>
-    // 2. props: {} in options API
-    // 3. Props interface in TypeScript
-
     const traverse = (node: Parser.SyntaxNode) => {
-      // defineProps() call
-      if (node.type === 'call_expression') {
-        const functionNode = node.child(0);
-        if (functionNode?.text === 'defineProps') {
-          const argsNode = node.child(1);
-          const propsArg = argsNode?.child(1); // First argument (skip opening parenthesis)
-          if (propsArg) {
-            props.push(...this.parsePropsFromNode(propsArg));
+      if (node.type === 'interface_declaration') {
+        const nameNode = node.childForFieldName('name');
+        if (nameNode?.text === typeName) {
+          const bodyNode = node.childForFieldName('body');
+          if (bodyNode) {
+            props.push(...this.parseInterfaceBody(bodyNode));
           }
         }
       }
 
-      // props: {} in options API
-      if (node.type === 'pair') {
-        const keyNode = node.child(0);
-        if (keyNode?.text === 'props') {
-          const propsValue = node.child(2); // After 'props' and ':'
-          if (propsValue) {
-            props.push(...this.parsePropsFromNode(propsValue));
+      if (node.type === 'type_alias_declaration') {
+        const nameNode = node.childForFieldName('name');
+        if (nameNode?.text === typeName) {
+          const valueNode = node.childForFieldName('value');
+          if (valueNode?.type === 'object_type') {
+            props.push(...this.parseInterfaceBody(valueNode));
           }
         }
       }
 
-      // Traverse children using Tree-sitter API
       for (let i = 0; i < node.childCount; i++) {
         const child = node.child(i);
         if (child) {
@@ -1601,8 +1622,189 @@ export class VueParser extends BaseFrameworkParser {
       }
     };
 
-    traverse(tree.rootNode);
+    traverse(rootNode);
     return props;
+  }
+
+  /**
+   * Parse an interface body or object type node to extract property definitions.
+   * Iterates through property signatures and extracts property name, type annotation,
+   * and optional status by checking for '?' token in the AST.
+   *
+   * @param bodyNode - The AST node representing an interface body or object type
+   * @returns Array of prop definitions extracted from the interface/object type
+   */
+  private parseInterfaceBody(bodyNode: Parser.SyntaxNode): PropDefinition[] {
+    const props: PropDefinition[] = [];
+
+    for (let i = 0; i < bodyNode.childCount; i++) {
+      const child = bodyNode.child(i);
+      if (child && child.type === 'property_signature') {
+        const nameNode = child.childForFieldName('name');
+        const typeNode = child.childForFieldName('type');
+
+        if (nameNode) {
+          const propName = nameNode.text;
+
+          // Check for optional marker by looking for '?' token in child nodes
+          let isOptional = false;
+          for (let j = 0; j < child.childCount; j++) {
+            const token = child.child(j);
+            if (token && token.type === '?') {
+              isOptional = true;
+              break;
+            }
+          }
+
+          let propType = typeNode?.text || 'any';
+
+          if (propType.startsWith(':')) {
+            propType = propType.substring(1).trim();
+          }
+
+          props.push({
+            name: propName,
+            type: propType,
+            required: !isOptional,
+          });
+        }
+      }
+    }
+
+    return props;
+  }
+
+  /**
+   * Extract Vue component props and emits in a single optimized AST traversal.
+   * This method combines the functionality of extractVueProps and extractVueEmits
+   * to avoid duplicate tree traversals, improving parser performance for large files.
+   *
+   * Supports:
+   * - Composition API: defineProps(), defineEmits()
+   * - Options API: props and emits properties
+   * - TypeScript type annotations for both props and emits
+   * - Runtime $emit and emit() calls
+   *
+   * @param tree - The parsed AST tree from Tree-sitter
+   * @returns Object containing arrays of props and emits extracted from the AST
+   */
+  private extractVuePropsAndEmits(tree: Parser.Tree): { props: PropDefinition[]; emits: string[] } {
+    const props: PropDefinition[] = [];
+    const emits: string[] = [];
+
+    if (!tree?.rootNode) return { props, emits };
+
+    const traverse = (node: Parser.SyntaxNode) => {
+      try {
+        if (node.type === 'call_expression') {
+          const functionNode = node.child(0);
+
+          // Extract props from defineProps
+          if (functionNode?.text === 'defineProps') {
+            const secondChild = node.child(1);
+
+            if (secondChild?.type === 'type_arguments') {
+              const typeIdentifier = secondChild.child(1);
+              if (typeIdentifier?.type === 'type_identifier') {
+                const typeName = typeIdentifier.text;
+                const interfaceProps = this.extractPropsFromTypeDefinition(tree.rootNode, typeName);
+                props.push(...interfaceProps);
+              }
+            } else if (secondChild?.type === 'arguments') {
+              const propsArg = secondChild.child(1);
+              if (propsArg) {
+                props.push(...this.parsePropsFromNode(propsArg));
+              }
+            }
+          }
+
+          // Extract emits from defineEmits
+          if (functionNode?.text === 'defineEmits') {
+            const secondChild = node.child(1);
+
+            if (secondChild?.type === 'type_arguments') {
+              const typeNode = secondChild.child(1);
+              if (typeNode) {
+                const typeEmits = this.extractEmitsFromTypeNode(typeNode, tree.rootNode);
+                emits.push(...typeEmits);
+              }
+            } else if (secondChild?.type === 'arguments') {
+              const emitsArg = secondChild.child(1);
+              if (emitsArg?.type === 'array') {
+                for (let i = 0; i < emitsArg.childCount; i++) {
+                  const child = emitsArg.child(i);
+                  if (child) {
+                    const emitName = this.extractStringLiteral(child);
+                    if (emitName) {
+                      emits.push(emitName);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Extract emit calls ($emit or emit)
+          const caller = node.child(0);
+          if (caller?.type === 'member_expression') {
+            const object = caller.child(0)?.text;
+            const property = caller.child(2)?.text;
+
+            if (object === '$emit' || property === 'emit') {
+              const argsNode = node.child(1);
+              const firstArg = argsNode?.child(1);
+              const emitName = this.extractStringLiteral(firstArg);
+              if (emitName && !emits.includes(emitName)) {
+                emits.push(emitName);
+              }
+            }
+          }
+        }
+
+        if (node.type === 'pair') {
+          const keyNode = node.child(0);
+
+          // Extract props from object-based props definition
+          if (keyNode?.text === 'props') {
+            const propsValue = node.child(2);
+            if (propsValue) {
+              props.push(...this.parsePropsFromNode(propsValue));
+            }
+          }
+
+          // Extract emits from array-based emits definition
+          if (keyNode?.text === 'emits') {
+            const emitsValue = node.child(2);
+            if (emitsValue?.type === 'array') {
+              for (let i = 0; i < emitsValue.childCount; i++) {
+                const child = emitsValue.child(i);
+                if (child) {
+                  const emitName = this.extractStringLiteral(child);
+                  if (emitName) {
+                    emits.push(emitName);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            traverse(child);
+          }
+        }
+      } catch (error) {
+        logger.warn('Error traversing AST node during props/emits extraction', {
+          nodeType: node.type,
+          error,
+        });
+      }
+    };
+
+    traverse(tree.rootNode);
+    return { props, emits };
   }
 
   /**
@@ -1695,77 +1897,178 @@ export class VueParser extends BaseFrameworkParser {
   }
 
   /**
-   * Extract Vue component emits from AST
+   * Extract emits from a TypeScript type node, supporting multiple type formats.
+   * Handles tuple types, array types, object types with method signatures,
+   * and type identifier references to named types.
+   *
+   * @param typeNode - The AST node representing the emits type annotation
+   * @param rootNode - The root AST node for resolving type references
+   * @returns Array of emit event names extracted from the type definition
    */
-  private extractVueEmits(tree: any): string[] {
+  private extractEmitsFromTypeNode(
+    typeNode: Parser.SyntaxNode,
+    rootNode: Parser.SyntaxNode
+  ): string[] {
     const emits: string[] = [];
 
-    if (!tree?.rootNode) return emits;
+    if (typeNode.type === 'tuple_type' || typeNode.type === 'array_type') {
+      for (let i = 0; i < typeNode.childCount; i++) {
+        const child = typeNode.child(i);
+        if (child) {
+          const emitName = this.extractStringLiteral(child);
+          if (emitName) {
+            emits.push(emitName);
+          }
+        }
+      }
+    } else if (typeNode.type === 'object_type') {
+      for (let i = 0; i < typeNode.childCount; i++) {
+        const child = typeNode.child(i);
+        if (child?.type === 'call_signature' || child?.type === 'method_signature') {
+          const params = child.childForFieldName('parameters');
+          if (params) {
+            const firstParam = params.child(1);
+            if (firstParam) {
+              const typeAnnotation = firstParam.childForFieldName('type');
+              if (typeAnnotation) {
+                const emitName = this.extractStringLiteral(typeAnnotation);
+                if (emitName) {
+                  emits.push(emitName);
+                }
+              }
+            }
+          }
+        }
+      }
+    } else if (typeNode.type === 'type_identifier') {
+      const typeName = typeNode.text;
+      const typeEmits = this.extractEmitsFromTypeDefinition(rootNode, typeName);
+      emits.push(...typeEmits);
+    }
+
+    return emits;
+  }
+
+  /**
+   * Extract emits from a TypeScript type alias definition by name.
+   * Searches the AST for type alias declarations matching the given type name
+   * and recursively extracts emit event names from the type definition.
+   *
+   * @param rootNode - The root AST node to search within
+   * @param typeName - The name of the type alias to extract emits from
+   * @returns Array of emit event names found in the type definition
+   */
+  private extractEmitsFromTypeDefinition(rootNode: Parser.SyntaxNode, typeName: string): string[] {
+    const emits: string[] = [];
 
     const traverse = (node: Parser.SyntaxNode) => {
-      // defineEmits() call
-      if (node.type === 'call_expression') {
-        const functionNode = node.child(0);
-        if (functionNode?.text === 'defineEmits') {
-          const argsNode = node.child(1);
-          const emitsArg = argsNode?.child(1); // First argument
-          if (emitsArg?.type === 'array') {
-            for (let i = 0; i < emitsArg.childCount; i++) {
-              const child = emitsArg.child(i);
-              if (child) {
-                const emitName = this.extractStringLiteral(child);
-                if (emitName) {
-                  emits.push(emitName);
-                }
-              }
-            }
+      if (node.type === 'type_alias_declaration') {
+        const nameNode = node.childForFieldName('name');
+        if (nameNode?.text === typeName) {
+          const valueNode = node.childForFieldName('value');
+          if (valueNode) {
+            emits.push(...this.extractEmitsFromTypeNode(valueNode, rootNode));
           }
         }
       }
 
-      // emits: [] in options API
-      if (node.type === 'pair') {
-        const keyNode = node.child(0);
-        if (keyNode?.text === 'emits') {
-          const emitsValue = node.child(2); // After 'emits' and ':'
-          if (emitsValue?.type === 'array') {
-            for (let i = 0; i < emitsValue.childCount; i++) {
-              const child = emitsValue.child(i);
-              if (child) {
-                const emitName = this.extractStringLiteral(child);
-                if (emitName) {
-                  emits.push(emitName);
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Look for $emit calls
-      if (node.type === 'call_expression') {
-        const caller = node.child(0);
-        if (caller?.type === 'member_expression') {
-          const object = caller.child(0)?.text;
-          const property = caller.child(2)?.text;
-
-          if (object === '$emit' || property === 'emit') {
-            const argsNode = node.child(1);
-            const firstArg = argsNode?.child(1);
-            const emitName = this.extractStringLiteral(firstArg);
-            if (emitName && !emits.includes(emitName)) {
-              emits.push(emitName);
-            }
-          }
-        }
-      }
-
-      // Traverse children using Tree-sitter API
       for (let i = 0; i < node.childCount; i++) {
         const child = node.child(i);
         if (child) {
           traverse(child);
         }
+      }
+    };
+
+    traverse(rootNode);
+    return emits;
+  }
+
+  /**
+   * Extract Vue component emits from AST
+   * @deprecated Use extractVuePropsAndEmits for better performance
+   */
+  private extractVueEmits(tree: Parser.Tree): string[] {
+    const emits: string[] = [];
+
+    if (!tree?.rootNode) return emits;
+
+    const traverse = (node: Parser.SyntaxNode) => {
+      try {
+        if (node.type === 'call_expression') {
+          const functionNode = node.child(0);
+          if (functionNode?.text === 'defineEmits') {
+            const secondChild = node.child(1);
+
+            if (secondChild?.type === 'type_arguments') {
+              const typeNode = secondChild.child(1);
+              if (typeNode) {
+                const typeEmits = this.extractEmitsFromTypeNode(typeNode, tree.rootNode);
+                emits.push(...typeEmits);
+              }
+            } else if (secondChild?.type === 'arguments') {
+              const emitsArg = secondChild.child(1);
+              if (emitsArg?.type === 'array') {
+                for (let i = 0; i < emitsArg.childCount; i++) {
+                  const child = emitsArg.child(i);
+                  if (child) {
+                    const emitName = this.extractStringLiteral(child);
+                    if (emitName) {
+                      emits.push(emitName);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (node.type === 'pair') {
+          const keyNode = node.child(0);
+          if (keyNode?.text === 'emits') {
+            const emitsValue = node.child(2);
+            if (emitsValue?.type === 'array') {
+              for (let i = 0; i < emitsValue.childCount; i++) {
+                const child = emitsValue.child(i);
+                if (child) {
+                  const emitName = this.extractStringLiteral(child);
+                  if (emitName) {
+                    emits.push(emitName);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (node.type === 'call_expression') {
+          const caller = node.child(0);
+          if (caller?.type === 'member_expression') {
+            const object = caller.child(0)?.text;
+            const property = caller.child(2)?.text;
+
+            if (object === '$emit' || property === 'emit') {
+              const argsNode = node.child(1);
+              const firstArg = argsNode?.child(1);
+              const emitName = this.extractStringLiteral(firstArg);
+              if (emitName && !emits.includes(emitName)) {
+                emits.push(emitName);
+              }
+            }
+          }
+        }
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            traverse(child);
+          }
+        }
+      } catch (error) {
+        logger.warn('Error traversing AST node during emits extraction', {
+          nodeType: node.type,
+          error,
+        });
       }
     };
 
@@ -2821,7 +3124,10 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Find composable functions in the AST
    */
-  private findComposableFunctions(tree: any, content: string): Array<{
+  private findComposableFunctions(
+    tree: any,
+    content: string
+  ): Array<{
     name: string;
     returns: string[];
     dependencies: string[];
@@ -4192,7 +4498,10 @@ export class VueParser extends BaseFrameworkParser {
     return ['.vue', '.js', '.ts'];
   }
 
-  protected performSinglePassExtraction(rootNode: any, content: string): {
+  protected performSinglePassExtraction(
+    rootNode: any,
+    content: string
+  ): {
     symbols: ParsedSymbol[];
     dependencies: ParsedDependency[];
     imports: any[];
@@ -4704,7 +5013,11 @@ export class VueParser extends BaseFrameworkParser {
   /**
    * Extract template symbols using lightweight regex patterns
    */
-  private extractTemplateSymbols(template: string, filePath?: string, options?: FrameworkParseOptions): ParsedSymbol[] {
+  private extractTemplateSymbols(
+    template: string,
+    filePath?: string,
+    options?: FrameworkParseOptions
+  ): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     if (!template) {
