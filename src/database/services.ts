@@ -1943,15 +1943,38 @@ export class DatabaseService {
   }
 
   // Component operations
-  async createComponent(data: CreateComponent): Promise<Component> {
-    const [component] = await this.db('components').insert(data).returning('*');
+  private deserializeComponentJsonFields(component: any): Component {
+    return {
+      ...component,
+      props: typeof component.props === 'string' ? JSON.parse(component.props) : component.props,
+      emits: component.emits && typeof component.emits === 'string' ? JSON.parse(component.emits) : component.emits,
+      slots: component.slots && typeof component.slots === 'string' ? JSON.parse(component.slots) : component.slots,
+      hooks: component.hooks && typeof component.hooks === 'string' ? JSON.parse(component.hooks) : component.hooks,
+      template_dependencies: typeof component.template_dependencies === 'string'
+        ? JSON.parse(component.template_dependencies)
+        : component.template_dependencies,
+    } as Component;
+  }
 
-    return component as Component;
+  async createComponent(data: CreateComponent): Promise<Component> {
+    const dbData = {
+      ...data,
+      props: JSON.stringify(data.props || []),
+      emits: JSON.stringify(data.emits || []),
+      slots: JSON.stringify(data.slots || []),
+      hooks: JSON.stringify(data.hooks || []),
+      template_dependencies: JSON.stringify(data.template_dependencies || []),
+    };
+
+    const [component] = await this.db('components').insert(dbData).returning('*');
+
+    return this.deserializeComponentJsonFields(component);
   }
 
   async getComponent(id: number): Promise<Component | null> {
     const component = await this.db('components').where({ id }).first();
-    return (component as Component) || null;
+    if (!component) return null;
+    return this.deserializeComponentJsonFields(component);
   }
 
   async getComponentWithSymbol(id: number): Promise<ComponentWithSymbol | null> {
@@ -1975,7 +1998,8 @@ export class DatabaseService {
 
     if (!result) return null;
 
-    const component = { ...result } as ComponentWithSymbol;
+    const deserializedResult = this.deserializeComponentJsonFields(result);
+    const component = { ...deserializedResult } as ComponentWithSymbol;
 
     if (result.symbol_id) {
       component.symbol = {
@@ -2008,14 +2032,14 @@ export class DatabaseService {
       .select('components.*', 'files.path as file_path', 'symbols.name as symbol_name')
       .where({ 'components.repo_id': repoId, 'components.component_type': type })
       .orderBy('components.id');
-    return components as Component[];
+    return components.map(c => this.deserializeComponentJsonFields(c));
   }
 
   async getComponentsByRepository(repoId: number): Promise<Component[]> {
     const components = await this.db('components')
       .where({ repo_id: repoId })
       .orderBy(['component_type', 'id']);
-    return components as Component[];
+    return components.map(c => this.deserializeComponentJsonFields(c));
   }
 
   async getComponentHierarchy(componentId: number): Promise<ComponentTree | null> {
@@ -2048,7 +2072,8 @@ export class DatabaseService {
       .select('components.*')
       .first();
 
-    return (component as Component) || null;
+    if (!component) return null;
+    return this.deserializeComponentJsonFields(component);
   }
 
   async searchComponents(options: ComponentSearchOptions): Promise<Component[]> {
@@ -2070,7 +2095,7 @@ export class DatabaseService {
 
     const components = await query.orderBy('symbols.name').limit(options.limit || 50);
 
-    return components as Component[];
+    return components.map(c => this.deserializeComponentJsonFields(c));
   }
 
   // Composable operations
