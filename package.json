@@ -21,6 +21,8 @@
     "db:clear": "node scripts/clear-database.js",
     "db:clear:docker": "node scripts/clear-database.js docker",
     "db:vacuum": "node scripts/vacuum-database.js",
+    "audit": "./scripts/run-audit.sh",
+    "audit:godot": "bash -c './scripts/run-audit.sh \"$1\" godot' --",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
