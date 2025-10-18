@@ -1,0 +1,71 @@
+{
+  "vue": {
+    "default": {
+      "fileExtensionRules": [
+        {
+          "extension": ".vue",
+          "priority": 20,
+          "entityType": "component",
+          "description": "Vue single-file component"
+        }
+      ],
+      "directoryRules": [
+        {
+          "path": "/components/",
+          "priority": 5,
+          "entityType": "component",
+          "description": "Components directory"
+        },
+        {
+          "path": "/composables/",
+          "priority": 5,
+          "entityType": "composable",
+          "description": "Vue composables"
+        },
+        {
+          "path": "/stores/",
+          "priority": 5,
+          "entityType": "store",
+          "description": "Pinia stores"
+        }
+      ]
+    },
+    "function": {
+      "namePatterns": {
+        "prefix": [
+          {
+            "pattern": "^use[A-Z]",
+            "priority": 10,
+            "entityType": "composable",
+            "description": "Vue composable (use* pattern)",
+            "fileExtensions": [".ts", ".js", ".vue"]
+          }
+        ]
+      }
+    },
+    "variable": {
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Store",
+            "priority": 10,
+            "entityType": "store",
+            "description": "Pinia store"
+          }
+        ]
+      }
+    },
+    "class": {
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Service",
+            "priority": 10,
+            "entityType": "service",
+            "description": "Service class"
+          }
+        ]
+      }
+    }
+  }
+}

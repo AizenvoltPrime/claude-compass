@@ -7,8 +7,8 @@
  * - File paths and extensions
  * - Framework context
  *
- * Rules are loaded from config/entity-classification-rules.json
- * and applied with priority-based resolution.
+ * Rules are loaded from config/entity-classification/ directory (per-framework files).
+ * All rules are merged and applied with priority-based resolution.
  */
 
 import * as fs from 'fs';
@@ -69,15 +69,203 @@ export class EntityTypeClassifier {
   private static instance: EntityTypeClassifier | null = null;
 
   constructor(rulesPath?: string) {
-    const configPath = rulesPath || path.join(__dirname, '../../../config/entity-classification-rules.json');
+    this.rules = this.loadRules(rulesPath);
+  }
+
+  /**
+   * Validate the structure of loaded rules to catch typos and malformed configurations
+   */
+  private validateRuleStructure(fileRules: any, fileName: string): void {
+    if (typeof fileRules !== 'object' || fileRules === null || Array.isArray(fileRules)) {
+      throw new Error(`Invalid rule format in ${fileName}: expected object, got ${typeof fileRules}`);
+    }
+
+    // Validate each framework
+    for (const [framework, symbolTypes] of Object.entries(fileRules)) {
+      if (typeof symbolTypes !== 'object' || symbolTypes === null || Array.isArray(symbolTypes)) {
+        throw new Error(`Invalid framework rules in ${fileName} for "${framework}": expected object, got ${typeof symbolTypes}`);
+      }
+
+      // Validate each symbol type
+      for (const [symbolType, rules] of Object.entries(symbolTypes as Record<string, any>)) {
+        if (typeof rules !== 'object' || rules === null || Array.isArray(rules)) {
+          throw new Error(`Invalid symbol type rules in ${fileName} for "${framework}.${symbolType}": expected object, got ${typeof rules}`);
+        }
+
+        const frameworkRules = rules as any;
+
+        // Validate baseClassRules
+        if (frameworkRules.baseClassRules !== undefined) {
+          if (typeof frameworkRules.baseClassRules !== 'object' || Array.isArray(frameworkRules.baseClassRules)) {
+            throw new Error(`Invalid baseClassRules in ${fileName} for "${framework}.${symbolType}": expected object`);
+          }
+          for (const [baseClass, rule] of Object.entries(frameworkRules.baseClassRules)) {
+            this.validateClassificationRule(rule, `${fileName}:${framework}.${symbolType}.baseClassRules.${baseClass}`);
+          }
+        }
+
+        // Validate namePatterns
+        if (frameworkRules.namePatterns !== undefined) {
+          if (typeof frameworkRules.namePatterns !== 'object' || Array.isArray(frameworkRules.namePatterns)) {
+            throw new Error(`Invalid namePatterns in ${fileName} for "${framework}.${symbolType}": expected object`);
+          }
+
+          if (frameworkRules.namePatterns.suffix !== undefined) {
+            if (!Array.isArray(frameworkRules.namePatterns.suffix)) {
+              throw new Error(`Invalid namePatterns.suffix in ${fileName} for "${framework}.${symbolType}": expected array`);
+            }
+            frameworkRules.namePatterns.suffix.forEach((rule: any, index: number) => {
+              this.validateNamePatternRule(rule, `${fileName}:${framework}.${symbolType}.namePatterns.suffix[${index}]`);
+            });
+          }
+
+          if (frameworkRules.namePatterns.prefix !== undefined) {
+            if (!Array.isArray(frameworkRules.namePatterns.prefix)) {
+              throw new Error(`Invalid namePatterns.prefix in ${fileName} for "${framework}.${symbolType}": expected array`);
+            }
+            frameworkRules.namePatterns.prefix.forEach((rule: any, index: number) => {
+              this.validateNamePatternRule(rule, `${fileName}:${framework}.${symbolType}.namePatterns.prefix[${index}]`);
+            });
+          }
+        }
+
+        // Validate directoryRules
+        if (frameworkRules.directoryRules !== undefined) {
+          if (!Array.isArray(frameworkRules.directoryRules)) {
+            throw new Error(`Invalid directoryRules in ${fileName} for "${framework}.${symbolType}": expected array`);
+          }
+          frameworkRules.directoryRules.forEach((rule: any, index: number) => {
+            this.validateDirectoryRule(rule, `${fileName}:${framework}.${symbolType}.directoryRules[${index}]`);
+          });
+        }
+
+        // Validate fileExtensionRules
+        if (frameworkRules.fileExtensionRules !== undefined) {
+          if (!Array.isArray(frameworkRules.fileExtensionRules)) {
+            throw new Error(`Invalid fileExtensionRules in ${fileName} for "${framework}.${symbolType}": expected array`);
+          }
+          frameworkRules.fileExtensionRules.forEach((rule: any, index: number) => {
+            this.validateFileExtensionRule(rule, `${fileName}:${framework}.${symbolType}.fileExtensionRules[${index}]`);
+          });
+        }
+      }
+    }
+  }
+
+  private validateClassificationRule(rule: any, path: string): void {
+    if (typeof rule !== 'object' || rule === null) {
+      throw new Error(`Invalid rule at ${path}: expected object`);
+    }
+    if (typeof rule.priority !== 'number') {
+      throw new Error(`Invalid priority at ${path}: expected number, got ${typeof rule.priority}`);
+    }
+    if (typeof rule.entityType !== 'string') {
+      throw new Error(`Invalid entityType at ${path}: expected string, got ${typeof rule.entityType}`);
+    }
+  }
+
+  private validateNamePatternRule(rule: any, path: string): void {
+    this.validateClassificationRule(rule, path);
+    if (typeof rule.pattern !== 'string') {
+      throw new Error(`Invalid pattern at ${path}: expected string, got ${typeof rule.pattern}`);
+    }
+    if (rule.exclude !== undefined) {
+      if (typeof rule.exclude !== 'object' || rule.exclude === null) {
+        throw new Error(`Invalid exclude at ${path}: expected object`);
+      }
+    }
+    if (rule.fileExtensions !== undefined && !Array.isArray(rule.fileExtensions)) {
+      throw new Error(`Invalid fileExtensions at ${path}: expected array`);
+    }
+  }
+
+  private validateDirectoryRule(rule: any, path: string): void {
+    this.validateClassificationRule(rule, path);
+    if (typeof rule.path !== 'string') {
+      throw new Error(`Invalid path at ${path}: expected string, got ${typeof rule.path}`);
+    }
+  }
+
+  private validateFileExtensionRule(rule: any, path: string): void {
+    this.validateClassificationRule(rule, path);
+    if (typeof rule.extension !== 'string') {
+      throw new Error(`Invalid extension at ${path}: expected string, got ${typeof rule.extension}`);
+    }
+  }
+
+  /**
+   * Load classification rules from directory (per-framework files)
+   *
+   * Priority System:
+   * - 1: Base class rules (lowest priority, most specific)
+   * - 5: Directory-based rules
+   * - 10: Name pattern rules (standard)
+   * - 15: Name pattern rules (high priority, e.g., React hooks)
+   * - 20: File extension rules (highest priority)
+   *
+   * Higher numbers win in conflicts.
+   */
+  private loadRules(rulesPath?: string): ClassificationRules {
+    const directoryPath = rulesPath || path.join(__dirname, '../../../config/entity-classification');
+
+    if (!fs.existsSync(directoryPath)) {
+      throw new Error(`Classification rules directory not found: ${directoryPath}`);
+    }
 
     try {
-      const rulesContent = fs.readFileSync(configPath, 'utf-8');
-      this.rules = JSON.parse(rulesContent);
-      logger.info(`Loaded entity classification rules from ${configPath}`);
+      // Get all JSON files from directory with safety checks
+      const files = fs.readdirSync(directoryPath)
+        .filter(f => {
+          const fullPath = path.join(directoryPath, f);
+          try {
+            const stats = fs.statSync(fullPath);
+            return stats.isFile() && f.endsWith('.json');
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn(`Failed to stat file ${f}: ${errorMessage}`);
+            return false;
+          }
+        });
+
+      if (files.length === 0) {
+        throw new Error(`No JSON files found in ${directoryPath}`);
+      }
+
+      const mergedRules: ClassificationRules = {};
+
+      for (const file of files) {
+        const filePath = path.join(directoryPath, file);
+        try {
+          const fileContent = fs.readFileSync(filePath, 'utf-8');
+          const fileRules = JSON.parse(fileContent);
+
+          // Validate rule structure (catches typos and malformed configs)
+          this.validateRuleStructure(fileRules, file);
+
+          // Validate no duplicate framework definitions
+          const frameworkKeys = Object.keys(fileRules);
+          for (const key of frameworkKeys) {
+            if (mergedRules[key]) {
+              throw new Error(`Duplicate framework "${key}" found in ${file}. Framework already defined in another file.`);
+            }
+          }
+
+          // Merge rules from this file into the overall rules object
+          Object.assign(mergedRules, fileRules);
+          logger.debug(`Loaded rules from ${file}`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error(`Failed to load rules from ${file}: ${errorMessage}`);
+          throw new Error(`Critical error loading classification rules from ${file}: ${errorMessage}`);
+        }
+      }
+
+      logger.info(`Loaded entity classification rules from ${files.length} files in ${directoryPath}`);
+      return mergedRules;
     } catch (error) {
-      logger.warn(`Failed to load classification rules from ${configPath}, using empty rules`, error);
-      this.rules = {};
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to load rules from directory ${directoryPath}: ${errorMessage}`);
+      throw error instanceof Error ? error : new Error(errorMessage);
     }
   }
 
@@ -367,10 +555,8 @@ export class EntityTypeClassifier {
    * Reload rules from disk (useful for development/testing)
    */
   reloadRules(rulesPath?: string): void {
-    const configPath = rulesPath || path.join(__dirname, '../../config/entity-classification-rules.json');
-    const rulesContent = fs.readFileSync(configPath, 'utf-8');
-    this.rules = JSON.parse(rulesContent);
-    logger.info(`Reloaded entity classification rules from ${configPath}`);
+    this.rules = this.loadRules(rulesPath);
+    logger.info('Entity classification rules reloaded');
   }
 }
 

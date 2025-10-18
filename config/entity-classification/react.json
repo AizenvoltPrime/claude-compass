@@ -1,0 +1,59 @@
+{
+  "react": {
+    "function": {
+      "namePatterns": {
+        "prefix": [
+          {
+            "pattern": "^[A-Z]",
+            "priority": 10,
+            "entityType": "component",
+            "description": "Capitalized function (React component). Note: This pattern is intentionally broad and follows React naming conventions. While it may match non-component exports like utility functions (e.g., ParseJSON), this is a known trade-off due to React's naming standards where components must be capitalized. Use directory rules or more specific patterns to refine classification when needed.",
+            "fileExtensions": [".jsx", ".tsx"]
+          },
+          {
+            "pattern": "^use[A-Z]",
+            "priority": 15,
+            "entityType": "hook",
+            "description": "React hook (useXxx pattern)"
+          }
+        ],
+        "suffix": [
+          {
+            "pattern": "Provider",
+            "priority": 10,
+            "entityType": "provider",
+            "description": "React context provider"
+          }
+        ]
+      },
+      "directoryRules": [
+        {
+          "path": "/components/",
+          "priority": 5,
+          "entityType": "component",
+          "description": "Components directory"
+        },
+        {
+          "path": "/hooks/",
+          "priority": 5,
+          "entityType": "hook",
+          "description": "Hooks directory"
+        }
+      ]
+    },
+    "class": {
+      "baseClassRules": {
+        "Component": {
+          "priority": 1,
+          "entityType": "component",
+          "description": "React class component"
+        },
+        "PureComponent": {
+          "priority": 1,
+          "entityType": "component",
+          "description": "React pure component"
+        }
+      }
+    }
+  }
+}
