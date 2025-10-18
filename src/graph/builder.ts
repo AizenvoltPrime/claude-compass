@@ -1141,6 +1141,7 @@ export class GraphBuilder {
           entity_type: symbol.entity_type,
           framework: symbol.framework,
           base_class: symbol.base_class,
+          namespace: symbol.namespace,
           start_line: symbol.start_line,
           end_line: symbol.end_line,
           is_exported: symbol.is_exported,
@@ -1561,7 +1562,12 @@ export class GraphBuilder {
               (expectedSymbolType ? s.symbol_type === expectedSymbolType : true)
           );
 
-          if (!matchingSymbol && entity.type !== 'api_call') {
+          if (
+            !matchingSymbol &&
+            entity.type !== 'api_call' &&
+            !this.isGodotScene(entity) &&
+            !this.isGodotNode(entity)
+          ) {
             const matchingFile = this.findFileForEntity(
               parseResult.filePath,
               filesMap,
@@ -1598,7 +1604,9 @@ export class GraphBuilder {
 
             const symbolType = symbolTypeMap[entity.type] || SymbolType.FUNCTION;
 
-            const entityMetadata = entity.metadata as { line?: number; endLine?: number } | undefined;
+            const entityMetadata = entity.metadata as
+              | { line?: number; endLine?: number }
+              | undefined;
             const entityStartLine = entityMetadata?.line || 1;
             const entityEndLine = entityMetadata?.endLine || entityStartLine + 5;
 
@@ -1737,7 +1745,6 @@ export class GraphBuilder {
               fields: ormSystemEntity.metadata?.fields || {},
             });
           } else if (this.isGodotScene(entity)) {
-            // Handle Godot scene entities - Core of Solution 1
             const sceneEntity = entity as any;
 
             const storedScene = await this.dbService.storeGodotScene({
@@ -1753,10 +1760,13 @@ export class GraphBuilder {
               },
             });
 
-            // Store nodes for this scene
             if (sceneEntity.nodes && Array.isArray(sceneEntity.nodes)) {
+              const nodePathToId = new Map<string, number>();
+              const storedNodeIds = new Map<any, number>();
+
+              // First pass: Store all nodes and build path-to-id mapping
               for (const node of sceneEntity.nodes) {
-                await this.dbService.storeGodotNode({
+                const storedNode = await this.dbService.storeGodotNode({
                   repo_id: repositoryId,
                   scene_id: storedScene.id,
                   node_name: node.nodeName || node.name,
@@ -1764,18 +1774,133 @@ export class GraphBuilder {
                   script_path: node.script,
                   properties: node.properties || {},
                 });
+
+                storedNodeIds.set(node, storedNode.id);
+
+                // Build the full path for this node
+                const nodeName = node.nodeName || node.name;
+                const nodePath = node.parentPath ? `${node.parentPath}/${nodeName}` : nodeName;
+                nodePathToId.set(nodePath, storedNode.id);
+
+                this.logger.debug('Stored Godot node with path', {
+                  nodeName,
+                  nodePath,
+                  nodeId: storedNode.id,
+                  scenePath: sceneEntity.scenePath,
+                });
               }
 
-              // Update scene with root node reference
-              if (sceneEntity.rootNode) {
-                const rootNode = sceneEntity.nodes.find(
-                  (n: any) =>
-                    n.nodeName === sceneEntity.rootNode.nodeName ||
-                    n.name === sceneEntity.rootNode.name
+              // Second pass: Resolve parent relationships using full paths (batched)
+              const parentUpdates: Array<{ nodeId: number; parentId: number }> = [];
+
+              for (const node of sceneEntity.nodes) {
+                if (node.parentPath) {
+                  const nodeId = storedNodeIds.get(node);
+                  if (!nodeId) {
+                    throw new Error(
+                      `Node storage failed but no error thrown for ${node.nodeName || node.name || 'unknown'} in ${sceneEntity.scenePath || parseResult.filePath || 'unknown scene'}`
+                    );
+                  }
+
+                  const parentId = nodePathToId.get(node.parentPath);
+                  if (!parentId) {
+                    this.logger.warn('Parent node not found by path', {
+                      nodeName: node.nodeName || node.name,
+                      parentPath: node.parentPath,
+                      scenePath: sceneEntity.scenePath,
+                      availablePaths: Array.from(nodePathToId.keys()),
+                    });
+                    continue;
+                  }
+
+                  parentUpdates.push({ nodeId, parentId });
+
+                  this.logger.debug('Queued parent link for batch update', {
+                    nodeName: node.nodeName || node.name,
+                    parentPath: node.parentPath,
+                    nodeId,
+                    parentId,
+                  });
+                }
+              }
+
+              if (parentUpdates.length > 0) {
+                const caseStatement = parentUpdates
+                  .map(({ nodeId, parentId }) => `WHEN ${nodeId} THEN ${parentId}`)
+                  .join(' ');
+                const nodeIds = parentUpdates.map(({ nodeId }) => nodeId).join(',');
+
+                await this.dbService.knex.raw(`
+                  UPDATE godot_nodes
+                  SET parent_node_id = CASE id ${caseStatement} END
+                  WHERE id IN (${nodeIds})
+                `);
+
+                this.logger.debug('Batch updated parent relationships', {
+                  scenePath: sceneEntity.scenePath,
+                  updatedCount: parentUpdates.length,
+                });
+              }
+
+              // Third pass: Create scene instance dependencies (batched file lookups)
+              const nodesWithInstances = sceneEntity.nodes.filter(n => n.instanceScene);
+              if (nodesWithInstances.length > 0) {
+                const currentFile = await this.dbService.getFileByPath(
+                  sceneEntity.scenePath || parseResult.filePath
                 );
-                if (rootNode) {
-                  // The root node would have been stored above, but we'd need its ID
-                  // For now, we'll skip updating the root_node_id to avoid complexity
+                if (!currentFile) {
+                  throw new Error(
+                    `Current scene file not found in database: ${sceneEntity.scenePath || parseResult.filePath}`
+                  );
+                }
+
+                const instancePaths = nodesWithInstances.map((n: any) => n.instanceScene!);
+
+                const BATCH_SIZE = 500;
+                const instanceFiles: any[] = [];
+
+                for (let i = 0; i < instancePaths.length; i += BATCH_SIZE) {
+                  const chunk = instancePaths.slice(i, i + BATCH_SIZE);
+                  const chunkFiles = await this.dbService.getFilesByPaths(chunk);
+                  instanceFiles.push(...chunkFiles);
+                }
+
+                const pathToFileMap = new Map(instanceFiles.map(f => [f.path, f]));
+
+                const dependencies = [];
+                for (const node of nodesWithInstances) {
+                  const nodeId = storedNodeIds.get(node);
+                  if (!nodeId) {
+                    throw new Error(
+                      `Node storage failed for ${node.nodeName || node.name || 'unknown'} but no error was thrown`
+                    );
+                  }
+
+                  const instanceFile = pathToFileMap.get(node.instanceScene!);
+                  if (!instanceFile) {
+                    this.logger.warn('Scene instance file not found in database', {
+                      instancePath: node.instanceScene,
+                      nodeName: node.nodeName || node.name,
+                      scenePath: sceneEntity.scenePath,
+                    });
+                    continue;
+                  }
+
+                  dependencies.push({
+                    from_file_id: currentFile.id,
+                    to_file_id: instanceFile.id,
+                    dependency_type: DependencyType.REFERENCES,
+                  });
+
+                  this.logger.debug('Created scene instance dependency', {
+                    fromScene: sceneEntity.scenePath,
+                    toScene: node.instanceScene,
+                    nodeName: node.nodeName || node.name,
+                  });
+                }
+
+                if (dependencies.length > 0) {
+                  await this.dbService.createFileDependencies(dependencies);
                 }
               }
             }
@@ -1920,7 +2045,6 @@ export class GraphBuilder {
           });
         }
       }
-
     } catch (error) {
       this.logger.error('Failed to build Godot relationships', {
         repositoryId,
@@ -2170,15 +2294,21 @@ export class GraphBuilder {
 
   // Phase 7B: Godot Framework Entity type guards
   private isGodotScene(entity: any): boolean {
-    return entity.type === 'godot_scene' && entity.framework === 'godot';
+    return (
+      entity != null &&
+      typeof entity === 'object' &&
+      entity.type === 'godot_scene' &&
+      entity.framework === 'godot'
+    );
   }
 
   private isGodotNode(entity: any): boolean {
-    return entity.type === 'godot_node' && entity.framework === 'godot';
-  }
-
-  private isGodotResource(entity: any): boolean {
-    return entity.type === 'godot_resource' && entity.framework === 'godot';
+    return (
+      entity != null &&
+      typeof entity === 'object' &&
+      entity.type === 'godot_node' &&
+      entity.framework === 'godot'
+    );
   }
 
   private createImportsMap(files: File[], parseResults: Array<ParseResult & { filePath: string }>) {
@@ -2452,6 +2582,10 @@ export class GraphBuilder {
         return 'php';
       case '.cs':
         return 'csharp';
+      case '.tscn':
+        return 'godot_scene';
+      case '.godot':
+        return 'godot';
       default:
         return 'unknown';
     }

@@ -14,6 +14,7 @@ export interface ParsedSymbol {
   entity_type?: string; // Semantic/framework-aware type (component, service, manager, etc.)
   framework?: string; // Framework context (godot, laravel, vue, react, etc.)
   base_class?: string; // Inheritance information (Node, Control, Model, etc.)
+  namespace?: string; // Namespace/package/module context
   start_line: number;
   end_line: number;
   is_exported: boolean;

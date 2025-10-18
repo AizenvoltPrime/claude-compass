@@ -148,6 +148,10 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['has_script']);
   });
 
+  /**
+   * Godot nodes table stores scene hierarchy elements.
+   * Nodes can share names when under different parents, requiring path-based resolution.
+   */
   await knex.schema.createTable('godot_nodes', table => {
     table.increments('id').primary();
     table
@@ -169,7 +173,6 @@ export async function up(knex: Knex): Promise<void> {
     table.jsonb('properties').defaultTo('{}');
     table.timestamps(true, true);
 
-    table.unique(['scene_id', 'node_name']);
     table.index(['repo_id']);
     table.index(['scene_id']);
     table.index(['node_type']);

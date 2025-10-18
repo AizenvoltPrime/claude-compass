@@ -740,6 +740,7 @@ export class CSharpParser extends ChunkedParser {
       entity_type: classification.entityType,
       framework: classification.framework,
       base_class: classification.baseClass || undefined,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
@@ -812,6 +813,7 @@ export class CSharpParser extends ChunkedParser {
       qualified_name: methodQualifiedName,
       symbol_type: SymbolType.METHOD,
       framework: methodFramework,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: isExported,
@@ -883,6 +885,8 @@ export class CSharpParser extends ChunkedParser {
       symbols.push({
         name: fieldName,
         symbol_type: modifiers.includes('const') ? SymbolType.CONSTANT : SymbolType.VARIABLE,
+        framework: context.currentClassFramework,
+        namespace: context.currentNamespace,
         start_line: declarator.startPosition.row + 1,
         end_line: declarator.endPosition.row + 1,
         is_exported: modifiers.includes('public'),
@@ -1288,6 +1292,8 @@ export class CSharpParser extends ChunkedParser {
     symbols.push({
       name,
       symbol_type: SymbolType.PROPERTY,
+      framework: context.currentClassFramework,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: isExported,
@@ -1604,6 +1610,7 @@ export class CSharpParser extends ChunkedParser {
       qualified_name: qualifiedName,
       symbol_type: SymbolType.INTERFACE,
       framework: classification.framework,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
@@ -1630,7 +1637,7 @@ export class CSharpParser extends ChunkedParser {
   private processStruct(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext,
+    context: ASTContext,
     symbols: ParsedSymbol[],
     exports: ParsedExport[]
   ): void {
@@ -1641,10 +1648,30 @@ export class CSharpParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node);
     const visibility = this.getVisibility(modifiers, node);
     const description = this.extractXmlDocComment(node, content);
+    const qualifiedName = context.currentNamespace ? `${context.currentNamespace}.${name}` : name;
+
+    let structFramework: string | undefined;
+    if (context.currentClassFramework) {
+      structFramework = context.currentClassFramework;
+    } else {
+      const classification = entityClassifier.classify(
+        'struct',
+        name,
+        [],
+        context.filePath || '',
+        undefined,
+        context.currentNamespace,
+        context.options?.repositoryFrameworks
+      );
+      structFramework = classification.framework;
+    }
 
     symbols.push({
       name,
-      symbol_type: SymbolType.CLASS,
+      qualified_name: qualifiedName,
+      symbol_type: SymbolType.STRUCT,
+      framework: structFramework,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
@@ -1668,7 +1695,7 @@ export class CSharpParser extends ChunkedParser {
   private processEnum(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext,
+    context: ASTContext,
     symbols: ParsedSymbol[],
     exports: ParsedExport[]
   ): void {
@@ -1679,10 +1706,32 @@ export class CSharpParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node);
     const visibility = this.getVisibility(modifiers, node);
     const description = this.extractXmlDocComment(node, content);
+    const qualifiedName = context.currentNamespace ? `${context.currentNamespace}.${name}` : name;
+
+    // Detect framework for enum using entity classifier
+    // If enum is inside a class, inherit from class; otherwise detect from file path/namespace
+    let enumFramework: string | undefined;
+    if (context.currentClassFramework) {
+      enumFramework = context.currentClassFramework;
+    } else {
+      const classification = entityClassifier.classify(
+        'enum',
+        name,
+        [], // Enums don't have base types
+        context.filePath || '',
+        undefined, // Auto-detect framework
+        context.currentNamespace,
+        context.options?.repositoryFrameworks
+      );
+      enumFramework = classification.framework;
+    }
 
     symbols.push({
       name,
+      qualified_name: qualifiedName,
       symbol_type: SymbolType.ENUM,
+      framework: enumFramework,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
@@ -1705,6 +1754,8 @@ export class CSharpParser extends ChunkedParser {
           name: memberName,
           qualified_name: qualifiedName,
           symbol_type: SymbolType.CONSTANT,
+          framework: enumFramework,
+          namespace: context.currentNamespace,
           start_line: memberNode.startPosition.row + 1,
           end_line: memberNode.endPosition.row + 1,
           is_exported: modifiers.includes('public'),
@@ -1730,7 +1781,7 @@ export class CSharpParser extends ChunkedParser {
   private processDelegate(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext,
+    context: ASTContext,
     symbols: ParsedSymbol[]
   ): void {
     const nameNode = node.childForFieldName('name');
@@ -1740,15 +1791,35 @@ export class CSharpParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node);
     const visibility = this.getVisibility(modifiers, node);
 
-    // Check if this is a Godot signal
-    // Check for Signal attribute for potential delegate signals
-    this.hasAttribute(node, 'Signal', content);
+    const isSignal = this.hasAttribute(node, 'Signal', content);
 
     const description = this.extractXmlDocComment(node, content);
+
+    let delegateFramework: string | undefined;
+    if (context.currentClassFramework) {
+      delegateFramework = context.currentClassFramework;
+    } else {
+      const classification = entityClassifier.classify(
+        'delegate',
+        name,
+        [],
+        context.filePath || '',
+        undefined,
+        context.currentNamespace,
+        context.options?.repositoryFrameworks
+      );
+      delegateFramework = classification.framework;
+    }
+
+    if (isSignal && !delegateFramework) {
+      delegateFramework = 'godot';
+    }
 
     symbols.push({
       name,
       symbol_type: SymbolType.TYPE_ALIAS,
+      framework: delegateFramework,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
@@ -1779,6 +1850,7 @@ export class CSharpParser extends ChunkedParser {
     symbols.push({
       name,
       symbol_type: SymbolType.METHOD,
+      namespace: context.currentNamespace,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
       is_exported: modifiers.includes('public'),
@@ -1794,7 +1866,7 @@ export class CSharpParser extends ChunkedParser {
   private processEvent(
     node: Parser.SyntaxNode,
     content: string,
-    _context: ASTContext,
+    context: ASTContext,
     symbols: ParsedSymbol[]
   ): void {
     const variableDeclaration = node.children.find(child => child.type === 'variable_declaration');
@@ -1814,6 +1886,8 @@ export class CSharpParser extends ChunkedParser {
       symbols.push({
         name,
         symbol_type: SymbolType.VARIABLE,
+        framework: context.currentClassFramework,
+        namespace: context.currentNamespace,
         start_line: declarator.startPosition.row + 1,
         end_line: declarator.endPosition.row + 1,
         is_exported: modifiers.includes('public'),
