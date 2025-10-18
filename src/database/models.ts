@@ -202,6 +202,7 @@ export interface FlatDependencyResponse {
 export enum SymbolType {
   FUNCTION = 'function',
   CLASS = 'class',
+  STRUCT = 'struct',
   INTERFACE = 'interface',
   VARIABLE = 'variable',
   CONSTANT = 'constant',

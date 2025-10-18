@@ -403,6 +403,30 @@ export class DatabaseService {
     return null;
   }
 
+  /**
+   * Batch version of getFileByPath for performance-sensitive operations.
+   * Queries all paths in a single database roundtrip instead of N queries.
+   */
+  async getFilesByPaths(paths: string[]): Promise<FileWithRepository[]> {
+    if (paths.length === 0) {
+      return [];
+    }
+
+    const results = await this.db('files')
+      .leftJoin('repositories', 'files.repo_id', 'repositories.id')
+      .select('files.*', 'repositories.name as repo_name', 'repositories.path as repo_path')
+      .whereIn('files.path', paths);
+
+    return results.map(result => ({
+      ...result,
+      repository: {
+        id: result.repo_id,
+        name: result.repo_name,
+        path: result.repo_path,
+      } as Repository,
+    })) as FileWithRepository[];
+  }
+
   async getFilesByRepository(repoId: number): Promise<File[]> {
     const files = await this.db('files').where({ repo_id: repoId }).orderBy('path');
     return files as File[];
@@ -2272,23 +2296,8 @@ export class DatabaseService {
   // Godot Node operations
   async storeGodotNode(data: CreateGodotNode): Promise<GodotNode> {
     try {
-      // Check if node already exists in this scene
-      const existingNode = await this.db('godot_nodes')
-        .where({ scene_id: data.scene_id, node_name: data.node_name })
-        .first();
-
-      if (existingNode) {
-        // Update existing node
-        const [node] = await this.db('godot_nodes')
-          .where({ id: existingNode.id })
-          .update({ ...data, updated_at: new Date() })
-          .returning('*');
-        return node as GodotNode;
-      } else {
-        // Insert new node
-        const [node] = await this.db('godot_nodes').insert(data).returning('*');
-        return node as GodotNode;
-      }
+      const [node] = await this.db('godot_nodes').insert(data).returning('*');
+      return node as GodotNode;
     } catch (error) {
       logger.error('Failed to store Godot node', {
         node_name: data.node_name,

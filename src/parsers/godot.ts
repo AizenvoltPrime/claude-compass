@@ -50,8 +50,10 @@ export interface GodotNode extends FrameworkEntity {
   nodeType: string;
   nodeName: string;
   parent?: string;
+  parentPath?: string;
   children: string[];
   script?: string;
+  instanceScene?: string;
   properties: Record<string, any>;
   framework: 'godot';
 }
@@ -311,10 +313,20 @@ export class GodotParser extends BaseFrameworkParser {
                 nodeType: nodeParams.type || 'Node',
                 nodeName: nodeParams.name || 'Unknown',
                 parent: nodeParams.parent,
+                parentPath: nodeParams.parentPath,
                 children: [],
                 properties: {},
                 framework: 'godot',
-                  };
+              };
+
+              if (nodeParams.instance) {
+                const instancePath = extResources.get(nodeParams.instance);
+                if (instancePath && projectRoot) {
+                  currentNode.instanceScene = this.convertGodotPathToAbsolute(instancePath, projectRoot);
+                } else if (instancePath) {
+                  currentNode.instanceScene = instancePath;
+                }
+              }
             }
           }
         } else if (trimmed && !trimmed.startsWith(';') && currentSection) {
@@ -342,13 +354,26 @@ export class GodotParser extends BaseFrameworkParser {
         }
       }
 
-      // Add the last node if any
       if (currentNode && currentSection === 'node') {
         nodes.push(currentNode as GodotNode);
       }
 
-      // Build node hierarchy
       this.buildNodeHierarchy(nodes);
+
+      const rootNode = nodes.find(node => !node.parent);
+      const nodesWithParents = nodes.filter(node => node.parent);
+      const nodesWithScripts = nodes.filter(node => node.script);
+
+      logger.debug('Godot scene parsed', {
+        filePath,
+        sceneName,
+        totalNodes: nodes.length,
+        rootNode: rootNode?.nodeName,
+        nodesWithParents: nodesWithParents.length,
+        nodesWithScripts: nodesWithScripts.length,
+        nodeTypes: [...new Set(nodes.map(n => n.nodeType))],
+        parentReferences: [...new Set(nodesWithParents.map(n => n.parent))],
+      });
 
       const scene: GodotScene = {
         type: 'godot_scene',
@@ -360,7 +385,7 @@ export class GodotParser extends BaseFrameworkParser {
           line: 1
         },
         scenePath: filePath,
-        rootNode: nodes.find(node => !node.parent),
+        rootNode,
         nodes,
         resources,
         connections,
@@ -473,20 +498,27 @@ export class GodotParser extends BaseFrameworkParser {
 
   // Helper methods for parsing scene files
 
-  private parseNodeParams(params: string): { name?: string; type?: string; parent?: string } {
-    const result: { name?: string; type?: string; parent?: string } = {};
+  private parseNodeParams(params: string): { name?: string; type?: string; parent?: string; parentPath?: string; instance?: string } {
+    const result: { name?: string; type?: string; parent?: string; parentPath?: string; instance?: string } = {};
 
-    // Parse name="NodeName"
     const nameMatch = params.match(/name="([^"]+)"/);
     if (nameMatch) result.name = nameMatch[1];
 
-    // Parse type="NodeType"
     const typeMatch = params.match(/type="([^"]+)"/);
     if (typeMatch) result.type = typeMatch[1];
 
-    // Parse parent="ParentNode"
     const parentMatch = params.match(/parent="([^"]+)"/);
-    if (parentMatch) result.parent = parentMatch[1];
+    if (parentMatch) {
+      const parentPath = parentMatch[1];
+      const isSceneRoot = parentPath === '.';
+      if (!isSceneRoot) {
+        result.parentPath = parentPath;
+        result.parent = parentPath.split('/').pop();
+      }
+    }
+
+    const instanceMatch = params.match(/instance[=\s]*ExtResource\s*\(\s*"([^"]+)"\s*\)/);
+    if (instanceMatch) result.instance = instanceMatch[1];
 
     return result;
   }
@@ -747,9 +779,11 @@ export class GodotParser extends BaseFrameworkParser {
     return ['.tscn', '.godot'];
   }
 
+  /**
+   * Symbol extraction is not performed by this parser.
+   * C# files are handled by CSharpParser, and .tscn files generate framework entities.
+   */
   protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
-    // For .cs files, this will be handled by the C# parser
-    // For .tscn files, symbols are extracted as framework entities
     return [];
   }
 
@@ -759,12 +793,10 @@ export class GodotParser extends BaseFrameworkParser {
   private extractTscnDependencies(content: string, filePath: string): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
-    // Extract dependencies from .tscn files - using actual file paths
     if (content.includes('[gd_scene') || content.includes('[gd_resource')) {
-      const extResources = new Map<string, string>(); // resourceId -> filePath
+      const extResources = new Map<string, string>();
       const lines = content.split('\n');
 
-      // First pass: Extract all external resource mappings
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const extResourceMatch = line.match(/\[ext_resource[^\]]*path="([^"]+)"[^\]]*id="([^"]+)"/);
@@ -774,11 +806,9 @@ export class GodotParser extends BaseFrameworkParser {
         }
       }
 
-      // Second pass: Extract script attachments and resource references
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
-        // Extract script attachments from node sections
         if (line.includes('script = ExtResource')) {
           const scriptMatch = line.match(/script = ExtResource\s*\(\s*"([^"]+)"\s*\)/);
           if (scriptMatch) {
@@ -786,10 +816,9 @@ export class GodotParser extends BaseFrameworkParser {
             const scriptPath = extResources.get(resourceId);
 
             if (scriptPath) {
-              // Create file-to-file dependency using actual paths
               dependencies.push({
-                from_symbol: filePath, // Current .tscn file
-                to_symbol: scriptPath, // Actual script file path
+                from_symbol: filePath,
+                to_symbol: scriptPath,
                 dependency_type: DependencyType.REFERENCES,
                 line_number: i + 1
               });
@@ -797,16 +826,16 @@ export class GodotParser extends BaseFrameworkParser {
           }
         }
 
-        // Extract other resource references (textures, materials, etc.)
+
         const resourceRefMatch = line.match(/ExtResource\s*\(\s*"([^"]+)"\s*\)/);
-        if (resourceRefMatch && !line.includes('script =')) {
+        if (resourceRefMatch && !line.includes('script =') && !line.includes('instance =')) {
           const resourceId = resourceRefMatch[1];
           const resourcePath = extResources.get(resourceId);
 
           if (resourcePath) {
             dependencies.push({
-              from_symbol: filePath, // Current .tscn file
-              to_symbol: resourcePath, // Actual resource file path
+              from_symbol: filePath,
+              to_symbol: resourcePath,
               dependency_type: DependencyType.REFERENCES,
               line_number: i + 1
             });
