@@ -1,0 +1,36 @@
+{
+  "typescript": {
+    "interface": {
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Props",
+            "priority": 10,
+            "entityType": "props_interface",
+            "description": "Component props interface"
+          },
+          {
+            "pattern": "State",
+            "priority": 10,
+            "entityType": "state_interface",
+            "description": "Component state interface"
+          },
+          {
+            "pattern": "Config",
+            "priority": 10,
+            "entityType": "config",
+            "description": "Configuration interface"
+          }
+        ],
+        "prefix": [
+          {
+            "pattern": "^I[A-Z]",
+            "priority": 5,
+            "entityType": "interface",
+            "description": "Interface with I prefix convention"
+          }
+        ]
+      }
+    }
+  }
+}

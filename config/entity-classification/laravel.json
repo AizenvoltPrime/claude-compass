@@ -1,0 +1,122 @@
+{
+  "laravel": {
+    "class": {
+      "baseClassRules": {
+        "Model": {
+          "priority": 1,
+          "entityType": "model",
+          "description": "Eloquent model"
+        },
+        "Controller": {
+          "priority": 1,
+          "entityType": "controller",
+          "description": "Laravel controller"
+        },
+        "Job": {
+          "priority": 1,
+          "entityType": "job",
+          "description": "Queue job"
+        },
+        "Middleware": {
+          "priority": 1,
+          "entityType": "middleware",
+          "description": "HTTP middleware"
+        },
+        "Request": {
+          "priority": 1,
+          "entityType": "request",
+          "description": "Form request validation"
+        },
+        "FormRequest": {
+          "priority": 1,
+          "entityType": "request",
+          "description": "Form request validation"
+        },
+        "Resource": {
+          "priority": 1,
+          "entityType": "api_resource",
+          "description": "API resource transformer"
+        },
+        "Notification": {
+          "priority": 1,
+          "entityType": "notification",
+          "description": "Notification class"
+        },
+        "Command": {
+          "priority": 1,
+          "entityType": "command",
+          "description": "Artisan command"
+        },
+        "Seeder": {
+          "priority": 1,
+          "entityType": "seeder",
+          "description": "Database seeder"
+        },
+        "Migration": {
+          "priority": 1,
+          "entityType": "migration",
+          "description": "Database migration"
+        },
+        "ServiceProvider": {
+          "priority": 1,
+          "entityType": "provider",
+          "description": "Service provider"
+        }
+      },
+      "namePatterns": {
+        "suffix": [
+          {
+            "pattern": "Controller",
+            "priority": 10,
+            "entityType": "controller",
+            "description": "Controller suffix"
+          },
+          {
+            "pattern": "Job",
+            "priority": 10,
+            "entityType": "job",
+            "description": "Job suffix"
+          },
+          {
+            "pattern": "Service",
+            "priority": 10,
+            "entityType": "service",
+            "description": "Service class"
+          },
+          {
+            "pattern": "Repository",
+            "priority": 10,
+            "entityType": "repository",
+            "description": "Repository pattern"
+          }
+        ]
+      },
+      "directoryRules": [
+        {
+          "path": "/Models/",
+          "priority": 5,
+          "entityType": "model",
+          "description": "Models directory"
+        },
+        {
+          "path": "/Controllers/",
+          "priority": 5,
+          "entityType": "controller",
+          "description": "Controllers directory"
+        },
+        {
+          "path": "/Jobs/",
+          "priority": 5,
+          "entityType": "job",
+          "description": "Jobs directory"
+        },
+        {
+          "path": "/Middleware/",
+          "priority": 5,
+          "entityType": "middleware",
+          "description": "Middleware directory"
+        }
+      ]
+    }
+  }
+}
