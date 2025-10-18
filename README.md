@@ -869,6 +869,110 @@ Both audit suites follow this structure:
 
 **📚 For detailed test documentation, see the SQL files in `tests/` directory.**
 
+## MCP Tool Audits
+
+In addition to database quality audits (which validate parser correctness and data integrity), Claude Compass includes **MCP Tool Audits** to verify that the Model Context Protocol tools work correctly across different frameworks and project types.
+
+### Purpose
+
+**Two-Layer Testing Strategy:**
+
+- **Database Audits** (data quality layer): Validate parsers extract correct data
+- **MCP Tool Audits** (query functionality layer): Validate tools return correct results
+
+Together they ensure end-to-end correctness from parsing → storage → retrieval → results.
+
+### Available MCP Audit Commands
+
+```bash
+# Quick test - general tests only
+npm run audit:mcp <repo_name> general
+
+# Framework-specific tests
+npm run audit:mcp:godot project_card_game
+npm run audit:mcp:laravel iemis
+
+# Complete test suite (auto-detects frameworks)
+npm run audit:mcp:all iemis
+npm run audit:mcp:all project_card_game
+```
+
+### What Gets Tested
+
+**Universal Tests** (work for all frameworks):
+- ✅ `search_code` - Symbol search with pattern matching
+- ✅ `get_symbol` - Symbol retrieval with file paths
+- ✅ `who_calls` - Reverse dependency lookup
+- ✅ `list_dependencies` - Outgoing dependencies
+- ✅ NULL handling in queries
+- ✅ LEFT JOIN correctness
+
+**Framework-Specific Tests:**
+- ✅ **Godot**: Scene tracking, node hierarchy, C# symbols, dependencies
+- ✅ **Laravel**: Route discovery, model detection, controller mapping
+- ✅ **Vue**: Component discovery, props/emits metadata, store detection
+- ✅ **Cross-Stack**: API call tracking (Vue → Laravel), feature discovery
+
+### Test Results
+
+**Example Output:**
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UNIVERSAL MCP TOOL TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ PASS: search_code finds common patterns (645 symbols)
+✅ PASS: who_calls finds callers (144 callers)
+✅ PASS: Dependencies have target or qualified name (13616)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEST SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Tests Run:    18
+Tests Passed:       18
+Tests Failed:       0
+
+🎉 ALL TESTS PASSED!
+```
+
+### When to Run MCP Audits
+
+**Before Deployment:**
+- After modifying MCP tool queries
+- After database schema changes
+- Before releasing new versions
+
+**During Development:**
+- When adding new framework support
+- When refactoring query logic
+- After parser updates that change data structure
+
+### Test Coverage
+
+| MCP Tool | Tested | Status |
+|----------|--------|--------|
+| `search_code` | ✅ Pattern search, entity filtering | Complete |
+| `get_symbol` | ✅ Symbol retrieval with metadata | Complete |
+| `get_file` | ⚠️ Not yet tested | TODO |
+| `who_calls` | ✅ Reverse dependencies | Complete |
+| `list_dependencies` | ✅ Outgoing dependencies | Complete |
+| `impact_of` | ⚠️ Partial (dependency joins) | Partial |
+| `trace_flow` | ⚠️ Not yet tested | TODO |
+| `discover_feature` | ✅ Cross-stack discovery | Partial |
+
+### Comparison: Database vs MCP Audits
+
+| Aspect | Database Audit | MCP Audit |
+|--------|---------------|-----------|
+| **Tests** | Data integrity, duplicates, parser quality | Query functionality, JOINs, results |
+| **Layer** | Storage layer | Business logic layer |
+| **Purpose** | Catch parser bugs | Catch query bugs |
+| **Speed** | Fast (direct SQL) | Fast (direct SQL) |
+| **Files** | `tests/*.sql` | `scripts/run-mcp-audit.sh` |
+
+**📚 For detailed MCP audit documentation, see [scripts/MCP_AUDIT_README.md](./scripts/MCP_AUDIT_README.md)**
+
 ## Success Metrics
 
 - **Time to understand new codebase**: < 2 hours (vs 2 days)
