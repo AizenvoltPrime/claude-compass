@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createComponentLogger } from './logger';
+import { findProjectRoot } from './project-root';
 
 const logger = createComponentLogger('entity-classifier');
 
@@ -206,7 +207,8 @@ export class EntityTypeClassifier {
    * Higher numbers win in conflicts.
    */
   private loadRules(rulesPath?: string): ClassificationRules {
-    const directoryPath = rulesPath || path.join(__dirname, '../../../config/entity-classification');
+    const projectRoot = findProjectRoot();
+    const directoryPath = rulesPath || path.join(projectRoot, 'config/entity-classification');
 
     if (!fs.existsSync(directoryPath)) {
       throw new Error(`Classification rules directory not found: ${directoryPath}`);

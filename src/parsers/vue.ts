@@ -1225,6 +1225,10 @@ export class VueParser extends BaseFrameworkParser {
         hasStyle: !!sections.style,
         scriptLang: sections.scriptLang || (filePath.includes('.ts') ? 'ts' : 'js'),
 
+        // Component props and emits (simplified for querying)
+        props: props.map(p => p.name),
+        emits: emits,
+
         // Component lifecycle
         lifecycle,
 

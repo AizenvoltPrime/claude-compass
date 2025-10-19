@@ -1965,7 +1965,7 @@ export class DatabaseService {
         // Delete files belonging to this repository
         const deletedFiles = await trx('files').where('repo_id', repositoryId).del();
 
-        // Then delete the repository itself
+        // Delete the repository itself (CASCADE will handle routes, components, etc.)
         const deletedRepo = await trx('repositories').where('id', repositoryId).del();
 
         logger.info('Repository completely deleted', {

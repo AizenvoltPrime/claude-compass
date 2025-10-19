@@ -1238,7 +1238,7 @@ export class LaravelParser extends BaseFrameworkParser {
         routeName: resourceRoute.routeName ? `${resourceRoute.routeName}.${action}` : null,
         metadata: {
           ...resourceRoute.metadata,
-          isResource: false,
+          isResource: true,
           resourceAction: action,
           expandedFrom: resourceType,
           parameters: this.extractRouteParameters(config.path),
@@ -1305,8 +1305,21 @@ export class LaravelParser extends BaseFrameworkParser {
   private extendsController(content: string, node: SyntaxNode): boolean {
     if (node.type !== 'class_declaration') return false;
 
-    const baseClause = node.childForFieldName('base_clause');
-    if (!baseClause) return false;
+    let baseClause = node.childForFieldName('base_clause');
+
+    if (!baseClause) {
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child?.type === 'base_clause') {
+          baseClause = child;
+          break;
+        }
+      }
+    }
+
+    if (!baseClause) {
+      return false;
+    }
 
     const baseClass = content.substring(baseClause.startIndex, baseClause.endIndex);
     return baseClass.includes('Controller') || baseClass.includes('BaseController');

@@ -291,7 +291,8 @@ describe('DatabaseService', () => {
         },
       ];
 
-      // Enhanced mock to handle both fulltext search (with raw SQL) and lexical search fallback
+      // Mock to simulate FTS returning zero results, triggering lexical search fallback
+      let callCount = 0;
       mockDb.mockImplementation(() => {
         const queryBuilder = {
           leftJoin: jest.fn().mockReturnThis(),
@@ -300,18 +301,21 @@ describe('DatabaseService', () => {
           whereIn: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           orderByRaw: jest.fn().mockReturnThis(),
-          limit: jest.fn().mockResolvedValue(mockSymbols),
+          limit: jest.fn().mockImplementation(() => {
+            callCount++;
+            // First call (FTS) returns empty, second call (lexical) returns results
+            return Promise.resolve(callCount === 1 ? [] : mockSymbols);
+          }),
         };
         return queryBuilder;
       });
 
-      // Mock the raw method to simulate PostgreSQL fulltext search failure
-      // This will trigger the fallback to lexical search
+      // Mock raw to return valid scoring values for both FTS and lexical
       mockDb.raw = jest.fn().mockImplementation(() => {
-        throw new Error('PostgreSQL function not available in mock');
+        return { then: (cb: Function) => cb(0) };
       });
 
-      const result = await dbService.searchSymbols('test', 1); // Provide repo ID for test
+      const result = await dbService.searchSymbols('test', 1);
 
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({

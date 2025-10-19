@@ -5,19 +5,40 @@ import { getDatabaseConnection } from '../../src/database/connection';
 import type { Knex } from 'knex';
 
 // Mock database for testing - creates a chainable query builder mock
-const createMockQueryBuilder = () => ({
-  select: jest.fn().mockReturnThis(),
-  leftJoin: jest.fn().mockReturnThis(),
-  whereIn: jest.fn().mockReturnThis(),
-  then: jest.fn()
-});
+const createMockQueryBuilder = () => {
+  const mock: any = {
+    select: jest.fn().mockReturnThis(),
+    leftJoin: jest.fn().mockReturnThis(),
+    whereIn: jest.fn().mockReturnThis(),
+    where: jest.fn(function(this: any, ...args: any[]) {
+      // Handle function argument for nested where clauses
+      if (typeof args[0] === 'function') {
+        const nestedBuilder = createMockQueryBuilder();
+        args[0].call(nestedBuilder);
+      }
+      return this;
+    }),
+    andWhere: jest.fn().mockReturnThis(),
+    orWhere: jest.fn().mockReturnThis(),
+    then: jest.fn((onFulfilled: Function) => Promise.resolve(onFulfilled([])))
+  };
+  return mock;
+};
 
 // Create specific mock for symbols table query used by resolveSymbolNames
-const createSymbolsQueryMock = (testData: any[]) => ({
-  leftJoin: jest.fn().mockReturnThis(),
-  whereIn: jest.fn().mockReturnThis(),
-  select: jest.fn().mockResolvedValue(testData)
-});
+const createSymbolsQueryMock = (testData: any[]) => {
+  const mock: any = {
+    leftJoin: jest.fn().mockReturnThis(),
+    whereIn: jest.fn().mockReturnThis(),
+    select: jest.fn(function(this: any) {
+      // Return a thenable that resolves with testData
+      return {
+        then: (onFulfilled: Function) => Promise.resolve(onFulfilled(testData))
+      };
+    })
+  };
+  return mock;
+};
 
 const mockDb = jest.fn((tableName?: string) => {
   if (tableName === 'symbols') {
