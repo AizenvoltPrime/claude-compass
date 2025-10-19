@@ -20,6 +20,7 @@ export class LaravelSearch {
         ...matchingRoutes.map(route => ({
           id: route.id,
           name: route.path,
+          entity_type: 'route',
           symbol_type: 'route',
           start_line: 0,
           end_line: 0,

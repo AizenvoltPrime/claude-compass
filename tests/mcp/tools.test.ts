@@ -129,7 +129,7 @@ describe('McpTools', () => {
       const mockSymbol = {
         id: 1,
         name: 'testFunction',
-        entity_types: SymbolType.FUNCTION,
+        symbol_type: SymbolType.FUNCTION,
         start_line: 1,
         end_line: 10,
         is_exported: true,
@@ -153,7 +153,7 @@ describe('McpTools', () => {
           to_symbol: {
             id: 2,
             name: 'helperFunction',
-            entity_types: SymbolType.FUNCTION,
+            symbol_type: SymbolType.FUNCTION,
             file: {
               path: '/test/utils.js',
             },
@@ -169,7 +169,7 @@ describe('McpTools', () => {
           from_symbol: {
             id: 3,
             name: 'mainFunction',
-            entity_types: SymbolType.FUNCTION,
+            symbol_type: SymbolType.FUNCTION,
             file: {
               path: '/test/main.js',
             },
@@ -223,9 +223,9 @@ describe('McpTools', () => {
         },
       ];
 
-      // Mock vector search to fail so it falls back to fulltext search
-      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockRejectedValue(new Error('Vector search not available'));
-      (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
+      // Mock vector search to return empty so it falls back to lexical search
+      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockResolvedValue([]);
+      (mockDatabaseService.lexicalSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
       const result = await mcpTools.searchCode({
         query: 'test',
@@ -259,9 +259,9 @@ describe('McpTools', () => {
         },
       }));
 
-      // Mock vector search to fail so it falls back to fulltext search
-      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockRejectedValue(new Error('Vector search not available'));
-      (mockDatabaseService.fulltextSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
+      // Mock vector search to return empty so it falls back to lexical search
+      (mockDatabaseService.vectorSearchSymbols as jest.Mock).mockResolvedValue([]);
+      (mockDatabaseService.lexicalSearchSymbols as jest.Mock).mockResolvedValue(mockSymbols);
 
       const result = await mcpTools.searchCode({
         query: 'function',
@@ -269,7 +269,7 @@ describe('McpTools', () => {
       });
 
       const data = JSON.parse(result.content[0].text);
-      expect(data.results).toHaveLength(100); // Fixed limit of 100 is applied
+      expect(data.results).toHaveLength(30); // Fixed limit of 30 is applied
     });
   });
 
@@ -315,8 +315,8 @@ describe('McpTools', () => {
       // Results are now in dependencies array format
       expect(Array.isArray(data.dependencies)).toBe(true);
       expect(data.total_count).toBeGreaterThan(0);
-      expect(data.dependencies[0].from).toBe('caller1');
-      expect(data.dependencies[0].to).toBe('targetFunction');
+      expect(data.dependencies[0].from).toBe('caller.caller1'); // Qualified with file name
+      expect(data.dependencies[0].to).toBe('target.targetFunction'); // Qualified with file name
       expect(data.dependencies[0].type).toBe('calls');
     });
   });
@@ -353,12 +353,12 @@ describe('McpTools', () => {
         },
       ];
 
-      (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+      (mockDatabaseService.getSymbolWithFile as jest.Mock).mockResolvedValue(mockSymbol);
       (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue(mockDependencies);
 
       const result = await mcpTools.listDependencies({ symbol_id: 1 });
 
-      expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
+      expect(mockDatabaseService.getSymbolWithFile).toHaveBeenCalledWith(1);
       expect(mockDatabaseService.getDependenciesFromWithContext).toHaveBeenCalledWith(1);
 
       const data = JSON.parse(result.content[0].text);
@@ -367,7 +367,7 @@ describe('McpTools', () => {
       // Results are now in dependencies array format
       expect(Array.isArray(data.dependencies)).toBe(true);
       expect(data.total_count).toBeGreaterThan(0);
-      expect(data.dependencies[0].from).toBe('sourceFunction');
+      expect(data.dependencies[0].from).toBe('source.sourceFunction'); // Qualified with file name
       expect(data.dependencies[0].to).toBeDefined();
       expect(data.dependencies[0].type).toBe('calls');
     });
@@ -379,7 +379,7 @@ describe('McpTools', () => {
         symbol_type: SymbolType.FUNCTION,
       };
 
-      (mockDatabaseService.getSymbol as jest.Mock).mockResolvedValue(mockSymbol);
+      (mockDatabaseService.getSymbolWithFile as jest.Mock).mockResolvedValue(mockSymbol);
       (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
 
       const result = await mcpTools.listDependencies({
@@ -387,7 +387,7 @@ describe('McpTools', () => {
         max_depth: 2
       });
 
-      expect(mockDatabaseService.getSymbol).toHaveBeenCalledWith(1);
+      expect(mockDatabaseService.getSymbolWithFile).toHaveBeenCalledWith(1);
       const data = JSON.parse(result.content[0].text);
       expect(data.query_info.symbol).toBe('testFunction');
     });
@@ -448,7 +448,7 @@ describe('McpTools', () => {
       expect(Array.isArray(data.dependencies)).toBe(true);
       expect(data.total_count).toBeGreaterThan(0);
       expect(data.dependencies[0].from).toBeDefined();
-      expect(data.dependencies[0].to).toBe('targetFunction');
+      expect(data.dependencies[0].to).toBe('target.targetFunction'); // Qualified with file name
     });
 
     it('should validate max_depth parameter values for whoCalls', async () => {

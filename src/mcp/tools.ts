@@ -274,6 +274,7 @@ export class McpTools {
                 id: symbol.id,
                 name: symbol.name,
                 type: symbol.symbol_type,
+                entity_type: symbol.entity_type || symbol.symbol_type || '',
                 start_line: symbol.start_line,
                 end_line: symbol.end_line,
                 is_exported: symbol.is_exported,
