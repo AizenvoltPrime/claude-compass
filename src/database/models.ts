@@ -139,7 +139,6 @@ export interface ImpactAnalysisResponse {
   routes_affected: Array<{
     path: string;
     method: string;
-    framework: string;
   }>;
   jobs_affected: Array<{
     name: string;
@@ -155,7 +154,7 @@ export interface ImpactAnalysisResponse {
     total_jobs: number;
     total_tests: number;
     max_depth: number;
-    frameworks: string[];
+    languages: string[];
   };
   query_info: {
     symbol: string;
