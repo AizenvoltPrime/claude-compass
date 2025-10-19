@@ -1,8 +1,9 @@
 import knex from 'knex';
 import type { Knex } from 'knex';
-import { config } from '../utils/config';
 import { createComponentLogger } from '../utils/logger';
+import { findProjectRoot } from '../utils/project-root';
 import process from 'process';
+import path from 'path';
 
 const logger = createComponentLogger('database');
 
@@ -41,36 +42,31 @@ export function createDatabaseConnection(): Knex {
     return db;
   }
 
+  const projectRoot = findProjectRoot();
+  const knexfilePath = path.join(projectRoot, 'knexfile.js');
+  const knexfile = require(knexfilePath);
+  const environment = process.env.NODE_ENV || 'development';
+  const baseConfig = knexfile[environment];
+
+  if (!baseConfig) {
+    throw new Error(`No knexfile configuration found for environment: ${environment}`);
+  }
+
   const connectionConfig: Knex.Config = {
-    client: 'postgresql',
-    connection: config.database.url || {
-      host: config.database.host,
-      port: config.database.port,
-      database: config.database.database,
-      user: config.database.user,
-      password: config.database.password,
-    },
+    ...baseConfig,
     pool: {
       min: process.env.NODE_ENV === 'test' ? 1 : 2,
-      max: process.env.NODE_ENV === 'test' ? 5 : 10, // Increase test pool size
-      acquireTimeoutMillis: 60000, // Increase timeout to 60s
+      max: process.env.NODE_ENV === 'test' ? 5 : 10,
+      acquireTimeoutMillis: 60000,
       idleTimeoutMillis: process.env.NODE_ENV === 'test' ? 60000 : 600000,
       createTimeoutMillis: 30000,
       destroyTimeoutMillis: 5000,
       reapIntervalMillis: 1000,
       createRetryIntervalMillis: 200,
-      // Force close idle connections aggressively in tests
       propagateCreateError: false
     },
-    migrations: {
-      directory: './dist/src/database/migrations',
-      tableName: 'knex_migrations',
-      extension: 'js',
-      loadExtensions: ['.js']
-    },
-    debug: false, // Disable SQL query logging to reduce noise
+    debug: false,
     postProcessResponse: (result: any) => {
-      // Handle JSONB fields - PostgreSQL returns them as strings, but we want objects
       if (Array.isArray(result)) {
         return result.map((row: any) => processJsonbFields(row));
       } else if (result && typeof result === 'object') {
@@ -79,15 +75,11 @@ export function createDatabaseConnection(): Knex {
       return result;
     },
     wrapIdentifier: (value: string, origImpl: (value: string) => string) => {
-      // Keep identifiers as-is for PostgreSQL
       return origImpl(value);
     }
   };
 
   db = knex(connectionConfig);
-
-  // Note: Connection testing is deferred until first actual use
-  // to prevent creating persistent handles during module import
 
   return db;
 }

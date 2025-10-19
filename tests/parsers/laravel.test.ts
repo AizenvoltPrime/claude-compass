@@ -35,13 +35,17 @@ Route::group(['prefix' => 'admin'], function () {
       const result = await parser.parseFile('/project/routes/web.php', code);
       const routes = result.frameworkEntities!.filter(e => e.type === 'route') as LaravelRoute[];
 
-      expect(routes).toHaveLength(3);
+      expect(routes).toHaveLength(9);
       expect(routes[0]).toMatchObject({
         path: '/users',
         method: 'GET',
         controller: 'UserController',
         action: 'index'
       });
+
+      const resourceRoutes = routes.filter(r => r.metadata.expandedFrom === 'resource');
+      expect(resourceRoutes).toHaveLength(7);
+      expect(resourceRoutes.every(r => r.metadata.isResource)).toBe(true);
     });
 
     it('should extract route middleware', async () => {
@@ -893,7 +897,7 @@ class UserController extends Controller
 
       // Should detect dependencies and method calls
       expect(result.dependencies!.length).toBeGreaterThan(0);
-      expect(result.dependencies!.some(d => d.to_symbol.includes('User'))).toBe(true);
+      expect(result.dependencies!.some(d => d.resolved_class === 'User' || d.to_qualified_name?.includes('User'))).toBe(true);
       expect(result.dependencies!.some(d => d.dependency_type === 'calls')).toBe(true);
     });
 

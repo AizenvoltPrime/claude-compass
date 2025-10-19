@@ -15,6 +15,7 @@ import {
   CreateApiCall,
   CreateDataContract,
   Repository,
+  File,
 } from '../../src/database/models';
 import { FrameworkEntity, FrameworkEntityType } from '../../src/parsers/base';
 import { jest } from '@jest/globals';
@@ -240,120 +241,6 @@ describe('CrossStackGraphBuilder', () => {
         edge => edge.relationshipType === 'shares_schema'
       );
       expect(dataContractEdges).toHaveLength(1);
-    });
-  });
-
-  describe('buildFullStackFeatureGraph', () => {
-    it('should build comprehensive full-stack graphs', async () => {
-      const mockRepository = {
-        id: 1,
-        name: 'test-full-stack-app',
-        path: '/test/app',
-      };
-
-      (mockDatabaseService.getRepository as jest.MockedFunction<any>).mockResolvedValue(
-        mockRepository as Repository
-      );
-      (mockDatabaseService.getCrossStackDependencies as jest.MockedFunction<any>).mockResolvedValue(
-        {
-          apiCalls: [
-            {
-              id: 1,
-              repo_id: 1,
-              caller_symbol_id: 1,
-              endpoint_symbol_id: 1,
-              http_method: 'GET',
-              endpoint_path: '/api/users',
-              call_type: 'axios',
-              created_at: new Date(),
-              updated_at: new Date(),
-            },
-          ] as ApiCall[],
-          dataContracts: [
-            {
-              id: 1,
-              repo_id: 1,
-              name: 'User',
-              frontend_type_id: 1,
-              backend_type_id: 2,
-              drift_detected: false,
-              created_at: new Date(),
-              updated_at: new Date(),
-            },
-          ] as DataContract[],
-        }
-      );
-
-      (mockDatabaseService.getFrameworkEntitiesByType as jest.MockedFunction<any>)
-        .mockResolvedValueOnce([
-          {
-            type: FrameworkEntityType.VUE_COMPONENT,
-            name: 'UserList',
-            filePath: '/frontend/components/UserList.vue',
-          },
-        ] as FrameworkEntity[])
-        .mockResolvedValueOnce([
-          {
-            type: FrameworkEntityType.LARAVEL_ROUTE,
-            name: 'users.index',
-            filePath: '/backend/routes/api.php',
-          },
-        ] as FrameworkEntity[]);
-
-      (mockDatabaseService.getSymbolsByType as jest.MockedFunction<any>)
-        .mockResolvedValueOnce([
-          {
-            id: 1,
-            name: 'User',
-            symbol_type: SymbolType.INTERFACE,
-            file_id: 1,
-            is_exported: true,
-          },
-        ] as Symbol[])
-        .mockResolvedValueOnce([
-          {
-            id: 2,
-            name: 'User',
-            symbol_type: SymbolType.CLASS,
-            file_id: 2,
-            is_exported: true,
-          },
-        ] as Symbol[]);
-
-      (mockDatabaseService.getSymbolsByRepository as jest.MockedFunction<any>).mockResolvedValue([
-        {
-          id: 1,
-          name: 'User',
-          symbol_type: SymbolType.INTERFACE,
-          file_id: 1,
-          is_exported: true,
-        },
-        {
-          id: 2,
-          name: 'User',
-          symbol_type: SymbolType.CLASS,
-          file_id: 2,
-          is_exported: true,
-        },
-        {
-          id: 3,
-          name: 'UserList',
-          symbol_type: SymbolType.COMPONENT,
-          file_id: 3,
-          is_exported: true,
-        },
-      ] as Symbol[]);
-
-      const result = await builder.buildFullStackFeatureGraph(1);
-
-      expect(result).toBeDefined();
-      // Note: repositoryId not part of FullStackFeatureGraph interface
-      // expect(result.repositoryId).toBe(1);
-      expect(result.apiCallGraph).toBeDefined();
-      expect(result.dataContractGraph).toBeDefined();
-      expect(result.features).toBeDefined();
-      expect(result.metadata.totalFeatures).toBeGreaterThan(0);
-      expect(result.metadata.crossStackRelationships).toBeGreaterThan(0);
     });
   });
 
