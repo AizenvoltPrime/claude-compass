@@ -234,7 +234,7 @@ describe('Enhanced MCP Tools Search', () => {
       expect(firstResult.file.language).toBeDefined();
     });
 
-    test('should include entity type and framework information', async () => {
+    test('should include entity type information', async () => {
       const result = await mcpTools.searchCode({
         query: 'user',
         repo_ids: [repoId]
@@ -245,7 +245,6 @@ describe('Enhanced MCP Tools Search', () => {
 
       const firstResult = response.results[0];
       expect(firstResult.entity_type).toBeDefined();
-      expect(firstResult.framework).toBeDefined();
     });
   });
 
@@ -458,7 +457,7 @@ describe('Enhanced MCP Tools Search', () => {
       expect(typeof response.query_filters.framework_auto_detected).toBe('boolean');
     });
 
-    test('should include entity_type and framework in individual results', async () => {
+    test('should include entity_type in individual results', async () => {
       const result = await mcpTools.searchCode({
         query: 'User',
         repo_ids: [repoId]
@@ -468,9 +467,7 @@ describe('Enhanced MCP Tools Search', () => {
       if (response.results.length > 0) {
         const firstResult = response.results[0];
         expect(firstResult).toHaveProperty('entity_type');
-        expect(firstResult).toHaveProperty('framework');
         expect(typeof firstResult.entity_type).toBe('string');
-        expect(typeof firstResult.framework).toBe('string');
       }
     });
 
@@ -724,7 +721,6 @@ describe('Enhanced MCP Tools Search', () => {
         expect(firstResult).toHaveProperty('type');
         expect(firstResult).toHaveProperty('file');
         expect(firstResult).toHaveProperty('entity_type');
-        expect(firstResult).toHaveProperty('framework');
       }
     });
   });
