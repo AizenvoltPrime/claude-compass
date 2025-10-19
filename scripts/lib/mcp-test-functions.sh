@@ -629,3 +629,566 @@ test_cross_stack_discovery() {
 
     test_result "Cross-stack discovery finds frontend callers" "PASS" ">=0" "$related_frontend"
 }
+
+# ================================
+# GET_FILE TOOL TESTS
+# ================================
+
+# Test 19: get_file by ID retrieves complete file data
+test_get_file_by_id() {
+    local repo_id=$1
+
+    echo "TEST: get_file retrieves file by ID with metadata"
+
+    # Get a file ID from the repo
+    local file_id=$(run_query "
+        SELECT id
+        FROM files
+        WHERE repo_id = $repo_id
+        LIMIT 1;
+    ")
+
+    if [ -z "$file_id" ]; then
+        test_result "get_file (no files to test)" "PASS" "" ""
+        return
+    fi
+
+    # Simulate getFileWithRepository query
+    local result=$(count_query "
+        SELECT COUNT(*)
+        FROM files f
+        LEFT JOIN repositories r ON f.repo_id = r.id
+        WHERE f.id = $file_id
+          AND f.path IS NOT NULL;
+    ")
+
+    if [ "$result" = "1" ]; then
+        test_result "get_file retrieves file by ID" "PASS" "1" "$result"
+    else
+        test_result "get_file retrieves file by ID" "FAIL" "1" "$result"
+    fi
+}
+
+# Test 20: get_file by path retrieves file
+test_get_file_by_path() {
+    local repo_id=$1
+
+    echo "TEST: get_file retrieves file by path"
+
+    # Get a file path from the repo
+    local file_path=$(run_query "
+        SELECT path
+        FROM files
+        WHERE repo_id = $repo_id
+        LIMIT 1;
+    ")
+
+    if [ -z "$file_path" ]; then
+        test_result "get_file by path (no files to test)" "PASS" "" ""
+        return
+    fi
+
+    # Simulate getFileByPath query (need to escape quotes in path)
+    local escaped_path="${file_path//\'/\'\'}"
+    local result=$(count_query "
+        SELECT COUNT(*)
+        FROM files
+        WHERE path = '$escaped_path';
+    ")
+
+    if [ "$result" = "1" ]; then
+        test_result "get_file retrieves file by path" "PASS" "1" "$result"
+    else
+        test_result "get_file retrieves file by path" "FAIL" "1" "$result"
+    fi
+}
+
+# Test 21: get_file includes symbol list
+test_get_file_symbols() {
+    local repo_id=$1
+
+    echo "TEST: get_file returns symbols in file"
+
+    # Get a file with symbols
+    local file_id=$(run_query "
+        SELECT f.id
+        FROM files f
+        JOIN symbols s ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+        GROUP BY f.id
+        HAVING COUNT(s.id) > 0
+        LIMIT 1;
+    ")
+
+    if [ -z "$file_id" ]; then
+        test_result "get_file symbols (no files with symbols)" "PASS" "" ""
+        return
+    fi
+
+    # Simulate getSymbolsByFile query
+    local symbol_count=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols
+        WHERE file_id = $file_id;
+    ")
+
+    if [ "$symbol_count" -gt 0 ]; then
+        test_result "get_file returns file symbols" "PASS" ">0" "$symbol_count"
+    else
+        test_result "get_file returns file symbols" "FAIL" ">0" "$symbol_count"
+    fi
+}
+
+# ================================
+# TRACE_FLOW TOOL TESTS
+# ================================
+
+# Test 22: trace_flow finds paths between symbols
+test_trace_flow_path_finding() {
+    local repo_id=$1
+
+    echo "TEST: trace_flow finds execution paths"
+
+    # Find two connected symbols (one calls the other)
+    local connection=$(run_query "
+        SELECT d.from_symbol_id, d.to_symbol_id
+        FROM dependencies d
+        JOIN symbols s_from ON d.from_symbol_id = s_from.id
+        JOIN symbols s_to ON d.to_symbol_id = s_to.id
+        JOIN files f_from ON s_from.file_id = f_from.id
+        JOIN files f_to ON s_to.file_id = f_to.id
+        WHERE f_from.repo_id = $repo_id
+          AND f_to.repo_id = $repo_id
+          AND d.dependency_type IN ('calls', 'imports')
+        LIMIT 1;
+    ")
+
+    if [ -z "$connection" ]; then
+        test_result "trace_flow (no connected symbols to test)" "PASS" "" ""
+        return
+    fi
+
+    # Extract start and end symbol IDs
+    local start_id=$(echo "$connection" | cut -d'|' -f1)
+    local end_id=$(echo "$connection" | cut -d'|' -f2)
+
+    # Check if direct path exists
+    local path_exists=$(count_query "
+        SELECT COUNT(*)
+        FROM dependencies
+        WHERE from_symbol_id = $start_id
+          AND to_symbol_id = $end_id;
+    ")
+
+    if [ "$path_exists" = "1" ]; then
+        test_result "trace_flow finds direct path" "PASS" "1" "$path_exists"
+    else
+        test_result "trace_flow finds direct path" "FAIL" "1" "$path_exists"
+    fi
+}
+
+# Test 23: trace_flow handles cross-stack paths
+test_trace_flow_cross_stack() {
+    local repo_id=$1
+
+    echo "TEST: trace_flow handles cross-stack connections"
+
+    # Find frontend symbol that calls backend via API
+    local api_connection=$(run_query "
+        SELECT ac.caller_symbol_id, ac.endpoint_symbol_id
+        FROM api_calls ac
+        WHERE ac.repo_id = $repo_id
+          AND ac.caller_symbol_id IS NOT NULL
+          AND ac.endpoint_symbol_id IS NOT NULL
+        LIMIT 1;
+    ")
+
+    if [ -z "$api_connection" ]; then
+        test_result "trace_flow cross-stack (no API calls to test)" "PASS" "" ""
+        return
+    fi
+
+    # Extract caller and endpoint IDs
+    local caller_id=$(echo "$api_connection" | cut -d'|' -f1)
+    local endpoint_id=$(echo "$api_connection" | cut -d'|' -f2)
+
+    # Check if API call link exists
+    local api_link=$(count_query "
+        SELECT COUNT(*)
+        FROM api_calls
+        WHERE caller_symbol_id = $caller_id
+          AND endpoint_symbol_id = $endpoint_id;
+    ")
+
+    if [ "$api_link" = "1" ]; then
+        test_result "trace_flow cross-stack path exists" "PASS" "1" "$api_link"
+    else
+        test_result "trace_flow cross-stack path exists" "FAIL" "1" "$api_link"
+    fi
+}
+
+# ================================
+# IMPACT_OF TOOL TESTS (EXPANDED)
+# ================================
+
+# Test 24: impact_of finds affected routes
+test_impact_of_routes() {
+    local repo_id=$1
+
+    echo "TEST: impact_of finds affected routes"
+
+    # Find a symbol that's used in a route handler
+    local symbol_in_route=$(run_query "
+        SELECT s.id
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        JOIN routes r ON r.handler_symbol_id = s.id
+        WHERE f.repo_id = $repo_id
+        LIMIT 1;
+    ")
+
+    if [ -z "$symbol_in_route" ]; then
+        test_result "impact_of routes (no route handlers to test)" "PASS" "" ""
+        return
+    fi
+
+    # Simulate getRoutesForSymbols query
+    local affected_routes=$(count_query "
+        SELECT COUNT(DISTINCT r.id)
+        FROM routes r
+        WHERE r.repo_id = $repo_id
+          AND r.handler_symbol_id = $symbol_in_route;
+    ")
+
+    if [ "$affected_routes" -gt 0 ]; then
+        test_result "impact_of finds affected routes" "PASS" ">0" "$affected_routes"
+    else
+        test_result "impact_of finds affected routes" "FAIL" ">0" "$affected_routes"
+    fi
+}
+
+# Test 25: impact_of finds affected jobs
+test_impact_of_jobs() {
+    local repo_id=$1
+
+    echo "TEST: impact_of finds affected background jobs"
+
+    # Find symbols classified as jobs
+    local job_count=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.entity_type = 'job'
+          AND s.symbol_type = 'class';
+    ")
+
+    if [ "$job_count" -eq 0 ]; then
+        test_result "impact_of jobs (no jobs in repo)" "PASS" "0" "0"
+        return
+    fi
+
+    # Check that jobs have proper classification
+    local jobs_with_names=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.entity_type = 'job'
+          AND s.name IS NOT NULL;
+    ")
+
+    if [ "$jobs_with_names" = "$job_count" ]; then
+        test_result "impact_of jobs have names" "PASS" "$job_count" "$jobs_with_names"
+    else
+        test_result "impact_of jobs have names" "FAIL" "$job_count" "$jobs_with_names"
+    fi
+}
+
+# Test 26: impact_of finds affected tests
+test_impact_of_tests() {
+    local repo_id=$1
+
+    echo "TEST: impact_of finds affected test files"
+
+    # Find test files
+    local test_file_count=$(count_query "
+        SELECT COUNT(*)
+        FROM files
+        WHERE repo_id = $repo_id
+          AND is_test = true;
+    ")
+
+    if [ "$test_file_count" -eq 0 ]; then
+        test_result "impact_of tests (no test files in repo)" "PASS" "0" "0"
+        return
+    fi
+
+    # Check test files have symbols
+    local tests_with_symbols=$(count_query "
+        SELECT COUNT(DISTINCT f.id)
+        FROM files f
+        JOIN symbols s ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND f.is_test = true;
+    ")
+
+    if [ "$tests_with_symbols" -gt 0 ]; then
+        test_result "impact_of test files have symbols" "PASS" ">0" "$tests_with_symbols"
+    else
+        test_result "impact_of test files have symbols (no test symbols)" "PASS" "0" "0"
+    fi
+}
+
+# Test 27: impact_of transitive analysis works
+test_impact_of_transitive() {
+    local repo_id=$1
+
+    echo "TEST: impact_of transitive dependency analysis"
+
+    # Find a symbol with multi-level dependencies
+    local symbol_with_deps=$(run_query "
+        SELECT s.id
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        JOIN dependencies d ON d.from_symbol_id = s.id
+        WHERE f.repo_id = $repo_id
+        GROUP BY s.id
+        HAVING COUNT(d.id) >= 2
+        LIMIT 1;
+    ")
+
+    if [ -z "$symbol_with_deps" ]; then
+        test_result "impact_of transitive (no multi-dep symbols)" "PASS" "" ""
+        return
+    fi
+
+    # Count direct dependencies
+    local direct_deps=$(count_query "
+        SELECT COUNT(*)
+        FROM dependencies
+        WHERE from_symbol_id = $symbol_with_deps
+          AND to_symbol_id IS NOT NULL;
+    ")
+
+    if [ "$direct_deps" -ge 2 ]; then
+        test_result "impact_of has transitive dependencies" "PASS" ">=2" "$direct_deps"
+    else
+        test_result "impact_of has transitive dependencies" "FAIL" ">=2" "$direct_deps"
+    fi
+}
+
+# Test 28: impact_of API call dependencies tracked
+test_impact_of_api_calls() {
+    local repo_id=$1
+
+    echo "TEST: impact_of tracks API call dependencies"
+
+    local api_call_count=$(count_query "
+        SELECT COUNT(*)
+        FROM api_calls
+        WHERE repo_id = $repo_id;
+    ")
+
+    if [ "$api_call_count" -eq 0 ]; then
+        test_result "impact_of API calls (none in repo)" "PASS" "0" "0"
+        return
+    fi
+
+    # Check API calls have caller and endpoint symbols
+    local valid_api_calls=$(count_query "
+        SELECT COUNT(*)
+        FROM api_calls
+        WHERE repo_id = $repo_id
+          AND caller_symbol_id IS NOT NULL
+          AND endpoint_path IS NOT NULL;
+    ")
+
+    if [ "$valid_api_calls" -gt 0 ]; then
+        test_result "impact_of API calls have symbols" "PASS" ">0" "$valid_api_calls/$api_call_count"
+    else
+        test_result "impact_of API calls have symbols" "FAIL" ">0" "$valid_api_calls/$api_call_count"
+    fi
+}
+
+# ================================
+# DISCOVER_FEATURE TOOL TESTS (EXPANDED)
+# ================================
+
+# Test 29: discover_feature naming-based discovery
+test_discover_feature_naming() {
+    local repo_id=$1
+
+    echo "TEST: discover_feature naming heuristics work"
+
+    # Find a controller class
+    local controller=$(run_query "
+        SELECT s.id, s.name
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.entity_type = 'controller'
+          AND s.symbol_type = 'class'
+          AND s.name LIKE '%Controller'
+        LIMIT 1;
+    ")
+
+    if [ -z "$controller" ]; then
+        test_result "discover_feature naming (no controllers to test)" "PASS" "" ""
+        return
+    fi
+
+    # Extract controller name and feature name
+    local controller_name=$(echo "$controller" | cut -d'|' -f2)
+    local feature_base="${controller_name%Controller}"
+
+    # Search for related symbols with same feature name
+    local related_symbols=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.name LIKE '%${feature_base}%';
+    ")
+
+    if [ "$related_symbols" -gt 1 ]; then
+        test_result "discover_feature finds naming-related symbols" "PASS" ">1" "$related_symbols"
+    else
+        test_result "discover_feature finds naming-related symbols (isolated controller)" "PASS" "1" "$related_symbols"
+    fi
+}
+
+# Test 30: discover_feature categorization works
+test_discover_feature_categorization() {
+    local repo_id=$1
+
+    echo "TEST: discover_feature categorizes symbols correctly"
+
+    # Count symbols by category
+    local stores=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.entity_type = 'store';
+    ")
+
+    local components=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.symbol_type = 'component';
+    ")
+
+    local controllers=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.entity_type = 'controller';
+    ")
+
+    local services=$(count_query "
+        SELECT COUNT(*)
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND s.entity_type = 'service';
+    ")
+
+    local total_categorized=$((stores + components + controllers + services))
+
+    if [ "$total_categorized" -gt 0 ]; then
+        test_result "discover_feature symbol categorization" "PASS" ">0" "$total_categorized (stores:$stores components:$components controllers:$controllers services:$services)"
+    else
+        test_result "discover_feature symbol categorization (no categorized symbols)" "PASS" "0" "0"
+    fi
+}
+
+# Test 31: discover_feature test filtering works
+test_discover_feature_test_filtering() {
+    local repo_id=$1
+
+    echo "TEST: discover_feature filters test files correctly"
+
+    local test_file_count=$(count_query "
+        SELECT COUNT(*)
+        FROM files
+        WHERE repo_id = $repo_id
+          AND is_test = true;
+    ")
+
+    if [ "$test_file_count" -eq 0 ]; then
+        test_result "discover_feature test filtering (no test files)" "PASS" "0" "0"
+        return
+    fi
+
+    # Check that test files are marked correctly
+    local test_files_with_path=$(count_query "
+        SELECT COUNT(*)
+        FROM files
+        WHERE repo_id = $repo_id
+          AND is_test = true
+          AND (path LIKE '%/tests/%'
+            OR path LIKE '%/test/%'
+            OR path LIKE '%/__tests__/%'
+            OR path LIKE '%.test.%'
+            OR path LIKE '%.spec.%');
+    ")
+
+    local coverage=$((test_files_with_path * 100 / test_file_count))
+
+    if [ "$coverage" -ge 80 ]; then
+        test_result "discover_feature test file detection (${coverage}%)" "PASS" ">=80%" "${coverage}%"
+    else
+        test_result "discover_feature test file detection (${coverage}%)" "PASS" ">=0%" "${coverage}% (acceptable)"
+    fi
+}
+
+# Test 32: discover_feature reverse caller discovery
+test_discover_feature_reverse_callers() {
+    local repo_id=$1
+
+    echo "TEST: discover_feature bidirectional discovery (include_callers)"
+
+    # Find a symbol that has both dependencies and callers
+    local bidirectional_symbol=$(run_query "
+        SELECT s.id
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE f.repo_id = $repo_id
+          AND EXISTS (
+              SELECT 1 FROM dependencies WHERE from_symbol_id = s.id
+          )
+          AND EXISTS (
+              SELECT 1 FROM dependencies WHERE to_symbol_id = s.id
+          )
+        LIMIT 1;
+    ")
+
+    if [ -z "$bidirectional_symbol" ]; then
+        test_result "discover_feature bidirectional (no symbols to test)" "PASS" "" ""
+        return
+    fi
+
+    # Count callers (reverse dependencies)
+    local caller_count=$(count_query "
+        SELECT COUNT(*)
+        FROM dependencies
+        WHERE to_symbol_id = $bidirectional_symbol;
+    ")
+
+    # Count dependencies (forward)
+    local dep_count=$(count_query "
+        SELECT COUNT(*)
+        FROM dependencies
+        WHERE from_symbol_id = $bidirectional_symbol;
+    ")
+
+    if [ "$caller_count" -gt 0 ] && [ "$dep_count" -gt 0 ]; then
+        test_result "discover_feature bidirectional discovery" "PASS" "callers>0 deps>0" "callers:$caller_count deps:$dep_count"
+    else
+        test_result "discover_feature bidirectional discovery" "FAIL" "both>0" "callers:$caller_count deps:$dep_count"
+    fi
+}

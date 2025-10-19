@@ -3,6 +3,7 @@
 Welcome to Claude Compass - an AI-native development environment that solves the "context starvation" problem by giving AI assistants complete contextual understanding of your codebase.
 
 Claude Compass provides:
+
 - ✅ JavaScript/TypeScript parsing with Tree-sitter
 - ✅ PHP parsing with Tree-sitter and advanced chunked parsing
 - ✅ C# parsing with Tree-sitter for game development
@@ -27,7 +28,7 @@ Claude Compass provides:
 - ✅ Vue ↔ Laravel cross-stack integration with API mapping and dependency tracking
 - ✅ Full-stack impact analysis and blast radius calculation
 - ✅ Cross-stack MCP tools (getApiCalls, getDataContracts, getCrossStackImpact)
-- ✅ Tool consolidation from 12 overlapping tools to 6 focused core tools
+- ✅ Tool consolidation from 12 overlapping tools to 8 core tools
 - ✅ Enhanced search with hybrid vector+lexical capabilities and framework awareness
 - ✅ Comprehensive impact analysis tool replacing 6 specialized tools
 - ✅ Database infrastructure for vector search (pgvector, embeddings, full-text search)
@@ -56,6 +57,7 @@ npm install
 ### 2. Set Up Database
 
 Using Docker (recommended):
+
 ```bash
 # Start PostgreSQL with pgvector
 npm run docker:up
@@ -65,6 +67,7 @@ npm run migrate:latest
 ```
 
 Or manually:
+
 ```bash
 createdb claude_compass
 psql claude_compass -c "CREATE EXTENSION vector;"
@@ -299,13 +302,38 @@ claude-compass stats
 claude-compass clear <repository-name> [--yes]
 
 # Clear all repositories
-claude-compass clear --all [--yes]
+claude-compass clear all [--yes]
 
 # Clear database completely (SQL method)
 npm run db:clear
 
 # Clear database with Docker reset
 npm run db:clear:docker
+
+# Vacuum database to optimize storage
+npm run db:vacuum
+```
+
+### Quality Audit Commands
+
+```bash
+# Run quality audit on a repository
+npm run audit <repository-path>
+
+# Run Godot-specific quality audit
+npm run audit:godot <repository-path>
+
+# Run MCP tool audit (validates MCP query capabilities)
+npm run audit:mcp <repository-path> <query-type>
+
+# Run MCP audit for Godot repositories
+npm run audit:mcp:godot <repository-path>
+
+# Run MCP audit for Laravel repositories
+npm run audit:mcp:laravel <repository-path>
+
+# Run all MCP audits for a repository
+npm run audit:mcp:all <repository-path>
 ```
 
 ## MCP Integration
@@ -314,13 +342,16 @@ The MCP server provides these tools for AI assistants:
 
 ### MCP Tools Available
 
-**6 Focused Core Tools:**
+**8 Core Tools:**
+
 1. **`get_file`** - Get file details with symbols
 2. **`get_symbol`** - Get symbol details with dependencies
 3. **`search_code`** - **Enhanced hybrid vector+lexical search** with framework awareness (replaces 4 specialized search tools)
 4. **`who_calls`** - Find callers of a symbol with cross-stack and transitive analysis
 5. **`list_dependencies`** - List symbol dependencies with cross-stack and transitive analysis
 6. **`impact_of`** - **Comprehensive blast radius tool** (replaces get_cross_stack_impact, get_api_calls, get_data_contracts)
+7. **`trace_flow`** - Find execution paths between two symbols (shortest or all paths)
+8. **`discover_feature`** - Discover complete feature modules across the entire stack with cross-stack API tracing
 
 ### Resources Available
 
@@ -334,26 +365,39 @@ const searchResponse = await mcpClient.callTool('search_code', {
   query: 'user authentication',
   entity_types: ['route', 'model', 'controller', 'component'],
   framework: 'laravel',
-  use_vector: true,
-  limit: 10
+  search_mode: 'auto', // 'auto' (hybrid), 'exact' (lexical), 'vector' (embedding-based), 'qualified' (namespace-aware)
 });
 
 // Comprehensive blast radius analysis
 const impactResponse = await mcpClient.callTool('impact_of', {
   symbol_id: 123,
   frameworks: ['vue', 'laravel'],
-  include_routes: true,
-  include_jobs: true,
-  include_tests: true,
   max_depth: 5,
-  max_depth: 5
 });
 
 // Cross-stack dependency analysis
 const callersResponse = await mcpClient.callTool('who_calls', {
   symbol_id: 456,
-  include_indirect: true,
-  dependency_type: 'calls'
+  include_cross_stack: true,
+  dependency_type: 'calls',
+  max_depth: 3,
+});
+
+// Find execution paths between symbols
+const flowResponse = await mcpClient.callTool('trace_flow', {
+  start_symbol_id: 100,
+  end_symbol_id: 200,
+  find_all_paths: false,
+  max_depth: 10,
+});
+
+// Discover complete feature module
+const featureResponse = await mcpClient.callTool('discover_feature', {
+  symbol_id: 789,
+  include_components: true,
+  include_routes: true,
+  include_models: true,
+  max_depth: 3,
 });
 ```
 
@@ -439,52 +483,11 @@ Claude Compass includes:
 - ✅ **Advanced route analysis**: Dynamic segments, auth patterns, validation, Swagger docs
 - ✅ **Enhanced MCP server**: Indirect analysis support with sophisticated relationship queries
 - ✅ **Vue ↔ Laravel Integration**: Cross-stack dependency tracking, API mapping, full-stack impact analysis
-- ✅ **Tool Consolidation**: 12 overlapping tools consolidated into 6 focused core tools
+- ✅ **Tool Consolidation**: 12 overlapping tools consolidated into 8 core tools
 - ✅ **Enhanced Search**: Hybrid vector+lexical search with framework awareness and advanced ranking
 - ✅ **Comprehensive Impact Analysis**: Single impact_of tool replacing 6 specialized tools
 - ✅ **Vector Search Infrastructure**: pgvector database with embeddings, full-text search, and hybrid ranking
 - ✅ **Database stores all entities**: Complete schema for routes, components, composables, jobs, tests, ORM entities, packages, API calls, data contracts
-
-## What's Working
-
-- 🔍 **Symbol Extraction**: Functions, classes, interfaces, variables, methods, components, hooks, jobs, tests, entities, scenes, scripts (JS/TS/PHP/C#)
-- 📦 **Import Analysis**: ES6, CommonJS, dynamic imports with path resolution
-- 🎯 **Framework Detection**: Evidence-based detection for Vue, Next.js, React, Node.js, Laravel, Godot
-- 🧩 **Component Analysis**: Props extraction, JSX dependencies, HOC detection
-- 🚀 **Route Mapping**: Express/Fastify/Laravel routes with middleware, auth, validation patterns
-- 🏛️ **Laravel Support**: Route detection (web.php, api.php), Eloquent models, job queues, service providers
-- 🎮 **Godot Support**: Scene file parsing (.tscn), C# script analysis, node hierarchy, autoload detection
-- 🎣 **Hook/Composable Parsing**: Custom hooks, Vue composables, state management
-- 📊 **Graph Building**: File, symbol, framework entity, and transitive relationships
-- ⚡ **Background Jobs**: Queue detection, job processing, worker thread analysis
-- 🧪 **Test Analysis**: Test suite parsing, coverage mapping, mock detection
-- 🗄️ **ORM Relationships**: Entity mapping, relationship detection, database schema analysis
-- 📦 **Package Management**: Dependency analysis, workspace detection, monorepo support
-- 🔄 **Transitive Analysis**: Deep dependency traversal, cycle detection, comprehensive relationship mapping
-- 🔧 **Large File Processing**: Chunked parsing for files up to 20MB
-- 🎯 **Smart Filtering**: Bundle files and generated content automatically filtered
-- 🛠️ **Encoding Recovery**: Handles encoding issues and problematic files
-- 🔌 **Enhanced MCP Integration**: 6 focused core tools with framework-aware AI assistant integration
-- 🔍 **Advanced Search**: Hybrid vector+lexical search with framework awareness and relevance scoring
-- 🎯 **Impact Analysis**: Comprehensive blast radius analysis with routes, jobs, tests, and cross-stack relationships
-- 🌐 **Cross-Stack Integration**: Vue ↔ Laravel API mapping, dependency tracking, full-stack impact analysis
-- 🗃️ **Vector Search Infrastructure**: pgvector with embeddings, full-text search, and advanced ranking
-- 💻 **CLI Interface**: Full-featured command-line tool with repository management
-- 🧪 **Testing**: Comprehensive test coverage with 95%+ coverage including edge cases
-
-## Roadmap
-
-Future development priorities:
-
-### Specification Tracking & Drift Detection
-- **API Contract Validation**: Between Vue components and Laravel endpoints
-- **Specification Drift Detection**: Monitor and report specification changes
-- **Documentation Integration**: Integrate with documentation systems
-- **Contract Testing**: Automated validation of API contracts
-
-### Additional Language Support
-- **Python/Django Support**: Planned support for Python and Django framework
-- **Additional Framework Integration**: Expand to other popular frameworks as needed
 
 ## Troubleshooting
 
@@ -504,6 +507,7 @@ npm run analyze . --force-full              # Bypass incremental mode
 ```
 
 ### Database Issues
+
 ```bash
 # Reset database (recommended approach)
 npm run db:clear                            # Clear database with SQL
@@ -519,6 +523,7 @@ npm run migrate:latest
 ```
 
 ### Build Issues
+
 ```bash
 # Clean and rebuild
 npm run clean
@@ -527,6 +532,7 @@ npx tsc
 ```
 
 ### Permission Issues
+
 ```bash
 # Make CLI executable
 chmod +x dist/src/cli/index.js
@@ -535,16 +541,8 @@ chmod +x dist/src/cli/index.js
 ## Contributing
 
 The codebase follows these principles:
+
 - TypeScript strict mode
 - Comprehensive error handling
 - Extensive logging
-- Test-driven development
 - Clean separation of concerns
-
-## License
-
-MIT
-
----
-
-Claude Compass provides enhanced search with hybrid vector+lexical capabilities, streamlined 6-tool architecture, comprehensive impact analysis, and complete CLI interface for JavaScript/TypeScript, PHP/Laravel, and Vue ↔ Laravel cross-stack integration.

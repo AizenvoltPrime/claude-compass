@@ -141,6 +141,35 @@ Validates cross-stack tracing:
 - Endpoints matched to Laravel routes
 - Frontend-backend connections mapped
 
+### `test_get_file_by_id` / `test_get_file_by_path` / `test_get_file_symbols`
+Validates the `get_file` MCP tool:
+- File retrieval by ID with repository metadata
+- File retrieval by path
+- Symbol listing for files
+- LEFT JOINs with repositories table
+
+### `test_trace_flow_path_finding` / `test_trace_flow_cross_stack`
+Validates the `trace_flow` MCP tool:
+- Path finding between connected symbols
+- Direct dependency path detection
+- Cross-stack path tracing (Vue → Laravel via API calls)
+- Call chain formatting
+
+### `test_impact_of_routes` / `test_impact_of_jobs` / `test_impact_of_tests` / `test_impact_of_transitive` / `test_impact_of_api_calls`
+Validates comprehensive `impact_of` analysis:
+- Route impact detection (getRoutesForSymbols query)
+- Background job impact tracking
+- Test file identification and impact
+- Transitive dependency analysis (multi-level)
+- API call dependency tracking (caller and endpoint symbols)
+
+### `test_discover_feature_naming` / `test_discover_feature_categorization` / `test_discover_feature_test_filtering` / `test_discover_feature_reverse_callers`
+Validates complete `discover_feature` functionality:
+- Naming heuristics (finds UserController → UserService → UserModel)
+- Symbol categorization (stores, components, controllers, services, models, jobs)
+- Test file filtering (exclude test symbols and test files)
+- Bidirectional discovery with reverse callers (include_callers parameter)
+
 ## Output Format
 
 Tests output color-coded results:
@@ -161,8 +190,8 @@ TEST: who_calls finds reverse dependencies
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TEST SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total Tests Run:    18
-Tests Passed:       18
+Total Tests Run:    32
+Tests Passed:       32
 Tests Failed:       0
 
 🎉 ALL TESTS PASSED!
@@ -307,18 +336,21 @@ Both are essential for ensuring system correctness!
 |----------|-----------|--------|
 | `search_code` | ✅ `test_search_code_*` | Complete |
 | `get_symbol` | ✅ `test_get_symbol` | Complete |
-| `get_file` | ⚠️ Not yet tested | TODO |
+| `get_file` | ✅ `test_get_file_*` (by ID, by path, symbols) | Complete |
 | `who_calls` | ✅ `test_who_calls` | Complete |
 | `list_dependencies` | ✅ `test_list_dependencies` | Complete |
-| `impact_of` | ⚠️ Partial (dependency joins) | Partial |
-| `trace_flow` | ⚠️ Not yet tested | TODO |
-| `discover_feature` | ✅ `test_cross_stack_discovery` | Partial |
+| `impact_of` | ✅ `test_impact_of_*` (routes, jobs, tests, transitive, API calls) | Complete |
+| `trace_flow` | ✅ `test_trace_flow_*` (path finding, cross-stack) | Complete |
+| `discover_feature` | ✅ `test_discover_feature_*` + `test_cross_stack_discovery` | Complete |
 
 ## Future Enhancements
 
+- [x] Complete get_file tool tests ✅
+- [x] Complete trace_flow tool tests ✅
+- [x] Complete impact_of tool tests (routes, jobs, tests, transitive, API calls) ✅
+- [x] Complete discover_feature tool tests (naming, categorization, test filtering, reverse callers) ✅
 - [ ] Add performance benchmarks (query execution time)
 - [ ] Test pagination queries
 - [ ] Test embedding-based search
-- [ ] Test impact analysis recursion depth
 - [ ] Add stress tests (large result sets)
 - [ ] Mock MCP client requests

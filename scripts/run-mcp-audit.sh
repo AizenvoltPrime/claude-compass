@@ -132,10 +132,20 @@ case $TEST_TYPE in
         test_search_code_basic "$REPO_ID"
         test_search_code_entity_types "$REPO_ID"
         test_get_symbol "$REPO_ID"
+        test_get_file_by_id "$REPO_ID"
+        test_get_file_by_path "$REPO_ID"
+        test_get_file_symbols "$REPO_ID"
         test_who_calls "$REPO_ID"
         test_list_dependencies "$REPO_ID"
         test_dependency_joins "$REPO_ID"
         test_null_handling "$REPO_ID"
+        test_trace_flow_path_finding "$REPO_ID"
+        test_trace_flow_cross_stack "$REPO_ID"
+        test_impact_of_routes "$REPO_ID"
+        test_impact_of_jobs "$REPO_ID"
+        test_impact_of_tests "$REPO_ID"
+        test_impact_of_transitive "$REPO_ID"
+        test_impact_of_api_calls "$REPO_ID"
         ;;
 esac
 
@@ -196,6 +206,10 @@ case $TEST_TYPE in
             section_header "CROSS-STACK TESTS (Vue ↔ Laravel)"
             test_api_calls "$REPO_ID"
             test_cross_stack_discovery "$REPO_ID"
+            test_discover_feature_naming "$REPO_ID"
+            test_discover_feature_categorization "$REPO_ID"
+            test_discover_feature_test_filtering "$REPO_ID"
+            test_discover_feature_reverse_callers "$REPO_ID"
         fi
         ;;
 esac
