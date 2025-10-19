@@ -61,7 +61,6 @@ export class ImpactService {
             relationship_type: dep.dependency_type,
             relationship_context: getRelationshipContext(dep),
             direction: 'dependency',
-            framework: fileLanguage,
             line_number: dep.line_number,
             to_qualified_name: dep.to_qualified_name,
           });
@@ -82,7 +81,6 @@ export class ImpactService {
             relationship_type: caller.dependency_type,
             relationship_context: getRelationshipContext(caller),
             direction: 'caller',
-            framework: fileLanguage,
             line_number: caller.line_number,
           });
 
@@ -102,7 +100,6 @@ export class ImpactService {
             relationship_type: 'api_call',
             relationship_context: `${apiCall.http_method} ${apiCall.endpoint_path}`,
             direction: 'dependency',
-            framework: fileLanguage,
             line_number: apiCall.line_number,
           });
 
@@ -122,7 +119,6 @@ export class ImpactService {
             relationship_type: 'api_call',
             relationship_context: `${apiCall.http_method} ${apiCall.endpoint_path}`,
             direction: 'caller',
-            framework: fileLanguage,
             line_number: apiCall.line_number,
           });
 
@@ -197,7 +193,6 @@ export class ImpactService {
               call_chain: result.call_chain,
               depth: result.depth,
               direction: 'dependency',
-              framework: fileLanguage,
             });
 
             if (fileLanguage) frameworksAffected.add(fileLanguage);
@@ -299,7 +294,6 @@ export class ImpactService {
         routes_affected: routeImpact.map(route => ({
           path: route.path,
           method: route.method,
-          framework: route.framework,
         })),
         jobs_affected: jobImpact.map(job => ({
           name: job.name,
@@ -315,7 +309,7 @@ export class ImpactService {
           total_jobs: jobImpact.length,
           total_tests: testImpact.length,
           max_depth: maxDepthReached,
-          frameworks: Array.from(frameworksAffected),
+          languages: Array.from(frameworksAffected),
         },
         query_info: {
           symbol: symbol.name,
