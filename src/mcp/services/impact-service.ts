@@ -14,7 +14,6 @@ import {
   determineTestType,
   classifyRelationshipImpact,
   getRelationshipContext,
-  determineFramework,
   deduplicateImpactItems,
   convertImpactItemsToSimplifiedDeps,
 } from '../utils';
@@ -52,7 +51,7 @@ export class ImpactService {
 
       for (const dep of directDependencies) {
         if (dep.to_symbol) {
-          const framework = determineFramework(dep.to_symbol);
+          const fileLanguage = dep.to_symbol.file?.language;
           directImpact.push({
             id: dep.to_symbol.id,
             name: dep.to_symbol.name,
@@ -62,18 +61,18 @@ export class ImpactService {
             relationship_type: dep.dependency_type,
             relationship_context: getRelationshipContext(dep),
             direction: 'dependency',
-            framework: framework,
+            framework: fileLanguage,
             line_number: dep.line_number,
             to_qualified_name: dep.to_qualified_name,
           });
 
-          if (framework) frameworksAffected.add(framework);
+          if (fileLanguage) frameworksAffected.add(fileLanguage);
         }
       }
 
       for (const caller of directCallers) {
         if (caller.from_symbol) {
-          const framework = determineFramework(caller.from_symbol);
+          const fileLanguage = caller.from_symbol.file?.language;
           directImpact.push({
             id: caller.from_symbol.id,
             name: caller.from_symbol.name,
@@ -83,17 +82,17 @@ export class ImpactService {
             relationship_type: caller.dependency_type,
             relationship_context: getRelationshipContext(caller),
             direction: 'caller',
-            framework: framework,
+            framework: fileLanguage,
             line_number: caller.line_number,
           });
 
-          if (framework) frameworksAffected.add(framework);
+          if (fileLanguage) frameworksAffected.add(fileLanguage);
         }
       }
 
       for (const apiCall of apiCallDependencies) {
         if (apiCall.endpoint_symbol) {
-          const framework = determineFramework(apiCall.endpoint_symbol);
+          const fileLanguage = apiCall.endpoint_symbol.file?.language;
           directImpact.push({
             id: apiCall.endpoint_symbol.id,
             name: apiCall.endpoint_symbol.name,
@@ -103,17 +102,17 @@ export class ImpactService {
             relationship_type: 'api_call',
             relationship_context: `${apiCall.http_method} ${apiCall.endpoint_path}`,
             direction: 'dependency',
-            framework: framework,
+            framework: fileLanguage,
             line_number: apiCall.line_number,
           });
 
-          if (framework) frameworksAffected.add(framework);
+          if (fileLanguage) frameworksAffected.add(fileLanguage);
         }
       }
 
       for (const apiCall of apiCallCallers) {
         if (apiCall.caller_symbol) {
-          const framework = determineFramework(apiCall.caller_symbol);
+          const fileLanguage = apiCall.caller_symbol.file?.language;
           directImpact.push({
             id: apiCall.caller_symbol.id,
             name: apiCall.caller_symbol.name,
@@ -123,11 +122,11 @@ export class ImpactService {
             relationship_type: 'api_call',
             relationship_context: `${apiCall.http_method} ${apiCall.endpoint_path}`,
             direction: 'caller',
-            framework: framework,
+            framework: fileLanguage,
             line_number: apiCall.line_number,
           });
 
-          if (framework) frameworksAffected.add(framework);
+          if (fileLanguage) frameworksAffected.add(fileLanguage);
         }
       }
 
@@ -188,7 +187,7 @@ export class ImpactService {
         for (const result of transitiveResult.results) {
           if (result.dependencies[0]?.to_symbol) {
             const toSymbol = result.dependencies[0].to_symbol;
-            const framework = determineFramework(toSymbol);
+            const fileLanguage = toSymbol.file?.language;
             transitiveImpact.push({
               id: toSymbol.id,
               name: toSymbol.name,
@@ -198,10 +197,10 @@ export class ImpactService {
               call_chain: result.call_chain,
               depth: result.depth,
               direction: 'dependency',
-              framework: framework,
+              framework: fileLanguage,
             });
 
-            if (framework) frameworksAffected.add(framework);
+            if (fileLanguage) frameworksAffected.add(fileLanguage);
           }
         }
       } catch (error) {

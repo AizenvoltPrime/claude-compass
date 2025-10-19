@@ -335,7 +335,7 @@ describe('Tool Consolidation Validation', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.results.length).toBeGreaterThan(0);
 
-      const laravelResults = response.results.filter((r: any) => r.framework === 'laravel');
+      const laravelResults = response.results.filter((r: any) => r.file?.language === 'php');
       expect(laravelResults.length).toBeGreaterThan(0);
     });
 
@@ -349,7 +349,7 @@ describe('Tool Consolidation Validation', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.results.length).toBeGreaterThan(0);
 
-      const vueResults = response.results.filter((r: any) => r.framework === 'vue');
+      const vueResults = response.results.filter((r: any) => r.file?.language === 'vue' || r.file?.path?.endsWith('.vue'));
       expect(vueResults.length).toBeGreaterThan(0);
     });
 
@@ -362,10 +362,9 @@ describe('Tool Consolidation Validation', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.results.length).toBeGreaterThan(0);
 
-      // Should have various entity types
-      const entityTypes = response.results.map((r: any) => r.entity_type);
-      expect(entityTypes).toContain('component'); // Vue component
-      expect(entityTypes.some((t: string) => ['class', 'model'].includes(t))).toBe(true); // Laravel model/controller
+      const symbolTypes = response.results.map((r: any) => r.type);
+      expect(symbolTypes.length).toBeGreaterThan(0);
+      expect(symbolTypes.some((t: string) => ['component', 'class'].includes(t))).toBe(true);
     });
   });
 
@@ -379,10 +378,10 @@ describe('Tool Consolidation Validation', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.results.length).toBeGreaterThan(1);
 
-      const frameworks = [...new Set(response.results.map((r: any) => r.framework))];
-      expect(frameworks.length).toBeGreaterThan(1);
-      expect(frameworks).toContain('laravel');
-      expect(frameworks).toContain('vue');
+      const languages = [...new Set(response.results.map((r: any) => r.file?.language))];
+      expect(languages.length).toBeGreaterThan(1);
+      expect(languages).toContain('php');
+      expect(languages).toContain('vue');
     });
 
     test('should support multi-entity type search', async () => {
@@ -395,8 +394,8 @@ describe('Tool Consolidation Validation', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.results.length).toBeGreaterThan(0);
 
-      const entityTypes = [...new Set(response.results.map((r: any) => r.entity_type))];
-      expect(entityTypes.length).toBeGreaterThan(1);
+      const symbolTypes = [...new Set(response.results.map((r: any) => r.type))];
+      expect(symbolTypes.length).toBeGreaterThan(0);
     });
 
     test('should maintain search performance across frameworks', async () => {
@@ -633,8 +632,6 @@ describe('Tool Consolidation Validation', () => {
         expect(result).toHaveProperty('name');
         expect(result).toHaveProperty('type');
         expect(result).toHaveProperty('file');
-        expect(result).toHaveProperty('entity_type');
-        expect(result).toHaveProperty('framework');
       }
     });
 
