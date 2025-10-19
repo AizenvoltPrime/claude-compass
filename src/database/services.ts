@@ -432,6 +432,100 @@ export class DatabaseService {
     return files as File[];
   }
 
+  /**
+   * Get only file paths for a repository (minimal memory footprint).
+   * Optimized for large repositories - returns only paths, not full file objects.
+   *
+   * @param repoId Repository ID to search within
+   * @returns Array of file paths
+   */
+  async getFilePathsByRepository(repoId: number): Promise<string[]> {
+    const paths = await this.db('files').where('repo_id', repoId).pluck('path');
+    return paths as string[];
+  }
+
+  /**
+   * Find files in database that are not present in the provided file paths.
+   * Optimized for large repositories - uses SQL query instead of loading all files into memory.
+   *
+   * @param repoId Repository ID to search within
+   * @param currentFilePaths Array of file paths currently in the filesystem
+   * @returns Array of database file records that no longer exist in filesystem
+   */
+  async findDeletedFiles(
+    repoId: number,
+    currentFilePaths: string[]
+  ): Promise<Pick<File, 'id' | 'path'>[]> {
+    if (currentFilePaths.length === 0) {
+      logger.debug('No current files provided, all DB files considered deleted', { repoId });
+      const deletedFiles = await this.db('files')
+        .where('repo_id', repoId)
+        .select('id', 'path');
+      return deletedFiles as Pick<File, 'id' | 'path'>[];
+    }
+
+    const CHUNK_THRESHOLD = 10000;
+
+    if (currentFilePaths.length > CHUNK_THRESHOLD) {
+      logger.info('Using temporary table approach for large file array', {
+        repoId,
+        fileCount: currentFilePaths.length,
+      });
+      return await this.findDeletedFilesWithTempTable(repoId, currentFilePaths);
+    }
+
+    const deletedFiles = await this.db('files')
+      .where('repo_id', repoId)
+      .whereNotIn('path', currentFilePaths)
+      .select('id', 'path');
+
+    logger.debug('Deletion detection completed', {
+      repoId,
+      currentFileCount: currentFilePaths.length,
+      deletedFileCount: deletedFiles.length,
+    });
+
+    return deletedFiles as Pick<File, 'id' | 'path'>[];
+  }
+
+  private async findDeletedFilesWithTempTable(
+    repoId: number,
+    currentFilePaths: string[]
+  ): Promise<Pick<File, 'id' | 'path'>[]> {
+    return await this.db.transaction(async trx => {
+      await trx.raw(`
+        CREATE TEMPORARY TABLE temp_current_paths (
+          path TEXT NOT NULL
+        ) ON COMMIT DROP
+      `);
+
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < currentFilePaths.length; i += BATCH_SIZE) {
+        const batch = currentFilePaths.slice(i, i + BATCH_SIZE);
+        await trx('temp_current_paths').insert(batch.map(path => ({ path })));
+      }
+
+      const result = await trx.raw(
+        `
+        SELECT f.id, f.path
+        FROM files f
+        LEFT JOIN temp_current_paths t ON f.path = t.path
+        WHERE f.repo_id = ?
+          AND t.path IS NULL
+      `,
+        [repoId]
+      );
+
+      logger.debug('Deletion detection completed with temp table', {
+        repoId,
+        currentFileCount: currentFilePaths.length,
+        deletedFileCount: result.rows.length,
+      });
+
+      return result.rows as Pick<File, 'id' | 'path'>[];
+    });
+  }
+
   async updateFile(id: number, data: Partial<CreateFile>): Promise<File | null> {
     const [file] = await this.db('files')
       .where({ id })
@@ -1614,6 +1708,174 @@ export class DatabaseService {
         fileCount: fileIds.length,
         ...deletionResults,
       });
+    });
+  }
+
+  /**
+   * Delete files and all related data in a single atomic transaction
+   * Combines cleanup of related data and file record deletion for atomicity
+   */
+  async deleteFilesWithTransaction(fileIds: number[]): Promise<number> {
+    if (fileIds.length === 0) return 0;
+
+    if (!fileIds.every(id => Number.isInteger(id) && id > 0)) {
+      throw new Error('Invalid file IDs: must be positive integers');
+    }
+
+    logger.info('Deleting files with transaction', {
+      count: fileIds.length,
+      sample: fileIds.slice(0, 5),
+    });
+
+    return await this.db.transaction(async trx => {
+      const symbolIds = await trx('symbols').whereIn('file_id', fileIds).pluck('id');
+
+      logger.info('Found symbols to clean up', { symbolCount: symbolIds.length });
+
+      const deletionResults: Record<string, number> = {};
+
+      if (symbolIds.length > 0) {
+        deletionResults.dependencies = await trx('dependencies')
+          .whereIn('from_symbol_id', symbolIds)
+          .del();
+
+        const hasRoutes = await trx.schema.hasTable('routes');
+        if (hasRoutes) {
+          deletionResults.routes = await trx('routes')
+            .whereIn('handler_symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasComponents = await trx.schema.hasTable('components');
+        if (hasComponents) {
+          deletionResults.components = await trx('components')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasComposables = await trx.schema.hasTable('composables');
+        if (hasComposables) {
+          deletionResults.composables = await trx('composables')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasOrmEntities = await trx.schema.hasTable('orm_entities');
+        if (hasOrmEntities) {
+          deletionResults.ormEntities = await trx('orm_entities')
+            .whereIn('symbol_id', symbolIds)
+            .del();
+        }
+
+        const hasJobQueues = await trx.schema.hasTable('job_queues');
+        if (hasJobQueues) {
+          deletionResults.jobQueues = await trx('job_queues').whereIn('symbol_id', symbolIds).del();
+        }
+      }
+
+      deletionResults.fileDependencies = await trx('file_dependencies')
+        .whereIn('from_file_id', fileIds)
+        .orWhereIn('to_file_id', fileIds)
+        .del();
+
+      const hasTestSuites = await trx.schema.hasTable('test_suites');
+      if (hasTestSuites) {
+        deletionResults.testSuites = await trx('test_suites').whereIn('file_id', fileIds).del();
+      }
+
+      const hasGodotScenes = await trx.schema.hasTable('godot_scenes');
+      if (hasGodotScenes) {
+        const filePaths = await trx('files').whereIn('id', fileIds).pluck('path');
+        const scenePaths = await trx('godot_scenes').whereIn('scene_path', filePaths).pluck('id');
+
+        if (scenePaths.length > 0) {
+          const hasGodotNodes = await trx.schema.hasTable('godot_nodes');
+          if (hasGodotNodes) {
+            deletionResults.godotNodes = await trx('godot_nodes')
+              .whereIn('scene_id', scenePaths)
+              .del();
+          }
+
+          const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
+          if (hasGodotRelationships) {
+            deletionResults.godotRelationships = await trx('godot_relationships')
+              .where(function () {
+                this.where('from_entity_type', 'scene')
+                  .whereIn('from_entity_id', scenePaths)
+                  .orWhere('to_entity_type', 'scene')
+                  .whereIn('to_entity_id', scenePaths);
+              })
+              .del();
+          }
+
+          deletionResults.godotScenes = await trx('godot_scenes').whereIn('id', scenePaths).del();
+        }
+      }
+
+      const hasGodotScripts = await trx.schema.hasTable('godot_scripts');
+      if (hasGodotScripts) {
+        const scriptPaths = await trx('files')
+          .whereIn('id', fileIds)
+          .where('language', 'csharp')
+          .pluck('path');
+
+        if (scriptPaths.length > 0) {
+          const scriptIds = await trx('godot_scripts')
+            .whereIn('script_path', scriptPaths)
+            .pluck('id');
+
+          if (scriptIds.length > 0) {
+            const hasGodotAutoloads = await trx.schema.hasTable('godot_autoloads');
+            if (hasGodotAutoloads) {
+              deletionResults.godotAutoloads = await trx('godot_autoloads')
+                .whereIn('script_id', scriptIds)
+                .del();
+            }
+
+            const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
+            if (hasGodotRelationships) {
+              deletionResults.godotScriptRelationships = await trx('godot_relationships')
+                .where(function () {
+                  this.where('from_entity_type', 'script')
+                    .whereIn('from_entity_id', scriptIds)
+                    .orWhere('to_entity_type', 'script')
+                    .whereIn('to_entity_id', scriptIds);
+                })
+                .del();
+            }
+
+            deletionResults.godotScripts = await trx('godot_scripts')
+              .whereIn('id', scriptIds)
+              .del();
+          }
+        }
+      }
+
+      if (symbolIds.length > 0) {
+        deletionResults.symbols = await trx('symbols').whereIn('id', symbolIds).del();
+      }
+
+      const deletedCount = await trx('files').whereIn('id', fileIds).del();
+
+      if (deletedCount !== fileIds.length) {
+        const error = new Error(
+          `File deletion count mismatch: expected ${fileIds.length}, deleted ${deletedCount}`
+        );
+        logger.error('File deletion failed', {
+          expected: fileIds.length,
+          actual: deletedCount,
+          fileIds: fileIds.slice(0, 10),
+        });
+        throw error;
+      }
+
+      logger.info('File deletion completed with transaction', {
+        fileCount: fileIds.length,
+        deletedCount,
+        ...deletionResults,
+      });
+
+      return deletedCount;
     });
   }
 

@@ -454,56 +454,76 @@ export class GraphBuilder {
     repositoryPath: string,
     repository: Repository,
     options: BuildOptions
-  ): Promise<string[]> {
+  ): Promise<{
+    changedFiles: string[];
+    deletedFileIds: number[];
+    newFiles: string[];
+  }> {
     const changedFiles: string[] = [];
+    const newFiles: string[] = [];
+    const deletedFileIds: number[] = [];
 
-    try {
-      // Get last analysis timestamp from repository metadata
-      const lastIndexed = repository.last_indexed;
-      if (!lastIndexed) {
-        // No previous analysis - all files are "changed"
-        this.logger.info('No previous analysis found, treating all files as changed');
-        const allFiles = await this.discoverFiles(repositoryPath, options);
-        return allFiles.map(f => f.path);
-      }
+    const lastIndexed = repository.last_indexed;
+    if (!lastIndexed) {
+      this.logger.info('No previous analysis found, treating all files as new');
+      const allFiles = await this.discoverFiles(repositoryPath, options);
+      return {
+        changedFiles: [],
+        deletedFileIds: [],
+        newFiles: allFiles.map(f => f.path),
+      };
+    }
 
-      this.logger.info('Detecting changes since last analysis', {
-        lastIndexed: lastIndexed.toISOString(),
-      });
+    this.logger.info('Detecting changes since last analysis', {
+      lastIndexed: lastIndexed.toISOString(),
+    });
 
-      // Discover all current files
-      const currentFiles = await this.discoverFiles(repositoryPath, options);
+    const currentFiles = await this.discoverFiles(repositoryPath, options);
+    const currentFilePaths = currentFiles.map(f => f.path);
 
-      // Check each file's modification time
-      for (const fileInfo of currentFiles) {
+    const deletedFiles = await this.dbService.findDeletedFiles(repository.id, currentFilePaths);
+    deletedFileIds.push(...deletedFiles.map(f => f.id));
+
+    const dbPathsArray = await this.dbService.getFilePathsByRepository(repository.id);
+    const dbFilePaths = new Set<string>(dbPathsArray);
+
+    for (const fileInfo of currentFiles) {
+      if (!dbFilePaths.has(fileInfo.path)) {
+        newFiles.push(fileInfo.path);
+      } else {
         try {
           const stats = await fs.stat(fileInfo.path);
           if (stats.mtime > lastIndexed) {
             changedFiles.push(fileInfo.path);
           }
         } catch (error) {
-          // File might have been deleted, skip it
-          this.logger.warn('Error checking file modification time', {
-            file: fileInfo.path,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+            this.logger.debug('File no longer exists during stat check', {
+              file: fileInfo.path,
+            });
+          } else {
+            this.logger.error('Unexpected error checking file modification time', {
+              file: fileInfo.path,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw new Error(
+              `Failed to check modification time for ${fileInfo.path}: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          }
         }
       }
-
-      this.logger.info('Change detection completed', {
-        totalFiles: currentFiles.length,
-        changedFiles: changedFiles.length,
-      });
-
-      return changedFiles;
-    } catch (error) {
-      this.logger.error('Error during change detection, falling back to full analysis', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Fallback: return all files for full analysis
-      const allFiles = await this.discoverFiles(repositoryPath, options);
-      return allFiles.map(f => f.path);
     }
+
+    this.logger.info('Change detection completed', {
+      totalFiles: currentFiles.length,
+      changedFiles: changedFiles.length,
+      newFiles: newFiles.length,
+      deletedFiles: deletedFileIds.length,
+    });
+
+    return { changedFiles, deletedFileIds, newFiles };
   }
 
   /**
@@ -520,9 +540,22 @@ export class GraphBuilder {
     });
 
     // Detect changed files
-    const changedFiles = await this.detectChangedFiles(repositoryPath, repository, options);
+    const { changedFiles, deletedFileIds, newFiles } = await this.detectChangedFiles(
+      repositoryPath,
+      repository,
+      options
+    );
 
-    if (changedFiles.length === 0) {
+    try {
+      // Handle deletions first
+      if (deletedFileIds.length > 0) {
+        await this.deleteFiles(deletedFileIds);
+      }
+
+      // Combine changed and new files for re-analysis
+      const filesToAnalyze = changedFiles.concat(newFiles);
+
+    if (filesToAnalyze.length === 0 && deletedFileIds.length === 0) {
       this.logger.info('No changed files detected, skipping analysis');
 
       // Fetch current repository statistics from database
@@ -576,10 +609,10 @@ export class GraphBuilder {
       };
     }
 
-    this.logger.info(`Processing ${changedFiles.length} changed files`);
+    this.logger.info(`Processing ${filesToAnalyze.length} files (${changedFiles.length} changed, ${newFiles.length} new)`);
 
-    // Re-analyze only changed files
-    const partialResult = await this.reanalyzeFiles(repository.id, changedFiles, options);
+    // Re-analyze changed and new files
+    const partialResult = await this.reanalyzeFiles(repository.id, filesToAnalyze, options);
 
     // Fetch current repository statistics from database
     const dbFiles = await this.dbService.getFilesByRepository(repository.id);
@@ -619,29 +652,41 @@ export class GraphBuilder {
       edges: Array(symbolDependencyCount).fill(null),
     };
 
-    // Update repository timestamp
-    await this.dbService.updateRepository(repository.id, {
-      last_indexed: new Date(),
-    });
+      // Update repository timestamp
+      await this.dbService.updateRepository(repository.id, {
+        last_indexed: new Date(),
+      });
 
-    this.logger.info('Incremental analysis completed', {
-      filesProcessed: partialResult.filesProcessed || 0,
-      symbolsExtracted: partialResult.symbolsExtracted || 0,
-      dependenciesCreated: partialResult.dependenciesCreated || 0,
-      errors: partialResult.errors?.length || 0,
-    });
+      this.logger.info('Incremental analysis completed', {
+        filesProcessed: partialResult.filesProcessed || 0,
+        symbolsExtracted: partialResult.symbolsExtracted || 0,
+        dependenciesCreated: partialResult.dependenciesCreated || 0,
+        errors: partialResult.errors?.length || 0,
+      });
 
-    return {
-      repository,
-      filesProcessed: partialResult.filesProcessed || 0,
-      symbolsExtracted: partialResult.symbolsExtracted || 0,
-      dependenciesCreated: partialResult.dependenciesCreated || 0,
-      fileGraph,
-      symbolGraph,
-      errors: [...(partialResult.errors || []), ...this.buildErrors],
-      totalFiles: dbFiles.length,
-      totalSymbols: symbols.length,
-    };
+      return {
+        repository,
+        filesProcessed: partialResult.filesProcessed || 0,
+        symbolsExtracted: partialResult.symbolsExtracted || 0,
+        dependenciesCreated: partialResult.dependenciesCreated || 0,
+        fileGraph,
+        symbolGraph,
+        errors: [...(partialResult.errors || []), ...this.buildErrors],
+        totalFiles: dbFiles.length,
+        totalSymbols: symbols.length,
+      };
+    } catch (error) {
+      this.logger.error('Incremental analysis failed', {
+        repositoryId: repository.id,
+        repositoryPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new Error(
+        `Incremental analysis failed for repository ${repository.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   /**
@@ -772,6 +817,23 @@ export class GraphBuilder {
         }))
       ),
     };
+  }
+
+  /**
+   * Delete files and all related data from the database using atomic transaction
+   */
+  private async deleteFiles(fileIds: number[]): Promise<void> {
+    if (fileIds.length === 0) return;
+
+    this.logger.info('Deleting files from database', {
+      fileCount: fileIds.length,
+    });
+
+    const deletedCount = await this.dbService.deleteFilesWithTransaction(fileIds);
+
+    this.logger.info('File deletion completed', {
+      filesDeleted: deletedCount,
+    });
   }
 
   private async ensureRepository(repositoryPath: string): Promise<Repository> {
