@@ -792,7 +792,6 @@ export class DatabaseService {
   ): Promise<SymbolWithFile[]> {
     const { limit = 100, symbolTypes = [], isExported, framework, repoIds = [] } = options;
 
-    // Determine which repositories to search
     const effectiveRepoIds = repoIds.length > 0 ? repoIds : repoId ? [repoId] : [];
 
     if (effectiveRepoIds.length === 0) {
@@ -800,8 +799,13 @@ export class DatabaseService {
       return [];
     }
 
-    // Default to fulltext search for backwards compatibility
-    return this.fullTextSearch(query, effectiveRepoIds, options);
+    const ftsResults = await this.fullTextSearch(query, effectiveRepoIds, options);
+
+    if (ftsResults.length === 0) {
+      return this.lexicalSearch(query, effectiveRepoIds, options);
+    }
+
+    return ftsResults;
   }
 
   /**
@@ -862,31 +866,34 @@ export class DatabaseService {
   ): Promise<SymbolWithFile[]> {
     const { limit = 30, symbolTypes = [], isExported, framework } = options;
 
-    // Tokenize multi-word queries and search for any token
     const tokens = query
       .trim()
       .split(/\s+/)
       .filter(t => t.length > 0);
-    const fuzzyTokens = tokens.map(t => t.replace(/[%_]/g, '\\$&'));
+    const sanitizedTokens = tokens.map(t => t.replace(/[%_]/g, '\\$&'));
 
-    // Build token match score - count how many query tokens match each result
-    const tokenMatchCases = fuzzyTokens
+    if (sanitizedTokens.length === 0) {
+      return [];
+    }
+
+    const tokenMatchCases = sanitizedTokens
       .map(
-        token =>
-          `CASE WHEN (symbols.name ILIKE '%${token}%' OR symbols.signature ILIKE '%${token}%' OR (symbols.description IS NOT NULL AND symbols.description ILIKE '%${token}%')) THEN 1 ELSE 0 END`
+        () =>
+          'CASE WHEN (symbols.name ILIKE ? OR symbols.signature ILIKE ? OR (symbols.description IS NOT NULL AND symbols.description ILIKE ?)) THEN 1 ELSE 0 END'
       )
       .join(' + ');
+    const tokenBindings = sanitizedTokens.flatMap(token => [`%${token}%`, `%${token}%`, `%${token}%`]);
 
-    // Build exact match boost for first token (primary term)
-    const primaryToken = fuzzyTokens[0] || '';
+    const primaryToken = sanitizedTokens[0];
     const exactMatchBoost = `
       CASE
-        WHEN symbols.name ILIKE '${primaryToken}' THEN 1000
-        WHEN symbols.name ILIKE '${primaryToken}%' THEN 100
-        WHEN symbols.name ILIKE '%${primaryToken}%' THEN 10
+        WHEN symbols.name ILIKE ? THEN 1000
+        WHEN symbols.name ILIKE ? THEN 100
+        WHEN symbols.name ILIKE ? THEN 10
         ELSE 0
       END
     `;
+    const exactBindings = [primaryToken, `${primaryToken}%`, `%${primaryToken}%`];
 
     let queryBuilder = this.db('symbols')
       .leftJoin('files', 'symbols.file_id', 'files.id')
@@ -894,13 +901,13 @@ export class DatabaseService {
         'symbols.*',
         'files.path as file_path',
         'files.language as file_language',
-        this.db.raw(`(${tokenMatchCases}) as token_match_score`),
-        this.db.raw(`(${exactMatchBoost}) as exact_match_boost`)
+        this.db.raw(`(${tokenMatchCases}) as token_match_score`, tokenBindings),
+        this.db.raw(`(${exactMatchBoost}) as exact_match_boost`, exactBindings)
       );
 
     // WHERE clause: match at least one token
     queryBuilder = queryBuilder.where(function () {
-      fuzzyTokens.forEach(token => {
+      sanitizedTokens.forEach(token => {
         this.orWhere(function () {
           this.where('symbols.name', 'ilike', `%${token}%`)
             .orWhere('symbols.signature', 'ilike', `%${token}%`)
@@ -974,6 +981,28 @@ export class DatabaseService {
   }
 
   /**
+   * Check if full-text search infrastructure is available for specific repositories.
+   * Returns false if no symbols have populated search_vector, indicating FTS triggers aren't working.
+   */
+  private async isFullTextSearchReady(repoIds: number[]): Promise<boolean> {
+    if (repoIds.length === 0) {
+      return false;
+    }
+    try {
+      const result = await this.db('symbols')
+        .join('files', 'symbols.file_id', 'files.id')
+        .whereIn('files.repo_id', repoIds)
+        .whereNotNull('symbols.search_vector')
+        .whereRaw("symbols.search_vector != ''::tsvector")
+        .first();
+      return !!result;
+    } catch (error) {
+      logger.debug(`Full-text search readiness check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return false;
+    }
+  }
+
+  /**
    * Full-text search using PostgreSQL tsvector with fallback to lexical search
    */
   private async fullTextSearch(
@@ -983,7 +1012,6 @@ export class DatabaseService {
   ): Promise<SymbolWithFile[]> {
     const { limit = 100, symbolTypes = [], isExported, framework } = options;
 
-    // Sanitize query for ts_query
     const sanitizedQuery = query
       .replace(/[^\w\s]/g, ' ')
       .trim()
@@ -995,8 +1023,13 @@ export class DatabaseService {
       return this.lexicalSearch(query, repoIds, options);
     }
 
+    const ftsReady = await this.isFullTextSearchReady(repoIds);
+    if (!ftsReady) {
+      return this.lexicalSearch(query, repoIds, options);
+    }
+
+
     try {
-      // Try PostgreSQL full-text search first
       let queryBuilder = this.db('symbols')
         .leftJoin('files', 'symbols.file_id', 'files.id')
         .select(
@@ -1062,27 +1095,26 @@ export class DatabaseService {
         .orderBy('symbols.name')
         .limit(limit);
 
-      const formattedResults = this.formatSymbolResults(results);
-
-      // If PostgreSQL FTS returns empty results, fall back to lexical search
-      // This handles cases where search_vector is NULL (e.g., trigger not working in tests)
-      if (formattedResults.length === 0) {
-        return this.lexicalSearch(query, repoIds, options);
-      }
-
-      return formattedResults;
+      return this.formatSymbolResults(results);
     } catch (error) {
-      // Fallback to lexical search if PostgreSQL FTS fails (e.g., in mocked tests)
+      logger.warn(`Full-text search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return this.lexicalSearch(query, repoIds, options);
     }
   }
 
   /**
-   * Check if vector search is available
+   * Check if vector search is available for specific repositories
    */
-  private async isVectorSearchReady(): Promise<boolean> {
+  private async isVectorSearchReady(repoIds: number[]): Promise<boolean> {
+    if (repoIds.length === 0) {
+      return false;
+    }
     try {
-      const result = await this.db('symbols').whereNotNull('combined_embedding').first();
+      const result = await this.db('symbols')
+        .join('files', 'symbols.file_id', 'files.id')
+        .whereIn('files.repo_id', repoIds)
+        .whereNotNull('symbols.combined_embedding')
+        .first();
       return !!result;
     } catch (error) {
       return false;
@@ -1100,8 +1132,7 @@ export class DatabaseService {
     logger.info(`[VECTOR SEARCH DB] Starting vector search for query: "${query}"`);
     logger.info(`[VECTOR SEARCH DB] Repo IDs: ${JSON.stringify(repoIds)}`);
 
-    // Fail fast if vector search isn't ready
-    const isReady = await this.isVectorSearchReady();
+    const isReady = await this.isVectorSearchReady(repoIds);
     logger.info(`[VECTOR SEARCH DB] Vector search ready: ${isReady}`);
     if (!isReady) {
       throw new Error(
