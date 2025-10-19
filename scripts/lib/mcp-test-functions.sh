@@ -772,7 +772,7 @@ test_trace_flow_path_finding() {
     local start_id=$(echo "$connection" | cut -d'|' -f1)
     local end_id=$(echo "$connection" | cut -d'|' -f2)
 
-    # Check if direct path exists
+    # Check if direct path exists (can be multiple calls on different lines)
     local path_exists=$(count_query "
         SELECT COUNT(*)
         FROM dependencies
@@ -780,10 +780,10 @@ test_trace_flow_path_finding() {
           AND to_symbol_id = $end_id;
     ")
 
-    if [ "$path_exists" = "1" ]; then
-        test_result "trace_flow finds direct path" "PASS" "1" "$path_exists"
+    if [ "$path_exists" -ge "1" ] 2>/dev/null; then
+        test_result "trace_flow finds direct path" "PASS" ">=1" "$path_exists"
     else
-        test_result "trace_flow finds direct path" "FAIL" "1" "$path_exists"
+        test_result "trace_flow finds direct path" "FAIL" ">=1" "$path_exists"
     fi
 }
 
