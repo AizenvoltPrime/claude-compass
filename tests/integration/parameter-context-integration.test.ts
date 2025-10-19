@@ -138,8 +138,8 @@ describe('Parameter Context Integration Tests', () => {
 
     const response = JSON.parse(whoCallsResult.content[0].text);
 
-    expect(response.symbol.name).toBe('TestSetHandPositions');
-    expect(Object.keys(response.callers)).toHaveLength(2); // callers is grouped by line number
+    expect(response.query_info.symbol).toBe('TestSetHandPositions');
+    expect(response.dependencies).toHaveLength(2);
     expect(response.parameter_analysis).toBeDefined();
     expect(response.parameter_analysis.total_variations).toBe(2);
 

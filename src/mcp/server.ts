@@ -215,7 +215,7 @@ export class ClaudeCompassMCPServer {
           },
           {
             name: 'who_calls',
-            description: 'Find all symbols that call or reference a specific symbol',
+            description: 'Find all symbols that call or reference a specific symbol. Includes parameter analysis showing different usage patterns and insights when parameter context is available. Provides transitive analysis metadata when max_depth > 1.',
             inputSchema: {
               type: 'object',
               properties: {

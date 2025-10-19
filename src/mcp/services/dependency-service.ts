@@ -25,6 +25,27 @@ import { createComponentLogger } from '../../utils/logger';
 
 const logger = createComponentLogger('dependency-service');
 
+/**
+ * Generates insights from parameter variations analysis
+ */
+function generateParameterInsights(parameterVariations: Array<{ parameters: string; call_count: number }>): string[] {
+  const insights: string[] = [];
+
+  if (parameterVariations.length > 0) {
+    insights.push(`Method called with ${parameterVariations.length} different parameter pattern${parameterVariations.length === 1 ? '' : 's'}`);
+
+    const nullPatterns = parameterVariations.filter(v =>
+      v.parameters.toLowerCase().includes('null')
+    );
+
+    if (nullPatterns.length > 0) {
+      insights.push(`${nullPatterns.length} call pattern(s) use null parameters`);
+    }
+  }
+
+  return insights;
+}
+
 export class DependencyService {
   constructor(private dbService: DatabaseService) {}
 
@@ -227,6 +248,41 @@ export class DependencyService {
           timestamp: new Date().toISOString(),
         },
       };
+
+      const hasParameterContext = directCallers.some(c => c.parameter_context);
+      if (hasParameterContext) {
+        try {
+          const paramAnalysis = await this.dbService.groupCallsByParameterContext(
+            validatedArgs.symbol_id
+          );
+
+          const parameterVariationsFormatted = paramAnalysis.parameterVariations.map(v => ({
+            parameters: v.parameter_context,
+            call_count: v.call_count,
+            call_instance_ids: v.call_instance_ids,
+            line_numbers: v.line_numbers,
+            parameter_types: v.parameter_types,
+          }));
+
+          response.parameter_analysis = {
+            total_variations: parameterVariationsFormatted.length,
+            parameter_variations: parameterVariationsFormatted,
+            insights: generateParameterInsights(parameterVariationsFormatted),
+          };
+        } catch (error) {
+          logger.warn('Failed to generate parameter analysis', {
+            error: (error as Error).message,
+            symbolId: validatedArgs.symbol_id,
+          });
+        }
+      }
+
+      if (transitiveResults.length > 0) {
+        response.transitive_analysis = {
+          max_depth: maxDepth,
+          total_transitive_callers: transitiveResults.length,
+        };
+      }
 
       return {
         content: [

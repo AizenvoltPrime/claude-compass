@@ -127,6 +127,21 @@ export interface SimplifiedDependencyResponse {
     analysis_type: 'callers' | 'dependencies' | 'impact';
     timestamp: string;
   };
+  parameter_analysis?: {
+    total_variations: number;
+    parameter_variations: Array<{
+      parameters: string;
+      call_count: number;
+      call_instance_ids: string[];
+      line_numbers: number[];
+      parameter_types?: string[];
+    }>;
+    insights: string[];
+  };
+  transitive_analysis?: {
+    max_depth: number;
+    total_transitive_callers: number;
+  };
 }
 
 /**
