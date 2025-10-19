@@ -17,8 +17,6 @@ import {
   getFrameworkPath,
   mapEntityTypeToSymbolType,
   performSearchByMode,
-  determineEntityType,
-  determineFramework,
 } from './utils';
 
 const logger = createComponentLogger('mcp-tools');
@@ -288,10 +286,14 @@ export class McpTools {
                       language: symbol.file.language,
                     }
                   : null,
-                entity_type: determineEntityType(symbol),
-                framework: determineFramework(symbol),
               })),
               total_results: filteredSymbols.length,
+              search_options: {
+                limit: searchOptions.limit,
+                symbol_types: searchOptions.symbolTypes,
+                is_exported: searchOptions.isExported,
+                repo_ids: searchOptions.repoIds,
+              },
               query_filters: {
                 entity_types: validatedArgs.entity_types,
                 framework: detectedFramework,

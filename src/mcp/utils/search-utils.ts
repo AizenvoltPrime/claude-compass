@@ -80,10 +80,3 @@ export async function performSearchByMode(
   }
 }
 
-export function determineEntityType(symbol: any): string | undefined {
-  return symbol.entity_type;
-}
-
-export function determineFramework(symbol: any): string | undefined {
-  return symbol.framework;
-}
