@@ -133,13 +133,13 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['resolved_class'], 'deps_resolved_class_idx');
   });
 
-  // Add foreign key with SET NULL for stable references during incremental analysis
+  // Add foreign key with CASCADE to prevent orphaned dependencies
   await knex.raw(`
     ALTER TABLE dependencies
     ADD CONSTRAINT dependencies_to_symbol_id_foreign
     FOREIGN KEY (to_symbol_id)
     REFERENCES symbols(id)
-    ON DELETE SET NULL
+    ON DELETE CASCADE
   `);
 
   await knex.schema.createTable('file_dependencies', table => {
