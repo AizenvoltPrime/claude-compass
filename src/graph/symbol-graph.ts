@@ -890,12 +890,46 @@ export class SymbolGraphBuilder {
         }
       }
 
+      const fallbackMatches = nameToSymbolMap.get(parsed.memberName) || [];
       const patternKey = `${parsed.qualifier}.${parsed.memberName}`;
       const shouldLog = !this.seenExternalPatterns.has(patternKey);
 
+      if (fallbackMatches.length > 0) {
+        if (isExternal || isInstanceAccess) {
+          if (shouldLog) {
+            this.logger.debug('External/instance reference - qualified resolution failed, skipping fallback', {
+              targetName,
+              qualifier: parsed.qualifier,
+              memberName: parsed.memberName,
+              isExternal,
+              isInstanceAccess,
+              potentialMatches: fallbackMatches.length
+            });
+            this.seenExternalPatterns.add(patternKey);
+          } else {
+            this.suppressedExternalCount++;
+          }
+          return [];
+        }
+
+        if (shouldLog) {
+          this.logger.debug('Qualified name resolution failed, using simple name fallback', {
+            targetName,
+            qualifier: parsed.qualifier,
+            memberName: parsed.memberName,
+            fallbackMatchCount: fallbackMatches.length
+          });
+          this.seenExternalPatterns.add(patternKey);
+        } else {
+          this.suppressedExternalCount++;
+        }
+
+        return fallbackMatches;
+      }
+
       if (shouldLog) {
         const logLevel = isExternal || isInstanceAccess ? 'debug' : 'warn';
-        this.logger[logLevel]('Qualified name resolution failed, trying simple name fallback', {
+        this.logger[logLevel]('Qualified name resolution failed, no fallback matches found', {
           targetName,
           qualifier: parsed.qualifier,
           memberName: parsed.memberName,
@@ -905,35 +939,6 @@ export class SymbolGraphBuilder {
         this.seenExternalPatterns.add(patternKey);
       } else {
         this.suppressedExternalCount++;
-      }
-
-      const fallbackMatches = nameToSymbolMap.get(parsed.memberName) || [];
-
-      if (fallbackMatches.length > 0) {
-        if (isExternal || isInstanceAccess) {
-          if (shouldLog) {
-            this.logger.debug('External/instance reference - skipping ambiguous fallback', {
-              targetName,
-              qualifier: parsed.qualifier,
-              memberName: parsed.memberName,
-              isExternal,
-              isInstanceAccess,
-              potentialMatches: fallbackMatches.length
-            });
-          } else {
-            this.suppressedExternalCount++;
-          }
-          return [];
-        }
-
-        this.logger.info('Simple name fallback successful for qualified name', {
-          targetName,
-          qualifier: parsed.qualifier,
-          memberName: parsed.memberName,
-          fallbackMatchCount: fallbackMatches.length
-        });
-
-        return fallbackMatches;
       }
 
       return [];
@@ -1087,7 +1092,13 @@ export class SymbolGraphBuilder {
       'Exception', 'ArgumentException', 'InvalidOperationException',
       'DateTime', 'TimeSpan', 'Guid', 'Uri', 'Task', 'Thread',
       'Node', 'Node2D', 'Node3D', 'Control', 'Resource', 'Object',
-      'Vector2', 'Vector3', 'Color', 'Transform2D', 'Transform3D'
+      'Vector2', 'Vector3', 'Color', 'Transform2D', 'Transform3D',
+      'AnimationPlayer', 'AnimationTree', 'AudioStreamPlayer', 'AudioStreamPlayer2D', 'AudioStreamPlayer3D',
+      'Camera2D', 'Camera3D', 'CollisionShape2D', 'CollisionShape3D',
+      'Label', 'Button', 'TextureRect', 'Sprite2D', 'Sprite3D',
+      'Timer', 'Area2D', 'Area3D', 'CharacterBody2D', 'CharacterBody3D',
+      'RigidBody2D', 'RigidBody3D', 'StaticBody2D', 'StaticBody3D',
+      'TileMap', 'NavigationAgent2D', 'NavigationAgent3D'
     ];
 
     const strippedName = this.stripGenericParameters(name);

@@ -470,6 +470,9 @@ program
         )
       );
 
+      // Final flush to ensure no logs appear after completion stats
+      await flushLogs();
+
       // Close database connection
       await databaseService.close();
 
@@ -479,6 +482,8 @@ program
       spinner.fail('Analysis failed');
       console.error(chalk.red(`\n${getEmoji('❌', '[ERROR]')} Error during analysis:`));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+
+      await flushLogs();
 
       // Close database connection even in error case
       try {

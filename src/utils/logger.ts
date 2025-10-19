@@ -88,12 +88,19 @@ export const createComponentLogger = (component: string): winston.Logger => {
 
 export const flushLogs = async (): Promise<void> => {
   return new Promise((resolve) => {
-    setImmediate(() => {
-      setImmediate(() => {
-        setImmediate(() => {
-          setTimeout(resolve, 200);
-        });
+    const transports = logger.transports as winston.transport[];
+    const flushPromises = transports.map(transport => {
+      return new Promise<void>((res) => {
+        if ('flush' in transport && typeof transport.flush === 'function') {
+          transport.flush(() => res());
+        } else {
+          setImmediate(() => setImmediate(() => res()));
+        }
       });
     });
+
+    Promise.all(flushPromises)
+      .then(() => resolve())
+      .catch(() => resolve());
   });
 };
