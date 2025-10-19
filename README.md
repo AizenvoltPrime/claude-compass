@@ -954,12 +954,12 @@ Tests Failed:       0
 |----------|--------|--------|
 | `search_code` | ✅ Pattern search, entity filtering | Complete |
 | `get_symbol` | ✅ Symbol retrieval with metadata | Complete |
-| `get_file` | ⚠️ Not yet tested | TODO |
+| `get_file` | ✅ File retrieval by ID/path, symbol listing | Complete |
 | `who_calls` | ✅ Reverse dependencies | Complete |
 | `list_dependencies` | ✅ Outgoing dependencies | Complete |
-| `impact_of` | ⚠️ Partial (dependency joins) | Partial |
-| `trace_flow` | ⚠️ Not yet tested | TODO |
-| `discover_feature` | ✅ Cross-stack discovery | Partial |
+| `impact_of` | ✅ Routes, jobs, tests, transitive analysis, API calls | Complete |
+| `trace_flow` | ✅ Path finding, cross-stack connections | Complete |
+| `discover_feature` | ✅ Naming discovery, categorization, test filtering, bidirectional | Complete |
 
 ### Comparison: Database vs MCP Audits
 
