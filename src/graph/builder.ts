@@ -2654,18 +2654,50 @@ export class GraphBuilder {
   }
 
   private async detectPrimaryLanguage(repositoryPath: string): Promise<string> {
-    try {
-      const packageJsonPath = path.join(repositoryPath, 'package.json');
-      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+    const files = await this.discoverFiles(repositoryPath, {
+      fileExtensions: [
+        '.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs',
+        '.php', '.vue', '.cs', '.tscn', '.godot',
+        '.py', '.rb', '.go', '.java', '.cpp', '.c', '.h'
+      ],
+      includeTestFiles: false,
+    });
 
-      if (packageJson.devDependencies?.typescript || packageJson.dependencies?.typescript) {
-        return 'typescript';
-      }
-    } catch {
-      // Ignore errors
+    if (files.length === 0) {
+      return 'unknown';
     }
 
-    return 'javascript';
+    const languageCounts = new Map<string, number>();
+
+    for (const file of files) {
+      const language = this.detectLanguageFromPath(file.path);
+
+      if (language && language !== 'unknown') {
+        languageCounts.set(language, (languageCounts.get(language) || 0) + 1);
+      }
+    }
+
+    if (languageCounts.size === 0) {
+      return 'unknown';
+    }
+
+    const sortedLanguages = Array.from(languageCounts.entries())
+      .sort((a, b) => b[1] - a[1]);
+
+    const primaryLanguage = sortedLanguages[0][0];
+    const primaryCount = sortedLanguages[0][1];
+    const totalFiles = files.length;
+    const percentage = ((primaryCount / totalFiles) * 100).toFixed(1);
+
+    this.logger.info('Detected primary language', {
+      language: primaryLanguage,
+      fileCount: primaryCount,
+      totalFiles,
+      percentage: `${percentage}%`,
+      allLanguages: Object.fromEntries(sortedLanguages),
+    });
+
+    return primaryLanguage;
   }
 
   private async detectFrameworks(repositoryPath: string): Promise<string[]> {

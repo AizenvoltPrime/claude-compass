@@ -4603,6 +4603,37 @@ export class VueParser extends BaseFrameworkParser {
               is_exported: false,
               signature: this.getVueNodeText(node),
             });
+          } else if (valueNode?.type === 'call_expression') {
+            const callee = valueNode.child(0);
+
+            if (callee?.text === 'defineStore') {
+              const stateTypeDeps = this.extractStateFieldTypes(
+                valueNode,
+                nameNode.text
+              );
+              dependencies.push(...stateTypeDeps);
+            }
+
+            const classification = entityClassifier.classify(
+              'variable',
+              nameNode.text,
+              [],
+              this.currentFilePath,
+              'vue',
+              undefined,
+              this.currentOptions?.repositoryFrameworks
+            );
+
+            symbols.push({
+              name: nameNode.text,
+              qualified_name: this.buildQualifiedName(nameNode.text),
+              symbol_type: 'variable',
+              entity_type: classification.entityType,
+              framework: 'vue',
+              start_line: node.startPosition?.row + 1 || 1,
+              end_line: node.endPosition?.row + 1 || 1,
+              is_exported: false,
+            });
           } else {
             const classification = entityClassifier.classify(
               'variable',
@@ -5396,5 +5427,121 @@ export class VueParser extends BaseFrameworkParser {
     return /\b(Partial|Required|Readonly|Record|Pick|Omit|Exclude|Extract|NonNullable|Parameters|ConstructorParameters|ReturnType|InstanceType|Array|Promise)</.test(
       content
     );
+  }
+
+  /**
+   * Extract dependencies from Pinia store state field type annotations
+   * Creates REFERENCES dependencies from store to managed types
+   */
+  private extractStateFieldTypes(
+    defineStoreNode: Parser.SyntaxNode,
+    storeName: string
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    const argsNode = defineStoreNode.children.find(c => c.type === 'arguments');
+    if (!argsNode) return dependencies;
+
+    const optionsArg = argsNode.namedChildren[1];
+    if (!optionsArg || optionsArg.type !== 'object') {
+      return dependencies;
+    }
+
+    for (const prop of optionsArg.namedChildren) {
+      if (prop.type !== 'pair') continue;
+
+      const key = prop.child(0);
+      if (key?.text !== 'state') continue;
+
+      const value = prop.child(2);
+      if (!value || value.type !== 'arrow_function') continue;
+
+      const body = value.child(value.childCount - 1);
+      if (!body) continue;
+
+      const stateObject = body.type === 'parenthesized_expression'
+        ? body.child(1)
+        : body;
+
+      if (stateObject?.type !== 'object') continue;
+
+      for (const stateProp of stateObject.namedChildren) {
+        if (stateProp.type !== 'pair') continue;
+
+        const propValue = stateProp.child(2);
+        if (!propValue) continue;
+
+        const types = this.extractTypeAssertions(propValue);
+
+        for (const typeName of types) {
+          dependencies.push({
+            from_symbol: storeName,
+            to_symbol: typeName,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: propValue.startPosition.row + 1,
+          });
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Recursively extract type assertions from an expression
+   * Handles: [] as Type[], Array<Type>, etc.
+   */
+  private extractTypeAssertions(node: Parser.SyntaxNode): string[] {
+    const types: string[] = [];
+
+    if (node.type === 'as_expression') {
+      const typeNode = node.child(2);
+      if (typeNode) {
+        const typeName = this.normalizeTypeName(typeNode.text);
+        if (typeName) types.push(typeName);
+      }
+    }
+
+    for (const child of node.children) {
+      types.push(...this.extractTypeAssertions(child));
+    }
+
+    return types;
+  }
+
+  /**
+   * Normalize type name by removing array/generic wrappers
+   * Type[] → Type
+   * Array<Type> → Type
+   * Type1 | Type2 → Type1 (first non-built-in)
+   */
+  private normalizeTypeName(rawType: string): string | null {
+    let typeName = rawType.trim();
+
+    const builtIns = ['string', 'number', 'boolean', 'any', 'unknown', 'void', 'null', 'undefined'];
+    if (builtIns.includes(typeName.toLowerCase())) {
+      return null;
+    }
+
+    typeName = typeName.replace(/\[\]$/, '');
+
+    const arrayGenericMatch = typeName.match(/^Array<(.+)>$/);
+    if (arrayGenericMatch) {
+      typeName = arrayGenericMatch[1];
+    }
+
+    typeName = typeName.replace(/^readonly\s+/, '');
+
+    if (typeName.includes('|')) {
+      const parts = typeName.split('|').map(p => p.trim());
+      for (const part of parts) {
+        if (!builtIns.includes(part.toLowerCase())) {
+          typeName = part;
+          break;
+        }
+      }
+    }
+
+    return typeName || null;
   }
 }

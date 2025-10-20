@@ -572,6 +572,178 @@ HAVING COUNT(*) > 1
 ORDER BY occurrences DESC
 LIMIT 20;
 
+\echo ''
+\echo '=== TEST 35: C# Constructor Dependencies (IMPORTS) ==='
+WITH constructor_symbols AS (
+    SELECT
+        s.id as constructor_id,
+        s.parent_symbol_id as class_id,
+        s.start_line,
+        parent.name as class_name
+    FROM symbols s
+    JOIN symbols parent ON s.parent_symbol_id = parent.id
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND f.language = 'csharp'
+        AND s.symbol_type = 'method'
+        AND s.name = parent.name
+)
+SELECT
+    COUNT(DISTINCT cs.constructor_id) as total_constructors,
+    COUNT(DISTINCT cs.class_id) as classes_with_constructors,
+    COUNT(DISTINCT d.id) as constructor_import_dependencies,
+    COUNT(DISTINCT d.to_symbol_id) as unique_types_imported,
+    ROUND(AVG(dep_count), 2) as avg_deps_per_constructor,
+    CASE
+        WHEN COUNT(DISTINCT d.id) > 0 THEN '✓ Constructor DI tracking working'
+        WHEN COUNT(DISTINCT cs.constructor_id) = 0 THEN '○ No constructors found'
+        ELSE '✗ Constructors exist but no dependencies tracked'
+    END as status
+FROM constructor_symbols cs
+LEFT JOIN dependencies d ON d.from_symbol_id = cs.class_id
+    AND d.line_number = cs.start_line
+    AND d.dependency_type = 'imports'
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) as dep_count
+    FROM dependencies d2
+    WHERE d2.from_symbol_id = cs.class_id
+        AND d2.line_number = cs.start_line
+        AND d2.dependency_type = 'imports'
+) counts ON true;
+
+\echo ''
+\echo 'Sample C# classes with constructor dependencies:'
+WITH constructor_symbols AS (
+    SELECT
+        s.id as constructor_id,
+        s.parent_symbol_id as class_id,
+        s.start_line,
+        parent.name as class_name
+    FROM symbols s
+    JOIN symbols parent ON s.parent_symbol_id = parent.id
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND f.language = 'csharp'
+        AND s.symbol_type = 'method'
+        AND s.name = parent.name
+)
+SELECT
+    cs.class_name,
+    to_sym.name as injected_type,
+    d.line_number,
+    f.path
+FROM constructor_symbols cs
+JOIN dependencies d ON d.from_symbol_id = cs.class_id
+    AND d.line_number = cs.start_line
+    AND d.dependency_type = 'imports'
+JOIN symbols to_sym ON d.to_symbol_id = to_sym.id
+JOIN files f ON f.id = (SELECT file_id FROM symbols WHERE id = cs.class_id)
+ORDER BY cs.class_name, d.line_number
+LIMIT 20;
+
+\echo ''
+\echo '=== TEST 36: Godot Entity Type Classification ==='
+WITH entity_samples AS (
+    SELECT
+        entity_type,
+        name,
+        ROW_NUMBER() OVER (PARTITION BY entity_type ORDER BY name) as rn
+    FROM symbols s
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND s.entity_type IN ('node', 'manager', 'service', 'handler',
+                              'coordinator', 'engine', 'ui_component',
+                              'resource', 'factory', 'pool', 'data_model',
+                              'validator', 'effect')
+)
+SELECT
+    s.entity_type,
+    COUNT(*) as count,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM symbols s2 JOIN files f2 ON s2.file_id = f2.id WHERE f2.repo_id = {REPO_ID} AND s2.entity_type IS NOT NULL), 1) as pct_of_classified,
+    (SELECT STRING_AGG(name, ', ' ORDER BY name)
+     FROM entity_samples es
+     WHERE es.entity_type = s.entity_type AND es.rn <= 5) as sample_names
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.entity_type IN ('node', 'manager', 'service', 'handler',
+                          'coordinator', 'engine', 'ui_component',
+                          'resource', 'factory', 'pool', 'data_model',
+                          'validator', 'effect')
+GROUP BY s.entity_type
+ORDER BY count DESC;
+
+\echo ''
+\echo 'Godot framework coverage summary:'
+SELECT
+    framework_layer,
+    COUNT(DISTINCT entity_type) as unique_entity_types,
+    COUNT(*) as total_symbols,
+    STRING_AGG(DISTINCT entity_type, ', ' ORDER BY entity_type) as entity_types_found
+FROM (
+    SELECT
+        CASE
+            WHEN s.entity_type IN ('node', 'ui_component', 'resource') THEN 'Godot Engine'
+            WHEN s.entity_type IN ('manager', 'handler', 'coordinator', 'engine', 'pool') THEN 'Infrastructure'
+            WHEN s.entity_type IN ('service') THEN 'Services'
+            WHEN s.entity_type IN ('factory', 'validator', 'data_model') THEN 'Data Patterns'
+            ELSE 'Other'
+        END as framework_layer,
+        s.entity_type
+    FROM symbols s
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND s.entity_type IS NOT NULL
+) categorized
+GROUP BY framework_layer
+ORDER BY total_symbols DESC;
+
+\echo ''
+\echo '=== TEST 37: Language Detection for C# Projects ==='
+SELECT
+    r.name as repository_name,
+    r.language_primary as detected_language,
+    most_common.language as most_common_file_language,
+    most_common.file_count,
+    most_common.percentage,
+    CASE
+        WHEN r.language_primary = 'csharp' AND most_common.language = 'csharp' THEN '✓ CORRECT'
+        WHEN r.language_primary != 'csharp' AND most_common.language = 'csharp' THEN '✗ WRONG - Should be csharp'
+        WHEN r.language_primary = 'javascript' THEN '✗ FALLBACK DETECTED - detectPrimaryLanguage() used default'
+        ELSE '⚠️ Review language detection logic'
+    END as validation_status
+FROM repositories r
+LEFT JOIN LATERAL (
+    SELECT
+        f.language,
+        COUNT(*) as file_count,
+        ROUND(100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM files WHERE repo_id = r.id), 0), 1) as percentage
+    FROM files f
+    WHERE f.repo_id = r.id
+        AND f.language IS NOT NULL
+        AND f.language != 'unknown'
+    GROUP BY f.language
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+) most_common ON true
+WHERE r.id = {REPO_ID};
+
+\echo ''
+\echo 'File language distribution for this project:'
+SELECT
+    f.language,
+    COUNT(*) as file_count,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM files WHERE repo_id = {REPO_ID}), 1) as percentage,
+    CASE
+        WHEN f.language = 'csharp' THEN '← Should match language_primary'
+        ELSE ''
+    END as note
+FROM files f
+WHERE f.repo_id = {REPO_ID}
+    AND f.language IS NOT NULL
+GROUP BY f.language
+ORDER BY file_count DESC;
+
 -- ============================================================================
 -- SECTION 11: AUDIT SUMMARY
 -- ============================================================================

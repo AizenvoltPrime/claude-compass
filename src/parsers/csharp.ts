@@ -483,6 +483,12 @@ export class CSharpParser extends ChunkedParser {
             context.currentMethodParameters.set(param.name, param.type);
           }
           this.processConstructor(node, content, context, symbols);
+          const constructorDeps = this.extractConstructorDependencies(
+            ctorParams,
+            context,
+            node.startPosition.row + 1
+          );
+          dependencies.push(...constructorDeps);
           for (let i = 0; i < node.namedChildCount; i++) {
             const child = node.namedChild(i);
             if (child) traverse(child, depth + 1);
@@ -2719,5 +2725,97 @@ export class CSharpParser extends ChunkedParser {
   protected extractExports(_rootNode: Parser.SyntaxNode, _content: string): ParsedExport[] {
     // This is handled by the single-pass extraction
     return [];
+  }
+
+  private extractConstructorDependencies(
+    parameters: ParameterInfo[],
+    context: ASTContext,
+    lineNumber: number
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    if (!context.currentClass || parameters.length === 0) {
+      return dependencies;
+    }
+
+    for (const param of parameters) {
+      let typeName = param.type.trim();
+
+      if (this.isBuiltInType(typeName)) continue;
+
+      typeName = typeName.replace(/^\?/, '');
+
+      const genericMatch = typeName.match(/^([^<]+)<(.+)>$/);
+      if (genericMatch) {
+        const baseType = genericMatch[1].trim();
+        const genericArgs = genericMatch[2].split(',').map(t => t.trim());
+
+        if (!this.isBuiltInType(baseType)) {
+          const fullyQualifiedType = this.resolveFQN(baseType, context);
+          dependencies.push({
+            from_symbol: context.currentClass,
+            to_symbol: baseType,
+            to_qualified_name: fullyQualifiedType,
+            dependency_type: DependencyType.IMPORTS,
+            line_number: lineNumber,
+          });
+        }
+
+        for (const genericArg of genericArgs) {
+          const cleanArg = genericArg.trim();
+          if (!this.isBuiltInType(cleanArg)) {
+            const fullyQualifiedArg = this.resolveFQN(cleanArg, context);
+            dependencies.push({
+              from_symbol: context.currentClass,
+              to_symbol: cleanArg,
+              to_qualified_name: fullyQualifiedArg,
+              dependency_type: DependencyType.IMPORTS,
+              line_number: lineNumber,
+            });
+          }
+        }
+      } else {
+        const fullyQualifiedType = this.resolveFQN(typeName, context);
+        dependencies.push({
+          from_symbol: context.currentClass,
+          to_symbol: typeName,
+          to_qualified_name: fullyQualifiedType,
+          dependency_type: DependencyType.IMPORTS,
+          line_number: lineNumber,
+        });
+      }
+    }
+
+    return dependencies;
+  }
+
+  private isBuiltInType(type: string): boolean {
+    const builtIns = new Set([
+      'string', 'int', 'float', 'double', 'decimal', 'bool', 'byte', 'sbyte',
+      'short', 'ushort', 'uint', 'long', 'ulong', 'char', 'object', 'void',
+      'dynamic', 'var', 'nint', 'nuint',
+      'Action', 'Func', 'Task', 'ValueTask', 'Exception',
+      'IEnumerable', 'ICollection', 'IList', 'IDictionary', 'IQueryable',
+      'List', 'Dictionary', 'HashSet', 'Queue', 'Stack',
+      'Array', 'Tuple', 'ValueTuple'
+    ]);
+    return builtIns.has(type) || /^System\./.test(type);
+  }
+
+  private resolveFQN(className: string, context: ASTContext): string {
+    if (className.includes('.')) {
+      return className;
+    }
+
+    for (const usingDirective of context.usingDirectives) {
+      const potentialFqn = `${usingDirective}.${className}`;
+      return potentialFqn;
+    }
+
+    if (context.currentNamespace) {
+      return `${context.currentNamespace}.${className}`;
+    }
+
+    return className;
   }
 }

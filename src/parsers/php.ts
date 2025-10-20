@@ -356,6 +356,12 @@ export class PHPParser extends ChunkedParser {
             symbols.push(symbol);
             if (symbol.name === '__construct') {
               this.trackConstructorParameterTypes(node, content, context.typeMap);
+              const constructorDeps = this.extractConstructorDependencies(
+                node,
+                content,
+                context
+              );
+              dependencies.push(...constructorDeps);
             }
           }
           break;
@@ -1900,6 +1906,101 @@ export class PHPParser extends ChunkedParser {
     if (!nameNode) return null;
 
     return this.getNodeText(nameNode, content);
+  }
+
+  /**
+   * Extract dependencies from constructor parameter type hints
+   * Creates IMPORTS dependencies from class to each injected service
+   */
+  private extractConstructorDependencies(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: PHPParsingContext
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+    const parametersNode = node.childForFieldName('parameters');
+
+    if (!parametersNode || !context.currentClass) {
+      return dependencies;
+    }
+
+    for (const param of parametersNode.children) {
+      if (param.type !== 'simple_parameter' && param.type !== 'property_promotion_parameter') {
+        continue;
+      }
+
+      const typeNode = param.childForFieldName('type');
+      if (!typeNode) continue;
+
+      let typeName = this.getNodeText(typeNode, content).trim();
+
+      if (this.isBuiltInType(typeName)) continue;
+
+      typeName = typeName.replace(/^\?/, '');
+
+      const unionTypes = typeName.split('|').map(t => t.trim());
+
+      for (const singleType of unionTypes) {
+        if (this.isBuiltInType(singleType)) continue;
+
+        const fullyQualifiedType = this.resolveFQN(singleType, context);
+
+        dependencies.push({
+          from_symbol: context.currentClass,
+          to_symbol: singleType,
+          to_qualified_name: fullyQualifiedType,
+          dependency_type: DependencyType.IMPORTS,
+          line_number: param.startPosition.row + 1,
+        });
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Check if type is a built-in PHP type (not a class)
+   */
+  private isBuiltInType(type: string): boolean {
+    const builtIns = new Set([
+      'string', 'int', 'float', 'bool', 'array', 'object',
+      'mixed', 'void', 'null', 'callable', 'iterable',
+      'self', 'parent', 'static', 'never', 'true', 'false'
+    ]);
+    return builtIns.has(type.toLowerCase());
+  }
+
+  /**
+   * Resolve fully qualified name for a class
+   * Uses use statements and namespace context
+   */
+  private resolveFQN(className: string, context: PHPParsingContext): string {
+    if (className.startsWith('\\')) {
+      return className;
+    }
+
+    for (const useStmt of context.useStatements) {
+      if (!useStmt.imported_names) continue;
+
+      for (const imported of useStmt.imported_names) {
+        const parts = imported.split('\\');
+        const lastPart = parts[parts.length - 1];
+
+        if (lastPart === className || imported === className) {
+          return imported;
+        }
+
+        if (imported.endsWith(`\\${className}`)) {
+          return imported;
+        }
+      }
+    }
+
+    if (context.currentNamespace) {
+      return `${context.currentNamespace}\\${className}`;
+    }
+
+    return className;
   }
 
   private extractCallingObject(node: Parser.SyntaxNode, content: string): string {
