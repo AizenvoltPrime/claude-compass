@@ -1,8 +1,7 @@
 import { DatabaseService } from '../../database/services';
-import { SymbolType } from '../../database/models';
-import { DiscoverFeatureArgs } from '../types';
 import { validateDiscoverFeatureArgs } from '../validators';
 import { createComponentLogger } from '../../utils/logger';
+import { createStandardDiscoveryEngine } from './discovery-strategies';
 
 const logger = createComponentLogger('feature-discovery-service');
 
@@ -105,9 +104,6 @@ interface FeatureManifest {
 }
 
 export class FeatureDiscoveryService {
-  private static readonly MAX_QUEUE_SIZE = 10000;
-  private static readonly MAX_VISITED_NODES = 50000;
-
   constructor(
     private dbService: DatabaseService,
     private getDefaultRepoId: () => number | undefined
@@ -131,10 +127,10 @@ export class FeatureDiscoveryService {
     const maxSymbols = validatedArgs.max_symbols || 500;
     const minRelevanceScore = validatedArgs.min_relevance_score || 0;
 
-    logger.info('Starting feature discovery', {
+    logger.info('Starting feature discovery (plugin architecture)', {
       symbolId: validatedArgs.symbol_id,
       repoId,
-      options: { includeComponents, includeRoutes, includeModels, namingDepth, maxDepth }
+      options: { includeComponents, includeRoutes, includeModels, namingDepth, maxDepth },
     });
 
     const entrySymbol = await this.getSymbol(validatedArgs.symbol_id);
@@ -143,52 +139,39 @@ export class FeatureDiscoveryService {
     }
 
     const featureName = this.extractFeatureName(entrySymbol.name);
-    const symbolRelevance = new Map<number, number>([[validatedArgs.symbol_id, 1.0]]);
 
-    const relatedByDependency = await this.findDependencyRelated(
+    // Use plugin-based discovery engine
+    const engine = createStandardDiscoveryEngine(this.dbService, {
+      maxIterations: 3,
+      convergenceThreshold: 1,
+      debug: false,
+    });
+
+    const { symbols: symbolRelevance, stats } = await engine.discover(
       validatedArgs.symbol_id,
       repoId,
-      maxDepth
-    );
-    relatedByDependency.forEach((depth, id) => {
-      symbolRelevance.set(id, 1.0 - (depth / (maxDepth + 1)));
-    });
-
-    const relatedByNaming = await this.findNamingRelated(
       featureName,
-      repoId,
-      namingDepth
-    );
-    relatedByNaming.forEach(id => {
-      if (!symbolRelevance.has(id)) {
-        symbolRelevance.set(id, 0.7);
+      {
+        maxDepth,
+        namingDepth,
+        includeComponents,
+        includeRoutes,
+        includeModels,
+        includeTests,
+        includeCallers,
+        maxSymbols,
+        minRelevanceScore,
       }
+    );
+
+    logger.info('Discovery engine complete', {
+      totalSymbols: symbolRelevance.size,
+      iterations: stats.iterations,
+      converged: stats.converged,
+      time: stats.totalTime,
     });
 
-    const relatedByCrossStack = await this.findCrossStackRelated(
-      Array.from(symbolRelevance.keys()),
-      repoId
-    );
-    relatedByCrossStack.forEach(id => {
-      if (!symbolRelevance.has(id)) {
-        symbolRelevance.set(id, 0.8);
-      }
-    });
-
-    if (includeCallers) {
-      const relatedByReverseDeps = await this.findReverseCallers(
-        Array.from(symbolRelevance.keys()),
-        repoId,
-        featureName,
-        maxDepth
-      );
-      relatedByReverseDeps.forEach((depth, id) => {
-        if (!symbolRelevance.has(id)) {
-          symbolRelevance.set(id, 0.75 - (depth * 0.1));
-        }
-      });
-    }
-
+    // Filter by relevance and apply limits
     let filteredSymbolIds = Array.from(symbolRelevance.entries())
       .filter(([_, relevance]) => relevance >= minRelevanceScore)
       .sort((a, b) => b[1] - a[1])
@@ -198,25 +181,40 @@ export class FeatureDiscoveryService {
       filteredSymbolIds = filteredSymbolIds.slice(0, maxSymbols);
     }
 
+    // Fetch full symbol details
     let allSymbols = await this.fetchSymbols(filteredSymbolIds);
 
+    // Filter tests if requested
     if (!includeTests) {
-      allSymbols = allSymbols.filter(s => !this.isTestFile(s.file_path) && !this.isTestSymbol(s.name));
+      allSymbols = allSymbols.filter(
+        s => !this.isTestFile(s.file_path) && !this.isTestSymbol(s.name)
+      );
     }
 
+    // Fetch routes
     const routes = includeRoutes ? await this.fetchRelatedRoutes(featureName, repoId) : [];
 
+    // Build manifest
     const manifest = this.buildFeatureManifest(
       featureName,
       entrySymbol,
       allSymbols,
       routes,
-      { includeComponents, includeRoutes, includeModels }
+      {
+        includeComponents,
+        includeRoutes,
+        includeModels,
+      },
+      stats
     );
 
     logger.info('Feature discovery complete', {
       featureName,
       totalSymbols: manifest.total_symbols,
+      strategyStats: Array.from(stats.strategyStats.entries()).map(([name, stat]) => ({
+        strategy: name,
+        discovered: stat.symbolsDiscovered,
+      })),
     });
 
     return {
@@ -239,19 +237,23 @@ export class FeatureDiscoveryService {
   }
 
   private isTestFile(filePath: string): boolean {
-    return filePath.includes('/tests/') ||
-           filePath.includes('/test/') ||
-           filePath.includes('/__tests__/') ||
-           filePath.includes('.test.') ||
-           filePath.includes('.spec.');
+    return (
+      filePath.includes('/tests/') ||
+      filePath.includes('/test/') ||
+      filePath.includes('/__tests__/') ||
+      filePath.includes('.test.') ||
+      filePath.includes('.spec.')
+    );
   }
 
   private isTestSymbol(symbolName: string): boolean {
-    return symbolName.startsWith('test_') ||
-           symbolName.startsWith('test') ||
-           symbolName.endsWith('Test') ||
-           symbolName.endsWith('Spec') ||
-           symbolName.includes('TestCase');
+    return (
+      symbolName.startsWith('test_') ||
+      symbolName.startsWith('test') ||
+      symbolName.endsWith('Test') ||
+      symbolName.endsWith('Spec') ||
+      symbolName.includes('TestCase')
+    );
   }
 
   private async getSymbol(symbolId: number): Promise<FeatureSymbol | null> {
@@ -271,138 +273,12 @@ export class FeatureDiscoveryService {
     };
   }
 
-  private async findDependencyRelated(
-    symbolId: number,
-    repoId: number,
-    maxDepth: number
-  ): Promise<Map<number, number>> {
-    const related = new Map<number, number>();
-    const queue = [{ id: symbolId, depth: 0 }];
-    const visited = new Set<number>([symbolId]);
-
-    while (queue.length > 0) {
-      if (visited.size > FeatureDiscoveryService.MAX_VISITED_NODES) {
-        logger.warn('Hit max visited nodes limit, terminating traversal early', {
-          visitedCount: visited.size,
-          maxNodes: FeatureDiscoveryService.MAX_VISITED_NODES,
-        });
-        break;
-      }
-
-      if (queue.length > FeatureDiscoveryService.MAX_QUEUE_SIZE) {
-        logger.warn('Queue size exceeded limit, pruning least relevant nodes', {
-          queueSize: queue.length,
-          maxQueueSize: FeatureDiscoveryService.MAX_QUEUE_SIZE,
-        });
-        queue.sort((a, b) => a.depth - b.depth);
-        queue.splice(FeatureDiscoveryService.MAX_QUEUE_SIZE);
-      }
-
-      const { id, depth } = queue.shift()!;
-      if (depth >= maxDepth) continue;
-
-      const dependencies = await this.dbService.getDependenciesFrom(id);
-      const callers = await this.dbService.getDependenciesTo(id);
-
-      for (const dep of dependencies) {
-        const targetId = dep.to_symbol_id;
-        if (targetId && !visited.has(targetId)) {
-          visited.add(targetId);
-          related.set(targetId, depth + 1);
-          queue.push({ id: targetId, depth: depth + 1 });
-        }
-      }
-
-      for (const dep of callers) {
-        const targetId = dep.from_symbol_id;
-        if (targetId && !visited.has(targetId)) {
-          visited.add(targetId);
-          related.set(targetId, depth + 1);
-          queue.push({ id: targetId, depth: depth + 1 });
-        }
-      }
-    }
-
-    return related;
-  }
-
-  private async findNamingRelated(
-    featureName: string,
-    repoId: number,
-    depth: number
-  ): Promise<number[]> {
-    const patterns = this.generateNamingPatterns(featureName, depth);
-    const related = new Set<number>();
-
-    for (const pattern of patterns) {
-      const symbols = await this.dbService.searchSymbols(pattern, repoId, {
-        limit: 100,
-        symbolTypes: [],
-      });
-      symbols.forEach(s => related.add(s.id));
-    }
-
-    return Array.from(related);
-  }
-
-  private generateNamingPatterns(featureName: string, depth: number): string[] {
-    const patterns = [featureName];
-
-    if (depth >= 1) {
-      patterns.push(
-        `${featureName}Controller`,
-        `${featureName}Service`,
-        `${featureName}Store`,
-        `${featureName}Request`,
-        `${featureName}Model`,
-        `${featureName}Job`,
-        `create${featureName}`,
-        `update${featureName}`,
-        `delete${featureName}`,
-        `get${featureName}`,
-      );
-    }
-
-    if (depth >= 2) {
-      patterns.push(
-        `${featureName}Component`,
-        `${featureName}Composable`,
-        `use${featureName}`,
-        `${featureName}Form`,
-        `${featureName}List`,
-        `${featureName}Details`,
-      );
-    }
-
-    return patterns;
-  }
-
-  private async findCrossStackRelated(
-    symbolIds: number[],
-    repoId: number
-  ): Promise<number[]> {
-    const db = this.dbService.knex;
-
-    const frontendSymbols = await db('symbols')
-      .whereIn('symbols.id', symbolIds)
-      .join('files', 'symbols.file_id', 'files.id')
-      .whereIn('files.language', ['typescript', 'vue', 'javascript'])
-      .select('symbols.id');
-
-    const frontendIds = frontendSymbols.map(s => s.id);
-    if (frontendIds.length === 0) return [];
-
-    const apiCalls = await db('api_calls')
-      .whereIn('caller_symbol_id', frontendIds)
-      .select('endpoint_symbol_id');
-
-    return apiCalls.map(ac => ac.endpoint_symbol_id).filter(Boolean);
-  }
 
   private async fetchSymbols(symbolIds: number[]): Promise<FeatureSymbol[]> {
     if (symbolIds.length === 0) return [];
 
-    const symbols = await this.dbService.knex('symbols')
+    const symbols = await this.dbService
+      .knex('symbols')
       .join('files', 'symbols.file_id', 'files.id')
       .whereIn('symbols.id', symbolIds)
       .select(
@@ -439,110 +315,34 @@ export class FeatureDiscoveryService {
       .filter((s): s is NonNullable<typeof s> => s !== undefined);
   }
 
-  private async findReverseCallers(
-    symbolIds: number[],
-    repoId: number,
-    featureName: string,
-    maxDepth: number
-  ): Promise<Map<number, number>> {
-    const callers = new Map<number, number>();
-    const queue = symbolIds.map(id => ({ id, depth: 0 }));
-    const visited = new Set<number>(symbolIds);
 
-    while (queue.length > 0) {
-      if (visited.size > FeatureDiscoveryService.MAX_VISITED_NODES) {
-        logger.warn('Hit max visited nodes limit in reverse caller search, terminating early', {
-          visitedCount: visited.size,
-          maxNodes: FeatureDiscoveryService.MAX_VISITED_NODES,
-        });
-        break;
-      }
-
-      if (queue.length > FeatureDiscoveryService.MAX_QUEUE_SIZE) {
-        logger.warn('Queue size exceeded limit in reverse caller search, pruning least relevant nodes', {
-          queueSize: queue.length,
-          maxQueueSize: FeatureDiscoveryService.MAX_QUEUE_SIZE,
-        });
-        queue.sort((a, b) => a.depth - b.depth);
-        queue.splice(FeatureDiscoveryService.MAX_QUEUE_SIZE);
-      }
-
-      const { id, depth } = queue.shift()!;
-      if (depth >= maxDepth) continue;
-
-      const symbol = await this.getSymbol(id);
-      if (symbol && this.shouldSkipReverseDeps(symbol, featureName)) {
-        continue;
-      }
-
-      const dependencies = await this.dbService.getDependenciesTo(id);
-
-      for (const dep of dependencies) {
-        const callerId = dep.from_symbol_id;
-        if (callerId && !visited.has(callerId)) {
-          visited.add(callerId);
-          callers.set(callerId, depth + 1);
-          queue.push({ id: callerId, depth: depth + 1 });
-        }
-      }
-    }
-
-    return callers;
-  }
-
-  private shouldSkipReverseDeps(symbol: FeatureSymbol, featureName: string): boolean {
-    const frameworkSymbols = [
-      'Vue', 'computed', 'ref', 'reactive', 'watch', 'onMounted', 'onUnmounted',
-      'Illuminate', 'Model', 'Controller', 'Request', 'Response', 'Route',
-      'Pinia', 'defineStore', 'storeToRefs',
-      'axios', 'fetch', 'http', 'get', 'post', 'put', 'delete'
-    ];
-
-    if (frameworkSymbols.some(fw => symbol.name === fw || symbol.name.startsWith(fw + '.'))) {
-      return true;
-    }
-
-    if (symbol.file_path.includes('node_modules') || symbol.file_path.includes('vendor')) {
-      return true;
-    }
-
-    const utilityPatterns = [
-      /^(format|parse|validate|sanitize|normalize)/i,
-      /^(log|debug|info|warn|error)/i,
-      /^(is|has|can|should)/i,
-      /^(get|set)(Item|Value|Property|Attribute)/i,
-    ];
-
-    const isUtility = utilityPatterns.some(pattern => pattern.test(symbol.name));
-    if (isUtility && !symbol.name.toLowerCase().includes(featureName.toLowerCase())) {
-      return true;
-    }
-
-    return false;
-  }
-
-  private async fetchRelatedRoutes(
-    featureName: string,
-    repoId: number
-  ): Promise<FeatureRoute[]> {
+  private async fetchRelatedRoutes(featureName: string, repoId: number): Promise<FeatureRoute[]> {
     const db = this.dbService.knex;
 
     const routes = await db('routes')
       .where('repo_id', repoId)
-      .andWhere(function() {
+      .andWhere(function () {
         this.where('path', 'like', `%${featureName.toLowerCase()}%`)
           .orWhere('controller_class', 'like', `%${featureName}%`)
           .orWhere('controller_method', 'like', `%${featureName}%`)
           .orWhere('action', 'like', `%${featureName}%`);
       })
-      .select('method', 'path', 'controller_class', 'controller_method', 'action', 'handler_symbol_id');
+      .select(
+        'method',
+        'path',
+        'controller_class',
+        'controller_method',
+        'action',
+        'handler_symbol_id'
+      );
 
     return routes.map(r => ({
       method: r.method,
       path: r.path,
-      handler: r.controller_class && r.controller_method
-        ? `${r.controller_class}@${r.controller_method}`
-        : r.action || 'unknown',
+      handler:
+        r.controller_class && r.controller_method
+          ? `${r.controller_class}@${r.controller_method}`
+          : r.action || 'unknown',
       controller_symbol_id: r.handler_symbol_id,
     }));
   }
@@ -651,12 +451,14 @@ export class FeatureDiscoveryService {
    * Deduplicate symbols with the same name
    * Preference: entity_type match > shortest path (definition over usage)
    */
-  private deduplicateByName<T extends {
-    name: string;
-    entity_type?: string;
-    type: string;
-    file_path: string
-  }>(symbols: T[]): T[] {
+  private deduplicateByName<
+    T extends {
+      name: string;
+      entity_type?: string;
+      type: string;
+      file_path: string;
+    },
+  >(symbols: T[]): T[] {
     const byName = new Map<string, T[]>();
 
     for (const symbol of symbols) {
@@ -670,16 +472,12 @@ export class FeatureDiscoveryService {
         return duplicates[0];
       }
 
-      const withEntityType = duplicates.find(d =>
-        d.entity_type && d.entity_type !== d.type
-      );
+      const withEntityType = duplicates.find(d => d.entity_type && d.entity_type !== d.type);
       if (withEntityType) {
         return withEntityType;
       }
 
-      return duplicates.sort((a, b) =>
-        a.file_path.length - b.file_path.length
-      )[0];
+      return duplicates.sort((a, b) => a.file_path.length - b.file_path.length)[0];
     });
   }
 
@@ -688,7 +486,8 @@ export class FeatureDiscoveryService {
     entryPoint: FeatureSymbol,
     allSymbols: FeatureSymbol[],
     routes: FeatureRoute[],
-    options: { includeComponents: boolean; includeRoutes: boolean; includeModels: boolean }
+    options: { includeComponents: boolean; includeRoutes: boolean; includeModels: boolean },
+    stats: { strategyStats: Map<string, any> }
   ): FeatureManifest {
     /**
      * Maximum number of symbols to return per category in the feature manifest.
@@ -819,10 +618,37 @@ export class FeatureDiscoveryService {
       related: categorized.related.slice(0, SAMPLE_SIZE),
     };
 
-    const hasGameEngineSymbols = categorized.nodes.length > 0 || categorized.ui_components.length > 0 || categorized.resources.length > 0;
-    const hasInfrastructureSymbols = categorized.managers.length > 0 || categorized.handlers.length > 0 || categorized.coordinators.length > 0 || categorized.engines.length > 0 || categorized.pools.length > 0;
-    const hasDataSymbols = categorized.repositories.length > 0 || categorized.factories.length > 0 || categorized.builders.length > 0 || categorized.validators.length > 0 || categorized.adapters.length > 0;
-    const hasMiddlewareSymbols = categorized.middleware.length > 0 || categorized.notifications.length > 0 || categorized.commands.length > 0 || categorized.providers.length > 0;
+    const hasFrontendSymbols =
+      categorized.stores.length > 0 ||
+      categorized.components.length > 0 ||
+      categorized.composables.length > 0;
+    const hasBackendSymbols =
+      categorized.controllers.length > 0 ||
+      categorized.services.length > 0 ||
+      categorized.requests.length > 0 ||
+      categorized.models.length > 0 ||
+      categorized.jobs.length > 0;
+    const hasGameEngineSymbols =
+      categorized.nodes.length > 0 ||
+      categorized.ui_components.length > 0 ||
+      categorized.resources.length > 0;
+    const hasInfrastructureSymbols =
+      categorized.managers.length > 0 ||
+      categorized.handlers.length > 0 ||
+      categorized.coordinators.length > 0 ||
+      categorized.engines.length > 0 ||
+      categorized.pools.length > 0;
+    const hasDataSymbols =
+      categorized.repositories.length > 0 ||
+      categorized.factories.length > 0 ||
+      categorized.builders.length > 0 ||
+      categorized.validators.length > 0 ||
+      categorized.adapters.length > 0;
+    const hasMiddlewareSymbols =
+      categorized.middleware.length > 0 ||
+      categorized.notifications.length > 0 ||
+      categorized.commands.length > 0 ||
+      categorized.providers.length > 0;
 
     return {
       feature_name: featureName,
@@ -847,7 +673,7 @@ export class FeatureDiscoveryService {
           nodes: sampled.nodes,
           ui_components: sampled.ui_components,
           resources: sampled.resources,
-        }
+        },
       }),
       ...(hasInfrastructureSymbols && {
         infrastructure: {
@@ -856,7 +682,7 @@ export class FeatureDiscoveryService {
           coordinators: sampled.coordinators,
           engines: sampled.engines,
           pools: sampled.pools,
-        }
+        },
       }),
       ...(hasDataSymbols && {
         data: {
@@ -865,7 +691,7 @@ export class FeatureDiscoveryService {
           builders: sampled.builders,
           validators: sampled.validators,
           adapters: sampled.adapters,
-        }
+        },
       }),
       ...(hasMiddlewareSymbols && {
         middleware: {
@@ -873,39 +699,53 @@ export class FeatureDiscoveryService {
           notifications: sampled.notifications,
           commands: sampled.commands,
           providers: sampled.providers,
-        }
+        },
       }),
       related_symbols: sampled.related,
       total_symbols: allSymbols.length,
-      discovery_strategy: 'dependency_graph + naming_heuristics + cross_stack_api_tracing + reverse_callers',
+      discovery_strategy: Array.from(stats.strategyStats.keys()).join(' + '),
       summary: {
-        total_stores: categorized.stores.length,
-        total_components: categorized.components.length,
-        total_composables: categorized.composables.length,
-        total_controllers: categorized.controllers.length,
-        total_services: categorized.services.length,
-        total_requests: categorized.requests.length,
-        total_models: categorized.models.length,
-        total_jobs: categorized.jobs.length,
-        total_nodes: categorized.nodes.length,
-        total_ui_components: categorized.ui_components.length,
-        total_resources: categorized.resources.length,
-        total_managers: categorized.managers.length,
-        total_handlers: categorized.handlers.length,
-        total_coordinators: categorized.coordinators.length,
-        total_engines: categorized.engines.length,
-        total_pools: categorized.pools.length,
-        total_repositories: categorized.repositories.length,
-        total_factories: categorized.factories.length,
-        total_builders: categorized.builders.length,
-        total_validators: categorized.validators.length,
-        total_adapters: categorized.adapters.length,
-        total_middleware: categorized.middleware.length,
-        total_notifications: categorized.notifications.length,
-        total_commands: categorized.commands.length,
-        total_providers: categorized.providers.length,
+        ...(hasFrontendSymbols && {
+          total_stores: categorized.stores.length,
+          total_components: categorized.components.length,
+          total_composables: categorized.composables.length,
+        }),
+        ...(hasBackendSymbols && {
+          total_controllers: categorized.controllers.length,
+          total_services: categorized.services.length,
+          total_requests: categorized.requests.length,
+          total_models: categorized.models.length,
+          total_jobs: categorized.jobs.length,
+        }),
+        ...(hasGameEngineSymbols && {
+          total_nodes: categorized.nodes.length,
+          total_ui_components: categorized.ui_components.length,
+          total_resources: categorized.resources.length,
+        }),
+        ...(hasInfrastructureSymbols && {
+          total_managers: categorized.managers.length,
+          total_handlers: categorized.handlers.length,
+          total_coordinators: categorized.coordinators.length,
+          total_engines: categorized.engines.length,
+          total_pools: categorized.pools.length,
+        }),
+        ...(hasDataSymbols && {
+          total_repositories: categorized.repositories.length,
+          total_factories: categorized.factories.length,
+          total_builders: categorized.builders.length,
+          total_validators: categorized.validators.length,
+          total_adapters: categorized.adapters.length,
+        }),
+        ...(hasMiddlewareSymbols && {
+          total_middleware: categorized.middleware.length,
+          total_notifications: categorized.notifications.length,
+          total_commands: categorized.commands.length,
+          total_providers: categorized.providers.length,
+        }),
         total_related: categorized.related.length,
-        total_routes: routes.length,
+        ...(routes.length > 0 && {
+          total_routes: routes.length,
+        }),
         showing_sample: true,
         sample_size: SAMPLE_SIZE,
       },
