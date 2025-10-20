@@ -518,6 +518,10 @@ Discover complete feature modules across the entire stack. Finds all related cod
 - `frontend`: Categorized frontend symbols (stores, components, composables)
 - `api`: API routes related to the feature
 - `backend`: Categorized backend symbols (controllers, services, requests, models, jobs)
+- `game_engine` (optional): Game engine symbols (nodes, ui_components, resources)
+- `infrastructure` (optional): Infrastructure patterns (managers, handlers, coordinators, engines, pools)
+- `data` (optional): Data layer patterns (repositories, factories, builders, validators, adapters)
+- `middleware` (optional): Laravel middleware layer (middleware, notifications, commands, providers)
 - `related_symbols`: Additional related symbols
 - `summary`: Aggregate metrics including counts for each category
 

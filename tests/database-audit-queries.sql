@@ -458,11 +458,244 @@ GROUP BY dependency_type
 ORDER BY count DESC;
 
 -- ============================================================================
--- SECTION 11: EMPTY OR NONSENSICAL DATA DETECTION
+-- SECTION 11: ENTITY CLASSIFICATION & ADVANCED DEPENDENCIES
 -- ============================================================================
 
 \echo ''
-\echo '=== TEST 26: Empty or Whitespace Symbol Names ==='
+\echo '=== TEST 26: Entity Type Distribution ==='
+SELECT
+    COALESCE(entity_type, 'unclassified') as entity_type,
+    COUNT(*) as count
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+GROUP BY entity_type
+ORDER BY count DESC;
+
+\echo ''
+\echo '=== TEST 27: Framework-Aware Classification Quality ==='
+SELECT
+    f.language,
+    COALESCE(s.entity_type, 'unclassified') as entity_type,
+    COUNT(*) as count
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND f.language IN ('php', 'typescript', 'vue', 'javascript')
+GROUP BY f.language, s.entity_type
+ORDER BY f.language, count DESC;
+
+\echo ''
+\echo '=== TEST 28: Vue Stores Classification ==='
+SELECT
+    COUNT(*) as total_stores,
+    COUNT(*) FILTER (WHERE s.name LIKE 'use%Store') as pinia_pattern_stores,
+    COUNT(*) FILTER (WHERE f.path LIKE '%/stores/%') as in_stores_directory
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.entity_type = 'store';
+
+\echo ''
+\echo 'Sample stores:'
+SELECT s.name, f.path, s.symbol_type
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.entity_type = 'store'
+    AND f.path LIKE '%/stores/%'
+ORDER BY f.path
+LIMIT 10;
+
+\echo ''
+\echo '=== TEST 29: Vue Composables Classification ==='
+SELECT
+    COUNT(*) as total_composables,
+    COUNT(*) FILTER (WHERE s.name LIKE 'use%') as use_pattern,
+    COUNT(*) FILTER (WHERE s.name LIKE 'create%') as create_pattern,
+    COUNT(*) FILTER (WHERE f.path LIKE '%/composables/%' OR f.path LIKE '%/Composables/%') as in_composables_dir
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.entity_type = 'composable';
+
+\echo ''
+\echo 'Sample composables:'
+SELECT s.name, s.symbol_type, f.path
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.entity_type = 'composable'
+ORDER BY s.name
+LIMIT 10;
+
+\echo ''
+\echo '=== TEST 30: Laravel Backend Classification ==='
+SELECT
+    s.entity_type,
+    COUNT(*) as count,
+    COUNT(*) FILTER (WHERE s.name LIKE '%Controller') as controller_suffix,
+    COUNT(*) FILTER (WHERE s.name LIKE '%Service') as service_suffix,
+    COUNT(*) FILTER (WHERE s.name LIKE '%Request') as request_suffix
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND f.language = 'php'
+    AND s.symbol_type = 'class'
+    AND s.entity_type IN ('controller', 'service', 'request', 'model', 'job')
+GROUP BY s.entity_type
+ORDER BY count DESC;
+
+\echo ''
+\echo '=== TEST 31: PHP Constructor Dependencies (IMPORTS) ==='
+WITH constructor_lines AS (
+    SELECT s1.file_id, s1.start_line, s1.end_line
+    FROM symbols s1
+    JOIN files f ON s1.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND s1.name = '__construct'
+        AND f.language = 'php'
+)
+SELECT
+    COUNT(DISTINCT d.id) as total_constructor_imports,
+    COUNT(DISTINCT s.id) as classes_with_constructor_deps,
+    ROUND(AVG(dep_count), 2) as avg_deps_per_class
+FROM dependencies d
+JOIN symbols s ON d.from_symbol_id = s.id
+JOIN constructor_lines cl ON s.file_id = cl.file_id
+    AND d.line_number BETWEEN cl.start_line AND cl.end_line
+JOIN files f ON s.file_id = f.id
+CROSS JOIN LATERAL (
+    SELECT COUNT(*) as dep_count
+    FROM dependencies d2
+    WHERE d2.from_symbol_id = s.id
+        AND d2.dependency_type = 'imports'
+        AND d2.line_number BETWEEN cl.start_line AND cl.end_line
+) counts
+WHERE f.repo_id = {REPO_ID}
+    AND d.dependency_type = 'imports'
+    AND s.symbol_type = 'class';
+
+\echo ''
+\echo 'Sample classes with constructor dependencies:'
+WITH constructor_lines AS (
+    SELECT s1.file_id, s1.start_line, s1.end_line
+    FROM symbols s1
+    JOIN files f ON s1.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND s1.name = '__construct'
+        AND f.language = 'php'
+)
+SELECT
+    s1.name as class_name,
+    s2.name as injected_service,
+    d.line_number,
+    f.path
+FROM dependencies d
+JOIN symbols s1 ON d.from_symbol_id = s1.id
+JOIN symbols s2 ON d.to_symbol_id = s2.id
+JOIN constructor_lines cl ON s1.file_id = cl.file_id
+    AND d.line_number BETWEEN cl.start_line AND cl.end_line
+JOIN files f ON s1.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND d.dependency_type = 'imports'
+    AND s1.symbol_type = 'class'
+ORDER BY s1.name, d.line_number
+LIMIT 20;
+
+\echo ''
+\echo '=== TEST 32: Vue State Field Type REFERENCES ==='
+SELECT
+    COUNT(DISTINCT d.id) as total_state_type_refs,
+    COUNT(DISTINCT s1.id) as stores_with_type_refs,
+    ROUND(AVG(ref_count), 2) as avg_refs_per_store
+FROM dependencies d
+JOIN symbols s1 ON d.from_symbol_id = s1.id
+JOIN files f ON s1.file_id = f.id
+CROSS JOIN LATERAL (
+    SELECT COUNT(*) as ref_count
+    FROM dependencies d2
+    WHERE d2.from_symbol_id = s1.id
+        AND d2.dependency_type = 'references'
+) counts
+WHERE f.repo_id = {REPO_ID}
+    AND d.dependency_type = 'references'
+    AND s1.entity_type = 'store';
+
+\echo ''
+\echo 'Sample stores with state type references:'
+SELECT
+    s1.name as store_name,
+    s2.name as referenced_type,
+    d.line_number,
+    f.path
+FROM dependencies d
+JOIN symbols s1 ON d.from_symbol_id = s1.id
+JOIN symbols s2 ON d.to_symbol_id = s2.id
+JOIN files f ON s1.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND d.dependency_type = 'references'
+    AND s1.entity_type = 'store'
+ORDER BY s1.name, d.line_number
+LIMIT 20;
+
+\echo ''
+\echo '=== TEST 33: Entity Type vs Symbol Type Consistency ==='
+SELECT
+    s.symbol_type,
+    s.entity_type,
+    COUNT(*) as count
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.entity_type IS NOT NULL
+GROUP BY s.symbol_type, s.entity_type
+ORDER BY count DESC
+LIMIT 20;
+
+\echo ''
+\echo '=== TEST 34: Classification Priority Validation ==='
+-- Check for useXxxStore DEFINITIONS in /stores/ directory (should be 'store' not 'composable')
+SELECT
+    'useXxxStore definitions (priority 12 > 10)' as test,
+    COUNT(*) as total_definitions,
+    COUNT(*) FILTER (WHERE entity_type = 'store') as classified_as_store,
+    COUNT(*) FILTER (WHERE entity_type = 'composable') as misclassified_as_composable,
+    CASE
+        WHEN COUNT(*) FILTER (WHERE entity_type = 'composable') = 0 THEN '✓ PASS'
+        ELSE '✗ FAIL'
+    END as status
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.name ~ '^use[A-Z].*Store$'
+    AND s.symbol_type = 'variable'
+    AND f.path LIKE '%/stores/%'
+    AND f.language IN ('typescript', 'javascript');
+
+\echo ''
+\echo 'Distribution of useXxxStore symbols (definitions vs usages):'
+SELECT
+    CASE
+        WHEN f.path LIKE '%/stores/%' THEN 'Definition (in /stores/)'
+        ELSE 'Usage (elsewhere)'
+    END as symbol_location,
+    COALESCE(s.entity_type, 'unclassified') as entity_type,
+    COUNT(*) as count
+FROM symbols s
+JOIN files f ON s.file_id = f.id
+WHERE f.repo_id = {REPO_ID}
+    AND s.name ~ '^use[A-Z].*Store$'
+    AND f.language IN ('typescript', 'vue', 'javascript')
+GROUP BY symbol_location, s.entity_type
+ORDER BY symbol_location, count DESC;
+
+-- ============================================================================
+-- SECTION 12: EMPTY OR NONSENSICAL DATA DETECTION
+-- ============================================================================
+
+\echo ''
+\echo '=== TEST 35: Empty or Whitespace Symbol Names ==='
 SELECT COUNT(*) as empty_or_whitespace_names
 FROM symbols s
 JOIN files f ON s.file_id = f.id
@@ -470,7 +703,7 @@ WHERE f.repo_id = {REPO_ID}
     AND (s.name = '' OR s.name ~ '^\s+$');
 
 \echo ''
-\echo '=== TEST 27: File Paths Sanity ==='
+\echo '=== TEST 36: File Paths Sanity ==='
 SELECT
     COUNT(*) as total_files,
     COUNT(*) FILTER (WHERE path IS NULL OR path = '') as missing_paths,
@@ -479,7 +712,7 @@ FROM files
 WHERE repo_id = {REPO_ID};
 
 \echo ''
-\echo '=== TEST 28: PHP Classes Missing Qualified Names ==='
+\echo '=== TEST 37: PHP Classes Missing Qualified Names ==='
 SELECT COUNT(*) as missing_qn
 FROM symbols s
 JOIN files f ON s.file_id = f.id
@@ -488,8 +721,167 @@ WHERE f.repo_id = {REPO_ID}
     AND s.symbol_type = 'class'
     AND (s.qualified_name IS NULL OR s.qualified_name = '');
 
+\echo ''
+\echo '=== TEST 38: C# Constructor Dependencies (IMPORTS) ==='
+WITH constructor_symbols AS (
+    SELECT
+        s.id as constructor_id,
+        s.parent_symbol_id as class_id,
+        s.start_line,
+        parent.name as class_name
+    FROM symbols s
+    JOIN symbols parent ON s.parent_symbol_id = parent.id
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND f.language = 'csharp'
+        AND s.symbol_type = 'method'
+        AND s.name = parent.name
+)
+SELECT
+    COUNT(DISTINCT cs.constructor_id) as total_constructors,
+    COUNT(DISTINCT cs.class_id) as classes_with_constructors,
+    COUNT(DISTINCT d.id) as constructor_import_dependencies,
+    COUNT(DISTINCT d.to_symbol_id) as unique_types_imported,
+    ROUND(AVG(dep_count), 2) as avg_deps_per_constructor
+FROM constructor_symbols cs
+LEFT JOIN dependencies d ON d.from_symbol_id = cs.class_id
+    AND d.line_number = cs.start_line
+    AND d.dependency_type = 'imports'
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) as dep_count
+    FROM dependencies d2
+    WHERE d2.from_symbol_id = cs.class_id
+        AND d2.line_number = cs.start_line
+        AND d2.dependency_type = 'imports'
+) counts ON true;
+
+\echo ''
+\echo 'Sample C# classes with constructor dependencies:'
+WITH constructor_symbols AS (
+    SELECT
+        s.id as constructor_id,
+        s.parent_symbol_id as class_id,
+        s.start_line,
+        parent.name as class_name
+    FROM symbols s
+    JOIN symbols parent ON s.parent_symbol_id = parent.id
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND f.language = 'csharp'
+        AND s.symbol_type = 'method'
+        AND s.name = parent.name
+)
+SELECT
+    cs.class_name,
+    to_sym.name as injected_type,
+    d.line_number,
+    f.path
+FROM constructor_symbols cs
+JOIN dependencies d ON d.from_symbol_id = cs.class_id
+    AND d.line_number = cs.start_line
+    AND d.dependency_type = 'imports'
+JOIN symbols to_sym ON d.to_symbol_id = to_sym.id
+JOIN files f ON f.id = (SELECT file_id FROM symbols WHERE id = cs.class_id)
+ORDER BY cs.class_name, d.line_number
+LIMIT 20;
+
+\echo ''
+\echo '=== TEST 39: Language Detection Correctness ==='
+SELECT
+    r.name as repository_name,
+    r.language_primary as detected_language,
+    most_common.language as most_common_file_language,
+    most_common.file_count,
+    most_common.percentage,
+    CASE
+        WHEN r.language_primary = most_common.language THEN '✓ CORRECT'
+        WHEN r.language_primary = 'unknown' AND most_common.file_count = 0 THEN '✓ CORRECT (no files)'
+        ELSE '✗ MISMATCH - detectPrimaryLanguage() may have used fallback'
+    END as validation_status
+FROM repositories r
+LEFT JOIN LATERAL (
+    SELECT
+        f.language,
+        COUNT(*) as file_count,
+        ROUND(100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM files WHERE repo_id = r.id), 0), 1) as percentage
+    FROM files f
+    WHERE f.repo_id = r.id
+        AND f.language IS NOT NULL
+        AND f.language != 'unknown'
+    GROUP BY f.language
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+) most_common ON true
+WHERE r.id = {REPO_ID};
+
+\echo ''
+\echo 'File language distribution:'
+SELECT
+    f.language,
+    COUNT(*) as file_count,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM files WHERE repo_id = {REPO_ID}), 1) as percentage
+FROM files f
+WHERE f.repo_id = {REPO_ID}
+    AND f.language IS NOT NULL
+GROUP BY f.language
+ORDER BY file_count DESC;
+
+\echo ''
+\echo '=== TEST 40: Multi-Framework Entity Type Coverage ==='
+SELECT
+    framework_category,
+    entity_type,
+    COUNT(*) as count,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY framework_category), 1) as pct_in_category
+FROM (
+    SELECT
+        CASE
+            WHEN s.entity_type IN ('store', 'component', 'composable') THEN 'Vue Frontend'
+            WHEN s.entity_type IN ('controller', 'service', 'request', 'model', 'job') THEN 'Laravel Backend'
+            WHEN s.entity_type IN ('node', 'ui_component', 'resource') THEN 'Godot Engine'
+            WHEN s.entity_type IN ('manager', 'handler', 'coordinator', 'engine', 'pool') THEN 'Infrastructure'
+            WHEN s.entity_type IN ('repository', 'factory', 'builder', 'validator', 'adapter') THEN 'Data Patterns'
+            WHEN s.entity_type IN ('middleware', 'notification', 'command', 'provider') THEN 'Laravel Middleware'
+            ELSE 'Other'
+        END as framework_category,
+        s.entity_type
+    FROM symbols s
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND s.entity_type IS NOT NULL
+) categorized
+GROUP BY framework_category, entity_type
+ORDER BY framework_category, count DESC;
+
+\echo ''
+\echo 'Entity type coverage summary by framework:'
+SELECT
+    framework_category,
+    COUNT(DISTINCT entity_type) as unique_entity_types,
+    COUNT(*) as total_symbols,
+    STRING_AGG(DISTINCT entity_type, ', ' ORDER BY entity_type) as entity_types_found
+FROM (
+    SELECT
+        CASE
+            WHEN s.entity_type IN ('store', 'component', 'composable') THEN 'Vue Frontend'
+            WHEN s.entity_type IN ('controller', 'service', 'request', 'model', 'job') THEN 'Laravel Backend'
+            WHEN s.entity_type IN ('node', 'ui_component', 'resource') THEN 'Godot Engine'
+            WHEN s.entity_type IN ('manager', 'handler', 'coordinator', 'engine', 'pool') THEN 'Infrastructure'
+            WHEN s.entity_type IN ('repository', 'factory', 'builder', 'validator', 'adapter') THEN 'Data Patterns'
+            WHEN s.entity_type IN ('middleware', 'notification', 'command', 'provider') THEN 'Laravel Middleware'
+            ELSE 'Other'
+        END as framework_category,
+        s.entity_type
+    FROM symbols s
+    JOIN files f ON s.file_id = f.id
+    WHERE f.repo_id = {REPO_ID}
+        AND s.entity_type IS NOT NULL
+) categorized
+GROUP BY framework_category
+ORDER BY total_symbols DESC;
+
 -- ============================================================================
--- SECTION 12: SUMMARY STATISTICS
+-- SECTION 13: SUMMARY STATISTICS
 -- ============================================================================
 
 \echo ''

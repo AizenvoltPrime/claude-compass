@@ -22,7 +22,13 @@
           "path": "/composables/",
           "priority": 5,
           "entityType": "composable",
-          "description": "Vue composables"
+          "description": "Vue composables directory"
+        },
+        {
+          "path": "/Composables/",
+          "priority": 5,
+          "entityType": "composable",
+          "description": "Vue composables directory (capitalized)"
         },
         {
           "path": "/stores/",
@@ -41,18 +47,39 @@
             "entityType": "composable",
             "description": "Vue composable (use* pattern)",
             "fileExtensions": [".ts", ".js", ".vue"]
+          },
+          {
+            "pattern": "^create[A-Z]",
+            "priority": 10,
+            "entityType": "composable",
+            "description": "Vue composable (create* pattern)",
+            "fileExtensions": [".ts", ".js"]
           }
         ]
-      }
+      },
+      "directoryRules": [
+        {
+          "path": "/composables/",
+          "priority": 8,
+          "entityType": "composable",
+          "description": "Functions in composables directory"
+        },
+        {
+          "path": "/Composables/",
+          "priority": 8,
+          "entityType": "composable",
+          "description": "Functions in Composables directory"
+        }
+      ]
     },
     "variable": {
       "namePatterns": {
         "suffix": [
           {
             "pattern": "Store",
-            "priority": 10,
+            "priority": 12,
             "entityType": "store",
-            "description": "Pinia store"
+            "description": "Pinia store (suffix precedence over use* prefix)"
           }
         ]
       }

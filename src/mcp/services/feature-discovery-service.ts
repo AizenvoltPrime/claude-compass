@@ -10,6 +10,7 @@ interface FeatureSymbol {
   id: number;
   name: string;
   type: string;
+  entity_type?: string;
   file_path: string;
   start_line: number;
   end_line: number;
@@ -42,6 +43,31 @@ interface FeatureManifest {
     models: FeatureSymbol[];
     jobs: FeatureSymbol[];
   };
+  game_engine?: {
+    nodes: FeatureSymbol[];
+    ui_components: FeatureSymbol[];
+    resources: FeatureSymbol[];
+  };
+  infrastructure?: {
+    managers: FeatureSymbol[];
+    handlers: FeatureSymbol[];
+    coordinators: FeatureSymbol[];
+    engines: FeatureSymbol[];
+    pools: FeatureSymbol[];
+  };
+  data?: {
+    repositories: FeatureSymbol[];
+    factories: FeatureSymbol[];
+    builders: FeatureSymbol[];
+    validators: FeatureSymbol[];
+    adapters: FeatureSymbol[];
+  };
+  middleware?: {
+    middleware: FeatureSymbol[];
+    notifications: FeatureSymbol[];
+    commands: FeatureSymbol[];
+    providers: FeatureSymbol[];
+  };
   related_symbols: FeatureSymbol[];
   total_symbols: number;
   discovery_strategy: string;
@@ -54,6 +80,23 @@ interface FeatureManifest {
     total_requests: number;
     total_models: number;
     total_jobs: number;
+    total_nodes?: number;
+    total_ui_components?: number;
+    total_resources?: number;
+    total_managers?: number;
+    total_handlers?: number;
+    total_coordinators?: number;
+    total_engines?: number;
+    total_pools?: number;
+    total_repositories?: number;
+    total_factories?: number;
+    total_builders?: number;
+    total_validators?: number;
+    total_adapters?: number;
+    total_middleware?: number;
+    total_notifications?: number;
+    total_commands?: number;
+    total_providers?: number;
     total_related: number;
     total_routes: number;
     showing_sample: boolean;
@@ -219,6 +262,7 @@ export class FeatureDiscoveryService {
       id: symbol.id,
       name: symbol.name,
       type: symbol.symbol_type,
+      entity_type: symbol.entity_type,
       file_path: symbol.file?.path || '',
       start_line: symbol.start_line,
       end_line: symbol.end_line,
@@ -365,6 +409,7 @@ export class FeatureDiscoveryService {
         'symbols.id',
         'symbols.name',
         'symbols.symbol_type as type',
+        'symbols.entity_type',
         'files.path as file_path',
         'symbols.start_line',
         'symbols.end_line',
@@ -379,6 +424,7 @@ export class FeatureDiscoveryService {
           id: s.id,
           name: s.name,
           type: s.type,
+          entity_type: s.entity_type,
           file_path: s.file_path,
           start_line: s.start_line,
           end_line: s.end_line,
@@ -502,73 +548,139 @@ export class FeatureDiscoveryService {
   }
 
   private isStore(symbol: FeatureSymbol): boolean {
-    return (
-      (symbol.name.endsWith('Store') || symbol.name.toLowerCase().includes('store')) &&
-      (symbol.type === SymbolType.CLASS || symbol.type === SymbolType.VARIABLE || symbol.type === SymbolType.FUNCTION) &&
-      (symbol.file_path.endsWith('.ts') || symbol.file_path.endsWith('.js'))
-    );
+    return symbol.entity_type === 'store';
   }
 
   private isComponent(symbol: FeatureSymbol): boolean {
-    return symbol.type === SymbolType.COMPONENT;
+    return symbol.entity_type === 'component';
   }
 
   private isComposable(symbol: FeatureSymbol): boolean {
-    return (
-      (symbol.name.startsWith('use') && symbol.type === SymbolType.FUNCTION) ||
-      (symbol.name.startsWith('create') && symbol.name.includes('composable'))
-    );
+    return symbol.entity_type === 'composable';
   }
 
   private isController(symbol: FeatureSymbol): boolean {
-    return (
-      symbol.name.endsWith('Controller') &&
-      symbol.type === SymbolType.CLASS
-    );
+    return symbol.entity_type === 'controller';
   }
 
   private isService(symbol: FeatureSymbol): boolean {
-    return (
-      symbol.name.endsWith('Service') &&
-      symbol.type === SymbolType.CLASS
-    );
+    return symbol.entity_type === 'service';
   }
 
   private isRequest(symbol: FeatureSymbol): boolean {
-    return (
-      symbol.name.endsWith('Request') &&
-      symbol.type === SymbolType.CLASS &&
-      symbol.file_path.endsWith('.php')
-    );
+    return symbol.entity_type === 'request';
   }
 
   private isModel(symbol: FeatureSymbol): boolean {
-    const hasModelSignature =
-      symbol.signature?.includes('extends Model') ||
-      symbol.signature?.includes('extends Authenticatable') ||
-      symbol.signature?.includes('extends Pivot');
-
-    const hasModelBaseClass =
-      symbol.base_class === 'Model' ||
-      symbol.base_class === 'Authenticatable' ||
-      symbol.base_class === 'Pivot';
-
-    return (
-      symbol.type === SymbolType.CLASS &&
-      symbol.file_path.endsWith('.php') &&
-      !symbol.name.endsWith('Controller') &&
-      !symbol.name.endsWith('Service') &&
-      !symbol.name.endsWith('Request') &&
-      !symbol.name.endsWith('Job') &&
-      (hasModelSignature || hasModelBaseClass)
-    );
+    return symbol.entity_type === 'model';
   }
 
   private isJob(symbol: FeatureSymbol): boolean {
-    return (
-      symbol.name.endsWith('Job') &&
-      symbol.type === SymbolType.CLASS
-    );
+    return symbol.entity_type === 'job';
+  }
+
+  private isNode(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'node';
+  }
+
+  private isUiComponent(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'ui_component';
+  }
+
+  private isResource(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'resource';
+  }
+
+  private isManager(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'manager';
+  }
+
+  private isHandler(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'handler';
+  }
+
+  private isCoordinator(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'coordinator';
+  }
+
+  private isEngine(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'engine';
+  }
+
+  private isPool(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'pool';
+  }
+
+  private isRepository(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'repository';
+  }
+
+  private isFactory(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'factory';
+  }
+
+  private isBuilder(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'builder';
+  }
+
+  private isValidator(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'validator';
+  }
+
+  private isAdapter(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'adapter';
+  }
+
+  private isMiddleware(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'middleware';
+  }
+
+  private isNotification(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'notification';
+  }
+
+  private isCommand(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'command';
+  }
+
+  private isProvider(symbol: FeatureSymbol): boolean {
+    return symbol.entity_type === 'provider';
+  }
+
+  /**
+   * Deduplicate symbols with the same name
+   * Preference: entity_type match > shortest path (definition over usage)
+   */
+  private deduplicateByName<T extends {
+    name: string;
+    entity_type?: string;
+    type: string;
+    file_path: string
+  }>(symbols: T[]): T[] {
+    const byName = new Map<string, T[]>();
+
+    for (const symbol of symbols) {
+      const existing = byName.get(symbol.name) || [];
+      existing.push(symbol);
+      byName.set(symbol.name, existing);
+    }
+
+    return Array.from(byName.values()).map(duplicates => {
+      if (duplicates.length === 1) {
+        return duplicates[0];
+      }
+
+      const withEntityType = duplicates.find(d =>
+        d.entity_type && d.entity_type !== d.type
+      );
+      if (withEntityType) {
+        return withEntityType;
+      }
+
+      return duplicates.sort((a, b) =>
+        a.file_path.length - b.file_path.length
+      )[0];
+    });
   }
 
   private buildFeatureManifest(
@@ -600,6 +712,23 @@ export class FeatureDiscoveryService {
       requests: [] as FeatureSymbol[],
       models: [] as FeatureSymbol[],
       jobs: [] as FeatureSymbol[],
+      nodes: [] as FeatureSymbol[],
+      ui_components: [] as FeatureSymbol[],
+      resources: [] as FeatureSymbol[],
+      managers: [] as FeatureSymbol[],
+      handlers: [] as FeatureSymbol[],
+      coordinators: [] as FeatureSymbol[],
+      engines: [] as FeatureSymbol[],
+      pools: [] as FeatureSymbol[],
+      repositories: [] as FeatureSymbol[],
+      factories: [] as FeatureSymbol[],
+      builders: [] as FeatureSymbol[],
+      validators: [] as FeatureSymbol[],
+      adapters: [] as FeatureSymbol[],
+      middleware: [] as FeatureSymbol[],
+      notifications: [] as FeatureSymbol[],
+      commands: [] as FeatureSymbol[],
+      providers: [] as FeatureSymbol[],
       related: [] as FeatureSymbol[],
     };
 
@@ -620,10 +749,46 @@ export class FeatureDiscoveryService {
         if (options.includeModels) categorized.models.push(symbol);
       } else if (this.isJob(symbol)) {
         categorized.jobs.push(symbol);
+      } else if (this.isNode(symbol)) {
+        categorized.nodes.push(symbol);
+      } else if (this.isUiComponent(symbol)) {
+        categorized.ui_components.push(symbol);
+      } else if (this.isResource(symbol)) {
+        categorized.resources.push(symbol);
+      } else if (this.isManager(symbol)) {
+        categorized.managers.push(symbol);
+      } else if (this.isHandler(symbol)) {
+        categorized.handlers.push(symbol);
+      } else if (this.isCoordinator(symbol)) {
+        categorized.coordinators.push(symbol);
+      } else if (this.isEngine(symbol)) {
+        categorized.engines.push(symbol);
+      } else if (this.isPool(symbol)) {
+        categorized.pools.push(symbol);
+      } else if (this.isRepository(symbol)) {
+        categorized.repositories.push(symbol);
+      } else if (this.isFactory(symbol)) {
+        categorized.factories.push(symbol);
+      } else if (this.isBuilder(symbol)) {
+        categorized.builders.push(symbol);
+      } else if (this.isValidator(symbol)) {
+        categorized.validators.push(symbol);
+      } else if (this.isAdapter(symbol)) {
+        categorized.adapters.push(symbol);
+      } else if (this.isMiddleware(symbol)) {
+        categorized.middleware.push(symbol);
+      } else if (this.isNotification(symbol)) {
+        categorized.notifications.push(symbol);
+      } else if (this.isCommand(symbol)) {
+        categorized.commands.push(symbol);
+      } else if (this.isProvider(symbol)) {
+        categorized.providers.push(symbol);
       } else {
         categorized.related.push(symbol);
       }
     }
+
+    categorized.components = this.deduplicateByName(categorized.components);
 
     const sampled = {
       stores: categorized.stores.slice(0, SAMPLE_SIZE),
@@ -634,8 +799,30 @@ export class FeatureDiscoveryService {
       requests: categorized.requests.slice(0, SAMPLE_SIZE),
       models: categorized.models.slice(0, SAMPLE_SIZE),
       jobs: categorized.jobs.slice(0, SAMPLE_SIZE),
+      nodes: categorized.nodes.slice(0, SAMPLE_SIZE),
+      ui_components: categorized.ui_components.slice(0, SAMPLE_SIZE),
+      resources: categorized.resources.slice(0, SAMPLE_SIZE),
+      managers: categorized.managers.slice(0, SAMPLE_SIZE),
+      handlers: categorized.handlers.slice(0, SAMPLE_SIZE),
+      coordinators: categorized.coordinators.slice(0, SAMPLE_SIZE),
+      engines: categorized.engines.slice(0, SAMPLE_SIZE),
+      pools: categorized.pools.slice(0, SAMPLE_SIZE),
+      repositories: categorized.repositories.slice(0, SAMPLE_SIZE),
+      factories: categorized.factories.slice(0, SAMPLE_SIZE),
+      builders: categorized.builders.slice(0, SAMPLE_SIZE),
+      validators: categorized.validators.slice(0, SAMPLE_SIZE),
+      adapters: categorized.adapters.slice(0, SAMPLE_SIZE),
+      middleware: categorized.middleware.slice(0, SAMPLE_SIZE),
+      notifications: categorized.notifications.slice(0, SAMPLE_SIZE),
+      commands: categorized.commands.slice(0, SAMPLE_SIZE),
+      providers: categorized.providers.slice(0, SAMPLE_SIZE),
       related: categorized.related.slice(0, SAMPLE_SIZE),
     };
+
+    const hasGameEngineSymbols = categorized.nodes.length > 0 || categorized.ui_components.length > 0 || categorized.resources.length > 0;
+    const hasInfrastructureSymbols = categorized.managers.length > 0 || categorized.handlers.length > 0 || categorized.coordinators.length > 0 || categorized.engines.length > 0 || categorized.pools.length > 0;
+    const hasDataSymbols = categorized.repositories.length > 0 || categorized.factories.length > 0 || categorized.builders.length > 0 || categorized.validators.length > 0 || categorized.adapters.length > 0;
+    const hasMiddlewareSymbols = categorized.middleware.length > 0 || categorized.notifications.length > 0 || categorized.commands.length > 0 || categorized.providers.length > 0;
 
     return {
       feature_name: featureName,
@@ -655,6 +842,39 @@ export class FeatureDiscoveryService {
         models: sampled.models,
         jobs: sampled.jobs,
       },
+      ...(hasGameEngineSymbols && {
+        game_engine: {
+          nodes: sampled.nodes,
+          ui_components: sampled.ui_components,
+          resources: sampled.resources,
+        }
+      }),
+      ...(hasInfrastructureSymbols && {
+        infrastructure: {
+          managers: sampled.managers,
+          handlers: sampled.handlers,
+          coordinators: sampled.coordinators,
+          engines: sampled.engines,
+          pools: sampled.pools,
+        }
+      }),
+      ...(hasDataSymbols && {
+        data: {
+          repositories: sampled.repositories,
+          factories: sampled.factories,
+          builders: sampled.builders,
+          validators: sampled.validators,
+          adapters: sampled.adapters,
+        }
+      }),
+      ...(hasMiddlewareSymbols && {
+        middleware: {
+          middleware: sampled.middleware,
+          notifications: sampled.notifications,
+          commands: sampled.commands,
+          providers: sampled.providers,
+        }
+      }),
       related_symbols: sampled.related,
       total_symbols: allSymbols.length,
       discovery_strategy: 'dependency_graph + naming_heuristics + cross_stack_api_tracing + reverse_callers',
@@ -667,6 +887,23 @@ export class FeatureDiscoveryService {
         total_requests: categorized.requests.length,
         total_models: categorized.models.length,
         total_jobs: categorized.jobs.length,
+        total_nodes: categorized.nodes.length,
+        total_ui_components: categorized.ui_components.length,
+        total_resources: categorized.resources.length,
+        total_managers: categorized.managers.length,
+        total_handlers: categorized.handlers.length,
+        total_coordinators: categorized.coordinators.length,
+        total_engines: categorized.engines.length,
+        total_pools: categorized.pools.length,
+        total_repositories: categorized.repositories.length,
+        total_factories: categorized.factories.length,
+        total_builders: categorized.builders.length,
+        total_validators: categorized.validators.length,
+        total_adapters: categorized.adapters.length,
+        total_middleware: categorized.middleware.length,
+        total_notifications: categorized.notifications.length,
+        total_commands: categorized.commands.length,
+        total_providers: categorized.providers.length,
         total_related: categorized.related.length,
         total_routes: routes.length,
         showing_sample: true,
