@@ -117,9 +117,22 @@ export class TypeScriptParser extends JavaScriptParser {
           break;
         }
         case 'method_signature': {
+          // Defensive validation: Only process actual method_signature nodes
+          if (node.type !== 'method_signature') {
+            break;
+          }
+
           const nameNode = node.childForFieldName('name');
           if (nameNode) {
             const name = this.getNodeText(nameNode, content);
+
+            // CRITICAL FIX: Filter control flow keywords
+            // Control flow keywords are JavaScript/TypeScript reserved words and cannot be method names
+            const controlFlowKeywords = ['if', 'else', 'catch', 'while', 'for', 'do', 'switch', 'try'];
+            if (controlFlowKeywords.includes(name)) {
+              break; // Skip - impossible method names
+            }
+
             tsSymbols.push({
               name,
               symbol_type: SymbolType.METHOD,

@@ -72,7 +72,7 @@ export class McpTools {
   async searchCode(args: any) {
     const validatedArgs = validateSearchCodeArgs(args);
     const defaultRepoId = this.getDefaultRepoId();
-    const repoIds = validatedArgs.repo_ids || (defaultRepoId ? [defaultRepoId] : []);
+    const repoIds = defaultRepoId ? [defaultRepoId] : [];
 
     let detectedFramework = validatedArgs.framework;
     let frameworkAutoDetected = false;
@@ -300,7 +300,6 @@ export class McpTools {
                 framework: detectedFramework,
                 framework_auto_detected: frameworkAutoDetected,
                 is_exported: validatedArgs.is_exported,
-                repo_ids: repoIds,
                 search_mode: validatedArgs.search_mode,
               },
               search_mode: 'enhanced_framework_aware',
@@ -337,5 +336,11 @@ export class McpTools {
 
   async discoverFeature(args: any) {
     return this.featureDiscoveryService.discoverFeature(args);
+  }
+
+  async detectDeadCode(args: any) {
+    const { detectDeadCode } = await import('./tools/detect-dead-code.js');
+    const defaultRepoId = this.getDefaultRepoId();
+    return detectDeadCode(args, defaultRepoId);
   }
 }

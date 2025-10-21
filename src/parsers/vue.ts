@@ -313,6 +313,24 @@ export class VueParser extends BaseFrameworkParser {
     // Detect framework entities
     const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
 
+    // Extract template event handler dependencies
+    if (sections.template) {
+      const componentName = this.extractComponentName(filePath);
+      const templateDeps = this.convertTemplateHandlersToDependencies(
+        sections.template,
+        componentName,
+        filePath
+      );
+      dependencies.push(...templateDeps);
+
+      // Extract template component usage dependencies
+      const componentDeps = this.convertTemplateComponentsToDependencies(
+        sections.template,
+        componentName
+      );
+      dependencies.push(...componentDeps);
+    }
+
     return {
       filePath,
       symbols,
@@ -387,6 +405,24 @@ export class VueParser extends BaseFrameworkParser {
 
     // Detect framework entities
     const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
+
+    // Extract template event handler dependencies
+    if (sections.template) {
+      const componentName = this.extractComponentName(filePath);
+      const templateDeps = this.convertTemplateHandlersToDependencies(
+        sections.template,
+        componentName,
+        filePath
+      );
+      dependencies.push(...templateDeps);
+
+      // Extract template component usage dependencies
+      const componentDeps = this.convertTemplateComponentsToDependencies(
+        sections.template,
+        componentName
+      );
+      dependencies.push(...componentDeps);
+    }
 
     return {
       filePath,
@@ -2957,6 +2993,63 @@ export class VueParser extends BaseFrameworkParser {
   }
 
   /**
+   * Convert template event handlers into ParsedDependency objects for dependency graph.
+   * This ensures template event listeners create proper "calls" edges, similar to how
+   * C# CallDeferred(nameof(Method)) creates call dependencies.
+   */
+  private convertTemplateHandlersToDependencies(
+    templateContent: string,
+    componentName: string,
+    filePath: string
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+    const eventHandlers = this.extractEventHandlers(templateContent);
+
+    for (const handler of eventHandlers) {
+      const handlerName = handler.handler.trim();
+
+      // Skip inline expressions like "count++" or "doSomething(arg)"
+      // Only process simple handler names like "onMonthRangeChanged"
+      if (handlerName && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(handlerName)) {
+        dependencies.push({
+          from_symbol: componentName,
+          to_symbol: handlerName,
+          dependency_type: DependencyType.CALLS,
+          line_number: 1, // Template line numbers not tracked by regex
+          qualified_context: `${componentName} template @${handler.event}`,
+        });
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Convert template component usage into ParsedDependency objects for dependency graph.
+   * This ensures components used in templates create proper dependency edges, preventing
+   * false "dead component" findings for imported components.
+   */
+  private convertTemplateComponentsToDependencies(
+    templateContent: string,
+    componentName: string
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+    const templateDependencies = this.extractTemplateDependencies(templateContent);
+
+    for (const usedComponent of templateDependencies) {
+      dependencies.push({
+        from_symbol: componentName,
+        to_symbol: usedComponent,
+        dependency_type: DependencyType.REFERENCES,
+        line_number: 1, // Template line numbers not precisely tracked by regex
+        qualified_context: `${componentName} template uses ${usedComponent}`,
+      });
+    }
+
+    return dependencies;
+  }
+
+  /**
    * Extract Vue lifecycle methods from script content
    */
   private extractLifecycleMethods(scriptContent: string): string[] {
@@ -5060,37 +5153,13 @@ export class VueParser extends BaseFrameworkParser {
     }
 
     try {
-      // Extract custom components (PascalCase or kebab-case)
-      const componentRegex = /<([A-Z][a-zA-Z0-9]*|[a-z-]+(?:-[a-z]+)+)/g;
-      let match;
-      while ((match = componentRegex.exec(template)) !== null) {
-        const componentName = match[1];
-
-        const classification = entityClassifier.classify(
-          'class',
-          componentName,
-          [],
-          filePath || '',
-          'vue',
-          undefined,
-          options?.repositoryFrameworks
-        );
-
-        symbols.push({
-          name: componentName,
-          symbol_type: SymbolType.CLASS,
-          entity_type: classification.entityType,
-          framework: 'vue',
-          base_class: classification.baseClass || undefined,
-          start_line: this.getLineFromIndex(template, match.index),
-          end_line: this.getLineFromIndex(template, match.index),
-          is_exported: false,
-          signature: `<${componentName}>`,
-        });
-      }
+      // NOTE: Component tags like <GoogleMap> are NOT extracted as symbols here.
+      // Component usage creates dependency edges via convertTemplateComponentsToDependencies().
+      // Actual component symbols come from script imports/definitions.
 
       // Extract template refs
       const refRegex = /ref=["']([^"']+)["']/g;
+      let match: RegExpExecArray | null;
       while ((match = refRegex.exec(template)) !== null) {
         const refName = match[1];
 

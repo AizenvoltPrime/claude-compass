@@ -89,9 +89,10 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **MCP Integration (`src/mcp/`)**
 
 - Model Context Protocol server implementation
-- Tools for code search, dependency analysis, impact assessment
-- Consolidated tool interface (8 core tools)
+- Tools for code search, dependency analysis, impact assessment, dead code detection
+- Consolidated tool interface (9 core tools)
 - Framework-aware search with Laravel, Vue, React, and Godot support
+- Dead code detection with interface bloat analysis
 
 **CLI (`src/cli/`)**
 
@@ -141,6 +142,16 @@ The system uses PostgreSQL with these core tables:
 - Vector similarity for embedding-based search
 - Framework-aware filtering
 - Impact analysis and blast radius
+
+**Dead Code Detection**
+
+- Systematic detection of unused code across all languages
+- Interface bloat: Interface methods implemented but never called
+- Dead methods: Public/private methods with zero callers
+- Dead classes: Classes with zero instantiations
+- Unused exports: Exported symbols with no imports
+- High-confidence filtering excludes entry points, framework callbacks, test methods
+- Results grouped by file → category → confidence (high/medium/low)
 
 ## Environment Variables
 

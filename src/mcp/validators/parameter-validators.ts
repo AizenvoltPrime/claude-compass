@@ -48,7 +48,10 @@ export function validateGetSymbolArgs(args: any): GetSymbolArgs {
 
 export function validateSearchCodeArgs(args: any): SearchCodeArgs {
   if (args.repo_id !== undefined) {
-    throw new Error('repo_id parameter removed. Use repo_ids array instead');
+    throw new Error('repo_id parameter removed. The default repository is used automatically.');
+  }
+  if (args.repo_ids !== undefined) {
+    throw new Error('repo_ids parameter removed. The default repository is used automatically.');
   }
   if (args.symbol_type !== undefined) {
     throw new Error('symbol_type parameter removed. Use entity_types array instead');
@@ -96,17 +99,6 @@ export function validateSearchCodeArgs(args: any): SearchCodeArgs {
 
   if (args.framework !== undefined && typeof args.framework !== 'string') {
     throw new Error('framework must be a string');
-  }
-
-  if (args.repo_ids !== undefined) {
-    if (!Array.isArray(args.repo_ids)) {
-      throw new Error('repo_ids must be an array');
-    }
-    for (const repoId of args.repo_ids) {
-      if (typeof repoId !== 'number') {
-        throw new Error('repo_ids must contain only numbers');
-      }
-    }
   }
 
   if (args.search_mode !== undefined) {

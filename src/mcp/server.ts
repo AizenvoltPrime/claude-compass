@@ -169,11 +169,6 @@ export class ClaudeCompassMCPServer {
                   type: 'string',
                   description: 'The search query (symbol name or pattern)',
                 },
-                repo_ids: {
-                  type: 'array',
-                  items: { type: 'number' },
-                  description: 'Repository IDs to search in',
-                },
                 entity_types: {
                   type: 'array',
                   items: {
@@ -187,6 +182,10 @@ export class ClaudeCompassMCPServer {
                       'function',
                       'class',
                       'interface',
+                      'scene',
+                      'node',
+                      'script',
+                      'autoload',
                     ],
                   },
                   description:
@@ -194,7 +193,7 @@ export class ClaudeCompassMCPServer {
                 },
                 framework: {
                   type: 'string',
-                  enum: ['laravel', 'vue', 'react', 'node'],
+                  enum: ['laravel', 'vue', 'react', 'node', 'godot'],
                   description: 'Filter by framework type',
                 },
                 is_exported: {
@@ -313,7 +312,7 @@ export class ClaudeCompassMCPServer {
                   type: 'array',
                   items: {
                     type: 'string',
-                    enum: ['vue', 'laravel', 'react', 'node'],
+                    enum: ['vue', 'laravel', 'react', 'node', 'godot'],
                   },
                   description: 'Multi-framework impact analysis (default: all detected frameworks)',
                 },
@@ -435,6 +434,38 @@ export class ClaudeCompassMCPServer {
               additionalProperties: false,
             },
           },
+          {
+            name: 'detect_dead_code',
+            description: 'Systematically detect dead code, interface bloat, and unused symbols in a codebase. Identifies interface methods implemented but never called, dead public/private methods, unused functions, dead classes, and unused exports. Excludes false positives like entry points, framework callbacks, test methods, and polymorphic methods. Results grouped by file path → category → confidence (high/medium/low).',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                confidence_threshold: {
+                  type: 'string',
+                  enum: ['high', 'medium', 'low'],
+                  description: 'Minimum confidence level to include in results (default: medium)',
+                },
+                include_exports: {
+                  type: 'boolean',
+                  description: 'Include exported symbols in results (default: false - excludes exports)',
+                },
+                include_tests: {
+                  type: 'boolean',
+                  description: 'Include test files in analysis (default: false)',
+                },
+                max_results: {
+                  type: 'number',
+                  description: 'Maximum number of results to return (default: 200)',
+                },
+                file_pattern: {
+                  type: 'string',
+                  description: 'Glob pattern to filter files (e.g., "src/**/*.cs")',
+                },
+              },
+              required: [],
+              additionalProperties: false,
+            },
+          },
         ],
       };
     });
@@ -491,6 +522,10 @@ export class ClaudeCompassMCPServer {
 
           case 'discover_feature':
             response = await this.tools.discoverFeature(args);
+            break;
+
+          case 'detect_dead_code':
+            response = await this.tools.detectDeadCode(args);
             break;
 
           default:

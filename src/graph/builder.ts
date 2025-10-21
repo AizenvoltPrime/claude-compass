@@ -555,102 +555,40 @@ export class GraphBuilder {
       // Combine changed and new files for re-analysis
       const filesToAnalyze = changedFiles.concat(newFiles);
 
-    if (filesToAnalyze.length === 0 && deletedFileIds.length === 0) {
-      this.logger.info('No changed files detected, skipping analysis');
+      if (filesToAnalyze.length === 0 && deletedFileIds.length === 0) {
+        this.logger.info('No changed files detected, skipping analysis');
 
-      // Fetch current repository statistics from database
-      const dbFiles = await this.dbService.getFilesByRepository(repository.id);
-      const symbols = await this.dbService.getSymbolsByRepository(repository.id);
-      const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(
-        repository.id
+        // Build statistics from database
+        const { fileGraph, symbolGraph } = await this.buildGraphStatistics(
+          repository,
+          repository.path
+        );
+
+        return {
+          repository,
+          filesProcessed: 0,
+          symbolsExtracted: 0,
+          dependenciesCreated: 0,
+          fileGraph,
+          symbolGraph,
+          errors: [...this.buildErrors],
+          totalFiles: fileGraph.nodes.length,
+          totalSymbols: symbolGraph.nodes.length,
+        };
+      }
+
+      this.logger.info(
+        `Processing ${filesToAnalyze.length} files (${changedFiles.length} changed, ${newFiles.length} new)`
       );
-      const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(
-        repository.id
-      );
 
-      // Create lightweight graph data structures for statistics
-      const fileGraph = {
-        nodes: dbFiles.map(f => ({
-          id: f.id,
-          path: f.path,
-          relativePath: path.relative(repository.path, f.path),
-          language: f.language,
-          isTest: f.is_test,
-          isGenerated: f.is_generated,
-        })),
-        edges: Array(fileDependencyCount).fill(null),
-      };
+      // Re-analyze changed and new files
+      const partialResult = await this.reanalyzeFiles(repository.id, filesToAnalyze, options);
 
-      const symbolGraph = {
-        nodes: symbols.map(s => ({
-          id: s.id,
-          name: s.name,
-          type: s.symbol_type,
-          fileId: s.file_id,
-          startLine: s.start_line || 0,
-          endLine: s.end_line || 0,
-          isExported: s.is_exported,
-          visibility: s.visibility,
-          signature: s.signature,
-        })),
-        edges: Array(symbolDependencyCount).fill(null),
-      };
-
-      return {
+      // Build statistics from database
+      const { fileGraph, symbolGraph } = await this.buildGraphStatistics(
         repository,
-        filesProcessed: 0,
-        symbolsExtracted: 0,
-        dependenciesCreated: 0,
-        fileGraph,
-        symbolGraph,
-        errors: [...this.buildErrors],
-        totalFiles: dbFiles.length,
-        totalSymbols: symbols.length,
-      };
-    }
-
-    this.logger.info(`Processing ${filesToAnalyze.length} files (${changedFiles.length} changed, ${newFiles.length} new)`);
-
-    // Re-analyze changed and new files
-    const partialResult = await this.reanalyzeFiles(repository.id, filesToAnalyze, options);
-
-    // Fetch current repository statistics from database
-    const dbFiles = await this.dbService.getFilesByRepository(repository.id);
-    const symbols = await this.dbService.getSymbolsByRepository(repository.id);
-    const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(
-      repository.id
-    );
-    const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(
-      repository.id
-    );
-
-    // Create lightweight graph data structures for statistics
-    const fileGraph = {
-      nodes: dbFiles.map(f => ({
-        id: f.id,
-        path: f.path,
-        relativePath: path.relative(repository.path, f.path),
-        language: f.language,
-        isTest: f.is_test,
-        isGenerated: f.is_generated,
-      })),
-      edges: Array(fileDependencyCount).fill(null),
-    };
-
-    const symbolGraph = {
-      nodes: symbols.map(s => ({
-        id: s.id,
-        name: s.name,
-        type: s.symbol_type,
-        fileId: s.file_id,
-        startLine: s.start_line || 0,
-        endLine: s.end_line || 0,
-        isExported: s.is_exported,
-        visibility: s.visibility,
-        signature: s.signature,
-      })),
-      edges: Array(symbolDependencyCount).fill(null),
-    };
+        repository.path
+      );
 
       // Update repository timestamp
       await this.dbService.updateRepository(repository.id, {
@@ -672,8 +610,8 @@ export class GraphBuilder {
         fileGraph,
         symbolGraph,
         errors: [...(partialResult.errors || []), ...this.buildErrors],
-        totalFiles: dbFiles.length,
-        totalSymbols: symbols.length,
+        totalFiles: fileGraph.nodes.length,
+        totalSymbols: symbolGraph.nodes.length,
       };
     } catch (error) {
       this.logger.error('Incremental analysis failed', {
@@ -2656,9 +2594,24 @@ export class GraphBuilder {
   private async detectPrimaryLanguage(repositoryPath: string): Promise<string> {
     const files = await this.discoverFiles(repositoryPath, {
       fileExtensions: [
-        '.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs',
-        '.php', '.vue', '.cs', '.tscn', '.godot',
-        '.py', '.rb', '.go', '.java', '.cpp', '.c', '.h'
+        '.js',
+        '.ts',
+        '.jsx',
+        '.tsx',
+        '.mjs',
+        '.cjs',
+        '.php',
+        '.vue',
+        '.cs',
+        '.tscn',
+        '.godot',
+        '.py',
+        '.rb',
+        '.go',
+        '.java',
+        '.cpp',
+        '.c',
+        '.h',
       ],
       includeTestFiles: false,
     });
@@ -2681,8 +2634,7 @@ export class GraphBuilder {
       return 'unknown';
     }
 
-    const sortedLanguages = Array.from(languageCounts.entries())
-      .sort((a, b) => b[1] - a[1]);
+    const sortedLanguages = Array.from(languageCounts.entries()).sort((a, b) => b[1] - a[1]);
 
     const primaryLanguage = sortedLanguages[0][0];
     const primaryCount = sortedLanguages[0][1];
@@ -2744,6 +2696,53 @@ export class GraphBuilder {
     }
 
     return frameworks;
+  }
+
+  /// <summary>
+  /// Build lightweight graph statistics from database for summary reporting
+  /// Extracts duplicated statistics gathering logic
+  /// </summary>
+  private async buildGraphStatistics(
+    repository: Repository,
+    repositoryPath: string
+  ): Promise<{ fileGraph: FileGraphData; symbolGraph: SymbolGraphData }> {
+    const dbFiles = await this.dbService.getFilesByRepository(repository.id);
+    const symbols = await this.dbService.getSymbolsByRepository(repository.id);
+    const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(
+      repository.id
+    );
+    const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(
+      repository.id
+    );
+
+    const fileGraph = {
+      nodes: dbFiles.map(f => ({
+        id: f.id,
+        path: f.path,
+        relativePath: path.relative(repositoryPath, f.path),
+        language: f.language,
+        isTest: f.is_test,
+        isGenerated: f.is_generated,
+      })),
+      edges: Array(fileDependencyCount).fill(null),
+    };
+
+    const symbolGraph = {
+      nodes: symbols.map(s => ({
+        id: s.id,
+        name: s.name,
+        type: s.symbol_type,
+        fileId: s.file_id,
+        startLine: s.start_line || 0,
+        endLine: s.end_line || 0,
+        isExported: s.is_exported,
+        visibility: s.visibility,
+        signature: s.signature,
+      })),
+      edges: Array(symbolDependencyCount).fill(null),
+    };
+
+    return { fileGraph, symbolGraph };
   }
 
   private async getGitHash(repoPath: string): Promise<string | null> {
