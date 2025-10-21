@@ -745,6 +745,16 @@ export class DatabaseService {
     return (symbol as Symbol) || null;
   }
 
+  async getSymbolsBatch(ids: number[]): Promise<Map<number, Symbol>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const symbols = await this.db('symbols').whereIn('id', ids).select('*');
+
+    return new Map(symbols.map(s => [s.id, s as Symbol]));
+  }
+
   async getSymbolWithFile(id: number): Promise<SymbolWithFileAndRepository | null> {
     const result = await this.db('symbols')
       .leftJoin('files', 'symbols.file_id', 'files.id')
@@ -1212,6 +1222,61 @@ export class DatabaseService {
       match_type: 'vector' as const,
       search_rank: result.vector_score,
     }));
+  }
+
+  /**
+   * Calculate semantic similarity between query embedding and symbol embeddings.
+   * Uses pgvector's cosine distance operator for efficient similarity computation.
+   *
+   * @param symbolIds - Symbol IDs to calculate similarity for
+   * @param queryEmbedding - 1024-dimensional feature embedding
+   * @returns Map of symbol ID to similarity score (0.0 to 1.0)
+   */
+  async getSymbolSimilarities(
+    symbolIds: number[],
+    queryEmbedding: number[]
+  ): Promise<Map<number, number>> {
+    if (symbolIds.length === 0) {
+      return new Map();
+    }
+
+    if (!queryEmbedding || queryEmbedding.length !== 1024) {
+      throw new Error(
+        `Invalid query embedding: expected 1024 dimensions, got ${queryEmbedding?.length || 0}`
+      );
+    }
+
+    logger.debug('Calculating symbol similarities', {
+      symbolCount: symbolIds.length,
+      embeddingDimensions: queryEmbedding.length,
+    });
+
+    const results = await this.db('symbols')
+      .select(
+        'id',
+        this.db.raw('(1 - (combined_embedding <=> ?)) as similarity', [
+          JSON.stringify(queryEmbedding),
+        ])
+      )
+      .whereIn('id', symbolIds)
+      .whereNotNull('combined_embedding');
+
+    logger.debug('Symbol similarities calculated', {
+      symbolsWithEmbeddings: results.length,
+      symbolsWithoutEmbeddings: symbolIds.length - results.length,
+    });
+
+    return new Map(
+      results.map(r => {
+        const similarity = parseFloat(r.similarity);
+        if (isNaN(similarity)) {
+          throw new Error(
+            `Data integrity error: Invalid similarity score from database for symbol ${r.id}: ${r.similarity}`
+          );
+        }
+        return [r.id, similarity];
+      })
+    );
   }
 
   /**

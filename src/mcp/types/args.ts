@@ -56,4 +56,5 @@ export interface DiscoverFeatureArgs {
   max_depth?: number;
   max_symbols?: number;
   min_relevance_score?: number;
+  semantic_filtering_enabled?: boolean;
 }

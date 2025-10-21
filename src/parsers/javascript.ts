@@ -454,15 +454,29 @@ export class JavaScriptParser extends ChunkedParser {
       options?.repositoryFrameworks
     );
 
+    const isExported = this.isSymbolExported(node, name, content);
+
+    // Override entity_type for Vue composables
+    // Only exported functions matching use*/create* patterns should be composables
+    // Non-exported helper functions should remain as regular functions
+    let entityType = classification.entityType;
+    if (
+      frameworkContext === 'vue' &&
+      classification.entityType === 'composable' &&
+      !isExported
+    ) {
+      entityType = 'function';
+    }
+
     return {
       name,
       symbol_type: SymbolType.FUNCTION,
-      entity_type: classification.entityType,
+      entity_type: entityType,
       base_class: classification.baseClass || undefined,
       framework: classification.framework,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: this.isSymbolExported(node, name, content),
+      is_exported: isExported,
       signature,
       description,
     };
@@ -521,15 +535,40 @@ export class JavaScriptParser extends ChunkedParser {
       options?.repositoryFrameworks
     );
 
+    // Override entity_type for Pinia store definitions (Vue framework)
+    // Detect defineStore() calls to distinguish actual store definitions
+    // from store usages (e.g., const x = useXxxStore())
+    let entityType = classification.entityType;
+    if (
+      frameworkContext === 'vue' &&
+      signature &&
+      signature.includes('defineStore(')
+    ) {
+      entityType = 'store';
+    }
+
+    const isExported = this.isSymbolExported(node, name, content);
+
+    // Override entity_type for Vue composables (arrow functions)
+    // Only exported arrow functions matching use*/create* patterns should be composables
+    // Non-exported helper arrow functions should remain as regular functions
+    if (
+      frameworkContext === 'vue' &&
+      classification.entityType === 'composable' &&
+      !isExported
+    ) {
+      entityType = 'function';
+    }
+
     return {
       name,
       symbol_type: symbolType,
-      entity_type: classification.entityType,
+      entity_type: entityType,
       framework: classification.framework,
       base_class: classification.baseClass || undefined,
       start_line: node.startPosition.row + 1,
       end_line: node.endPosition.row + 1,
-      is_exported: this.isSymbolExported(node, name, content),
+      is_exported: isExported,
       signature,
       description,
     };

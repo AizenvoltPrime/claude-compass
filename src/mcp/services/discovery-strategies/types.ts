@@ -52,6 +52,14 @@ export interface DiscoveryContext {
    * Strategies can adjust behavior based on iteration depth.
    */
   iteration: number;
+
+  /**
+   * Semantic filtering configuration passed to strategies for reference.
+   */
+  semanticFiltering: {
+    enabled: boolean;
+    threshold: number | Map<string, number>;
+  };
 }
 
 /**
@@ -132,6 +140,38 @@ export interface DiscoveryEngineConfig {
    * Enable detailed logging for debugging.
    */
   debug: boolean;
+
+  /**
+   * Semantic filtering configuration.
+   * Uses embedding similarity to filter irrelevant symbols discovered by strategies.
+   */
+  semanticFiltering: {
+    /**
+     * Enable semantic filtering (default: true).
+     */
+    enabled: boolean;
+
+    /**
+     * Minimum cosine similarity threshold (0.0 to 1.0).
+     * Can be a single number (applied to all strategies) or a Map of strategy-specific thresholds.
+     *
+     * Strategy-specific thresholds allow tuning precision based on strategy reliability:
+     * - dependency-traversal: 0.60 (direct dependencies are highly reliable)
+     * - reverse-caller: 0.65 (actual callers are reliable)
+     * - forward-dependency: 0.65 (actual dependencies are reliable)
+     * - cross-stack: 0.70 (API matching is moderately reliable)
+     * - naming-pattern: 0.75 (name matching is less reliable)
+     *
+     * Default: 0.7 (balanced precision/recall)
+     */
+    similarityThreshold: number | Map<string, number>;
+
+    /**
+     * Set of strategy names to apply semantic filtering to.
+     * Default: naming-pattern, forward-dependency, reverse-caller
+     */
+    applyToStrategies: Set<string>;
+  };
 }
 
 /**
@@ -192,4 +232,42 @@ export interface DiscoveryStats {
     iteration: number;
     error: string;
   }>;
+
+  /**
+   * Semantic filtering statistics tracking impact of embedding-based filtering.
+   */
+  semanticFiltering: {
+    /**
+     * Whether semantic filtering was enabled for this discovery.
+     */
+    enabled: boolean;
+
+    /**
+     * Similarity threshold used for filtering.
+     * Can be a single number (global threshold) or a Map of strategy-specific thresholds.
+     */
+    threshold: number | Map<string, number>;
+
+    /**
+     * Total symbols before semantic filtering across all strategies.
+     */
+    totalSymbolsBeforeFilter: number;
+
+    /**
+     * Total symbols after semantic filtering across all strategies.
+     */
+    totalSymbolsAfterFilter: number;
+
+    /**
+     * Per-strategy filtering statistics showing impact.
+     */
+    strategiesFiltered: Map<
+      string,
+      {
+        before: number;
+        after: number;
+        avgSimilarity: number;
+      }
+    >;
+  };
 }

@@ -40,10 +40,11 @@ export { ReverseCallerStrategy } from './reverse-caller-strategy';
 
 /**
  * Factory function to create a fully configured discovery engine
- * with all standard strategies registered.
+ * with all standard strategies registered and semantic filtering enabled by default.
  */
 import { DatabaseService } from '../../../database/services';
 import { DiscoveryEngine } from './discovery-engine';
+import { DiscoveryEngineConfig } from './types';
 import { DependencyTraversalStrategy } from './dependency-traversal-strategy';
 import { NamingPatternStrategy } from './naming-pattern-strategy';
 import { ForwardDependencyStrategy } from './forward-dependency-strategy';
@@ -52,19 +53,14 @@ import { ReverseCallerStrategy } from './reverse-caller-strategy';
 
 export function createStandardDiscoveryEngine(
   dbService: DatabaseService,
-  config?: {
-    maxIterations?: number;
-    convergenceThreshold?: number;
-    debug?: boolean;
-  }
+  config?: Partial<DiscoveryEngineConfig>
 ): DiscoveryEngine {
-  const engine = new DiscoveryEngine(config);
+  const engine = new DiscoveryEngine(dbService, config);
 
-  // Register all standard strategies in priority order
   engine.registerStrategies([
     new DependencyTraversalStrategy(dbService),
     new NamingPatternStrategy(dbService),
-    new ForwardDependencyStrategy(dbService),  // ← This fixes the bug!
+    new ForwardDependencyStrategy(dbService),
     new CrossStackStrategy(dbService),
     new ReverseCallerStrategy(dbService),
   ]);
