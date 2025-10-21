@@ -126,11 +126,27 @@ export class FeatureDiscoveryService {
     const maxDepth = validatedArgs.max_depth || 3;
     const maxSymbols = validatedArgs.max_symbols || 500;
     const minRelevanceScore = validatedArgs.min_relevance_score || 0;
+    const semanticFilteringEnabled = validatedArgs.semantic_filtering_enabled ?? true;
+
+    const strategyThresholds = new Map([
+      ['dependency-traversal', 0.60],
+      ['reverse-caller', 0.65],
+      ['forward-dependency', 0.65],
+      ['cross-stack', 0.70],
+      ['naming-pattern', 0.75],
+    ]);
 
     logger.info('Starting feature discovery (plugin architecture)', {
       symbolId: validatedArgs.symbol_id,
       repoId,
-      options: { includeComponents, includeRoutes, includeModels, namingDepth, maxDepth },
+      options: {
+        includeComponents,
+        includeRoutes,
+        includeModels,
+        namingDepth,
+        maxDepth,
+        semanticFiltering: semanticFilteringEnabled,
+      },
     });
 
     const entrySymbol = await this.getSymbol(validatedArgs.symbol_id);
@@ -140,11 +156,15 @@ export class FeatureDiscoveryService {
 
     const featureName = this.extractFeatureName(entrySymbol.name);
 
-    // Use plugin-based discovery engine
     const engine = createStandardDiscoveryEngine(this.dbService, {
       maxIterations: 3,
       convergenceThreshold: 1,
       debug: false,
+      semanticFiltering: {
+        enabled: semanticFilteringEnabled,
+        similarityThreshold: strategyThresholds,
+        applyToStrategies: new Set(['dependency-traversal', 'naming-pattern', 'forward-dependency', 'reverse-caller']),
+      },
     });
 
     const { symbols: symbolRelevance, stats } = await engine.discover(

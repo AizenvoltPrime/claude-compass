@@ -425,6 +425,11 @@ export class ClaudeCompassMCPServer {
                   minimum: 0,
                   maximum: 1,
                 },
+                semantic_filtering_enabled: {
+                  type: 'boolean',
+                  description: 'Enable semantic filtering using embedding similarity with strategy-based thresholds (0.60-0.75 optimized per discovery method)',
+                  default: true,
+                },
               },
               required: ['symbol_id'],
               additionalProperties: false,

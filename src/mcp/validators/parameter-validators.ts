@@ -227,6 +227,12 @@ export function validateDiscoverFeatureArgs(args: any): DiscoverFeatureArgs {
       throw new Error('min_relevance_score must be between 0 and 1');
     }
   }
+  if (
+    args.semantic_filtering_enabled !== undefined &&
+    typeof args.semantic_filtering_enabled !== 'boolean'
+  ) {
+    throw new Error('semantic_filtering_enabled must be a boolean');
+  }
   validateMaxDepthParameter(args.max_depth);
   return args as DiscoverFeatureArgs;
 }

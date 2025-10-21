@@ -511,6 +511,15 @@ Discover complete feature modules across the entire stack. Finds all related cod
 - `min_relevance_score`: Minimum relevance score (0.0-1.0) for including symbols (default: 0)
   - Based on dependency distance and naming similarity
   - Higher values = only highly relevant symbols
+- `semantic_filtering_enabled`: Enable semantic filtering using embedding similarity (boolean, default: true)
+  - Uses BGE-M3 embeddings with strategy-based thresholds to filter out semantically unrelated symbols
+  - **Strategy-based thresholds** automatically adjust precision based on discovery method reliability:
+    - `dependency-traversal`: 0.60 (direct code dependencies are highly reliable)
+    - `reverse-caller`: 0.65 (actual function calls/imports are reliable)
+    - `forward-dependency`: 0.65 (dependencies are reliable)
+    - `cross-stack`: 0.70 (API matching is moderately reliable)
+    - `naming-pattern`: 0.75 (name-based matching requires stricter filtering)
+  - This prevents both false negatives (missing important code) and false positives (including unrelated code)
 
 **Returns:** Feature manifest with categorized symbols:
 - `feature_name`: Inferred feature name
