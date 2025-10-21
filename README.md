@@ -512,13 +512,17 @@ Discover complete feature modules across the entire stack. Finds all related cod
   - Based on dependency distance and naming similarity
   - Higher values = only highly relevant symbols
 - `semantic_filtering_enabled`: Enable semantic filtering using embedding similarity (boolean, default: true)
-  - Uses BGE-M3 embeddings with strategy-based thresholds to filter out semantically unrelated symbols
+  - Uses BGE-M3 embeddings with **two-dimensional adaptive thresholds** to filter out semantically unrelated symbols
   - **Strategy-based thresholds** automatically adjust precision based on discovery method reliability:
     - `dependency-traversal`: 0.60 (direct code dependencies are highly reliable)
     - `reverse-caller`: 0.65 (actual function calls/imports are reliable)
     - `forward-dependency`: 0.65 (dependencies are reliable)
     - `cross-stack`: 0.70 (API matching is moderately reliable)
     - `naming-pattern`: 0.75 (name-based matching requires stricter filtering)
+  - **Entity-type-aware thresholds** add fine-grained filtering based on symbol characteristics:
+    - Stricter for generic/reusable types: composables (0.75), functions (0.75), unclassified symbols (0.68-0.75)
+    - Stricter for indirect discovery: controllers/services from naming patterns (0.70)
+    - More lenient for structural types: interfaces/types (min 0.60)
   - This prevents both false negatives (missing important code) and false positives (including unrelated code)
 
 **Returns:** Feature manifest with categorized symbols:
