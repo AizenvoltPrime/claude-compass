@@ -2,7 +2,7 @@
 
 > A dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases.
 
-Enhanced search with hybrid vector+lexical capabilities, 6 focused core tools for comprehensive code analysis, powerful impact analysis, and streamlined CLI interface for production use.
+Enhanced search with hybrid vector+lexical capabilities, 9 focused core tools for comprehensive code analysis, powerful impact analysis, dead code detection, and streamlined CLI interface for production use.
 
 ## What is Claude Compass?
 
@@ -72,6 +72,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 - ✅ **Background Jobs** - Bull, BullMQ, Agenda, Bee, Kue, Worker Threads
 - ✅ **Enhanced Search** - Hybrid embedding+lexical search with vector similarity
 - ✅ **Impact Analysis** - Comprehensive blast radius calculation
+- ✅ **Dead Code Detection** - Systematic identification of unused code, interface bloat, and orphaned symbols
 
 ## Architecture
 
@@ -320,6 +321,11 @@ git clone https://github.com/your-org/claude-compass
 cd claude-compass
 npm install
 
+# Configure environment
+cp .env.example .env
+# Edit .env and set TIMEZONE (required for Docker)
+# Example: TIMEZONE=Europe/Athens or TIMEZONE=America/New_York
+
 # Setup database (Docker recommended)
 npm run docker:up
 npm run migrate:latest
@@ -367,7 +373,7 @@ npm test
 
 ## MCP Tools
 
-Claude Compass exposes 8 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, impact assessment, and feature discovery.
+Claude Compass exposes 9 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, impact assessment, feature discovery, and dead code detection.
 
 ### Available Tools
 
@@ -538,6 +544,38 @@ Discover complete feature modules across the entire stack. Finds all related cod
 - `related_symbols`: Additional related symbols
 - `summary`: Aggregate metrics including counts for each category
 
+#### 9. `detect_dead_code`
+
+Systematically detect dead code, interface bloat, and unused symbols in a codebase. Identifies interface methods implemented but never called, dead public/private methods, unused functions, dead classes, and unused exports. Excludes false positives like entry points, framework callbacks, test methods, and polymorphic methods.
+
+**Parameters:**
+
+- `repo_id` (optional): Repository ID to analyze (defaults to most recently analyzed)
+- `confidence_threshold`: Minimum confidence level to include in results
+  - Options: `high`, `medium`, `low` (default: `medium`)
+- `include_exports` (boolean): Include exported symbols in results (default: false - excludes exports)
+- `include_tests` (boolean): Include test files in analysis (default: false)
+- `symbol_types`: Array of symbol types to filter (e.g., `["function", "method", "class"]`)
+- `file_pattern`: Glob pattern to filter files (e.g., `"src/**/*.cs"`)
+- `max_results` (number): Maximum number of results to return (default: 200)
+
+**Returns:** Dead code analysis results grouped by file path → category → confidence (high/medium/low)
+
+**Categories Detected:**
+
+- `interface_bloat`: Interface methods implemented but never called
+- `dead_private_method`: Private methods with zero callers
+- `dead_public_method`: Public methods with zero callers, not exported
+- `dead_class`: Classes with zero instantiations
+- `dead_function`: Standalone functions never called
+- `unused_export`: Exported symbols with zero imports (may be used externally)
+
+Each finding includes:
+- Symbol details (id, name, type, line range)
+- Category and confidence level
+- Human-readable reason
+- Evidence (caller count, visibility, interface info)
+
 ### Usage Examples
 
 ```typescript
@@ -596,6 +634,28 @@ const feature = await mcpClient.callTool('discover_feature', {
   max_depth: 3, // Focused results
   max_symbols: 500,
   min_relevance_score: 0.5, // Only highly relevant symbols
+});
+
+// Detect dead code with high confidence (safest deletions)
+const deadCode = await mcpClient.callTool('detect_dead_code', {
+  confidence_threshold: 'high',
+  include_exports: false, // Exclude public API
+  include_tests: false,
+  max_results: 100,
+});
+
+// Find interface bloat in specific directory
+const interfaceBloat = await mcpClient.callTool('detect_dead_code', {
+  confidence_threshold: 'high',
+  include_exports: true,
+  file_pattern: 'src/services/**/*.cs',
+});
+
+// Scan entire codebase for all dead code
+const allDeadCode = await mcpClient.callTool('detect_dead_code', {
+  confidence_threshold: 'medium',
+  include_exports: true,
+  max_results: 200,
 });
 ```
 

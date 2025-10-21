@@ -217,8 +217,23 @@ export class JavaScriptParser extends ChunkedParser {
           break;
         }
         case 'method_definition': {
+          // CRITICAL FIX: Reject method_definition nodes that are actually control flow statements
+          // Control flow keywords (if, catch, while, etc.) are JavaScript reserved words and can
+          // NEVER be legitimate method names. Tree-sitter occasionally reports these nodes when
+          // parsing certain code patterns, but they represent impossible symbols that must be filtered.
+          const nameNode = node.childForFieldName('name');
+          const controlFlowKeywords = ['if', 'else', 'catch', 'while', 'for', 'do', 'switch', 'try'];
+          const isControlFlow = nameNode && controlFlowKeywords.includes(nameNode.text);
+
+          if (isControlFlow) {
+            // Skip - control flow keywords cannot be method names
+            break;
+          }
+
           const symbol = this.extractMethodSymbol(node, content, filePath, options);
-          if (symbol) symbols.push(symbol);
+          if (symbol) {
+            symbols.push(symbol);
+          }
           break;
         }
         case 'arrow_function': {
@@ -617,11 +632,15 @@ export class JavaScriptParser extends ChunkedParser {
   }
 
   private extractMethodSymbol(node: Parser.SyntaxNode, content: string, filePath?: string, options?: FrameworkParseOptions): ParsedSymbol | null {
+    // Defensive validation: Only process actual method_definition nodes
+    if (node.type !== 'method_definition') {
+      return null;
+    }
+
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
     const name = this.getNodeText(nameNode, content);
-
     if (name === 'constructor') {
       return null;
     }

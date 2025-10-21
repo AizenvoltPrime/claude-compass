@@ -7,6 +7,9 @@ services:
       POSTGRES_USER: claude_compass
       POSTGRES_PASSWORD: password
       POSTGRES_INITDB_ARGS: '--encoding=UTF-8'
+      TZ: ${TIMEZONE}
+      PGTZ: ${TIMEZONE}
+    command: postgres -c timezone=${TIMEZONE}
     ports:
       - '5432:5432'
     volumes:
@@ -29,6 +32,9 @@ services:
       POSTGRES_USER: claude_compass
       POSTGRES_PASSWORD: password
       POSTGRES_INITDB_ARGS: '--encoding=UTF-8'
+      TZ: ${TIMEZONE}
+      PGTZ: ${TIMEZONE}
+    command: postgres -c timezone=${TIMEZONE}
     ports:
       - '5433:5432'
     volumes:

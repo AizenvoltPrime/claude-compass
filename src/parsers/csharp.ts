@@ -787,6 +787,12 @@ export class CSharpParser extends ChunkedParser {
     const parameters = this.extractParameters(node, content);
     const isGodotLifecycle = CSharpParser.GODOT_LIFECYCLE_METHODS.has(name);
 
+    // Extract explicit interface qualifier if present
+    const explicitInterfaceQualifier = this.extractExplicitInterfaceQualifier(node, content);
+    const fullMethodName = explicitInterfaceQualifier
+      ? `${explicitInterfaceQualifier}.${name}`
+      : name;
+
     // Add to method map for resolution
     const methodInfo: MethodInfo = {
       name,
@@ -824,7 +830,7 @@ export class CSharpParser extends ChunkedParser {
       end_line: node.endPosition.row + 1,
       is_exported: isExported,
       visibility,
-      signature: this.buildMethodSignature(name, modifiers, returnType, parameters),
+      signature: this.buildMethodSignature(fullMethodName, modifiers, returnType, parameters),
       description,
     };
 
@@ -1014,6 +1020,23 @@ export class CSharpParser extends ChunkedParser {
       content,
       context
     );
+
+    // Handle Godot's CallDeferred(nameof(MethodName)) pattern
+    // This creates a reflection-based call that should be tracked as a dependency
+    if (
+      (methodName === 'CallDeferred' || methodName === 'CallDeferredThreadGroup') &&
+      parameters.length > 0
+    ) {
+      const deferredMethodName = this.extractNameofIdentifier(node, content);
+      if (deferredMethodName) {
+        // Create a call to the deferred method instead of CallDeferred
+        methodName = deferredMethodName;
+        // The deferred method is on the current class (this)
+        callingObject = 'this';
+        resolvedClass = context.currentClass;
+      }
+    }
+
     const fullyQualifiedName = resolvedClass ? `${resolvedClass}.${methodName}` : methodName;
 
     return {
@@ -2236,6 +2259,42 @@ export class CSharpParser extends ChunkedParser {
     return 'unknown';
   }
 
+  /**
+   * Extract the identifier from a nameof() expression in the first argument
+   * Used to track CallDeferred(nameof(MethodName)) as a method call dependency
+   */
+  private extractNameofIdentifier(node: Parser.SyntaxNode, content: string): string | null {
+    // Find the argument_list node
+    const argumentList = this.findNodeOfType(node, 'argument_list');
+    if (!argumentList || argumentList.namedChildCount === 0) return null;
+
+    // Get the first argument
+    const firstArg = argumentList.namedChild(0);
+    if (!firstArg || firstArg.type !== 'argument') return null;
+
+    // Look for invocation_expression (the nameof call itself)
+    const invocationNode = this.findNodeOfType(firstArg, 'invocation_expression');
+    if (!invocationNode) return null;
+
+    // Verify it's actually a nameof call
+    const functionNode = invocationNode.childForFieldName('function');
+    if (!functionNode) return null;
+
+    const functionName = this.getNodeText(functionNode, content);
+    if (functionName !== 'nameof') return null;
+
+    // Extract the argument to nameof()
+    const nameofArgList = this.findNodeOfType(invocationNode, 'argument_list');
+    if (!nameofArgList || nameofArgList.namedChildCount === 0) return null;
+
+    const nameofArg = nameofArgList.namedChild(0);
+    if (!nameofArg) return null;
+
+    // The argument text is the identifier we want (e.g., "InitializeGameplayCoordination")
+    const identifier = this.getNodeText(nameofArg, content).trim();
+    return identifier || null;
+  }
+
   private resolveType(typeString: string): string {
     if (PATTERNS.interfacePrefix.test(typeString)) {
       const withoutPrefix = typeString.substring(1);
@@ -2359,6 +2418,13 @@ export class CSharpParser extends ChunkedParser {
     const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
     const paramString = parameters.map(p => `${p.type} ${p.name}`).join(', ');
     return `${modifierString}${name}(${paramString})`;
+  }
+
+  private extractExplicitInterfaceQualifier(node: Parser.SyntaxNode, content: string): string | null {
+    const declarationText = this.getNodeText(node, content);
+    const explicitInterfacePattern = /\b(I[A-Z]\w+)\s*\.\s*\w+\s*\(/;
+    const match = declarationText.match(explicitInterfacePattern);
+    return match ? match[1] : null;
   }
 
   protected shouldUseChunking(content: string, options: ChunkedParseOptions): boolean {

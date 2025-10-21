@@ -617,6 +617,12 @@ export class PHPParser extends ChunkedParser {
   }
 
   private extractMethodSymbol(node: Parser.SyntaxNode, content: string, context: PHPParsingContext): ParsedSymbol | null {
+    // Defensive validation: Only process actual method_declaration nodes
+    // This prevents bugs where other statement nodes are mistakenly passed to this method
+    if (node.type !== 'method_declaration') {
+      return null;
+    }
+
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -624,7 +630,9 @@ export class PHPParser extends ChunkedParser {
     const modifiers = this.extractModifiers(node);
     const paramsNode = node.childForFieldName('parameters');
     const params = paramsNode ? this.getNodeText(paramsNode, content) : '()';
-    const signature = this.buildMethodSignature(name, modifiers, params);
+    const returnTypeNode = node.childForFieldName('return_type');
+    const returnType = returnTypeNode ? this.getNodeText(returnTypeNode, content) : null;
+    const signature = this.buildMethodSignature(name, modifiers, params, returnType);
     const visibility = this.extractVisibility(node, content);
     const description = this.extractPhpDocComment(node, content);
 
@@ -815,6 +823,7 @@ export class PHPParser extends ChunkedParser {
   private extractFunctionSignature(node: Parser.SyntaxNode, content: string): string {
     const nameNode = node.childForFieldName('name');
     const parametersNode = node.childForFieldName('parameters');
+    const returnTypeNode = node.childForFieldName('return_type');
 
     let signature = '';
     if (nameNode) {
@@ -823,6 +832,10 @@ export class PHPParser extends ChunkedParser {
 
     if (parametersNode) {
       signature += this.getNodeText(parametersNode, content);
+    }
+
+    if (returnTypeNode) {
+      signature += ': ' + this.getNodeText(returnTypeNode, content);
     }
 
     return signature;
@@ -845,9 +858,10 @@ export class PHPParser extends ChunkedParser {
     return modifiers;
   }
 
-  private buildMethodSignature(name: string, modifiers: string[], params: string): string {
+  private buildMethodSignature(name: string, modifiers: string[], params: string, returnType: string | null = null): string {
     const modifierString = modifiers.length > 0 ? modifiers.join(' ') + ' ' : '';
-    return `${modifierString}function ${name}${params}`;
+    const returnTypeString = returnType ? `: ${returnType}` : '';
+    return `${modifierString}function ${name}${params}${returnTypeString}`;
   }
 
   private findContainingFunction(callNode: Parser.SyntaxNode, content: string): string {

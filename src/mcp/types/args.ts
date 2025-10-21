@@ -11,7 +11,6 @@ export interface GetSymbolArgs {
 
 export interface SearchCodeArgs {
   query: string;
-  repo_ids?: number[];
   entity_types?: string[];
   framework?: string;
   is_exported?: boolean;
