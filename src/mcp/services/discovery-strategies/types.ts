@@ -60,6 +60,24 @@ export interface DiscoveryContext {
     enabled: boolean;
     threshold: number | Map<string, number>;
   };
+
+  /**
+   * Symbol IDs that were discovered through direct graph edges (API calls, dependencies).
+   * These symbols have proven connections and should bypass semantic validation.
+   * Populated by cross-stack strategy when discovering controllers via API graph.
+   */
+  graphValidatedSymbols: Set<number>;
+
+  /**
+   * Symbol IDs added to provide validation context but NOT part of the feature itself.
+   *
+   * Context symbols are used for validation logic (e.g., checking if a request is used
+   * by discovered controller methods) but should NOT appear in the final feature manifest.
+   *
+   * This separation prevents route discovery from including unrelated CRUD endpoints
+   * when starting from backend models.
+   */
+  contextSymbols: Set<number>;
 }
 
 /**

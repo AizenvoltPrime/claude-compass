@@ -156,11 +156,23 @@ export class JavaScriptParser extends ChunkedParser {
       const deduplicatedImports = this.removeDuplicateImports(result.imports);
       const deduplicatedExports = this.removeDuplicateExports(result.exports);
 
+      // Convert local imports into symbol dependencies (like C#/PHP parsers do)
+      const importDependencies = this.convertImportsToDependencies(
+        deduplicatedImports,
+        deduplicatedSymbols,
+        deduplicatedExports,
+        filePath
+      );
+      const allDependencies = this.removeDuplicateDependencies([
+        ...deduplicatedDependencies,
+        ...importDependencies,
+      ]);
+
       return {
         symbols: validatedOptions.includePrivateSymbols
           ? deduplicatedSymbols
           : deduplicatedSymbols.filter(s => s.visibility !== 'private'),
-        dependencies: deduplicatedDependencies,
+        dependencies: allDependencies,
         imports: deduplicatedImports,
         exports: deduplicatedExports,
         errors: [],
@@ -1173,6 +1185,78 @@ export class JavaScriptParser extends ChunkedParser {
   private buildMethodSignature(name: string, modifiers: string[], params: string): string {
     const modifierString = modifiers.length > 0 ? modifiers.join(' ') + ' ' : '';
     return `${modifierString}${name}${params}`;
+  }
+
+  /**
+   * Convert local imports into symbol dependencies.
+   * Creates dependency edges from the file's main symbol to imported symbols,
+   * similar to how C# and PHP parsers track type dependencies.
+   *
+   * Only processes local imports (relative paths or @/ aliases), not external packages.
+   */
+  protected convertImportsToDependencies(
+    imports: ParsedImport[],
+    symbols: ParsedSymbol[],
+    exports: ParsedExport[],
+    filePath?: string
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    // Determine the "from" symbol - prefer default export, then first exported symbol, then first symbol
+    let fromSymbol = '';
+    if (exports.length > 0) {
+      const defaultExport = exports.find(e => e.export_type === 'default');
+      if (defaultExport && defaultExport.exported_names.length > 0) {
+        fromSymbol = defaultExport.exported_names[0];
+      } else if (exports[0].exported_names.length > 0) {
+        fromSymbol = exports[0].exported_names[0];
+      }
+    }
+    if (!fromSymbol && symbols.length > 0) {
+      // Use first exported symbol, or just first symbol
+      const firstExportedSymbol = symbols.find(s => s.is_exported);
+      fromSymbol = firstExportedSymbol?.name || symbols[0].name;
+    }
+    if (!fromSymbol) {
+      // No symbols found, can't create dependencies
+      return dependencies;
+    }
+
+    for (const importInfo of imports) {
+      // Only process local imports (not external packages)
+      const isLocalImport =
+        importInfo.source.startsWith('./') ||
+        importInfo.source.startsWith('../') ||
+        importInfo.source.startsWith('/') ||
+        importInfo.source.startsWith('src/') ||
+        importInfo.source.startsWith('@/');
+
+      if (!isLocalImport) {
+        continue;
+      }
+
+      // Create dependencies for each imported name
+      for (const importedName of importInfo.imported_names) {
+        dependencies.push({
+          from_symbol: fromSymbol,
+          to_symbol: importedName,
+          dependency_type: DependencyType.IMPORTS,
+          line_number: importInfo.line_number,
+          qualified_context: `import from ${importInfo.source}`,
+        });
+
+        // Also create a REFERENCES dependency to match existing behavior
+        dependencies.push({
+          from_symbol: fromSymbol,
+          to_symbol: importedName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: importInfo.line_number,
+          qualified_context: `import from ${importInfo.source}`,
+        });
+      }
+    }
+
+    return dependencies;
   }
 
   /**

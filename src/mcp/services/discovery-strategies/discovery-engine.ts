@@ -30,6 +30,7 @@ const logger = createComponentLogger('discovery-engine');
 interface SemanticThresholdConfig {
   composable: number;
   function: number;
+  component: number;
   unclassifiedVariable: number;
   unclassifiedFunction: number;
   unclassifiedMethod: number;
@@ -54,19 +55,20 @@ export class DiscoveryEngine {
   private readonly thresholdConfig: SemanticThresholdConfig = {
     composable: 0.75,
     function: 0.75,
-    unclassifiedVariable: 0.70,
+    component: 0.7,
+    unclassifiedVariable: 0.7,
     unclassifiedFunction: 0.75,
-    unclassifiedMethod: 0.70,
+    unclassifiedMethod: 0.7,
     unclassifiedOther: 0.68,
     interface: 0.0,
     type: 0.0,
     property: 0.0,
     variable: 0.0,
-    controller: 0.70,
-    service: 0.70,
+    controller: 0.7,
+    service: 0.7,
     interfaceTypeOffset: -0.05,
     propertyVariableOffset: 0.05,
-    minInterfaceTypeThreshold: 0.60,
+    minInterfaceTypeThreshold: 0.6,
   };
 
   constructor(
@@ -82,7 +84,12 @@ export class DiscoveryEngine {
         similarityThreshold: config.semanticFiltering?.similarityThreshold ?? 0.7,
         applyToStrategies:
           config.semanticFiltering?.applyToStrategies ??
-          new Set(['dependency-traversal', 'naming-pattern', 'forward-dependency', 'reverse-caller']),
+          new Set([
+            'dependency-traversal',
+            'naming-pattern',
+            'forward-dependency',
+            'reverse-caller',
+          ]),
       },
     };
     this.embeddingService = getEmbeddingService();
@@ -189,6 +196,12 @@ export class DiscoveryEngine {
     // These are harder to distinguish semantically due to shared patterns
     if (entityType === 'composable' || entityType === 'function') {
       return this.thresholdConfig.composable;
+    }
+
+    // Components need stricter threshold to filter out weakly-related UI components
+    // Template parsing creates many component connections; semantic filtering prevents noise
+    if (entityType === 'component') {
+      return this.thresholdConfig.component;
     }
 
     // Unclassified symbols (null entity_type) are often generic helpers or framework code
@@ -332,6 +345,15 @@ export class DiscoveryEngine {
     try {
       const startTime = Date.now();
       const symbolRelevance = new Map<number, number>([[entryPointId, 1.0]]);
+
+      // CONTROLLER METHOD EXPANSION:
+      // When starting from a controller method, also include the parent controller class
+      // This ensures we discover constructor-injected services, requests, and models
+      // that are dependencies of the controller class, not the individual method
+      await this.expandControllerMethodEntryPoint(symbolRelevance, entryPointId, repoId);
+
+      const graphValidatedSymbols = new Set<number>(); // Track symbols discovered via direct graph edges
+      const contextSymbols = new Set<number>(); // Track symbols for validation context only (not part of feature)
       const stats: DiscoveryStats = {
         iterations: 0,
         symbolsPerIteration: [],
@@ -361,152 +383,186 @@ export class DiscoveryEngine {
         }
       });
 
-    logger.info('Starting discovery engine', {
-      entryPointId,
-      featureName,
-      strategiesCount: this.strategies.length,
-      maxIterations: this.config.maxIterations,
-      semanticFiltering: this.config.semanticFiltering.enabled,
-    });
-
-    for (let iteration = 0; iteration < this.config.maxIterations; iteration++) {
-      const iterationStartSize = symbolRelevance.size;
-      stats.iterations = iteration + 1;
-
-      if (this.config.debug) {
-        logger.debug(`Iteration ${iteration + 1}`, {
-          currentSymbols: symbolRelevance.size,
-          strategies: this.strategies.map(s => s.name),
-        });
-      }
-
-      const context: DiscoveryContext = {
-        currentSymbols: Array.from(symbolRelevance.keys()),
-        repoId,
-        featureName,
+      logger.info('Starting discovery engine', {
         entryPointId,
-        options,
-        iteration,
-        semanticFiltering: {
-          enabled: this.config.semanticFiltering.enabled,
-          threshold: this.config.semanticFiltering.similarityThreshold,
-        },
-      };
+        featureName,
+        strategiesCount: this.strategies.length,
+        maxIterations: this.config.maxIterations,
+        semanticFiltering: this.config.semanticFiltering.enabled,
+      });
 
-      for (const strategy of this.strategies) {
-        if (strategy.shouldRun && !strategy.shouldRun(context)) {
-          if (this.config.debug) {
-            logger.debug(`Skipping strategy ${strategy.name}`, { iteration });
-          }
-          continue;
+      for (let iteration = 0; iteration < this.config.maxIterations; iteration++) {
+        const iterationStartSize = symbolRelevance.size;
+        stats.iterations = iteration + 1;
+
+        if (this.config.debug) {
+          logger.debug(`Iteration ${iteration + 1}`, {
+            currentSymbols: symbolRelevance.size,
+            strategies: this.strategies.map(s => s.name),
+          });
         }
 
-        const strategyStart = Date.now();
-        let discovered: DiscoveryResult;
+        const context: DiscoveryContext = {
+          currentSymbols: Array.from(symbolRelevance.keys()),
+          repoId,
+          featureName,
+          entryPointId,
+          options,
+          iteration,
+          semanticFiltering: {
+            enabled: this.config.semanticFiltering.enabled,
+            threshold: this.config.semanticFiltering.similarityThreshold,
+          },
+          graphValidatedSymbols,
+          contextSymbols,
+        };
 
-        try {
-          discovered = await strategy.discover(context);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+        for (const strategy of this.strategies) {
+          if (strategy.shouldRun && !strategy.shouldRun(context)) {
+            if (this.config.debug) {
+              logger.debug(`Skipping strategy ${strategy.name}`, { iteration });
+            }
+            continue;
+          }
 
-          // Track failure in stats
-          stats.failedStrategies.push({
-            strategy: strategy.name,
-            iteration,
-            error: errorMessage,
-          });
+          const strategyStart = Date.now();
+          let discovered: DiscoveryResult;
 
-          // Critical strategies (priority <= CRITICAL_STRATEGY_PRIORITY) must succeed
-          // These are foundational strategies like dependency-traversal
-          if (strategy.priority <= CRITICAL_STRATEGY_PRIORITY) {
-            logger.error(`Critical strategy ${strategy.name} failed - aborting discovery`, {
+          try {
+            discovered = await strategy.discover(context);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            // Track failure in stats
+            stats.failedStrategies.push({
+              strategy: strategy.name,
+              iteration,
+              error: errorMessage,
+            });
+
+            // Critical strategies (priority <= CRITICAL_STRATEGY_PRIORITY) must succeed
+            // These are foundational strategies like dependency-traversal
+            if (strategy.priority <= CRITICAL_STRATEGY_PRIORITY) {
+              logger.error(`Critical strategy ${strategy.name} failed - aborting discovery`, {
+                error: errorMessage,
+                iteration,
+                priority: strategy.priority,
+              });
+              throw new Error(
+                `Critical discovery strategy '${strategy.name}' failed: ${errorMessage}`
+              );
+            }
+
+            // Non-critical strategies log error and continue
+            logger.error(`Strategy ${strategy.name} failed - continuing with other strategies`, {
               error: errorMessage,
               iteration,
               priority: strategy.priority,
             });
-            throw new Error(
-              `Critical discovery strategy '${strategy.name}' failed: ${errorMessage}`
+            continue;
+          }
+
+          let filterStats = { before: discovered.size, after: discovered.size, avgSimilarity: 0 };
+          if (this.shouldApplySemanticFilter(strategy.name) && featureEmbedding) {
+            const result = await this.applySemanticFilter(
+              discovered,
+              featureEmbedding,
+              strategy.name
             );
+            discovered = result.filtered;
+            filterStats = result.stats;
+
+            stats.semanticFiltering.strategiesFiltered.set(strategy.name, filterStats);
+            stats.semanticFiltering.totalSymbolsBeforeFilter += filterStats.before;
+            stats.semanticFiltering.totalSymbolsAfterFilter += filterStats.after;
           }
 
-          // Non-critical strategies log error and continue
-          logger.error(`Strategy ${strategy.name} failed - continuing with other strategies`, {
-            error: errorMessage,
-            iteration,
-            priority: strategy.priority,
+          const strategyTime = Date.now() - strategyStart;
+          const newSymbolsCount = Array.from(discovered.keys()).filter(
+            id => !symbolRelevance.has(id)
+          ).length;
+
+          discovered.forEach((relevance, id) => {
+            if (!symbolRelevance.has(id)) {
+              symbolRelevance.set(id, relevance);
+            }
           });
-          continue;
-        }
 
-        let filterStats = { before: discovered.size, after: discovered.size, avgSimilarity: 0 };
-        if (this.shouldApplySemanticFilter(strategy.name) && featureEmbedding) {
-          const result = await this.applySemanticFilter(discovered, featureEmbedding, strategy.name);
-          discovered = result.filtered;
-          filterStats = result.stats;
+          // Track graph-validated symbols from cross-stack strategy
+          // Controllers and requests discovered via API graph edges should bypass semantic validation
+          if (strategy.name === 'cross-stack' && discovered.size > 0) {
+            const discoveredIds = Array.from(discovered.keys());
+            const symbols = await this.dbService.getSymbolsBatch(discoveredIds);
 
-          stats.semanticFiltering.strategiesFiltered.set(strategy.name, filterStats);
-          stats.semanticFiltering.totalSymbolsBeforeFilter += filterStats.before;
-          stats.semanticFiltering.totalSymbolsAfterFilter += filterStats.after;
-        }
+            let controllersAdded = 0;
+            let requestsAdded = 0;
 
-        const strategyTime = Date.now() - strategyStart;
-        const newSymbolsCount = Array.from(discovered.keys()).filter(
-          id => !symbolRelevance.has(id)
-        ).length;
+            for (const [id, symbol] of symbols.entries()) {
+              if (symbol?.entity_type === 'controller') {
+                graphValidatedSymbols.add(id);
+                controllersAdded++;
+              } else if (symbol?.entity_type === 'request') {
+                graphValidatedSymbols.add(id);
+                requestsAdded++;
+              }
+            }
 
-        discovered.forEach((relevance, id) => {
-          if (!symbolRelevance.has(id)) {
-            symbolRelevance.set(id, relevance);
+            if (this.config.debug) {
+              logger.debug('Graph-validated symbols from cross-stack', {
+                controllers: controllersAdded,
+                requests: requestsAdded,
+                total: graphValidatedSymbols.size,
+              });
+            }
           }
+
+          // Update stats
+          const stratStats = stats.strategyStats.get(strategy.name) || {
+            executions: 0,
+            symbolsDiscovered: 0,
+            avgExecutionTime: 0,
+          };
+          stratStats.executions++;
+          stratStats.symbolsDiscovered += newSymbolsCount;
+          stratStats.avgExecutionTime =
+            (stratStats.avgExecutionTime * (stratStats.executions - 1) + strategyTime) /
+            stratStats.executions;
+          stats.strategyStats.set(strategy.name, stratStats);
+
+          if (this.config.debug) {
+            logger.debug(`Strategy ${strategy.name} complete`, {
+              discovered: discovered.size,
+              newSymbols: newSymbolsCount,
+              time: strategyTime,
+            });
+          }
+        }
+
+        const iterationNewSymbols = symbolRelevance.size - iterationStartSize;
+        stats.symbolsPerIteration.push(iterationNewSymbols);
+
+        logger.info(`Iteration ${iteration + 1} complete`, {
+          totalSymbols: symbolRelevance.size,
+          newSymbols: iterationNewSymbols,
         });
 
-        // Update stats
-        const stratStats = stats.strategyStats.get(strategy.name) || {
-          executions: 0,
-          symbolsDiscovered: 0,
-          avgExecutionTime: 0,
-        };
-        stratStats.executions++;
-        stratStats.symbolsDiscovered += newSymbolsCount;
-        stratStats.avgExecutionTime =
-          (stratStats.avgExecutionTime * (stratStats.executions - 1) + strategyTime) /
-          stratStats.executions;
-        stats.strategyStats.set(strategy.name, stratStats);
-
-        if (this.config.debug) {
-          logger.debug(`Strategy ${strategy.name} complete`, {
-            discovered: discovered.size,
-            newSymbols: newSymbolsCount,
-            time: strategyTime,
-          });
+        // Check convergence
+        if (symbolRelevance.size === previousSize) {
+          unchangedIterations++;
+          if (unchangedIterations >= this.config.convergenceThreshold) {
+            logger.info('Discovery converged', {
+              iterations: iteration + 1,
+              totalSymbols: symbolRelevance.size,
+            });
+            stats.converged = true;
+            break;
+          }
+        } else {
+          unchangedIterations = 0;
         }
+
+        previousSize = symbolRelevance.size;
       }
-
-      const iterationNewSymbols = symbolRelevance.size - iterationStartSize;
-      stats.symbolsPerIteration.push(iterationNewSymbols);
-
-      logger.info(`Iteration ${iteration + 1} complete`, {
-        totalSymbols: symbolRelevance.size,
-        newSymbols: iterationNewSymbols,
-      });
-
-      // Check convergence
-      if (symbolRelevance.size === previousSize) {
-        unchangedIterations++;
-        if (unchangedIterations >= this.config.convergenceThreshold) {
-          logger.info('Discovery converged', {
-            iterations: iteration + 1,
-            totalSymbols: symbolRelevance.size,
-          });
-          stats.converged = true;
-          break;
-        }
-      } else {
-        unchangedIterations = 0;
-      }
-
-      previousSize = symbolRelevance.size;
-    }
 
       stats.totalTime = Date.now() - startTime;
 
@@ -525,6 +581,51 @@ export class DiscoveryEngine {
     } finally {
       // Always clear cached embedding to prevent memory leaks, even on error
       this.featureEmbedding = null;
+    }
+  }
+
+  /**
+   * Expand entry point when it's a controller method to include the parent controller class.
+   *
+   * Controller methods often don't have direct dependencies to services/models because
+   * these are injected in the controller constructor.
+   *
+   * @param symbolRelevance - Map to add the controller class to
+   * @param entryPointId - The method symbol ID
+   * @param repoId - Repository ID
+   */
+  private async expandControllerMethodEntryPoint(
+    symbolRelevance: Map<number, number>,
+    entryPointId: number,
+    repoId: number
+  ): Promise<void> {
+    const db = this.dbService.knex;
+
+    // Get the entry point symbol
+    const entryPoint = await db('symbols').where('id', entryPointId).first();
+
+    // Only expand if it's a controller method
+    if (entryPoint?.symbol_type !== 'method' || entryPoint?.entity_type !== 'method') {
+      return;
+    }
+
+    // Find parent controller class in the same file
+    const controllerClass = await db('symbols')
+      .where('file_id', entryPoint.file_id)
+      .where('symbol_type', 'class')
+      .where('entity_type', 'controller')
+      .first();
+
+    if (controllerClass) {
+      // Add controller class to initial discovery set
+      symbolRelevance.set(controllerClass.id, 1.0);
+
+      logger.info('Expanded controller method entry point', {
+        methodId: entryPointId,
+        methodName: entryPoint.name,
+        controllerId: controllerClass.id,
+        controllerName: controllerClass.name,
+      });
     }
   }
 

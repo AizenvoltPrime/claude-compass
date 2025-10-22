@@ -35,15 +35,14 @@ export class NamingPatternStrategy implements DiscoveryStrategy {
   }
 
   async discover(context: DiscoveryContext): Promise<DiscoveryResult> {
-    const { featureName, repoId, options } = context;
+    const { featureName, repoId, options, currentSymbols } = context;
 
     // Auto-detect naming patterns from repository
     const detected = await this.detectCommonPatterns(repoId);
-    const patterns = this.generateNamingPatterns(
-      featureName,
-      options.namingDepth,
-      detected
-    );
+    const patterns = this.generateNamingPatterns(featureName, options.namingDepth, detected);
+
+    // Build file-level context from currently discovered symbols
+    const validatedFileIds = await this.getValidatedFileIds(currentSymbols);
 
     logger.debug('Starting naming pattern search', {
       featureName,
@@ -51,6 +50,8 @@ export class NamingPatternStrategy implements DiscoveryStrategy {
       depth: options.namingDepth,
       detectedSuffixes: detected.suffixes.length,
       detectedVerbs: detected.verbs.length,
+      discoveredSymbols: currentSymbols.length,
+      validatedFiles: validatedFileIds.size,
     });
 
     const related = new Set<number>();
@@ -60,7 +61,40 @@ export class NamingPatternStrategy implements DiscoveryStrategy {
         limit: DEFAULT_SEARCH_LIMIT,
         symbolTypes: [],
       });
-      symbols.forEach(s => related.add(s.id));
+      // Exclude components, stores, services, models, controllers, composables, and requests from naming-pattern discovery.
+      // These should only be discovered through actual code dependencies
+      // (imports, calls, API endpoints, routes) to avoid pattern-similar false positives.
+
+      symbols.forEach(s => {
+        if (
+          s.entity_type !== 'component' &&
+          s.entity_type !== 'store' &&
+          s.entity_type !== 'service' &&
+          s.entity_type !== 'model' &&
+          s.entity_type !== 'controller' &&
+          s.entity_type !== 'composable' &&
+          s.entity_type !== 'request'
+        ) {
+          // FILE-LEVEL CONTEXT FILTERING
+          // Only apply to generic symbols (methods, properties, variables, functions, interfaces)
+          // Entity types have their own validation logic and should not be filtered by file-level context
+          const isEntityType = s.entity_type && [
+            'store', 'service', 'model', 'controller', 'component', 'request', 'composable'
+          ].includes(s.entity_type);
+
+          if (!isEntityType && s.file_id && !validatedFileIds.has(s.file_id)) {
+            logger.debug('Filtered by file-level context', {
+              symbolId: s.id,
+              symbolName: s.name,
+              symbolType: s.symbol_type,
+              fileId: s.file_id,
+            });
+            return; // Skip this symbol
+          }
+
+          related.add(s.id);
+        }
+      });
     }
 
     // Convert to relevance map (all naming-discovered symbols get same score)
@@ -113,7 +147,8 @@ export class NamingPatternStrategy implements DiscoveryStrategy {
       .limit(FUNCTION_SAMPLE_SIZE_FOR_VERBS); // Sample to avoid huge queries
 
     const verbs = new Set<string>();
-    const verbPattern = /^(create|get|update|delete|handle|process|fetch|load|save|remove|add|set|check|validate|build|generate|find|make|show|edit|destroy|store|index|search|filter|sort|toggle|enable|disable|register|unregister|start|stop|run|execute|invoke|trigger|emit|dispatch|subscribe|unsubscribe|watch|unwatch|mount|unmount|render|draw|spawn|despawn|initialize|cleanup)/i;
+    const verbPattern =
+      /^(create|get|update|delete|handle|process|fetch|load|save|remove|add|set|check|validate|build|generate|find|make|show|edit|destroy|store|index|search|filter|sort|toggle|enable|disable|register|unregister|start|stop|run|execute|invoke|trigger|emit|dispatch|subscribe|unsubscribe|watch|unwatch|mount|unmount|render|draw|spawn|despawn|initialize|cleanup)/i;
 
     for (const { name } of functionNames) {
       const match = name.match(verbPattern);
@@ -225,6 +260,25 @@ export class NamingPatternStrategy implements DiscoveryStrategy {
     }
 
     return patterns;
+  }
+
+  /**
+   * Get file IDs from a set of currently discovered symbols.
+   * Used to build file-level context for filtering.
+   */
+  private async getValidatedFileIds(symbolIds: number[]): Promise<Set<number>> {
+    if (symbolIds.length === 0) return new Set();
+
+    const symbols = await this.dbService.getSymbolsBatch(symbolIds);
+    const fileIds = new Set<number>();
+
+    for (const [_, symbol] of symbols.entries()) {
+      if (symbol?.file_id) {
+        fileIds.add(symbol.file_id);
+      }
+    }
+
+    return fileIds;
   }
 
   /**

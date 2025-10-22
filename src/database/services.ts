@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 import { getDatabaseConnection, closeDatabaseConnection } from './connection';
 import { PaginationParams, PaginatedResponse, createPaginatedQuery } from './pagination';
 import { withCache, cacheable, queryCache } from './cache';
+import { getEmbeddingService, EmbeddingService } from '../services/embedding-service';
 import {
   Repository,
   File,
@@ -80,7 +81,6 @@ import {
   GodotNodeSearchOptions,
 } from './models';
 import { createComponentLogger } from '../utils/logger';
-import { getEmbeddingService, EmbeddingService } from '../services/embedding-service';
 
 const logger = createComponentLogger('database-services');
 
@@ -88,6 +88,11 @@ export class DatabaseService {
   private db: Knex;
   private embeddingService: EmbeddingService;
   private embeddingCache = new Map<string, number[]>();
+
+  // Embedding failure tracking
+  private embeddingFailureCounter = 0;
+  private embeddingTotalAttempts = 0;
+  private lastFailureRateWarning = 0;
 
   constructor() {
     this.db = getDatabaseConnection();
@@ -97,6 +102,55 @@ export class DatabaseService {
   // Getter for knex instance
   get knex(): Knex {
     return this.db;
+  }
+
+  /**
+   * Track embedding generation failures and alert on systematic issues.
+   * Prevents silent degradation of semantic search quality.
+   */
+  private trackEmbeddingFailure(context: string): void {
+    this.embeddingTotalAttempts++;
+    this.embeddingFailureCounter++;
+
+    const failureRate = this.embeddingFailureCounter / this.embeddingTotalAttempts;
+    const now = Date.now();
+
+    // Alert on systematic failure (>10% failure rate with at least 10 attempts)
+    // Throttle warnings to once per minute to avoid log spam
+    if (
+      failureRate > 0.1 &&
+      this.embeddingTotalAttempts >= 10 &&
+      now - this.lastFailureRateWarning > 60000
+    ) {
+      logger.error('High embedding failure rate detected - check service availability', {
+        failureRate: `${(failureRate * 100).toFixed(1)}%`,
+        totalFailures: this.embeddingFailureCounter,
+        totalAttempts: this.embeddingTotalAttempts,
+        context,
+      });
+      this.lastFailureRateWarning = now;
+    }
+  }
+
+  /**
+   * Track successful embedding generation.
+   */
+  private trackEmbeddingSuccess(): void {
+    this.embeddingTotalAttempts++;
+  }
+
+  /**
+   * Validate embedding vector before database insertion.
+   * Prevents mysterious pgvector query failures from dimension mismatches.
+   */
+  private validateEmbedding(embedding: number[] | undefined, expectedDim: number = 1024): boolean {
+    if (!embedding) return false;
+
+    return (
+      Array.isArray(embedding) &&
+      embedding.length === expectedDim &&
+      embedding.every(v => typeof v === 'number' && !isNaN(v) && isFinite(v))
+    );
   }
 
   /**
@@ -2090,11 +2144,45 @@ export class DatabaseService {
 
   // Route operations
   async createRoute(data: CreateRoute): Promise<Route> {
+    // Generate embedding for route path (for semantic similarity matching)
+    let pathEmbedding: number[] | undefined;
+    if (!data.path_embedding && data.path) {
+      try {
+        const embeddingService = getEmbeddingService();
+        await embeddingService.initialize();
+        // Combine path and method for better semantic representation
+        const pathText = data.method ? `${data.method} ${data.path}` : data.path;
+        pathEmbedding = await embeddingService.generateEmbedding(pathText);
+
+        // Validate embedding before insertion
+        if (!this.validateEmbedding(pathEmbedding)) {
+          logger.error('Invalid embedding dimensions for route', {
+            path: data.path,
+            expected: 1024,
+            actual: pathEmbedding?.length,
+            hasNaN: pathEmbedding?.some(v => isNaN(v)),
+          });
+          pathEmbedding = undefined; // Discard invalid embedding
+        } else {
+          this.trackEmbeddingSuccess();
+        }
+      } catch (error) {
+        this.trackEmbeddingFailure('route_creation');
+        logger.warn('Failed to generate route path embedding', {
+          path: data.path,
+          error: (error as Error).message,
+          failureRate: `${((this.embeddingFailureCounter / this.embeddingTotalAttempts) * 100).toFixed(1)}%`,
+        });
+        // Continue without embedding - non-critical
+      }
+    }
+
     // Convert array fields to JSON strings for JSONB columns
     const insertData = {
       ...data,
       middleware: data.middleware ? JSON.stringify(data.middleware) : '[]',
       dynamic_segments: data.dynamic_segments ? JSON.stringify(data.dynamic_segments) : '[]',
+      path_embedding: pathEmbedding ? JSON.stringify(pathEmbedding) : data.path_embedding ? JSON.stringify(data.path_embedding) : null,
     };
 
     const [route] = await this.db('routes').insert(insertData).returning('*');
@@ -3014,6 +3102,57 @@ export class DatabaseService {
   async createApiCalls(data: CreateApiCall[]): Promise<ApiCall[]> {
     if (data.length === 0) return [];
 
+    // Generate embeddings for all API call endpoints in batch (for semantic similarity)
+    const itemsNeedingEmbeddings = data.filter(item => !item.endpoint_embedding && item.endpoint_path);
+
+    try {
+      if (itemsNeedingEmbeddings.length > 0) {
+        const embeddingService = getEmbeddingService();
+        await embeddingService.initialize();
+
+        // Combine method and path for better semantic representation
+        const endpointTexts = itemsNeedingEmbeddings.map(
+          item => item.http_method ? `${item.http_method} ${item.endpoint_path}` : item.endpoint_path
+        );
+
+        const embeddings = await embeddingService.generateBatchEmbeddings(endpointTexts);
+
+        // Assign and validate embeddings back to the items
+        itemsNeedingEmbeddings.forEach((item, idx) => {
+          const embedding = embeddings[idx];
+
+          // Validate embedding before assignment
+          if (!this.validateEmbedding(embedding)) {
+            logger.error('Invalid embedding dimensions for API call', {
+              endpoint: item.endpoint_path,
+              method: item.http_method,
+              expected: 1024,
+              actual: embedding?.length,
+              hasNaN: embedding?.some(v => isNaN(v)),
+            });
+            // Don't assign invalid embedding
+          } else {
+            item.endpoint_embedding = embedding;
+            this.trackEmbeddingSuccess();
+          }
+        });
+
+        logger.info('Generated embeddings for API calls', {
+          count: itemsNeedingEmbeddings.length,
+        });
+      }
+    } catch (error) {
+      // Track failure for each item that needed embeddings
+      itemsNeedingEmbeddings.forEach(() => this.trackEmbeddingFailure('api_call_creation'));
+
+      logger.warn('Failed to generate API call embeddings', {
+        error: (error as Error).message,
+        count: itemsNeedingEmbeddings.length,
+        failureRate: `${((this.embeddingFailureCounter / this.embeddingTotalAttempts) * 100).toFixed(1)}%`,
+      });
+      // Continue without embeddings - non-critical
+    }
+
     const BATCH_SIZE = 100;
     const results: ApiCall[] = [];
     let totalSkipped = 0;
@@ -3022,8 +3161,14 @@ export class DatabaseService {
       for (let i = 0; i < data.length; i += BATCH_SIZE) {
         const batch = data.slice(i, i + BATCH_SIZE);
 
+        // Prepare batch for insertion (stringify embeddings for pgvector)
+        const insertBatch = batch.map(item => ({
+          ...item,
+          endpoint_embedding: item.endpoint_embedding ? JSON.stringify(item.endpoint_embedding) : null,
+        }));
+
         const batchResults = await this.db('api_calls')
-          .insert(batch)
+          .insert(insertBatch)
           .onConflict([
             'caller_symbol_id',
             'endpoint_symbol_id',

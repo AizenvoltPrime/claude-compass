@@ -211,8 +211,9 @@ export class FeatureDiscoveryService {
       );
     }
 
-    // Fetch routes
-    const routes = includeRoutes ? await this.fetchRelatedRoutes(featureName, repoId) : [];
+    // Fetch routes (graph-based discovery using discovered controller methods)
+    // Semantic filtering applied at query boundary to filter CRUD methods
+    const routes = includeRoutes ? await this.fetchRelatedRoutes(allSymbols, repoId, featureName) : [];
 
     // Build manifest
     const manifest = this.buildFeatureManifest(
@@ -336,17 +337,44 @@ export class FeatureDiscoveryService {
   }
 
 
-  private async fetchRelatedRoutes(featureName: string, repoId: number): Promise<FeatureRoute[]> {
+  private async fetchRelatedRoutes(
+    discoveredSymbols: FeatureSymbol[],
+    repoId: number,
+    featureName: string
+  ): Promise<FeatureRoute[]> {
     const db = this.dbService.knex;
 
+    // Extract controller method IDs from discovered symbols
+    // Routes are connected to controller methods via handler_symbol_id
+    const allMethodSymbols = discoveredSymbols.filter(s => s.entity_type === 'method');
+
+    if (allMethodSymbols.length === 0) {
+      logger.debug('No controller methods discovered, skipping route discovery');
+      return [];
+    }
+
+    // SEMANTIC FILTERING: Only include methods semantically related to feature
+    // This prevents CRUD noise (getVehicles, createVehicle) from appearing in camera alert feature
+    const filteredMethods = allMethodSymbols.filter(method =>
+      this.isSymbolSemanticMatch(method.name, featureName)
+    );
+
+    const controllerMethodIds = filteredMethods.map(s => s.id);
+
+    if (controllerMethodIds.length === 0) {
+      logger.debug('No feature-relevant controller methods after semantic filtering', {
+        totalMethods: allMethodSymbols.length,
+        featureName,
+      });
+      return [];
+    }
+
+    // Query routes by handler_symbol_id (graph-based discovery)
+    // This discovers routes through proven dependency graph edges:
+    // Frontend → API call → Controller method → Route (handler_symbol_id)
     const routes = await db('routes')
       .where('repo_id', repoId)
-      .andWhere(function () {
-        this.where('path', 'like', `%${featureName.toLowerCase()}%`)
-          .orWhere('controller_class', 'like', `%${featureName}%`)
-          .orWhere('controller_method', 'like', `%${featureName}%`)
-          .orWhere('action', 'like', `%${featureName}%`);
-      })
+      .whereIn('handler_symbol_id', controllerMethodIds)
       .select(
         'method',
         'path',
@@ -355,6 +383,14 @@ export class FeatureDiscoveryService {
         'action',
         'handler_symbol_id'
       );
+
+    logger.debug('Graph-based route discovery with semantic filtering', {
+      totalMethods: allMethodSymbols.length,
+      filteredMethods: filteredMethods.length,
+      filteredOut: allMethodSymbols.length - filteredMethods.length,
+      routesFound: routes.length,
+      featureName,
+    });
 
     return routes.map(r => ({
       method: r.method,
@@ -468,6 +504,35 @@ export class FeatureDiscoveryService {
   }
 
   /**
+   * Check if a symbol name is semantically related to the feature name.
+   * Uses token-based matching: extracts camelCase tokens from both names
+   * and requires at least 50% of feature tokens to match.
+   *
+   * Examples:
+   * - "StoreCameraAlertRequest" matches "VehicleCameraAlert" (2/3 tokens: camera, alert) ✅
+   * - "CreateVehicleRequest" does NOT match "VehicleCameraAlert" (1/3 tokens: vehicle) ❌
+   * - "getVehicleCameraAlerts" matches "VehicleCameraAlert" (3/3 tokens) ✅
+   * - "getVehicles" does NOT match "VehicleCameraAlert" (1/3 tokens) ❌
+   */
+  private isSymbolSemanticMatch(symbolName: string, featureName: string): boolean {
+    // Extract feature tokens (filter out short words like "get", "set")
+    const featureTokens = featureName
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(t => t.length > 3);
+
+    if (featureTokens.length === 0) return true; // No filtering if no tokens
+
+    const symbolNameLower = symbolName.toLowerCase();
+    const matchingTokens = featureTokens.filter(token => symbolNameLower.includes(token));
+
+    // Require at least 50% of feature tokens to match (minimum 1)
+    const minTokens = Math.max(1, Math.ceil(featureTokens.length * 0.5));
+    return matchingTokens.length >= minTokens;
+  }
+
+  /**
    * Deduplicate symbols with the same name
    * Preference: entity_type match > shortest path (definition over usage)
    */
@@ -563,7 +628,12 @@ export class FeatureDiscoveryService {
       } else if (this.isService(symbol)) {
         categorized.services.push(symbol);
       } else if (this.isRequest(symbol)) {
-        categorized.requests.push(symbol);
+        // SEMANTIC FILTERING: Only include requests semantically related to feature
+        // This prevents CRUD requests (CreateVehicleRequest, UpdateVehicleRequest)
+        // from appearing when feature is camera alerts
+        if (this.isSymbolSemanticMatch(symbol.name, featureName)) {
+          categorized.requests.push(symbol);
+        }
       } else if (this.isModel(symbol)) {
         if (options.includeModels) categorized.models.push(symbol);
       } else if (this.isJob(symbol)) {
@@ -603,7 +673,17 @@ export class FeatureDiscoveryService {
       } else if (this.isProvider(symbol)) {
         categorized.providers.push(symbol);
       } else {
-        categorized.related.push(symbol);
+        // SEMANTIC FILTERING: Only include methods semantically related to feature
+        // Methods go to related_symbols, filter to exclude CRUD methods
+        // (getVehicles, createVehicle, etc.) when feature is camera alerts
+        if (symbol.entity_type === 'method') {
+          if (this.isSymbolSemanticMatch(symbol.name, featureName)) {
+            categorized.related.push(symbol);
+          }
+        } else {
+          // Non-method symbols go through without filtering
+          categorized.related.push(symbol);
+        }
       }
     }
 
