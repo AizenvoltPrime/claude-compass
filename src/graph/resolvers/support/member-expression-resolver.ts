@@ -45,7 +45,7 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
       return null;
     }
 
-    return this.resolveNestedMember(resolvedObject, memberPath, indexManager);
+    return this.resolveNestedMember(resolvedObject, memberPath, indexManager, context);
   }
 
   private resolveObjectReference(
@@ -96,7 +96,8 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
   private resolveNestedMember(
     baseObject: Symbol,
     memberPath: MemberExpressionPart[],
-    indexManager: ISymbolIndexManager
+    indexManager: ISymbolIndexManager,
+    context: IResolutionContext
   ): Symbol | null {
     const finalMember = memberPath[memberPath.length - 1];
 
@@ -115,10 +116,76 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
     }
 
     if (candidateSymbols.length > 0) {
-      logger.debug('Using fallback symbol resolution for nested member', {
+      logger.info('Using fallback symbol resolution for nested member', {
         baseObject: baseObject.name,
+        baseObjectType: baseObject.symbol_type,
         member: finalMember.name,
         candidateCount: candidateSymbols.length,
+        contextFile: context.filePath,
+      });
+
+      // When multiple candidates exist, prefer symbols from the same language/stack
+      // For Pinia stores (TypeScript), prefer store methods over backend controller methods
+      if (candidateSymbols.length > 1) {
+        // Determine if base object is from frontend or backend based on context
+        const isFrontendBase = this.isFrontendFile(context.filePath);
+
+        logger.info('Multiple candidates found, applying disambiguation', {
+          baseObject: baseObject.name,
+          member: finalMember.name,
+          totalCandidates: candidateSymbols.length,
+          candidateFiles: candidateSymbols.map(c => ({
+            id: c.id,
+            file_id: c.file_id,
+            type: c.symbol_type
+          })),
+          isFrontendBase,
+        });
+
+        // Filter candidates by language preference
+        const preferredCandidates = candidateSymbols.filter(candidate => {
+          const candidateFilePath = indexManager.getFilePath(candidate.file_id);
+          if (!candidateFilePath) {
+            logger.warn('Could not get file path for candidate', {
+              candidateId: candidate.id,
+              fileId: candidate.file_id,
+            });
+            return false;
+          }
+
+          const isFrontendCandidate = this.isFrontendFile(candidateFilePath);
+          logger.info('Checking candidate', {
+            candidateId: candidate.id,
+            candidatePath: candidateFilePath,
+            isFrontendCandidate,
+            matches: isFrontendBase === isFrontendCandidate,
+          });
+          return isFrontendBase === isFrontendCandidate;
+        });
+
+        if (preferredCandidates.length > 0 && preferredCandidates.length < candidateSymbols.length) {
+          logger.info('Filtered candidates by language preference', {
+            baseObject: baseObject.name,
+            member: finalMember.name,
+            contextFile: context.filePath,
+            total: candidateSymbols.length,
+            preferred: preferredCandidates.length,
+            isFrontend: isFrontendBase,
+            selectedId: preferredCandidates[0].id,
+          });
+          return preferredCandidates[0];
+        } else {
+          logger.info('Disambiguation did not filter candidates', {
+            preferredCount: preferredCandidates.length,
+            totalCount: candidateSymbols.length,
+            reason: preferredCandidates.length === 0 ? 'No preferred candidates' : 'All candidates match preference',
+          });
+        }
+      }
+
+      logger.info('Returning first candidate without filtering', {
+        candidateId: candidateSymbols[0].id,
+        candidateName: candidateSymbols[0].name,
       });
       return candidateSymbols[0];
     }
@@ -166,5 +233,30 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
     }
 
     return candidates[0];
+  }
+
+  private isFrontendFile(filePath: string): boolean {
+    // Laravel-specific frontend paths
+    if (filePath.includes('/resources/js/') || filePath.includes('/resources/ts/')) {
+      return true;
+    }
+
+    // Common frontend directory patterns
+    if (
+      filePath.includes('/frontend/') ||
+      filePath.includes('/client/') ||
+      filePath.includes('/src/components/') ||
+      filePath.includes('/src/pages/') ||
+      filePath.includes('/src/views/')
+    ) {
+      return true;
+    }
+
+    // Vue/React component files (but not in backend directories)
+    if (filePath.match(/\.(vue|tsx|jsx)$/) !== null && !filePath.includes('/app/')) {
+      return true;
+    }
+
+    return false;
   }
 }

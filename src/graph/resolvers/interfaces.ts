@@ -72,6 +72,7 @@ export interface ISymbolIndexManager {
   getExportedSymbols(name: string): ExportedSymbol[];
   getSymbolByQualifiedName(qualifiedName: string): Symbol | undefined;
   getFileId(filePath: string): number | undefined;
+  getFilePath(fileId: number): string | undefined;
 
   clearTransient(): void;
   clearAll(): void;

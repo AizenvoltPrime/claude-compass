@@ -307,6 +307,10 @@ export class JavaScriptParser extends ChunkedParser {
 
     traverse(rootNode);
 
+    // Extract containment relationships (parent functions containing nested functions)
+    const containmentDeps = this.extractContainmentDependencies(symbols);
+    dependencies.push(...containmentDeps);
+
     return { symbols, dependencies, imports, exports };
   }
 
@@ -777,12 +781,16 @@ export class JavaScriptParser extends ChunkedParser {
 
   /**
    * Find the containing function for a call expression node by traversing up the AST
+   * Continues past anonymous functions to find the outermost named function
    */
   private findContainingFunction(callNode: Parser.SyntaxNode): string {
     let parent = callNode.parent;
+    const MAX_DEPTH = 15;
+    let depth = 0;
 
-    // Walk up the AST to find containing function or method
-    while (parent) {
+    // Walk up the AST to find containing function or method with a name
+    // Continue past anonymous functions to find the outermost named function
+    while (parent && depth < MAX_DEPTH) {
       if (
         parent.type === 'function_declaration' ||
         parent.type === 'function_expression' ||
@@ -798,10 +806,21 @@ export class JavaScriptParser extends ChunkedParser {
           const keyNode = parent.childForFieldName('key');
           if (keyNode) return keyNode.text;
         }
-        // For arrow functions and function expressions, return a generic name
-        return parent.type === 'arrow_function' ? 'arrow_function' : 'function_expression';
+
+        // For arrow functions and function expressions, check if they're assigned to a variable
+        if (parent.type === 'arrow_function' || parent.type === 'function_expression') {
+          if (parent.parent && parent.parent.type === 'variable_declarator') {
+            const varNameNode = parent.parent.childForFieldName('name');
+            if (varNameNode) return varNameNode.text;
+          }
+        }
+
+        // Continue walking up to find a named parent function
+        // Don't stop at anonymous functions - they might be nested in named functions
       }
+
       parent = parent.parent;
+      depth++;
     }
 
     return 'global';
@@ -851,7 +870,10 @@ export class JavaScriptParser extends ChunkedParser {
       }
 
       if (!propertyNode) return null;
-      functionName = this.getNodeText(propertyNode, content);
+
+      // Extract full member expression path (e.g., "store.method" instead of just "method")
+      // This enables proper symbol disambiguation in the resolver
+      functionName = this.getNodeText(functionNode, content);
     } else {
       return null;
     }
@@ -1605,5 +1627,86 @@ export class JavaScriptParser extends ChunkedParser {
     }
 
     return typeName || null;
+  }
+
+  /**
+   * Extract containment relationships between parent and nested functions/methods.
+   * Creates CONTAINS dependencies when a function/composable contains nested functions.
+   * Uses line range overlap to identify parent-child relationships.
+   *
+   * NOTE: All symbols in the input array are from the same file (guaranteed by caller).
+   * This method is called per-file during parsing, so same-file validation is implicit.
+   *
+   * Performance: O(n²) where n = number of symbols per file.
+   * Acceptable because typical files have < 100 symbols, resulting in < 10k comparisons.
+   * Early exit optimizations: skip if no line ranges, filter candidates by type first.
+   */
+  private extractContainmentDependencies(symbols: ParsedSymbol[]): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    // Potential child symbols: functions and methods
+    const childCandidates = symbols.filter(
+      s => s.symbol_type === 'function' || s.symbol_type === 'method'
+    );
+
+    // Potential parent symbols: functions, methods, AND entity types (stores, composables, classes, components)
+    const parentCandidates = symbols.filter(
+      s => s.symbol_type === 'function' ||
+           s.symbol_type === 'method' ||
+           s.symbol_type === 'class' ||
+           s.entity_type === 'store' ||
+           s.entity_type === 'composable' ||
+           s.entity_type === 'component'
+    );
+
+    if (childCandidates.length === 0 || parentCandidates.length === 0) return dependencies;
+
+    // For each symbol, check if it's nested inside another symbol
+    for (const child of childCandidates) {
+      for (const parent of parentCandidates) {
+        // Skip self-comparison
+        if (child === parent) continue;
+
+        // Skip if they don't have proper line ranges
+        if (!child.start_line || !child.end_line || !parent.start_line || !parent.end_line) {
+          continue;
+        }
+
+        // Check if parent's line range fully contains the child
+        const isContained =
+          parent.start_line < child.start_line &&
+          parent.end_line > child.end_line;
+
+        if (isContained) {
+          // Ensure we only capture direct containment (not grandparent)
+          // by checking no other symbol is between them
+          const hasIntermediateParent = parentCandidates.some(intermediate => {
+            if (intermediate === parent || intermediate === child) return false;
+            if (!intermediate.start_line || !intermediate.end_line) return false;
+
+            const intermediateContainsChild =
+              intermediate.start_line < child.start_line &&
+              intermediate.end_line > child.end_line;
+
+            const parentContainsIntermediate =
+              parent.start_line < intermediate.start_line &&
+              parent.end_line > intermediate.end_line;
+
+            return intermediateContainsChild && parentContainsIntermediate;
+          });
+
+          if (!hasIntermediateParent) {
+            dependencies.push({
+              from_symbol: parent.name,
+              to_symbol: child.name,
+              dependency_type: DependencyType.CONTAINS,
+              line_number: child.start_line,
+            });
+          }
+        }
+      }
+    }
+
+    return dependencies;
   }
 }

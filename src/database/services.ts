@@ -1644,6 +1644,7 @@ export class DatabaseService {
         'dependencies.*',
         'from_symbols.name as from_symbol_name',
         'from_symbols.symbol_type as from_symbol_type',
+        'from_symbols.entity_type as from_entity_type',
         'from_files.path as from_file_path'
       )
       .where('dependencies.to_symbol_id', symbolId)
@@ -1655,6 +1656,7 @@ export class DatabaseService {
         id: result.from_symbol_id,
         name: result.from_symbol_name,
         symbol_type: result.from_symbol_type,
+        entity_type: result.from_entity_type,
         file: {
           id: result.from_file_id,
           path: result.from_file_path,

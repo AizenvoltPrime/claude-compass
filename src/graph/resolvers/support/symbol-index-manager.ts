@@ -7,6 +7,7 @@ const logger = createComponentLogger('symbol-index-manager');
 export class SymbolIndexManager implements ISymbolIndexManager {
   private globalSymbolIndex: Map<string, SymbolLocation> = new Map();
   private filePathToIdMap: Map<string, number> = new Map();
+  private fileIdToPathMap: Map<number, string> = new Map();
   private symbolIdToSymbolMap: Map<number, Symbol> = new Map();
 
   private symbolsByName: Map<string, Symbol[]> = new Map();
@@ -15,10 +16,12 @@ export class SymbolIndexManager implements ISymbolIndexManager {
   buildGlobalIndex(files: File[], symbols: Symbol[]): void {
     this.globalSymbolIndex.clear();
     this.filePathToIdMap.clear();
+    this.fileIdToPathMap.clear();
     this.symbolIdToSymbolMap.clear();
 
     for (const file of files) {
       this.filePathToIdMap.set(file.path, file.id);
+      this.fileIdToPathMap.set(file.id, file.path);
     }
 
     for (const symbol of symbols) {
@@ -99,6 +102,10 @@ export class SymbolIndexManager implements ISymbolIndexManager {
 
   getFileId(filePath: string): number | undefined {
     return this.filePathToIdMap.get(filePath);
+  }
+
+  getFilePath(fileId: number): string | undefined {
+    return this.fileIdToPathMap.get(fileId);
   }
 
   clearTransient(): void {
