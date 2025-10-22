@@ -546,6 +546,10 @@ export class CSharpParser extends ChunkedParser {
 
     traverse(rootNode);
 
+    // Extract containment relationships (classes/interfaces containing methods)
+    const containmentDeps = this.extractContainmentDependencies(symbols);
+    dependencies.push(...containmentDeps);
+
     return { symbols, dependencies, imports, exports, errors };
   }
 
@@ -2849,6 +2853,75 @@ export class CSharpParser extends ChunkedParser {
           dependency_type: DependencyType.IMPORTS,
           line_number: lineNumber,
         });
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Extract containment relationships between parent classes/interfaces and their methods.
+   * Creates CONTAINS dependencies when a class/interface/struct contains methods or properties.
+   * Uses line range overlap to identify parent-child relationships.
+   */
+  private extractContainmentDependencies(symbols: ParsedSymbol[]): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    // Potential child symbols: methods and properties (C# fields are also stored as properties)
+    const childCandidates = symbols.filter(
+      s => s.symbol_type === SymbolType.METHOD || s.symbol_type === SymbolType.PROPERTY
+    );
+
+    // Potential parent symbols: classes, interfaces, structs
+    const parentCandidates = symbols.filter(
+      s =>
+        s.symbol_type === SymbolType.CLASS ||
+        s.symbol_type === SymbolType.INTERFACE ||
+        s.symbol_type === SymbolType.STRUCT
+    );
+
+    if (childCandidates.length === 0 || parentCandidates.length === 0) return dependencies;
+
+    // For each symbol, check if it's nested inside another symbol
+    for (const child of childCandidates) {
+      for (const parent of parentCandidates) {
+        // Skip self-comparison
+        if (child === parent) continue;
+
+        // Skip if they don't have proper line ranges
+        if (!child.start_line || !child.end_line || !parent.start_line || !parent.end_line) {
+          continue;
+        }
+
+        // Check if parent's line range fully contains the child
+        const isContained =
+          parent.start_line < child.start_line && parent.end_line > child.end_line;
+
+        if (isContained) {
+          // Ensure we only capture direct containment (not grandparent)
+          const hasIntermediateParent = parentCandidates.some(intermediate => {
+            if (intermediate === parent || intermediate === child) return false;
+            if (!intermediate.start_line || !intermediate.end_line) return false;
+
+            const intermediateContainsChild =
+              intermediate.start_line < child.start_line && intermediate.end_line > child.end_line;
+
+            const parentContainsIntermediate =
+              parent.start_line < intermediate.start_line &&
+              parent.end_line > intermediate.end_line;
+
+            return intermediateContainsChild && parentContainsIntermediate;
+          });
+
+          if (!hasIntermediateParent) {
+            dependencies.push({
+              from_symbol: parent.name,
+              to_symbol: child.name,
+              dependency_type: DependencyType.CONTAINS,
+              line_number: child.start_line,
+            });
+          }
+        }
       }
     }
 

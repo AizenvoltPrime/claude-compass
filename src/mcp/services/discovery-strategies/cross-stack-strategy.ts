@@ -184,7 +184,7 @@ export class CrossStackStrategy implements DiscoveryStrategy {
     // If no frameworks detected, check files table for language patterns
     if (frontendLanguages.size === 0) {
       const languages: string[] = await db('files')
-        .where('repository_id', repoId)
+        .where('repo_id', repoId)
         .distinct('language')
         .pluck('language');
 
@@ -367,7 +367,7 @@ export class CrossStackStrategy implements DiscoveryStrategy {
     // If no frameworks detected, check files table for language patterns
     if (backendLanguages.size === 0) {
       const languages: string[] = await db('files')
-        .where('repository_id', repoId)
+        .where('repo_id', repoId)
         .distinct('language')
         .pluck('language');
 
