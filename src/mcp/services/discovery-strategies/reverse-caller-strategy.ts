@@ -274,10 +274,9 @@ export class ReverseCallerStrategy implements DiscoveryStrategy {
         const container = await this.dbService.getSymbol(containerId);
         if (!container) continue;
 
-        // Check if container name matches feature (loose matching)
-        if (!this.matchesFeatureName(container.name, context.featureName)) {
-          continue;
-        }
+        // Trust the dependency graph: if we discovered a method through dependencies,
+        // its CONTAINS parent (class/service/store) is relevant regardless of name matching.
+        // The method was discovered through actual code relationships, so its parent is part of the feature.
 
         // Add with high relevance since it's a direct container
         const relevance = 0.80 - (context.iteration * 0.05);

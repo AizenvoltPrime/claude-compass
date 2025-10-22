@@ -12,6 +12,7 @@ import {
   DataContract,
   CreateApiCall,
   CreateDataContract,
+  CreateDependency,
   DependencyType,
   Route,
   Component,
@@ -587,8 +588,10 @@ export class CrossStackGraphBuilder {
    */
   async storeCrossStackRelationships(graph: FullStackFeatureGraph, repoId: number): Promise<void> {
     try {
-      // Extract API calls from graph edges
+      // Extract API calls and corresponding dependencies from graph edges
       const apiCallsToCreate: CreateApiCall[] = [];
+      const dependenciesToCreate: CreateDependency[] = [];
+
       for (const edge of graph.apiCallGraph.edges) {
         if (edge.relationshipType === 'api_call') {
           // Find corresponding nodes
@@ -596,36 +599,56 @@ export class CrossStackGraphBuilder {
           const toNode = graph.apiCallGraph.nodes.find(n => n.id === edge.to);
 
           if (fromNode && toNode && fromNode.metadata.symbolId && toNode.metadata.entityId) {
+            const callerSymbolId = fromNode.metadata.symbolId;
+            const endpointSymbolId = parseInt(toNode.metadata.entityId);
+
             apiCallsToCreate.push({
               repo_id: repoId,
-              caller_symbol_id: fromNode.metadata.symbolId,
-              endpoint_symbol_id: parseInt(toNode.metadata.entityId),
+              caller_symbol_id: callerSymbolId,
+              endpoint_symbol_id: endpointSymbolId,
               http_method: edge.metadata.httpMethod || 'GET',
               endpoint_path: edge.metadata.urlPattern || '',
-              call_type: 'axios', // Default call type
-              line_number: edge.metadata.lineNumber || null,
+              call_type: 'axios',
+              line_number: edge.metadata.lineNumber ?? null,
+            });
+
+            dependenciesToCreate.push({
+              from_symbol_id: callerSymbolId,
+              to_symbol_id: endpointSymbolId,
+              dependency_type: DependencyType.API_CALL,
+              line_number: edge.metadata.lineNumber ?? null,
             });
           }
         }
       }
 
-      // Extract data contracts from graph edges
+      // Extract data contracts and corresponding dependencies from graph edges
       const dataContractsToCreate: CreateDataContract[] = [];
+
       for (const edge of graph.dataContractGraph.edges) {
         if (edge.relationshipType === 'shares_schema') {
           const fromNode = graph.dataContractGraph.nodes.find(n => n.id === edge.from);
           const toNode = graph.dataContractGraph.nodes.find(n => n.id === edge.to);
 
           if (fromNode && toNode && fromNode.metadata.symbolId && toNode.metadata.symbolId) {
+            const frontendTypeId = fromNode.metadata.symbolId;
+            const backendTypeId = toNode.metadata.symbolId;
+
             dataContractsToCreate.push({
               repo_id: repoId,
               name: `${fromNode.name}_${toNode.name}`,
-              frontend_type_id: fromNode.metadata.symbolId,
-              backend_type_id: toNode.metadata.symbolId,
+              frontend_type_id: frontendTypeId,
+              backend_type_id: backendTypeId,
               schema_definition: JSON.stringify({
                 compatibility: edge.metadata.schemaCompatibility,
               }),
               drift_detected: edge.metadata.driftDetected || false,
+            });
+
+            dependenciesToCreate.push({
+              from_symbol_id: frontendTypeId,
+              to_symbol_id: backendTypeId,
+              dependency_type: DependencyType.SHARES_SCHEMA,
             });
           }
         }
@@ -635,10 +658,15 @@ export class CrossStackGraphBuilder {
       if (apiCallsToCreate.length > 0) {
         try {
           await this.database.createApiCalls(apiCallsToCreate);
+          this.logger.info('Created API calls in api_calls table', {
+            count: apiCallsToCreate.length,
+          });
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
           this.logger.error('Failed to create API calls in database', {
-            error: error.message,
-            stack: error.stack,
+            error: errorMessage,
+            stack: errorStack,
             apiCallsToCreate: apiCallsToCreate.slice(0, 2),
           });
         }
@@ -647,11 +675,34 @@ export class CrossStackGraphBuilder {
       if (dataContractsToCreate.length > 0) {
         try {
           await this.database.createDataContracts(dataContractsToCreate);
+          this.logger.info('Created data contracts in data_contracts table', {
+            count: dataContractsToCreate.length,
+          });
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
           this.logger.error('Failed to create data contracts in database', {
-            error: error.message,
-            stack: error.stack,
+            error: errorMessage,
+            stack: errorStack,
             dataContractsToCreate: dataContractsToCreate.slice(0, 2),
+          });
+        }
+      }
+
+      if (dependenciesToCreate.length > 0) {
+        try {
+          await this.database.createDependencies(dependenciesToCreate);
+          this.logger.info('Created cross-stack dependencies in dependencies table', {
+            count: dependenciesToCreate.length,
+            types: [...new Set(dependenciesToCreate.map(d => d.dependency_type))],
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
+          this.logger.error('Failed to create cross-stack dependencies', {
+            error: errorMessage,
+            stack: errorStack,
+            dependenciesToCreate: dependenciesToCreate.slice(0, 2),
           });
         }
       }

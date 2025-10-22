@@ -24,6 +24,7 @@ import {
 } from './chunked-parser';
 import { DependencyType, SymbolType } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
+import { CSharpParser } from './csharp';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
@@ -133,14 +134,14 @@ export interface GodotConnection {
  * Handles C# scripts with Godot patterns and .tscn scene files
  */
 export class GodotParser extends BaseFrameworkParser {
-  private csharpParser: Parser;
+  private csharpParser: CSharpParser;
 
   constructor(parser: Parser) {
     super(parser, 'godot');
 
-    // Create C# parser for handling C# script content
-    this.csharpParser = new Parser();
-    this.csharpParser.setLanguage(CSharp as any);
+    // Create C# parser instance for handling Godot C# scripts
+    // This gives us full C# parsing with CONTAINS dependencies built-in
+    this.csharpParser = new CSharpParser();
   }
 
   /**
@@ -704,45 +705,26 @@ export class GodotParser extends BaseFrameworkParser {
         };
       }
 
-      // For .cs files with Godot patterns, parse as C# but add framework entities
+      // For .cs files with Godot patterns, delegate to C# parser and add Godot framework entities
       if (filePath.endsWith('.cs') && this.isGodotScript(content)) {
-        const tree = this.parseContent(content, validatedOptions);
-        if (!tree || !tree.rootNode) {
-          return {
-            filePath,
-            symbols: [],
-            dependencies: [],
-            imports: [],
-            exports: [],
-            errors: [{
-              message: 'Failed to parse C# syntax tree',
-              line: 1,
-              column: 1,
-              severity: 'error'
-            }]
-          };
-        }
+        // Delegate to CSharpParser for full C# parsing with CONTAINS dependencies
+        const csharpResult = await this.csharpParser.parseFile(filePath, content, validatedOptions);
 
-        // Use C# parser for basic symbols and dependencies
-        const symbols = this.extractSymbols(tree.rootNode, content);
-        const dependencies = this.extractDependencies(tree.rootNode, content);
-        const imports = this.extractImports(tree.rootNode, content);
-        const exports = this.extractExports(tree.rootNode, content);
-
-        // Add Godot framework entities
+        // Add Godot-specific framework entities (nodes, signals, exports)
         const frameworkResult = await this.detectFrameworkEntities(
           content,
           filePath,
           validatedOptions as FrameworkParseOptions
         );
 
+        // Merge C# parse results with Godot framework entities
         return {
           filePath,
-          symbols,
-          dependencies,
-          imports,
-          exports,
-          errors: [],
+          symbols: csharpResult.symbols,
+          dependencies: csharpResult.dependencies,
+          imports: csharpResult.imports,
+          exports: csharpResult.exports,
+          errors: csharpResult.errors,
           frameworkEntities: frameworkResult.entities,
           success: true
         };
