@@ -347,6 +347,9 @@ export class PHPParser extends ChunkedParser {
             symbols.push(symbol);
             const exportInfo = this.extractFunctionExport(node, content);
             if (exportInfo) exports.push(exportInfo);
+
+            const typeDeps = this.extractMethodTypeDependencies(node, content, context);
+            dependencies.push(...typeDeps);
           }
           break;
         }
@@ -362,6 +365,9 @@ export class PHPParser extends ChunkedParser {
                 context
               );
               dependencies.push(...constructorDeps);
+            } else {
+              const typeDeps = this.extractMethodTypeDependencies(node, content, context);
+              dependencies.push(...typeDeps);
             }
           }
           break;
@@ -421,6 +427,13 @@ export class PHPParser extends ChunkedParser {
 
     const includeNodes = this.findIncludeStatements(rootNode, content);
     imports.push(...includeNodes);
+
+    const useStatementDeps = this.convertUseStatementsToDependencies(
+      imports,
+      symbols,
+      exports
+    );
+    dependencies.push(...useStatementDeps);
 
     return { symbols, dependencies, imports, exports };
   }
@@ -2015,6 +2028,151 @@ export class PHPParser extends ChunkedParser {
     }
 
     return className;
+  }
+
+  /**
+   * Convert use statements to dependency edges
+   * Creates IMPORTS and REFERENCES dependencies from current class to imported classes
+   */
+  private convertUseStatementsToDependencies(
+    imports: ParsedImport[],
+    symbols: ParsedSymbol[],
+    exports: ParsedExport[]
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+
+    let fromSymbol = '';
+    let fromSymbolLineNumber = 1;
+
+    if (exports.length > 0 && exports[0].exported_names.length > 0) {
+      fromSymbol = exports[0].exported_names[0];
+    }
+
+    if (!fromSymbol && symbols.length > 0) {
+      const firstClass = symbols.find(
+        s => s.symbol_type === SymbolType.CLASS ||
+             s.symbol_type === SymbolType.INTERFACE ||
+             s.symbol_type === SymbolType.TRAIT
+      );
+      fromSymbol = firstClass?.name || symbols[0].name;
+    }
+
+    if (!fromSymbol) {
+      return dependencies;
+    }
+
+    const classSymbol = symbols.find(s => s.name === fromSymbol);
+    if (classSymbol) {
+      fromSymbolLineNumber = classSymbol.start_line;
+    }
+
+    for (const importInfo of imports) {
+      if (importInfo.import_type === 'side_effect') {
+        continue;
+      }
+
+      for (const importedName of importInfo.imported_names) {
+        const parts = importedName.split('\\');
+        const shortName = parts[parts.length - 1];
+
+        dependencies.push({
+          from_symbol: fromSymbol,
+          to_symbol: shortName,
+          to_qualified_name: importedName,
+          dependency_type: DependencyType.IMPORTS,
+          line_number: fromSymbolLineNumber,
+          qualified_context: `use ${importedName}`,
+        });
+
+        dependencies.push({
+          from_symbol: fromSymbol,
+          to_symbol: shortName,
+          to_qualified_name: importedName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: fromSymbolLineNumber,
+          qualified_context: `use ${importedName}`,
+        });
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * Extract dependencies from method/function parameter type hints and return type hints
+   * Creates REFERENCES dependencies to all type-hinted classes
+   */
+  private extractMethodTypeDependencies(
+    node: Parser.SyntaxNode,
+    content: string,
+    context: PHPParsingContext
+  ): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+    const methodName = node.childForFieldName('name')
+      ? this.getNodeText(node.childForFieldName('name')!, content)
+      : 'anonymous';
+
+    const parametersNode = node.childForFieldName('parameters');
+    if (parametersNode) {
+      for (const param of parametersNode.children) {
+        if (param.type !== 'simple_parameter' && param.type !== 'property_promotion_parameter') {
+          continue;
+        }
+
+        const typeNode = param.childForFieldName('type');
+        if (!typeNode) continue;
+
+        let typeName = this.getNodeText(typeNode, content).trim();
+        if (this.isBuiltInType(typeName)) continue;
+
+        typeName = typeName.replace(/^\?/, '');
+
+        const unionTypes = typeName.split('|').map(t => t.trim());
+
+        for (const singleType of unionTypes) {
+          if (this.isBuiltInType(singleType)) continue;
+
+          const fullyQualifiedType = this.resolveFQN(singleType, context);
+
+          dependencies.push({
+            from_symbol: methodName,
+            to_symbol: singleType,
+            to_qualified_name: fullyQualifiedType,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: param.startPosition.row + 1,
+            qualified_context: `parameter type hint in ${methodName}`,
+          });
+        }
+      }
+    }
+
+    const returnTypeNode = node.childForFieldName('return_type');
+    if (returnTypeNode) {
+      let returnType = this.getNodeText(returnTypeNode, content).trim();
+
+      if (!this.isBuiltInType(returnType)) {
+        returnType = returnType.replace(/^\?/, '');
+
+        const unionTypes = returnType.split('|').map(t => t.trim());
+
+        for (const singleType of unionTypes) {
+          if (this.isBuiltInType(singleType)) continue;
+
+          const fullyQualifiedType = this.resolveFQN(singleType, context);
+
+          dependencies.push({
+            from_symbol: methodName,
+            to_symbol: singleType,
+            to_qualified_name: fullyQualifiedType,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: returnTypeNode.startPosition.row + 1,
+            qualified_context: `return type hint in ${methodName}`,
+          });
+        }
+      }
+    }
+
+    return dependencies;
   }
 
   private extractCallingObject(node: Parser.SyntaxNode, content: string): string {

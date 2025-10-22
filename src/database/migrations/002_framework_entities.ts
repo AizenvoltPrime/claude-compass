@@ -42,6 +42,10 @@ export async function up(knex: Knex): Promise<void> {
     table.text('file_path'); // Source file path
     table.integer('line_number'); // Line number in source file
 
+    // Semantic search: embedding for route path matching
+    // Nullable to support incremental embedding generation for existing routes
+    table.specificType('path_embedding', 'vector(1024)').nullable();
+
     table.timestamps(true, true);
 
     // Indexes
@@ -73,6 +77,11 @@ export async function up(knex: Knex): Promise<void> {
     table.text('raw_call');
     table.string('call_type');
     table.jsonb('metadata').defaultTo('{}');
+
+    // Semantic search: embedding for endpoint path matching
+    // Nullable to support incremental embedding generation for existing API calls
+    table.specificType('endpoint_embedding', 'vector(1024)').nullable();
+
     table.timestamps(true, true);
 
     // Optimized indexes for cross-stack analysis

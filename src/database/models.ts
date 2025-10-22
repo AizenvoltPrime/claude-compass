@@ -419,6 +419,9 @@ export interface Route {
   file_path?: string; // Source file path
   line_number?: number; // Line number in source file
 
+  // Semantic search: embedding for route path
+  path_embedding?: number[] | null;
+
   created_at: Date;
   updated_at: Date;
 }
@@ -559,6 +562,9 @@ export interface CreateRoute {
   action?: string; // Laravel route action
   file_path?: string; // Source file path
   line_number?: number; // Line number in source file
+
+  // Semantic search
+  path_embedding?: number[];
 }
 
 export interface CreateComponent {
@@ -659,6 +665,10 @@ export interface ApiCall {
   raw_call?: string;
   call_type: string;
   metadata?: Record<string, any>;
+
+  // Semantic search: embedding for endpoint path
+  endpoint_embedding?: number[] | null;
+
   created_at: Date;
   updated_at: Date;
 }
@@ -878,6 +888,9 @@ export interface CreateApiCall {
   line_number?: number | null;
   raw_call?: string;
   metadata?: Record<string, any>;
+
+  // Semantic search
+  endpoint_embedding?: number[];
 }
 
 export interface CreateDataContract {
