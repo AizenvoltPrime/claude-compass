@@ -78,6 +78,14 @@ export interface DiscoveryContext {
    * when starting from backend models.
    */
   contextSymbols: Set<number>;
+
+  /**
+   * Indicates if the entry point is frontend-focused (store, composable, or component).
+   * Used to adjust depth filtering for components in dependency traversal:
+   * - Frontend entry points: Allow deeper component discovery
+   * - Backend entry points: Limit component depth to avoid UI noise
+   */
+  isFrontendEntryPoint: boolean;
 }
 
 /**

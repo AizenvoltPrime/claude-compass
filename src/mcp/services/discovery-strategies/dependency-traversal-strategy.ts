@@ -299,8 +299,10 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
         for (const targetId of candidateIds) {
           const symbol = symbolMap.get(targetId);
 
-          // Exclude components at depth > 1 (UI elements, less relevant to backend features)
-          if (nextDepth > 1 && symbol?.entity_type === 'component') {
+          // Context-aware component filtering:
+          // - Backend entry points: Exclude components at depth > 1 (UI elements less relevant)
+          // - Frontend entry points: Allow deeper component discovery (UI is the feature)
+          if (nextDepth > 1 && symbol?.entity_type === 'component' && !context.isFrontendEntryPoint) {
             continue;
           }
 

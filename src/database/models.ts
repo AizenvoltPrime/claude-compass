@@ -268,6 +268,7 @@ export enum DependencyType {
   IMPLEMENTS = 'implements',
   REFERENCES = 'references',
   EXPORTS = 'exports',
+  CONTAINS = 'contains', // Parent function/class contains nested function/method
   ORM_RELATION = 'orm_relation',
   TEST_COVERS = 'test_covers',
   PROCESSES_JOB = 'processes_job',

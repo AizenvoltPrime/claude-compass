@@ -15,6 +15,7 @@
 import { createComponentLogger } from '../../../utils/logger';
 import { DatabaseService } from '../../../database/services';
 import { getEmbeddingService, EmbeddingService } from '../../../services/embedding-service';
+import { DependencyType } from '../../../database/models';
 import {
   DiscoveryStrategy,
   DiscoveryContext,
@@ -70,6 +71,24 @@ export class DiscoveryEngine {
     propertyVariableOffset: 0.05,
     minInterfaceTypeThreshold: 0.6,
   };
+
+  // Context-aware thresholds for graph-based discovery strategies
+  // These are more lenient because they follow actual code relationships
+  private readonly graphBasedStrategies = new Set([
+    'dependency-traversal',
+    'reverse-caller',
+    'forward-dependency',
+    'cross-stack'
+  ]);
+
+  private readonly graphBasedComposableThreshold = 0.70; // Balanced: includes feature-specific, excludes cross-feature
+  private readonly namingBasedComposableThreshold = 0.75; // Strict for naming patterns
+
+  private readonly graphBasedComponentThreshold = 0.70; // Lenient for graph-based component discovery
+  private readonly namingBasedComponentThreshold = 0.75; // Stricter for naming-based discovery
+
+  private readonly graphBasedControllerThreshold = 0.70; // Lenient for graph-based controller discovery
+  private readonly namingBasedControllerThreshold = 0.75; // Stricter for naming-based discovery
 
   constructor(
     private dbService: DatabaseService,
@@ -177,8 +196,16 @@ export class DiscoveryEngine {
    * @returns Filtered map with adjusted relevance scores and statistics
    */
   /**
-   * Get entity-type-specific semantic threshold.
-   * Stricter thresholds for generic/reusable entity types and unclassified symbols.
+   * Get entity-type-specific semantic threshold with context-aware logic.
+   *
+   * Context-Aware Thresholding:
+   * - Graph-based strategies (dependency-traversal, reverse-caller, etc.) follow actual code edges,
+   *   so composables/functions get more lenient threshold (0.65) to capture direct dependencies
+   * - Naming-based strategies use string similarity, so composables/functions need stricter
+   *   threshold (0.75) to filter out generic utilities
+   *
+   * This prevents false negatives (missing feature-specific composables like createVehicleMarkers)
+   * while still filtering false positives (generic composables like useDebounce).
    */
   private getSemanticThreshold(
     symbol: { entity_type?: string | null; symbol_type: string } | null,
@@ -192,16 +219,26 @@ export class DiscoveryEngine {
 
     const entityType = symbol.entity_type;
 
-    // Stricter threshold for generic/reusable entity types
-    // These are harder to distinguish semantically due to shared patterns
+    // Context-aware threshold for composables/functions
+    // Graph-based discovery: More lenient (trusts the dependency graph)
+    // Naming-based discovery: Stricter (requires strong semantic match)
     if (entityType === 'composable' || entityType === 'function') {
-      return this.thresholdConfig.composable;
+      if (this.graphBasedStrategies.has(strategyName)) {
+        return this.graphBasedComposableThreshold; // 0.70 - trust graph edges
+      } else {
+        return this.namingBasedComposableThreshold; // 0.75 - strict for naming patterns
+      }
     }
 
-    // Components need stricter threshold to filter out weakly-related UI components
-    // Template parsing creates many component connections; semantic filtering prevents noise
+    // Context-aware threshold for components
+    // Graph-based: Trust actual component imports/usage
+    // Naming-based: Require strong semantic match to avoid unrelated UI components
     if (entityType === 'component') {
-      return this.thresholdConfig.component;
+      if (this.graphBasedStrategies.has(strategyName)) {
+        return this.graphBasedComponentThreshold; // 0.70 - trust component relationships
+      } else {
+        return this.namingBasedComponentThreshold; // 0.75 - strict naming match
+      }
     }
 
     // Unclassified symbols (null entity_type) are often generic helpers or framework code
@@ -232,13 +269,15 @@ export class DiscoveryEngine {
       return baseThreshold + this.thresholdConfig.propertyVariableOffset;
     }
 
-    // Controllers and services from indirect strategies should be stricter
-    // to avoid pulling in unrelated domain controllers
-    if (
-      (entityType === 'controller' || entityType === 'service') &&
-      (strategyName === 'naming-pattern' || strategyName === 'forward-dependency')
-    ) {
-      return this.thresholdConfig.controller;
+    // Context-aware threshold for controllers and services
+    // Graph-based: Trust actual dependency relationships between controllers
+    // Naming-based: Require strong semantic match to avoid unrelated domain controllers
+    if (entityType === 'controller' || entityType === 'service') {
+      if (this.graphBasedStrategies.has(strategyName)) {
+        return this.graphBasedControllerThreshold; // 0.70 - trust controller relationships
+      } else {
+        return this.namingBasedControllerThreshold; // 0.75 - strict naming match
+      }
     }
 
     return baseThreshold;
@@ -346,6 +385,35 @@ export class DiscoveryEngine {
       const startTime = Date.now();
       const symbolRelevance = new Map<number, number>([[entryPointId, 1.0]]);
 
+      // Determine if entry point is frontend-focused using graph relationships
+      // Check if the entry point is a store/composable/component OR contained within one
+      const entryPointSymbol = await this.dbService.getSymbol(entryPointId);
+      let isFrontendEntryPoint = entryPointSymbol?.entity_type === 'store' ||
+                                 entryPointSymbol?.entity_type === 'composable' ||
+                                 entryPointSymbol?.entity_type === 'component';
+
+      // If not directly a frontend entity, check if it's contained within one (via CONTAINS)
+      if (!isFrontendEntryPoint) {
+        const containers = await this.dbService.getDependenciesTo(entryPointId);
+        const containsDeps = containers.filter(dep => dep.dependency_type === DependencyType.CONTAINS);
+
+        for (const dep of containsDeps) {
+          const container = dep.from_symbol;
+          if (container?.entity_type === 'store' ||
+              container?.entity_type === 'composable' ||
+              container?.entity_type === 'component') {
+            isFrontendEntryPoint = true;
+            break;
+          }
+        }
+      }
+
+      logger.debug('Entry point context determined', {
+        entryPointId,
+        entityType: entryPointSymbol?.entity_type,
+        isFrontendEntryPoint,
+      });
+
       // CONTROLLER METHOD EXPANSION:
       // When starting from a controller method, also include the parent controller class
       // This ensures we discover constructor-injected services, requests, and models
@@ -415,6 +483,7 @@ export class DiscoveryEngine {
           },
           graphValidatedSymbols,
           contextSymbols,
+          isFrontendEntryPoint,
         };
 
         for (const strategy of this.strategies) {

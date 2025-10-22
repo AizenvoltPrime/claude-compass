@@ -11,6 +11,7 @@
  */
 
 import { DatabaseService } from '../../../database/services';
+import { DependencyType } from '../../../database/models';
 import { createComponentLogger } from '../../../utils/logger';
 import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
 
@@ -59,6 +60,10 @@ export class ReverseCallerStrategy implements DiscoveryStrategy {
     });
 
     const candidateCallers = new Map<number, number>();
+
+    // ENHANCEMENT: Find container symbols (parent functions/composables containing discovered nested functions)
+    // This handles Vue composable pattern: export function useStore() { const helper = () => {...} }
+    await this.addContainerSymbols(currentSymbols, candidateCallers, context);
 
     for (const symbolId of uncheckedSymbols) {
       this.previouslyChecked.add(symbolId);
@@ -229,6 +234,70 @@ export class ReverseCallerStrategy implements DiscoveryStrategy {
     }
 
     return fileIds;
+  }
+
+  /**
+   * Find container symbols (parent functions/composables) that contain the discovered symbols.
+   * Handles Vue composable pattern: export function useStore() { const helper = () => {...} }
+   * Uses CONTAINS dependencies created during parsing.
+   */
+  private async addContainerSymbols(
+    symbolIds: number[],
+    candidates: Map<number, number>,
+    context: DiscoveryContext
+  ): Promise<void> {
+    if (symbolIds.length === 0) return;
+
+    logger.debug('Searching for container symbols via CONTAINS dependencies', {
+      symbols: symbolIds.length,
+    });
+
+    let containersFound = 0;
+
+    // For each discovered symbol, find its container via CONTAINS dependency
+    for (const symbolId of symbolIds) {
+      // Query for CONTAINS dependencies where this symbol is the child (to_symbol_id)
+      const allDeps = await this.dbService.getDependenciesTo(symbolId);
+      const containers = allDeps.filter(dep => dep.dependency_type === DependencyType.CONTAINS);
+
+      for (const dep of containers) {
+        const containerId = dep.from_symbol_id;
+        if (!containerId) continue;
+
+        // Skip if already discovered
+        if (context.currentSymbols.includes(containerId)) continue;
+
+        // Skip if already in candidates
+        if (candidates.has(containerId)) continue;
+
+        // Get container symbol details
+        const container = await this.dbService.getSymbol(containerId);
+        if (!container) continue;
+
+        // Check if container name matches feature (loose matching)
+        if (!this.matchesFeatureName(container.name, context.featureName)) {
+          continue;
+        }
+
+        // Add with high relevance since it's a direct container
+        const relevance = 0.80 - (context.iteration * 0.05);
+        candidates.set(containerId, Math.max(relevance, 0.5));
+        containersFound++;
+
+        logger.debug('Found container symbol via CONTAINS dependency', {
+          container: container.name,
+          containerType: container.entity_type || container.symbol_type,
+          child: dep.to_symbol?.name,
+          relevance,
+        });
+      }
+    }
+
+    if (containersFound > 0) {
+      logger.info('Container symbols discovered via CONTAINS dependencies', {
+        count: containersFound,
+      });
+    }
   }
 
   /**
