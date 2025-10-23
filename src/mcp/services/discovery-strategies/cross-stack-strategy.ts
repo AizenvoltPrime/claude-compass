@@ -5,7 +5,7 @@
  * bridging the Vue/React → Laravel/Express API boundary.
  *
  * Uses the api_calls table which tracks API endpoint relationships
- * extracted during parsing (e.g., axios.get('/api/vehicles/camera-alerts')).
+ * extracted during parsing.
  */
 
 import { DatabaseService } from '../../../database/services';
@@ -13,6 +13,9 @@ import { createComponentLogger } from '../../../utils/logger';
 import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
 
 const logger = createComponentLogger('cross-stack-strategy');
+
+const BACKEND_SYMBOL_RELEVANCE = 0.8;
+const FRONTEND_PARENT_RELEVANCE = 0.9;
 
 export class CrossStackStrategy implements DiscoveryStrategy {
   readonly name = 'cross-stack';
@@ -63,7 +66,7 @@ export class CrossStackStrategy implements DiscoveryStrategy {
       const backendIds = backendSymbols.map((s: { id: number }) => s.id);
 
       if (backendIds.length > 0) {
-        const result = await this.discoverFrontendCallers(backendIds, context.featureName, repoId);
+        const result = await this.discoverFrontendCallers(backendIds);
         logger.info('Reverse cross-stack discovery complete (backend → frontend)', {
           backendSymbols: backendIds.length,
           frontendDiscovered: result.size,
@@ -85,16 +88,17 @@ export class CrossStackStrategy implements DiscoveryStrategy {
       return new Map();
     }
 
-    // Expand to include store/composable methods (they make the actual API calls)
-    // Similar to controller method expansion - stores are discovered but their methods aren't
-    // IMPORTANT: Only expand methods semantically related to feature to avoid false positives
-    const expandedIds = await this.expandWithStoreMethods(frontendIds, context.featureName);
+    // METHOD-LEVEL EXPANSION: Include only store/composable methods that are actually CALLED
+    // This prevents discovering ALL methods in a store file
+    // and instead only follows methods with proven call relationships
+    const expandedIds = await this.expandWithStoreMethods(frontendIds);
     frontendIds = Array.from(new Set([...frontendIds, ...expandedIds]));
 
-    logger.debug('Expanded frontend symbols with store methods', {
+    logger.debug('Expanded frontend symbols with store methods (method-level tracking)', {
       original: frontendSymbols.length,
       withMethods: frontendIds.length,
-      featureName: context.featureName,
+      expandedMethods: expandedIds.length,
+      approach: 'call-based (not name-based)',
     });
 
     // Find backend endpoints these frontend symbols call
@@ -106,19 +110,28 @@ export class CrossStackStrategy implements DiscoveryStrategy {
       .map((ac: { endpoint_symbol_id: number | null }) => ac.endpoint_symbol_id)
       .filter((id): id is number => id !== null);
 
-    // Find parent controller classes and request classes in parallel
-    // This ensures transitive backend discovery (method → controller class + requests)
+    // Find parent controller classes, request classes, and service dependencies in parallel
+    // This ensures transitive backend discovery (method → controller class + requests + services)
     // Parallelization saves ~200ms per 20 endpoints
-    const [controllerIds, requestIds] = await Promise.all([
+    const [controllerIds, requestIds, serviceIds] = await Promise.all([
       this.findParentControllers(backendEndpointIds),
       this.findEndpointRequests(backendEndpointIds),
+      this.findServiceDependencies(backendEndpointIds),
     ]);
 
-    // Convert to relevance map (methods, controllers, and requests)
+    // Collect specific backend symbols to find related models
+    // Exclude controller classes (too broad - they import models for all their methods)
+    // Include: endpoint methods (specific) + services (feature-scoped)
+    const backendIdsForModelDiscovery = [...backendEndpointIds, ...serviceIds];
+    const relatedModelIds = await this.findRelatedModels(backendIdsForModelDiscovery);
+
+    // Convert to relevance map (methods, controllers, requests, services, and related models)
     const result = new Map<number, number>();
-    backendEndpointIds.forEach(id => result.set(id, 0.8));
-    controllerIds.forEach(id => result.set(id, 0.8));
-    requestIds.forEach(id => result.set(id, 0.8));
+    backendEndpointIds.forEach(id => result.set(id, BACKEND_SYMBOL_RELEVANCE));
+    controllerIds.forEach(id => result.set(id, BACKEND_SYMBOL_RELEVANCE));
+    requestIds.forEach(id => result.set(id, BACKEND_SYMBOL_RELEVANCE));
+    serviceIds.forEach(id => result.set(id, BACKEND_SYMBOL_RELEVANCE));
+    relatedModelIds.forEach(id => result.set(id, BACKEND_SYMBOL_RELEVANCE));
 
     logger.info('Cross-stack discovery complete', {
       frontendSymbols: frontendIds.length,
@@ -129,6 +142,10 @@ export class CrossStackStrategy implements DiscoveryStrategy {
       controllerIds: controllerIds,
       requestClasses: requestIds.length,
       requestIds: requestIds,
+      services: serviceIds.length,
+      serviceIds: serviceIds,
+      relatedModels: relatedModelIds.length,
+      relatedModelIds: relatedModelIds,
       frontendLanguages,
       totalDiscovered: result.size,
     });
@@ -269,54 +286,159 @@ export class CrossStackStrategy implements DiscoveryStrategy {
   }
 
   /**
-   * Expand frontend symbols to include methods from stores and composables.
-   * Stores/composables are discovered as symbols, but their methods that make API calls aren't.
-   * This is similar to how we expand controller methods in dependency-traversal.
+   * Find service methods and classes called by controller methods.
+   * When controller methods call service methods, we need to discover both:
+   * 1. The service methods themselves
+   * 2. The parent service classes containing those methods
+   * This ensures complete backend discovery (controller → service → model chain).
+   */
+  private async findServiceDependencies(controllerMethodIds: number[]): Promise<number[]> {
+    if (controllerMethodIds.length === 0) return [];
+
+    const db = this.dbService.knex;
+
+    // Find service methods called by controller methods
+    const serviceMethods = await db('dependencies as d')
+      .join('symbols as method', 'd.to_symbol_id', 'method.id')
+      .join('files as f', 'method.file_id', 'f.id')
+      .whereIn('d.from_symbol_id', controllerMethodIds)
+      .where('d.dependency_type', 'calls')
+      .where('method.symbol_type', 'method')
+      .where('f.path', 'like', '%/Services/%')
+      .distinct('method.id', 'method.file_id')
+      .select('method.id', 'method.file_id');
+
+    const serviceMethodIds = serviceMethods.map((m: { id: number }) => m.id);
+    const serviceFileIds = [...new Set(serviceMethods.map((m: { file_id: number }) => m.file_id))];
+
+    // Find parent service classes in the same files as the service methods
+    const serviceClasses = await db('symbols')
+      .whereIn('file_id', serviceFileIds)
+      .where('entity_type', 'service')
+      .where('symbol_type', 'class')
+      .distinct('id')
+      .select('id');
+
+    const serviceClassIds = serviceClasses.map((s: { id: number }) => s.id);
+
+    // Combine service methods + service classes
+    const allServiceIds = [...serviceMethodIds, ...serviceClassIds];
+
+    logger.debug('Found services from controller methods', {
+      controllerMethods: controllerMethodIds.length,
+      serviceMethods: serviceMethodIds.length,
+      serviceClasses: serviceClassIds.length,
+      totalServices: allServiceIds.length,
+    });
+
+    return allServiceIds;
+  }
+
+  /**
+   * Find models imported/referenced by discovered backend symbols (endpoint methods + services).
+   * This discovers model relationships between related entities.
    *
-   * IMPORTANT: Only includes methods semantically related to the feature to prevent
-   * discovering unrelated API calls.
+   * PRECISION: Only uses endpoint methods and services, NOT controller classes.
+   * Controller classes import models for all their methods, causing over-discovery.
+   */
+  private async findRelatedModels(backendSymbolIds: number[]): Promise<number[]> {
+    if (backendSymbolIds.length === 0) return [];
+
+    const db = this.dbService.knex;
+
+    // Find models that are imported/referenced by discovered backend symbols
+    const relatedModels = await db('dependencies as d')
+      .join('symbols as model', 'd.to_symbol_id', 'model.id')
+      .whereIn('d.from_symbol_id', backendSymbolIds)
+      .whereIn('d.dependency_type', ['imports', 'references'])
+      .where('model.entity_type', 'model')
+      .distinct('model.id')
+      .select('model.id');
+
+    const modelIds = relatedModels.map((m: { id: number }) => m.id);
+
+    logger.debug('Found related models from backend symbols', {
+      backendSymbols: backendSymbolIds.length,
+      relatedModels: modelIds.length,
+    });
+
+    return modelIds;
+  }
+
+  /**
+   * METHOD-LEVEL DISCOVERY: Expand ONLY store methods that are actually called.
+   *
+   * PRECISE FILTERING APPROACH:
+   * 1. Filter stores to only those with "calls" dependencies from discovered symbols
+   *    (excludes stores imported only for property access)
+   * 2. Expand discovered symbols with their "contains" dependencies (inner functions)
+   * 3. Find store methods that are CALLED by this expanded set AND make API calls
+   *
+   * This prevents discovering unrelated endpoints from the same store.
    */
   private async expandWithStoreMethods(
-    frontendSymbolIds: number[],
-    featureName: string
+    frontendSymbolIds: number[]
   ): Promise<number[]> {
     if (frontendSymbolIds.length === 0) return [];
 
     const db = this.dbService.knex;
 
-    // Get all methods from files containing discovered stores/composables
-    const methods = await db('symbols as method')
-      .join('symbols as parent', 'method.file_id', 'parent.file_id')
-      .whereIn('parent.id', frontendSymbolIds)
-      .whereIn('parent.entity_type', ['store', 'composable'])
+    // Find store/composable symbols from the discovered frontend symbols
+    // FILTER: Only include stores that are CALLED (not just imported for property access)
+    // This prevents discovering all auth endpoints when a component only uses usersStore.isDarkMode
+    const storesAndComposables = await db('symbols as store')
+      .join('dependencies as d', 'store.id', 'd.to_symbol_id')
+      .whereIn('store.id', frontendSymbolIds)
+      .whereIn('store.entity_type', ['store', 'composable'])
+      .whereIn('d.from_symbol_id', frontendSymbolIds)
+      .where('d.dependency_type', 'calls')  // Only stores that are actually called
+      .distinct('store.id', 'store.file_id')
+      .select('store.id', 'store.file_id');
+
+    if (storesAndComposables.length === 0) {
+      logger.debug('No called stores/composables in discovered symbols, skipping method expansion');
+      return [];
+    }
+
+    const fileIds = storesAndComposables.map((s: { file_id: number }) => s.file_id);
+
+    // STORE METHOD EXPANSION: Include ONLY store methods that are actually called
+    // The challenge: Store method calls are often made from inner/contained functions
+    // within composables, not directly from the composable itself.
+    //
+    // Solution: Expand discovered symbols to include their "contains" dependencies (inner functions),
+    // then find store methods called by this expanded set.
+
+    // Step 1: Expand discovered symbols with their contained functions
+    const containedSymbols = await db('dependencies as d')
+      .whereIn('d.from_symbol_id', frontendSymbolIds)
+      .where('d.dependency_type', 'contains')
+      .distinct('d.to_symbol_id')
+      .pluck('d.to_symbol_id');
+
+    const expandedCallers = [...frontendSymbolIds, ...containedSymbols];
+
+    // Step 2: Find store methods that are CALLED by discovered symbols or their contained functions
+    // AND make API calls (to ensure they're backend-connected)
+    const methodsWithCallsAndApiCalls = await db('symbols as method')
+      .join('api_calls as ac', 'method.id', 'ac.caller_symbol_id')
+      .join('dependencies as d', 'method.id', 'd.to_symbol_id')
+      .whereIn('method.file_id', fileIds)
+      .whereIn('d.from_symbol_id', expandedCallers)  // Called from discovered symbols or their contained functions
+      .where('d.dependency_type', 'calls')  // Actual call relationship
       .where('method.symbol_type', 'method')
       .distinct('method.id', 'method.name')
       .select('method.id', 'method.name');
 
-    // Filter methods by semantic relevance to feature name
-    // Extract feature tokens
-    const featureTokens = featureName
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(t => t.length > 3); // Ignore short tokens like "get", "set"
+    const methodIds = methodsWithCallsAndApiCalls.map((m: { id: number }) => m.id);
 
-    const relevantMethods = methods.filter((m: { id: number; name: string }) => {
-      const methodName = m.name.toLowerCase();
-
-      // Method name contains at least one feature token
-      return featureTokens.some(token => methodName.includes(token));
-    });
-
-    const methodIds = relevantMethods.map((m: { id: number }) => m.id);
-
-    logger.debug('Expanded store/composable methods for API call detection', {
-      storesComposables: frontendSymbolIds.length,
-      totalMethods: methods.length,
-      relevantMethods: methodIds.length,
-      featureName,
-      featureTokens,
-      filteredOut: methods.length - methodIds.length,
+    logger.debug('METHOD-LEVEL store expansion (precise call tracking)', {
+      calledStoresComposables: storesAndComposables.length,
+      discoveredSymbols: frontendSymbolIds.length,
+      containedFunctions: containedSymbols.length,
+      expandedCallers: expandedCallers.length,
+      actuallyCalledMethods: methodIds.length,
+      approach: 'trace through contains → find actually called store methods with API calls',
     });
 
     return methodIds;
@@ -399,9 +521,7 @@ export class CrossStackStrategy implements DiscoveryStrategy {
    * uses those endpoints via API calls.
    */
   private async discoverFrontendCallers(
-    backendSymbolIds: number[],
-    featureName: string,
-    repoId: number
+    backendSymbolIds: number[]
   ): Promise<Map<number, number>> {
     if (backendSymbolIds.length === 0) return new Map();
 
@@ -436,8 +556,8 @@ export class CrossStackStrategy implements DiscoveryStrategy {
       .select('id', 'name', 'entity_type');
 
     // Add callers and their parents to result
-    callerIds.forEach(id => result.set(id, 0.8));
-    parents.forEach((p: { id: number }) => result.set(p.id, 0.9)); // Higher relevance for parent symbols
+    callerIds.forEach(id => result.set(id, BACKEND_SYMBOL_RELEVANCE));
+    parents.forEach((p: { id: number }) => result.set(p.id, FRONTEND_PARENT_RELEVANCE));
 
     logger.info('Discovered frontend callers from backend endpoints', {
       backendSymbols: backendSymbolIds.length,

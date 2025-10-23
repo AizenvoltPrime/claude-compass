@@ -88,6 +88,9 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
    * Only run on first iteration - subsequent discoveries handled by other strategies.
    */
   shouldRun(context: DiscoveryContext): boolean {
+    // Only run in iteration 0 to prevent redundant re-traversal
+    // Direction-aware traversal ensures clean discovery within the iteration
+    // Subsequent iterations handle new symbols discovered by other strategies
     return context.iteration === 0;
   }
 
@@ -110,13 +113,31 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
     // Initialize queue with ALL currently discovered symbols (including controller class expansion)
     // This ensures that when we start from a controller method and the discovery engine adds
     // the parent controller class, we traverse dependencies from both the method AND the class
-    const queue = currentSymbols.map(id => ({ id, depth: 0 }));
+    // Direction-aware traversal handles component explosion naturally without special-case filtering
+    const symbolsBatch = await this.dbService.getSymbolsBatch(currentSymbols);
+
+    // Direction-aware traversal: Track how each symbol was discovered
+    // - 'entry': Entry point (can traverse both directions)
+    // - 'forward': Discovered via forward deps (only traverse forward from here)
+    // - 'backward': Discovered via backward deps (only traverse backward from here)
+    type DiscoveryDirection = 'entry' | 'forward' | 'backward';
+
+    // Determine initial direction based on entry point layer
+    // This implements layer-based discovery strategy:
+    // - Frontend leaf (component): Forward only → "what does it need"
+    // - Backend leaf (model/service): Backward only → "who uses it"
+    // - Middle layer (composable/store/endpoint): Bidirectional → "who uses + what needs"
+    const initialDirection: DiscoveryDirection =
+      context.entryPointLayer === 'frontend-leaf' ? 'forward' :
+      context.entryPointLayer === 'backend-leaf' ? 'backward' :
+      'entry';
+
+    const queue = currentSymbols.map(id => ({ id, depth: 0, direction: initialDirection }));
     const visited = new Set<number>(currentSymbols);
     const discoveredSymbols = new Set<number>(currentSymbols); // Track all discovered symbols for context-aware filtering
     const validatedFileIds = new Set<number>(); // Track files containing validated entities for file-level filtering
 
     // Add all current symbol files to validated files
-    const symbolsBatch = await this.dbService.getSymbolsBatch(currentSymbols);
     for (const [_id, symbol] of symbolsBatch) {
       if (symbol?.file_id) {
         validatedFileIds.add(symbol.file_id);
@@ -163,32 +184,133 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
         queue.splice(DependencyTraversalStrategy.MAX_QUEUE_SIZE);
       }
 
-      const { id, depth } = queue.shift()!;
+      const { id, depth, direction } = queue.shift()!;
       if (depth >= maxDepth) continue;
 
-      // Forward dependencies (calls, imports, references)
-      const dependencies = await this.dbService.getDependenciesFrom(id);
+      // Check current symbol type for traversal decisions
+      const currentSymbol = await this.dbService.getSymbol(id);
+      const isStore = currentSymbol?.entity_type === 'store';
+      const isExecutionIntermediary = currentSymbol?.entity_type === 'composable' || currentSymbol?.entity_type === 'method';
 
-      // Backward dependencies (callers, importers)
-      const callers = await this.dbService.getDependenciesTo(id);
+      // Direction-aware traversal with exception for execution intermediaries
+      // Composables/methods discovered backward still need to traverse forward to find stores/services they use
+      const shouldTraverseForward = direction === 'entry' || direction === 'forward' || (direction === 'backward' && isExecutionIntermediary);
+      const shouldTraverseBackward = direction === 'entry' || direction === 'backward';
+
+      // Get forward dependencies (filtered by type later based on depth)
+      const dependencies = shouldTraverseForward ? await this.dbService.getDependenciesFrom(id) : [];
+
+      // Get backward dependencies (filtered by type later)
+      const callers = shouldTraverseBackward ? await this.dbService.getDependenciesTo(id) : [];
 
       const nextDepth = depth + 1;
       const candidateIds: number[] = [];
+      const forwardCandidates = new Set<number>(); // Track which came from forward deps
+      const backwardCandidates = new Set<number>(); // Track which came from backward deps
+      const candidateDependencyTypes = new Map<number, string>(); // Track what dependency type discovered each candidate
+
+      // DEPENDENCY TYPE FILTERING: Simple, clean rules based on depth and direction
+      // Forward traversal:
+      //   - Depth 0 (entry): Follow imports/references to discover what it uses
+      //   - Depth 1: Allow selective 'contains' for composables (NOT stores)
+      //   - Depth 2+: Execution paths only (calls, api_call)
+      // Backward traversal:
+      //   - All depths: Follow calls/references/contains (actual usage + structural parents)
+      let allowedDependencyTypes: Set<string>;
+      if (shouldTraverseForward && !shouldTraverseBackward) {
+        // Forward-only traversal
+        if (depth === 0) {
+          allowedDependencyTypes = new Set(['imports', 'references', 'calls', 'api_call']);
+        } else if (depth === 1 && !isStore) {
+          allowedDependencyTypes = new Set(['calls', 'api_call', 'contains']);
+        } else {
+          allowedDependencyTypes = new Set(['calls', 'api_call']);
+        }
+      } else if (shouldTraverseBackward && !shouldTraverseForward) {
+        // Backward-only traversal: all depths follow calls/references/contains
+        // CONTAINS is needed to traverse from inner functions back to parent composables/functions
+        allowedDependencyTypes = new Set(['calls', 'references', 'contains']);
+      } else {
+        // Entry point (both directions): depth 0 behavior
+        allowedDependencyTypes = new Set(['imports', 'references', 'calls', 'api_call']);
+      }
+
+      // Collect 'contains' dependencies for batch validation
+      const containsTargets: number[] = [];
+      const nonContainsCandidates: number[] = [];
 
       for (const dep of dependencies) {
         const targetId = dep.to_symbol_id;
-        if (targetId && !visited.has(targetId)) {
+
+        // Skip if already visited
+        if (!targetId || visited.has(targetId)) continue;
+
+        // Filter by dependency type based on depth
+        if (!allowedDependencyTypes.has(dep.dependency_type)) {
+          continue;
+        }
+
+        // Special handling for 'contains' at depth 1: only follow if target has execution deps
+        if (dep.dependency_type === 'contains' && depth === 1) {
+          containsTargets.push(targetId);
+        } else {
           visited.add(targetId);
-          candidateIds.push(targetId);
+          nonContainsCandidates.push(targetId);
+          candidateDependencyTypes.set(targetId, dep.dependency_type);
         }
       }
 
+      // Batch check: which 'contains' targets have outgoing calls/api_call?
+      if (containsTargets.length > 0) {
+        const targetsWithExecutionDeps = await this.dbService.knex('dependencies')
+          .whereIn('from_symbol_id', containsTargets)
+          .whereIn('dependency_type', ['calls', 'api_call'])
+          .distinct('from_symbol_id')
+          .pluck('from_symbol_id');
+
+        // Only traverse into symbols that actually DO something (make calls)
+        for (const targetId of targetsWithExecutionDeps) {
+          if (!visited.has(targetId)) {
+            visited.add(targetId);
+            candidateIds.push(targetId);
+            forwardCandidates.add(targetId); // Mark as forward discovery
+            candidateDependencyTypes.set(targetId, 'contains');
+          }
+        }
+
+        logger.info('Selective contains filtering', {
+          currentSymbolId: id,
+          currentSymbolEntity: currentSymbol?.entity_type,
+          currentDepth: depth,
+          totalContainsTargets: containsTargets.length,
+          withExecutionDeps: targetsWithExecutionDeps.length,
+          filtered: containsTargets.length - targetsWithExecutionDeps.length,
+          targetsWithExecutionDeps: targetsWithExecutionDeps,
+        });
+      }
+
+      // Add non-contains candidates and mark as forward discovery
+      candidateIds.push(...nonContainsCandidates);
+      nonContainsCandidates.forEach(id => forwardCandidates.add(id));
+
+      // For backward dependencies (callers), filter by allowed dependency types
+      // Direction-aware traversal handles store explosion naturally:
+      // - Stores discovered forward won't traverse backward (shouldTraverseBackward = false)
       for (const dep of callers) {
         const targetId = dep.from_symbol_id;
-        if (targetId && !visited.has(targetId)) {
-          visited.add(targetId);
-          candidateIds.push(targetId);
+
+        // Skip if already visited
+        if (!targetId || visited.has(targetId)) continue;
+
+        // Filter by allowed dependency types
+        if (!allowedDependencyTypes.has(dep.dependency_type)) {
+          continue;
         }
+
+        visited.add(targetId);
+        candidateIds.push(targetId);
+        backwardCandidates.add(targetId); // Mark as backward discovery
+        candidateDependencyTypes.set(targetId, dep.dependency_type);
       }
 
       // Smart filtering to prevent false positives while allowing valid connections
@@ -210,6 +332,9 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
         );
         const serviceIds = candidateIds.filter(
           id => symbolMap.get(id)?.entity_type === 'service'
+        );
+        const composableIds = candidateIds.filter(
+          id => symbolMap.get(id)?.entity_type === 'composable'
         );
 
         // Validate controllers at ALL depths to filter generic utility controllers
@@ -284,12 +409,14 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
           : new Set(serviceIds);
 
         // Collect file IDs from all validated entities this iteration
+        // Include composables to allow their internal functions to be discovered
         const currentIterationValidated = new Set([
           ...validControllers,
           ...validStores,
           ...validRequests,
           ...validModels,
-          ...validServices
+          ...validServices,
+          ...composableIds  // Add composables so their files are tracked
         ]);
 
         if (currentIterationValidated.size > 0) {
@@ -300,9 +427,11 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
           const symbol = symbolMap.get(targetId);
 
           // Context-aware component filtering:
-          // - Backend entry points: Exclude components at depth > 1 (UI elements less relevant)
+          // - Backend-leaf entry points (model/service): Exclude components at depth > 1
+          // - Middle-layer entry points (controller method, composable, store): Allow components (bidirectional discovery)
           // - Frontend entry points: Allow deeper component discovery (UI is the feature)
-          if (nextDepth > 1 && symbol?.entity_type === 'component' && !context.isFrontendEntryPoint) {
+          const isBackendLeaf = context.entryPointLayer === 'backend-leaf';
+          if (nextDepth > 1 && symbol?.entity_type === 'component' && isBackendLeaf) {
             continue;
           }
 
@@ -339,7 +468,15 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
             'store', 'service', 'model', 'controller', 'component', 'request', 'composable'
           ].includes(symbol.entity_type);
 
-          if (nextDepth > 1 && !isEntityType && symbol?.file_id && !validatedFileIds.has(symbol.file_id)) {
+          // EXCEPTION: Allow inner functions discovered backward via CONTAINS
+          // These are execution intermediaries that bridge to parent composables/functions
+          const isInnerFunctionInBackwardContains =
+            symbol?.symbol_type === 'function' &&
+            symbol?.entity_type === 'function' &&
+            backwardCandidates.has(targetId) &&
+            depth > 0;
+
+          if (nextDepth > 1 && !isEntityType && !isInnerFunctionInBackwardContains && symbol?.file_id && !validatedFileIds.has(symbol.file_id)) {
             logger.debug('Filtered by file-level context', {
               symbolId: targetId,
               symbolName: symbol.name,
@@ -350,10 +487,22 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
             continue;
           }
 
-          const relevance = 1.0 - nextDepth / (maxDepth + 1);
+          // Assign direction based on how this symbol was discovered
+          const candidateDirection: DiscoveryDirection = forwardCandidates.has(targetId) ? 'forward' : 'backward';
+
+          // ARCHITECTURAL DECISION: CONTAINS relationships are depth-neutral in backward traversal
+          // CONTAINS represents structural parent-child relationships (function contains inner function)
+          // NOT execution flow - so it shouldn't consume depth levels
+          // This prevents inner functions from blocking discovery of parent composables/components
+          const depType = candidateDependencyTypes.get(targetId);
+          const isBackwardContains = candidateDirection === 'backward' && depType === 'contains';
+          const effectiveDepth = isBackwardContains ? depth : nextDepth;
+
+          const relevance = 1.0 - effectiveDepth / (maxDepth + 1);
           related.set(targetId, relevance);
           discoveredSymbols.add(targetId); // Add to discovered symbols for context-aware filtering
-          queue.push({ id: targetId, depth: nextDepth });
+
+          queue.push({ id: targetId, depth: effectiveDepth, direction: candidateDirection });
         }
       }
     }

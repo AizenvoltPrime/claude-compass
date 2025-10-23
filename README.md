@@ -494,7 +494,7 @@ Find execution paths between two symbols. Can find shortest path or all paths up
 
 #### 8. `discover_feature`
 
-Discover complete feature modules across the entire stack. Finds all related code for a feature by combining dependency analysis, naming heuristics, and cross-stack API tracing. Discovers semantic features that span frontend and backend with improved filtering, relevance scoring, and test exclusion.
+Discover complete feature modules across the entire stack using layer-based graph traversal. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point: backend-leaf entities (models/services) discover backward (who uses them), middle-layer entities (components/composables/controllers) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns.
 
 **Parameters:**
 
@@ -503,33 +503,14 @@ Discover complete feature modules across the entire stack. Finds all related cod
 - `include_routes`: Include API routes in the feature manifest (boolean, default: true)
 - `include_models`: Include database models in the feature manifest (boolean, default: true)
 - `include_tests`: Include test files and test symbols (boolean, default: false to filter out test noise)
-- `include_callers`: Include reverse dependencies - symbols that call/import the discovered symbols (boolean, default: true)
-  - Enables bidirectional discovery for symmetric results regardless of entry point
-- `naming_depth`: How aggressively to match related symbols by name (default: 2, min: 1, max: 3)
-  - 1 = conservative (exact matches)
-  - 2 = moderate (pattern matching)
-  - 3 = aggressive (fuzzy matching)
 - `max_depth`: Maximum depth for dependency graph traversal (default: 3, min: 1, max: 20)
   - Lower values = more focused results
   - Higher values = more comprehensive discovery
 - `max_symbols`: Maximum number of symbols to return (default: 500, min: 10, max: 5000)
   - Prevents overwhelming responses with too many results
 - `min_relevance_score`: Minimum relevance score (0.0-1.0) for including symbols (default: 0)
-  - Based on dependency distance and naming similarity
+  - Based on dependency distance from entry point
   - Higher values = only highly relevant symbols
-- `semantic_filtering_enabled`: Enable semantic filtering using embedding similarity (boolean, default: true)
-  - Uses BGE-M3 embeddings with **two-dimensional adaptive thresholds** to filter out semantically unrelated symbols
-  - **Strategy-based thresholds** automatically adjust precision based on discovery method reliability:
-    - `dependency-traversal`: 0.60 (direct code dependencies are highly reliable)
-    - `reverse-caller`: 0.65 (actual function calls/imports are reliable)
-    - `forward-dependency`: 0.65 (dependencies are reliable)
-    - `cross-stack`: 0.70 (API matching is moderately reliable)
-    - `naming-pattern`: 0.75 (name-based matching requires stricter filtering)
-  - **Entity-type-aware thresholds** add fine-grained filtering based on symbol characteristics:
-    - Stricter for generic/reusable types: composables (0.75), functions (0.75), unclassified symbols (0.68-0.75)
-    - Stricter for indirect discovery: controllers/services from naming patterns (0.70)
-    - More lenient for structural types: interfaces/types (min 0.60)
-  - This prevents both false negatives (missing important code) and false positives (including unrelated code)
 
 **Returns:** Feature manifest with categorized symbols:
 - `feature_name`: Inferred feature name
@@ -629,8 +610,6 @@ const feature = await mcpClient.callTool('discover_feature', {
   include_routes: true,
   include_models: true,
   include_tests: false, // Exclude test files
-  include_callers: true, // Bidirectional discovery
-  naming_depth: 2, // Moderate name matching
   max_depth: 3, // Focused results
   max_symbols: 500,
   min_relevance_score: 0.5, // Only highly relevant symbols

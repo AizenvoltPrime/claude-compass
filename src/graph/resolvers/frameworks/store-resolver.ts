@@ -131,9 +131,8 @@ export class StoreResolver extends BaseLanguageResolver {
       for (const symbol of symbolsByName) {
         if (symbol.file_id === exported.fromFile) {
           const fileId = symbol.file_id;
-          const allSymbolsInFile = this.indexManager.getSymbolsByName('');
+          const fileSymbols = this.indexManager.getSymbolsByFileId(fileId);
 
-          const fileSymbols = allSymbolsInFile.filter(s => s.file_id === fileId);
           const fileHasStorePattern = fileSymbols.some(s =>
             s.name.toLowerCase().includes(storeName.toLowerCase())
           );
@@ -157,8 +156,7 @@ export class StoreResolver extends BaseLanguageResolver {
         continue;
       }
 
-      const allSymbolsInFile = this.indexManager.getSymbolsByName('');
-      const fileSymbols = allSymbolsInFile.filter(s => s.file_id === symbol.file_id);
+      const fileSymbols = this.indexManager.getSymbolsByFileId(symbol.file_id);
 
       const hasStoreInFile = fileSymbols.some(s => {
         const name = s.name.toLowerCase();

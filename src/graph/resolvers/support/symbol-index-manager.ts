@@ -87,6 +87,18 @@ export class SymbolIndexManager implements ISymbolIndexManager {
     return this.symbolsByName.get(name) || [];
   }
 
+  getSymbolsByFileId(fileId: number): Symbol[] {
+    const symbols: Symbol[] = [];
+    for (const symbolList of this.symbolsByName.values()) {
+      for (const symbol of symbolList) {
+        if (symbol.file_id === fileId) {
+          symbols.push(symbol);
+        }
+      }
+    }
+    return symbols;
+  }
+
   getExportedSymbols(name: string): ExportedSymbol[] {
     return this.exportedSymbols.get(name) || [];
   }
