@@ -998,39 +998,38 @@ export class GraphBuilder {
       modelFileCount: modelFiles.length
     });
 
-    // Parse model files sequentially to build registry
-    // Import PHPParser directly to access FrameworkParseOptions support
+    /**
+     * Parse model files in parallel to build registry efficiently.
+     * Map is thread-safe in Node.js, allowing concurrent registry updates.
+     */
     const { PHPParser } = await import('../parsers/php');
     const phpParser = new PHPParser();
 
-    let successCount = 0;
-    let failureCount = 0;
-    const failedFiles: string[] = [];
+    const parseResults = await Promise.all(
+      modelFiles.map(async (file) => {
+        try {
+          const content = await this.readFileWithEncodingRecovery(file.path, options);
+          if (!content) {
+            return { success: false, file: file.path };
+          }
 
-    for (const file of modelFiles) {
-      try {
-        const content = await this.readFileWithEncodingRecovery(file.path, options);
-        if (!content) {
-          failureCount++;
-          failedFiles.push(file.path);
-          continue;
+          await phpParser.parseFile(file.path, content, {
+            eloquentRelationshipRegistry: registry
+          });
+          return { success: true };
+        } catch (error) {
+          this.logger.warn('Failed to parse model file for registry', {
+            path: file.path,
+            error: (error as Error).message,
+          });
+          return { success: false, file: file.path };
         }
+      })
+    );
 
-        // Parse with shared registry - parser will add relationships to it
-        // Since Map is a reference type, changes are visible to us
-        await phpParser.parseFile(file.path, content, {
-          eloquentRelationshipRegistry: registry
-        });
-        successCount++;
-      } catch (error) {
-        failureCount++;
-        failedFiles.push(file.path);
-        this.logger.warn('Failed to parse model file for registry', {
-          path: file.path,
-          error: (error as Error).message,
-        });
-      }
-    }
+    const successCount = parseResults.filter(r => r.success).length;
+    const failureCount = parseResults.filter(r => !r.success).length;
+    const failedFiles = parseResults.filter(r => !r.success && r.file).map(r => r.file!);
 
     this.logger.info('Eloquent relationship registry built', {
       modelCount: registry.size,
