@@ -108,6 +108,25 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
       return this.selectBestMatch(symbolsInSameFile, baseObject);
     }
 
+    // Handle variables that reference stores/composables
+    // Example: const userStore = useUserStore() where signature is "useUserStore()"
+    if (baseObject.symbol_type === 'variable' || baseObject.symbol_type === 'constant') {
+      const actualContainer = this.resolveVariableContainer(baseObject, indexManager);
+      if (actualContainer) {
+        const typeRelatedSymbols = this.findMembersOfType(actualContainer, finalMember.name, indexManager);
+        if (typeRelatedSymbols.length > 0) {
+          logger.debug('Resolved member via variable container', {
+            variable: baseObject.name,
+            container: actualContainer.name,
+            containerType: actualContainer.entity_type,
+            member: finalMember.name,
+            resolvedId: typeRelatedSymbols[0].id,
+          });
+          return typeRelatedSymbols[0];
+        }
+      }
+    }
+
     if (baseObject.symbol_type === 'class' || baseObject.symbol_type === 'interface') {
       const typeRelatedSymbols = this.findMembersOfType(baseObject, finalMember.name, indexManager);
       if (typeRelatedSymbols.length > 0) {
@@ -188,6 +207,67 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
         candidateName: candidateSymbols[0].name,
       });
       return candidateSymbols[0];
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve the actual container (store/composable) from a variable's signature.
+   *
+   * Handles patterns like:
+   * - const userStore = useUserStore() → resolves to useUserStore symbol
+   * - const authComposable = useAuth() → resolves to useAuth symbol
+   *
+   * This enables proper method resolution for Pinia stores and Vue composables.
+   */
+  private resolveVariableContainer(
+    variable: Symbol,
+    indexManager: ISymbolIndexManager
+  ): Symbol | null {
+    if (!variable.signature) {
+      return null;
+    }
+
+    // Extract function call from signature: "useUserStore()" → "useUserStore"
+    const functionCallMatch = variable.signature.match(/^(\w+)\s*\(/);
+    if (!functionCallMatch) {
+      return null;
+    }
+
+    const containerName = functionCallMatch[1];
+    const containerCandidates = indexManager.getSymbolsByName(containerName);
+
+    // Find the store/composable definition
+    // Prefer symbols with entity_type = 'store' or 'composable'
+    for (const candidate of containerCandidates) {
+      if (candidate.entity_type === 'store' ||
+          candidate.entity_type === 'composable' ||
+          candidate.entity_type === 'component') {
+        logger.debug('Resolved variable container', {
+          variable: variable.name,
+          variableSignature: variable.signature,
+          container: candidate.name,
+          containerType: candidate.entity_type,
+          containerId: candidate.id,
+        });
+        return candidate;
+      }
+    }
+
+    // Fallback: if no entity_type match, use the first candidate if it's a reasonable container type
+    for (const candidate of containerCandidates) {
+      if (candidate.symbol_type === 'function' ||
+          candidate.symbol_type === 'variable' ||
+          candidate.symbol_type === 'class') {
+        logger.debug('Resolved variable container (fallback)', {
+          variable: variable.name,
+          container: candidate.name,
+          containerType: candidate.symbol_type,
+          containerId: candidate.id,
+        });
+        return candidate;
+      }
     }
 
     return null;

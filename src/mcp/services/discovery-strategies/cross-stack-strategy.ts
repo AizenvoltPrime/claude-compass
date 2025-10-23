@@ -120,9 +120,11 @@ export class CrossStackStrategy implements DiscoveryStrategy {
     ]);
 
     // Collect specific backend symbols to find related models
-    // Exclude controller classes (too broad - they import models for all their methods)
-    // Include: endpoint methods (specific) + services (feature-scoped)
-    const backendIdsForModelDiscovery = [...backendEndpointIds, ...serviceIds];
+    // Exclude controller/service classes (too broad - they import models for all their methods)
+    // Include ONLY: endpoint methods (specific) + service methods (execution-scoped)
+    // Service classes have the same problem as controller classes - they import models for ALL methods
+    const serviceMethodIds = await this.extractServiceMethods(serviceIds);
+    const backendIdsForModelDiscovery = [...backendEndpointIds, ...serviceMethodIds];
     const relatedModelIds = await this.findRelatedModels(backendIdsForModelDiscovery);
 
     // Convert to relevance map (methods, controllers, requests, services, and related models)
@@ -363,6 +365,35 @@ export class CrossStackStrategy implements DiscoveryStrategy {
     });
 
     return modelIds;
+  }
+
+  /**
+   * Extract service methods from a mixed array of service classes and methods.
+   * Filters out service classes to prevent class-level imports from polluting model discovery.
+   * Service classes import ALL models for ALL their methods (structural dependencies).
+   * We only want models used by methods in the execution path (execution dependencies).
+   */
+  private async extractServiceMethods(serviceIds: number[]): Promise<number[]> {
+    if (serviceIds.length === 0) return [];
+
+    const db = this.dbService.knex;
+
+    // Filter to only service methods (exclude service classes)
+    const serviceMethods = await db('symbols')
+      .whereIn('id', serviceIds)
+      .where('symbol_type', 'method')
+      .where('entity_type', 'method')
+      .select('id');
+
+    const methodIds = serviceMethods.map((m: { id: number }) => m.id);
+
+    logger.debug('Extracted service methods for model discovery', {
+      totalServiceIds: serviceIds.length,
+      serviceMethodIds: methodIds.length,
+      filteredOutClasses: serviceIds.length - methodIds.length,
+    });
+
+    return methodIds;
   }
 
   /**

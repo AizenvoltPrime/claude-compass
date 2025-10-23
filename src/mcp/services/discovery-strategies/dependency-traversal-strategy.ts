@@ -66,9 +66,11 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
     // - Backend leaf (model/service): Backward only → "who uses it"
     // - Middle layer (composable/store/endpoint): Bidirectional → "who uses + what needs"
     const initialDirection: DiscoveryDirection =
-      context.entryPointLayer === 'frontend-leaf' ? 'forward' :
-      context.entryPointLayer === 'backend-leaf' ? 'backward' :
-      'entry';
+      context.entryPointLayer === 'frontend-leaf'
+        ? 'forward'
+        : context.entryPointLayer === 'backend-leaf'
+          ? 'backward'
+          : 'entry';
 
     const queue = currentSymbols.map(id => ({ id, depth: 0, direction: initialDirection }));
     const visited = new Set<number>(currentSymbols);
@@ -90,7 +92,10 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
       return symbol?.entity_type === 'controller';
     });
     if (entryPointControllerIds.length > 0) {
-      await this.expandContextWithControllerMethods(new Set(entryPointControllerIds), context.contextSymbols);
+      await this.expandContextWithControllerMethods(
+        new Set(entryPointControllerIds),
+        context.contextSymbols
+      );
     }
 
     logger.debug('Initialized traversal queue', {
@@ -126,15 +131,21 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
       // Check current symbol type for traversal decisions
       const currentSymbol = await this.dbService.getSymbol(id);
       const isStore = currentSymbol?.entity_type === 'store';
-      const isExecutionIntermediary = currentSymbol?.entity_type === 'composable' || currentSymbol?.entity_type === 'method';
+      const isExecutionIntermediary =
+        currentSymbol?.entity_type === 'composable' || currentSymbol?.entity_type === 'method';
 
       // Direction-aware traversal with exception for execution intermediaries
       // Composables/methods discovered backward still need to traverse forward to find stores/services they use
-      const shouldTraverseForward = direction === 'entry' || direction === 'forward' || (direction === 'backward' && isExecutionIntermediary);
+      const shouldTraverseForward =
+        direction === 'entry' ||
+        direction === 'forward' ||
+        (direction === 'backward' && isExecutionIntermediary);
       const shouldTraverseBackward = direction === 'entry' || direction === 'backward';
 
       // Get forward dependencies (filtered by type later based on depth)
-      const dependencies = shouldTraverseForward ? await this.dbService.getDependenciesFrom(id) : [];
+      const dependencies = shouldTraverseForward
+        ? await this.dbService.getDependenciesFrom(id)
+        : [];
 
       // Get backward dependencies (filtered by type later)
       const callers = shouldTraverseBackward ? await this.dbService.getDependenciesTo(id) : [];
@@ -178,11 +189,29 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
       for (const dep of dependencies) {
         const targetId = dep.to_symbol_id;
 
-        // Skip if already visited
         if (!targetId || visited.has(targetId)) continue;
 
-        // Filter by dependency type based on depth
         if (!allowedDependencyTypes.has(dep.dependency_type)) {
+          continue;
+        }
+
+        /**
+         * EXECUTION-LEVEL FILTERING: Prevents class-level imports from polluting discovery.
+         * Controller/Service classes import ALL models for ALL their methods (structural dependencies).
+         * We only want models actually used by methods in the execution path (execution dependencies).
+         * Solution: Classes cannot follow imports/references, only methods/functions can.
+         */
+        if (
+          (dep.dependency_type === 'imports' || dep.dependency_type === 'references') &&
+          currentSymbol?.symbol_type === 'class'
+        ) {
+          logger.debug('Filtered class-level import/reference', {
+            class: currentSymbol.name,
+            entity_type: currentSymbol.entity_type,
+            dependency_type: dep.dependency_type,
+            targetId,
+            depth,
+          });
           continue;
         }
 
@@ -198,7 +227,8 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
 
       // Batch check: which 'contains' targets have outgoing calls/api_call?
       if (containsTargets.length > 0) {
-        const targetsWithExecutionDeps = await this.dbService.knex('dependencies')
+        const targetsWithExecutionDeps = await this.dbService
+          .knex('dependencies')
           .whereIn('from_symbol_id', containsTargets)
           .whereIn('dependency_type', ['calls', 'api_call'])
           .distinct('from_symbol_id')
@@ -257,25 +287,20 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
         const controllerIds = candidateIds.filter(
           id => symbolMap.get(id)?.entity_type === 'controller'
         );
-        const storeIds = candidateIds.filter(
-          id => symbolMap.get(id)?.entity_type === 'store'
-        );
-        const requestIds = candidateIds.filter(
-          id => symbolMap.get(id)?.entity_type === 'request'
-        );
-        const modelIds = candidateIds.filter(
-          id => symbolMap.get(id)?.entity_type === 'model'
-        );
-        const serviceIds = candidateIds.filter(
-          id => symbolMap.get(id)?.entity_type === 'service'
-        );
+        const storeIds = candidateIds.filter(id => symbolMap.get(id)?.entity_type === 'store');
+        const requestIds = candidateIds.filter(id => symbolMap.get(id)?.entity_type === 'request');
+        const modelIds = candidateIds.filter(id => symbolMap.get(id)?.entity_type === 'model');
+        const serviceIds = candidateIds.filter(id => symbolMap.get(id)?.entity_type === 'service');
         const composableIds = candidateIds.filter(
           id => symbolMap.get(id)?.entity_type === 'composable'
         );
 
         // Expand context to include methods from discovered controllers
         if (controllerIds.length > 0) {
-          await this.expandContextWithControllerMethods(new Set(controllerIds), context.contextSymbols);
+          await this.expandContextWithControllerMethods(
+            new Set(controllerIds),
+            context.contextSymbols
+          );
         }
 
         // Collect file IDs from all discovered entities this iteration
@@ -285,7 +310,7 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
           ...requestIds,
           ...modelIds,
           ...serviceIds,
-          ...composableIds
+          ...composableIds,
         ]);
 
         if (currentIterationDiscovered.size > 0) {
@@ -294,6 +319,7 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
 
         for (const targetId of candidateIds) {
           const symbol = symbolMap.get(targetId);
+          const depType = candidateDependencyTypes.get(targetId);
 
           // Layer-aware component filtering:
           // Backend-leaf entry points (model/service) exclude components at depth > 1
@@ -307,9 +333,17 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
           // Only apply to generic symbols (methods, properties, variables, functions, interfaces)
           // Entity types (stores, services, models, controllers, components, requests, composables)
           // have their own validation logic and should not be filtered by file-level context
-          const isEntityType = symbol?.entity_type && [
-            'store', 'service', 'model', 'controller', 'component', 'request', 'composable'
-          ].includes(symbol.entity_type);
+          const isEntityType =
+            symbol?.entity_type &&
+            [
+              'store',
+              'service',
+              'model',
+              'controller',
+              'component',
+              'request',
+              'composable',
+            ].includes(symbol.entity_type);
 
           // EXCEPTION: Allow inner functions discovered backward via CONTAINS
           // These are execution intermediaries that bridge to parent composables/functions
@@ -319,7 +353,13 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
             backwardCandidates.has(targetId) &&
             depth > 0;
 
-          if (nextDepth > 1 && !isEntityType && !isInnerFunctionInBackwardContains && symbol?.file_id && !validatedFileIds.has(symbol.file_id)) {
+          if (
+            nextDepth > 1 &&
+            !isEntityType &&
+            !isInnerFunctionInBackwardContains &&
+            symbol?.file_id &&
+            !validatedFileIds.has(symbol.file_id)
+          ) {
             logger.debug('Filtered by file-level context', {
               symbolId: targetId,
               symbolName: symbol.name,
@@ -331,13 +371,14 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
           }
 
           // Assign direction based on how this symbol was discovered
-          const candidateDirection: DiscoveryDirection = forwardCandidates.has(targetId) ? 'forward' : 'backward';
+          const candidateDirection: DiscoveryDirection = forwardCandidates.has(targetId)
+            ? 'forward'
+            : 'backward';
 
           // ARCHITECTURAL DECISION: CONTAINS relationships are depth-neutral in backward traversal
           // CONTAINS represents structural parent-child relationships (function contains inner function)
           // NOT execution flow - so it shouldn't consume depth levels
           // This prevents inner functions from blocking discovery of parent composables/components
-          const depType = candidateDependencyTypes.get(targetId);
           const isBackwardContains = candidateDirection === 'backward' && depType === 'contains';
           const effectiveDepth = isBackwardContains ? depth : nextDepth;
 
@@ -357,7 +398,6 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
 
     return related;
   }
-
 
   /**
    * Expand context to include all methods from discovered controllers.
@@ -405,10 +445,7 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
    * Only symbols from files containing discovered entities (controllers, services, models, etc.)
    * will be included in related_symbols, filtering out methods from unrelated files.
    */
-  private async collectFileIds(
-    symbolIds: Set<number>,
-    fileIds: Set<number>
-  ): Promise<void> {
+  private async collectFileIds(symbolIds: Set<number>, fileIds: Set<number>): Promise<void> {
     if (symbolIds.size === 0) return;
 
     const symbols = await this.dbService.getSymbolsBatch(Array.from(symbolIds));

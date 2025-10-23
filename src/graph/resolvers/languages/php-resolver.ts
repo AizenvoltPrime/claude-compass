@@ -38,6 +38,21 @@ export class PHPResolver extends BaseLanguageResolver {
       }
     }
 
+    // Handle instance method calls with resolved_class (e.g., $this->service->method())
+    // When parser resolves $this->paymentService->processPayment(),
+    // it provides resolved_class="PaymentService" to disambiguate the method call
+    if (dependency?.resolved_class) {
+      const instanceMethodSymbol = this.resolveInstanceMethodCall(
+        context,
+        targetSymbol,
+        dependency.resolved_class
+      );
+      if (instanceMethodSymbol) {
+        this.logResolution(true, targetSymbol, 'instance_method_call', context);
+        return this.createHighConfidenceResult(instanceMethodSymbol, 'php:instance_method');
+      }
+    }
+
     const localSymbol = this.resolveInLocalScope(context, targetSymbol);
     if (localSymbol) {
       this.logResolution(true, targetSymbol, 'local_scope', context);
@@ -186,6 +201,93 @@ export class PHPResolver extends BaseLanguageResolver {
   private extractNamespace(context: IResolutionContext): string | null {
     const namespaceSymbol = context.symbols.find(s => s.symbol_type === 'namespace');
     return namespaceSymbol?.name || null;
+  }
+
+  /**
+   * Resolve instance method calls using resolved_class context.
+   * Example: $this->paymentService->processPayment()
+   * - targetSymbol: "processPayment"
+   * - resolvedClass: "PaymentService"
+   *
+   * This disambiguates method calls by finding the method in the correct class,
+   * preventing false matches to methods with the same name in other classes.
+   */
+  private resolveInstanceMethodCall(
+    context: IResolutionContext,
+    methodName: string,
+    resolvedClass: string
+  ): Symbol | null {
+    const currentNamespace = this.extractNamespace(context);
+    const useStatements = context.imports;
+
+    // Resolve the class FQN from the resolved_class name
+    const classFqn = this.resolvePHPClassName(resolvedClass, useStatements, currentNamespace);
+    if (!classFqn) {
+      logger.debug('Could not resolve class FQN for instance method call', {
+        resolvedClass,
+        methodName,
+      });
+      return null;
+    }
+
+    // Try qualified name lookup first (most precise)
+    const methodFqn = `${classFqn}::${methodName}`;
+    const symbolByQualifiedName = this.indexManager.getSymbolByQualifiedName(methodFqn);
+    if (symbolByQualifiedName) {
+      logger.debug('Resolved instance method via qualified name', {
+        methodName,
+        resolvedClass,
+        classFqn,
+        methodFqn,
+        symbolId: symbolByQualifiedName.id,
+      });
+      return symbolByQualifiedName;
+    }
+
+    // Fallback: Find via autoloader + file lookup
+    if (!this.projectRoot) {
+      logger.debug('Project root not set, cannot resolve via autoloader');
+      return null;
+    }
+
+    const resolvedPath = autoloaderRegistry.resolvePhpClass(classFqn, context.filePath);
+    if (!resolvedPath) {
+      logger.debug('Could not resolve PHP class to file', { classFqn, contextFilePath: context.filePath });
+      return null;
+    }
+
+    const fileId = this.indexManager.getFileId(resolvedPath);
+    if (!fileId) {
+      logger.debug('No file ID for resolved path', { resolvedPath });
+      return null;
+    }
+
+    // Find method in the class file
+    const methodSymbols = this.indexManager.getSymbolsByName(methodName);
+    const method = methodSymbols.find(
+      s => s.file_id === fileId && s.symbol_type === SymbolType.METHOD
+    );
+
+    if (method) {
+      logger.debug('Resolved instance method via autoloader', {
+        methodName,
+        resolvedClass,
+        classFqn,
+        resolvedPath,
+        methodId: method.id,
+      });
+    } else {
+      logger.debug('Instance method not found in resolved class file', {
+        methodName,
+        resolvedClass,
+        classFqn,
+        resolvedPath,
+        fileId,
+        availableMethodsWithName: methodSymbols.length,
+      });
+    }
+
+    return method || null;
   }
 
   cleanup(): void {
