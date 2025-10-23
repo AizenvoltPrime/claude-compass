@@ -16,7 +16,7 @@ import {
   DataContract,
 } from '../database/models';
 import { DatabaseService } from '../database/services';
-import { getParserForFile, ParseResult, MultiParser } from '../parsers';
+import { getParserForFile, ParseResult, MultiParser, ParserFactory } from '../parsers';
 import {
   VueComponent,
   ReactComponent,
@@ -60,6 +60,9 @@ export interface BuildOptions {
   enableCrossStackAnalysis?: boolean;
   detectFrameworks?: boolean;
   verbose?: boolean;
+
+  /** Eloquent relationship registry shared across repository for semantic analysis */
+  eloquentRelationshipRegistry?: Map<string, Map<string, string>>;
 }
 
 export interface BuildResult {
@@ -968,11 +971,86 @@ export class GraphBuilder {
     }
   }
 
+  /**
+   * Build Eloquent relationship registry from all model files
+   * This enables semantic analysis of with() relationship chains
+   */
+  private async buildEloquentRelationshipRegistry(
+    files: Array<{ path: string; relativePath?: string }>,
+    options: BuildOptions
+  ): Promise<Map<string, Map<string, string>>> {
+    const registry = new Map<string, Map<string, string>>();
+
+    // Identify model files (Laravel: app/Models/, app/Model/)
+    const modelFiles = files.filter(file => {
+      const normalized = file.path.replace(/\\/g, '/');
+      return (
+        normalized.includes('/app/Models/') ||
+        normalized.includes('/app/Model/')
+      ) && file.path.endsWith('.php');
+    });
+
+    if (modelFiles.length === 0) {
+      return registry;
+    }
+
+    this.logger.info('Building Eloquent relationship registry', {
+      modelFileCount: modelFiles.length
+    });
+
+    // Parse model files sequentially to build registry
+    // Import PHPParser directly to access FrameworkParseOptions support
+    const { PHPParser } = await import('../parsers/php');
+    const phpParser = new PHPParser();
+
+    let successCount = 0;
+    let failureCount = 0;
+    const failedFiles: string[] = [];
+
+    for (const file of modelFiles) {
+      try {
+        const content = await this.readFileWithEncodingRecovery(file.path, options);
+        if (!content) {
+          failureCount++;
+          failedFiles.push(file.path);
+          continue;
+        }
+
+        // Parse with shared registry - parser will add relationships to it
+        // Since Map is a reference type, changes are visible to us
+        await phpParser.parseFile(file.path, content, {
+          eloquentRelationshipRegistry: registry
+        });
+        successCount++;
+      } catch (error) {
+        failureCount++;
+        failedFiles.push(file.path);
+        this.logger.warn('Failed to parse model file for registry', {
+          path: file.path,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    this.logger.info('Eloquent relationship registry built', {
+      modelCount: registry.size,
+      totalRelationships: Array.from(registry.values()).reduce((sum, m) => sum + m.size, 0),
+      successfulParses: successCount,
+      failedParses: failureCount,
+      ...(failureCount > 0 && { failedFiles: failedFiles.slice(0, 5) })
+    });
+
+    return registry;
+  }
+
   private async parseFiles(
     files: Array<{ path: string; relativePath?: string }>,
     options: BuildOptions
   ): Promise<Array<ParseResult & { filePath: string }>> {
     const multiParser = new MultiParser();
+
+    // Build Eloquent relationship registry from model files first
+    const eloquentRegistry = await this.buildEloquentRelationshipRegistry(files, options);
 
     const concurrency = options.maxConcurrency || 10;
     const limit = pLimit(concurrency);
@@ -985,11 +1063,17 @@ export class GraphBuilder {
             return null;
           }
 
+          // Pass registry to all file parses
+          const enhancedOptions = {
+            ...options,
+            eloquentRelationshipRegistry: eloquentRegistry
+          };
+
           const parseResult = await this.processFileWithSizePolicyMultiParser(
             file,
             content,
             multiParser,
-            options
+            enhancedOptions
           );
           if (!parseResult) {
             return null;
@@ -2924,6 +3008,7 @@ export class GraphBuilder {
           enableEncodingRecovery: true,
           chunkSize: action === 'chunk' ? fileSizePolicy.chunkingThreshold : undefined,
           chunkOverlapLines: options.chunkOverlapLines || 100,
+          eloquentRelationshipRegistry: options.eloquentRelationshipRegistry,
         };
 
         const multiResult = await multiParser.parseFile(content, file.path, parseOptions);
@@ -2978,6 +3063,8 @@ export class GraphBuilder {
       enableCrossStackAnalysis: this.shouldEnableCrossStackAnalysis(options, repository),
       detectFrameworks: options.detectFrameworks ?? false,
       verbose: options.verbose ?? false,
+
+      eloquentRelationshipRegistry: options.eloquentRelationshipRegistry,
     };
   }
 

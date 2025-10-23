@@ -31,6 +31,9 @@ export interface FrameworkParseOptions extends ParseOptions {
   repositoryFrameworks?: string[]; // Detected frameworks for the entire repository
   detectFrameworkEntities?: boolean;
   skipFrameworkAnalysis?: boolean;
+  // Eloquent relationship registry shared across repository for semantic analysis
+  // ModelClass → { methodName → TargetModelClass }
+  eloquentRelationshipRegistry?: Map<string, Map<string, string>>;
 }
 
 /**

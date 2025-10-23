@@ -85,3 +85,6 @@ tools/verification/frontend-api-calls.json
 .gitignore
 tools/verification/comparison-results.json
 tools/verification/remaining-routes.json
+
+# Feature discovery verification responses
+verification-responses/
