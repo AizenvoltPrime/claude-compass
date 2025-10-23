@@ -186,20 +186,6 @@ export function validateDiscoverFeatureArgs(args: any): DiscoverFeatureArgs {
   if (args.include_tests !== undefined && typeof args.include_tests !== 'boolean') {
     throw new Error('include_tests must be a boolean');
   }
-  if (args.include_callers !== undefined && typeof args.include_callers !== 'boolean') {
-    throw new Error('include_callers must be a boolean');
-  }
-  if (args.naming_depth !== undefined) {
-    if (typeof args.naming_depth !== 'number') {
-      throw new Error('naming_depth must be a number');
-    }
-    if (!Number.isInteger(args.naming_depth)) {
-      throw new Error('naming_depth must be an integer');
-    }
-    if (args.naming_depth < 1 || args.naming_depth > 3) {
-      throw new Error('naming_depth must be between 1 and 3');
-    }
-  }
   if (args.max_symbols !== undefined) {
     if (typeof args.max_symbols !== 'number') {
       throw new Error('max_symbols must be a number');
@@ -218,12 +204,6 @@ export function validateDiscoverFeatureArgs(args: any): DiscoverFeatureArgs {
     if (args.min_relevance_score < 0 || args.min_relevance_score > 1) {
       throw new Error('min_relevance_score must be between 0 and 1');
     }
-  }
-  if (
-    args.semantic_filtering_enabled !== undefined &&
-    typeof args.semantic_filtering_enabled !== 'boolean'
-  ) {
-    throw new Error('semantic_filtering_enabled must be a boolean');
   }
   validateMaxDepthParameter(args.max_depth);
   return args as DiscoverFeatureArgs;

@@ -363,7 +363,7 @@ export class ClaudeCompassMCPServer {
           {
             name: 'discover_feature',
             description:
-              'Discover complete feature modules across the entire stack. Finds all related code for a feature by combining dependency analysis, naming heuristics, and cross-stack API tracing. Discovers semantic features that span frontend and backend with improved filtering, relevance scoring, and test exclusion.',
+              'Discover complete feature modules across the entire stack using layer-based graph traversal. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point: backend-leaf entities (models/services) discover backward (who uses them), middle-layer entities (components/composables/controllers) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -391,18 +391,6 @@ export class ClaudeCompassMCPServer {
                   description: 'Include test files and test symbols (default: false to filter out test noise)',
                   default: false,
                 },
-                include_callers: {
-                  type: 'boolean',
-                  description: 'Include reverse dependencies (symbols that call/import the discovered symbols). Enables bidirectional discovery for symmetric results regardless of entry point (default: true)',
-                  default: true,
-                },
-                naming_depth: {
-                  type: 'number',
-                  description: 'How aggressively to match related symbols by name (1=conservative, 2=moderate, 3=aggressive)',
-                  default: 2,
-                  minimum: 1,
-                  maximum: 3,
-                },
                 max_depth: {
                   type: 'number',
                   description: 'Maximum depth for dependency graph traversal (lower = more focused results)',
@@ -423,11 +411,6 @@ export class ClaudeCompassMCPServer {
                   default: 0,
                   minimum: 0,
                   maximum: 1,
-                },
-                semantic_filtering_enabled: {
-                  type: 'boolean',
-                  description: 'Enable semantic filtering using embedding similarity with strategy-based thresholds (0.60-0.75 optimized per discovery method)',
-                  default: true,
                 },
               },
               required: ['symbol_id'],

@@ -50,10 +50,7 @@ export interface DiscoverFeatureArgs {
   include_routes?: boolean;
   include_models?: boolean;
   include_tests?: boolean;
-  include_callers?: boolean;
-  naming_depth?: number;
   max_depth?: number;
   max_symbols?: number;
   min_relevance_score?: number;
-  semantic_filtering_enabled?: boolean;
 }

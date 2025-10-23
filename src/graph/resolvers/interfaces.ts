@@ -69,6 +69,7 @@ export interface ISymbolIndexManager {
 
   getSymbolById(symbolId: number): Symbol | undefined;
   getSymbolsByName(name: string): Symbol[];
+  getSymbolsByFileId(fileId: number): Symbol[];
   getExportedSymbols(name: string): ExportedSymbol[];
   getSymbolByQualifiedName(qualifiedName: string): Symbol | undefined;
   getFileId(filePath: string): number | undefined;
