@@ -33,7 +33,6 @@ export interface PHPParsingContext {
 }
 
 export const PHP_CLOSURE_NODE_TYPES = new Set([
-  'anonymous_function_creation_expression',
   'anonymous_function',
   'arrow_function',
 ]);
@@ -93,3 +92,13 @@ export const MODIFIER_KEYWORDS = new Set([
   'abstract',
   'final',
 ]);
+
+export const CLOSURE_SYMBOL_PREFIX = '<closure:line_';
+
+export function createClosureSymbolName(lineNumber: number): string {
+  return `${CLOSURE_SYMBOL_PREFIX}${lineNumber}>`;
+}
+
+export function isClosureSymbolName(name: string): boolean {
+  return name.startsWith(CLOSURE_SYMBOL_PREFIX);
+}

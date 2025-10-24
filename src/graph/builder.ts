@@ -38,6 +38,7 @@ import { EncodingConverter } from '../utils/encoding-converter';
 import { CompassIgnore } from '../utils/compassignore';
 import { getEmbeddingService } from '../services/embedding-service';
 import { AdaptiveEmbeddingController } from '../utils/adaptive-embedding-controller';
+import { isClosureSymbolName } from '../parsers/php/types';
 
 const logger = createComponentLogger('graph-builder');
 
@@ -1556,6 +1557,45 @@ export class GraphBuilder {
     return matchingFile || null;
   }
 
+  private isClosureRouteLinkedDuringPersistence(route: { controller_class?: string | null; action?: string | null }): boolean {
+    return route.controller_class === 'Closure' || route.action === 'Closure';
+  }
+
+  private findClosureSymbolForRoute(
+    route: LaravelRoute,
+    fileSymbols: Symbol[]
+  ): number | null {
+    if (route.action !== 'Closure' || !route.metadata?.closureLineNumber) {
+      return null;
+    }
+
+    const closureSymbol = fileSymbols.find(
+      s => s.start_line === route.metadata.closureLineNumber &&
+           s.symbol_type === SymbolType.FUNCTION &&
+           isClosureSymbolName(s.name)
+    );
+
+    if (closureSymbol) {
+      this.logger.debug('Linked closure route to symbol during persistence', {
+        routePath: route.path,
+        closureSymbolId: closureSymbol.id,
+        closureSymbolName: closureSymbol.name,
+        lineNumber: route.metadata.closureLineNumber,
+      });
+      return closureSymbol.id;
+    }
+
+    this.logger.warn('Closure symbol not found for route', {
+      routePath: route.path,
+      expectedLineNumber: route.metadata.closureLineNumber,
+      availableSymbols: fileSymbols
+        .filter(s => s.symbol_type === SymbolType.FUNCTION)
+        .map(s => ({ name: s.name, line: s.start_line })),
+    });
+
+    return null;
+  }
+
   private async storeFrameworkEntities(
     repositoryId: number,
     symbols: Symbol[],
@@ -1610,11 +1650,16 @@ export class GraphBuilder {
               continue;
             }
 
+            const closureSymbolId = this.findClosureSymbolForRoute(
+              laravelRoute,
+              fileSymbols
+            );
+
             await this.dbService.createRoute({
               repo_id: repositoryId,
               path: laravelRoute.path,
               method: normalizedMethod,
-              handler_symbol_id: null,
+              handler_symbol_id: closureSymbolId,
               framework_type: 'laravel',
               middleware: laravelRoute.middleware || [],
               dynamic_segments: [],
@@ -1624,7 +1669,7 @@ export class GraphBuilder {
               controller_method: laravelRoute.action,
               action: laravelRoute.action,
               file_path: laravelRoute.filePath,
-              line_number: laravelRoute.metadata?.line || 1,
+              line_number: laravelRoute.metadata?.closureLineNumber || laravelRoute.metadata?.line || 1,
             });
             continue;
           }
@@ -2268,42 +2313,9 @@ export class GraphBuilder {
 
     let linked = 0;
     let failed = 0;
-    let closuresCreated = 0;
 
     for (const route of unlinkedRoutes) {
-      if (route.controller_class === 'Closure') {
-        this.logger.debug('Creating synthetic symbol for closure route', {
-          routePath: route.path,
-          routeMethod: route.method,
-          filePath: route.file_path,
-          lineNumber: route.line_number,
-        });
-
-        const routeFile = await this.dbService.getFileByPath(route.file_path!);
-        if (!routeFile) {
-          this.logger.warn('Route file not found for closure route', {
-            filePath: route.file_path,
-            routePath: route.path,
-          });
-          failed++;
-          continue;
-        }
-
-        const closureSymbolName = `Closure_${route.path.replace(/[^a-zA-Z0-9]/g, '_')}_${route.method}`;
-        const closureSymbol = await this.dbService.createSymbol({
-          file_id: routeFile.id,
-          name: closureSymbolName,
-          qualified_name: `Closure::${route.path}`,
-          symbol_type: SymbolType.FUNCTION,
-          start_line: route.line_number || 1,
-          end_line: route.line_number || 1,
-          is_exported: false,
-          visibility: Visibility.PUBLIC,
-        });
-
-        await this.dbService.updateRouteHandlerSymbolId(route.id, closureSymbol.id);
-        closuresCreated++;
-        linked++;
+      if (this.isClosureRouteLinkedDuringPersistence(route)) {
         continue;
       }
 
@@ -2361,7 +2373,6 @@ export class GraphBuilder {
     this.logger.info('Route handler linkage complete', {
       total: unlinkedRoutes.length,
       linked,
-      closuresCreated,
       failed,
     });
   }

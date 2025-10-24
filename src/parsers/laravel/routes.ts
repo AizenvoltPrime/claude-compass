@@ -198,6 +198,7 @@ export function parseRouteDefinition(
       framework: 'laravel',
       metadata: {
         parameters: extractRouteParameters(fullPath),
+        closureLineNumber: handler?.closureLineNumber,
       },
     };
 
@@ -306,7 +307,7 @@ export function getRoutePath(node: SyntaxNode, content: string): string | null {
 export function getRouteHandler(
   node: SyntaxNode,
   content: string
-): { controller?: string; action?: string } | null {
+): { controller?: string; action?: string; closureLineNumber?: number } | null {
   const args = node.childForFieldName('arguments');
   if (!args) return null;
 
@@ -339,9 +340,14 @@ export function getRouteHandler(
         }
 
         // Check for closure
-        const closureNode = child.children.find(c => c.type === 'anonymous_function_creation_expression');
+        const closureNode = child.children?.find(
+          c => c.type === 'anonymous_function' || c.type === 'arrow_function'
+        );
         if (closureNode) {
-          return { action: 'Closure' };
+          return {
+            action: 'Closure',
+            closureLineNumber: closureNode.startPosition.row + 1
+          };
         }
       }
     }
@@ -457,15 +463,46 @@ export function getRouteDomain(node: SyntaxNode, content: string): string | null
   return null;
 }
 
-export function isRouteGroup(node: SyntaxNode): boolean {
-  if (node.type === 'scoped_call_expression') {
-    const firstChild = node.children && node.children[0];
-    const methodName = node.childForFieldName('name');
-    if (firstChild && firstChild.text === 'Route' && methodName && methodName.text === 'group') {
-      return true;
-    }
+function isDirectRouteGroupCall(node: SyntaxNode): boolean {
+  if (node.type !== 'scoped_call_expression') {
+    return false;
   }
+
+  const firstChild = node.children && node.children[0];
+  const methodName = node.childForFieldName('name');
+  return firstChild?.text === 'Route' && methodName?.text === 'group';
+}
+
+function isChainedRouteGroupCall(node: SyntaxNode): boolean {
+  if (node.type !== 'member_call_expression') {
+    return false;
+  }
+
+  const methodName = node.childForFieldName('name');
+  if (methodName?.text !== 'group') {
+    return false;
+  }
+
+  let current: SyntaxNode | null = node.childForFieldName('object');
+  while (current) {
+    if (current.type === 'scoped_call_expression') {
+      const className = current.children?.[0];
+      return className?.text === 'Route';
+    }
+
+    if (current.type === 'member_call_expression') {
+      current = current.childForFieldName('object');
+      continue;
+    }
+
+    break;
+  }
+
   return false;
+}
+
+export function isRouteGroup(node: SyntaxNode): boolean {
+  return isDirectRouteGroupCall(node) || isChainedRouteGroupCall(node);
 }
 
 export function getRouteGroupMiddleware(node: SyntaxNode, content: string): string[] {
@@ -506,33 +543,49 @@ export function getRouteGroupMiddleware(node: SyntaxNode, content: string): stri
 }
 
 export function getRouteGroupPrefix(node: SyntaxNode, content: string): string {
-  // Look for first argument being an array with 'prefix' key
-  const args = node.childForFieldName('arguments');
-  if (!args) return '';
+  let currentNode: SyntaxNode | null = node;
 
-  for (const child of args.children) {
-    if (child.type === 'argument') {
-      const arrayNode = child.children.find(c => c.type === 'array_creation_expression');
-      if (arrayNode) {
-        // Parse array for 'prefix' key
-        for (const element of arrayNode.children) {
-          if (element.type === 'array_element_initializer') {
-            const keyNode = element.children.find(c => c.type === 'string');
-            if (keyNode && extractLaravelStringLiteral(keyNode, content) === 'prefix') {
-              // Find the value after the arrow
-              const arrowIndex = element.children.findIndex(c => c.type === '=>');
-              if (arrowIndex !== -1 && arrowIndex + 1 < element.children.length) {
-                const valueNode = element.children[arrowIndex + 1];
-                if (valueNode.type === 'string') {
-                  const prefix = extractLaravelStringLiteral(valueNode, content);
-                  return prefix.startsWith('/') ? prefix.substring(1) : prefix;
-                }
+  while (currentNode) {
+    if (currentNode.type === 'member_call_expression') {
+      const nameNode = currentNode.childForFieldName('name');
+
+      if (nameNode && nameNode.text === 'prefix') {
+        const argsNode = currentNode.childForFieldName('arguments');
+        if (argsNode) {
+          for (const child of argsNode.children) {
+            if (child.type === 'argument') {
+              const stringNode = child.children.find(c => c.type === 'string');
+              if (stringNode) {
+                const prefix = extractLaravelStringLiteral(stringNode, content);
+                return prefix.startsWith('/') ? prefix.substring(1) : prefix;
               }
             }
           }
         }
       }
-      break; // Only check first argument
+
+      currentNode = currentNode.childForFieldName('object');
+    } else if (currentNode.type === 'scoped_call_expression') {
+      const className = currentNode.children && currentNode.children[0];
+      const methodName = currentNode.childForFieldName('name');
+
+      if (className && className.text === 'Route' && methodName && methodName.text === 'prefix') {
+        const argsNode = currentNode.childForFieldName('arguments');
+        if (argsNode) {
+          for (const child of argsNode.children) {
+            if (child.type === 'argument') {
+              const stringNode = child.children.find(c => c.type === 'string');
+              if (stringNode) {
+                const prefix = extractLaravelStringLiteral(stringNode, content);
+                return prefix.startsWith('/') ? prefix.substring(1) : prefix;
+              }
+            }
+          }
+        }
+      }
+      break;
+    } else {
+      break;
     }
   }
 
