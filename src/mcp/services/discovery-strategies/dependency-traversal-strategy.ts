@@ -259,6 +259,10 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
       candidateIds.push(...nonContainsCandidates);
       nonContainsCandidates.forEach(id => forwardCandidates.add(id));
 
+      // Structural parents discovered via backward CONTAINS (stores containing methods, classes containing functions)
+      // These are added for CONTEXT (categorization) but NOT queued for traversal (to prevent noise)
+      const structuralParents: number[] = [];
+
       // For backward dependencies (callers), filter by allowed dependency types
       // Direction-aware traversal handles store explosion naturally:
       // - Stores discovered forward won't traverse backward (shouldTraverseBackward = false)
@@ -267,6 +271,14 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
 
         // Skip if already visited
         if (!targetId || visited.has(targetId)) continue;
+
+        // Special handling for CONTAINS: structural parents (stores, classes)
+        // These provide context but shouldn't be traversed to prevent noise
+        if (dep.dependency_type === 'contains' && !allowedDependencyTypes.has('contains')) {
+          visited.add(targetId);
+          structuralParents.push(targetId);
+          continue;
+        }
 
         // Filter by allowed dependency types
         if (!allowedDependencyTypes.has(dep.dependency_type)) {
@@ -277,6 +289,20 @@ export class DependencyTraversalStrategy implements DiscoveryStrategy {
         candidateIds.push(targetId);
         backwardCandidates.add(targetId); // Mark as backward discovery
         candidateDependencyTypes.set(targetId, dep.dependency_type);
+      }
+
+      // Add structural parents to discovered symbols for categorization
+      // but DON'T add to candidateIds (won't be queued for traversal)
+      if (structuralParents.length > 0) {
+        for (const parentId of structuralParents) {
+          discoveredSymbols.add(parentId);
+          related.set(parentId, 1.0); // High relevance - structural context
+        }
+        logger.debug('Discovered structural parents (context-only, no traversal)', {
+          currentSymbol: id,
+          parents: structuralParents,
+          depth,
+        });
       }
 
       // Smart filtering to prevent false positives while allowing valid connections

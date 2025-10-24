@@ -121,7 +121,10 @@ export class FeatureDiscoveryService {
     const includeRoutes = validatedArgs.include_routes !== false;
     const includeModels = validatedArgs.include_models !== false;
     const includeTests = validatedArgs.include_tests || false;
-    const maxDepth = validatedArgs.max_depth || 3;
+    // Default depth 5 ensures complete feature discovery regardless of entry point.
+    // Well-architected features saturate early (depth 2-3), making extra traversal negligible.
+    // Higher depth prevents missing components/callers when starting from middle-layer symbols.
+    const maxDepth = validatedArgs.max_depth || 5;
     const maxSymbols = validatedArgs.max_symbols || 500;
     const minRelevanceScore = validatedArgs.min_relevance_score || 0;
 

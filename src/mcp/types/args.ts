@@ -31,12 +31,6 @@ export interface ListDependenciesArgs {
   max_depth?: number;
 }
 
-export interface ImpactOfArgs {
-  symbol_id: number;
-  frameworks?: string[];
-  max_depth?: number;
-}
-
 export interface TraceFlowArgs {
   start_symbol_id: number;
   end_symbol_id: number;

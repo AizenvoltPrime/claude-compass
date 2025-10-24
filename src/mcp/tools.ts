@@ -8,7 +8,6 @@ import {
   FileService,
   SymbolService,
   DependencyService,
-  ImpactService,
   FlowService,
   FeatureDiscoveryService,
 } from './services';
@@ -30,7 +29,6 @@ export class McpTools {
   private fileService: FileService;
   private symbolService: SymbolService;
   private dependencyService: DependencyService;
-  private impactService: ImpactService;
   private flowService: FlowService;
   private featureDiscoveryService: FeatureDiscoveryService;
   private laravelSearch: LaravelSearch;
@@ -45,7 +43,6 @@ export class McpTools {
     this.fileService = new FileService(dbService);
     this.symbolService = new SymbolService(dbService);
     this.dependencyService = new DependencyService(dbService);
-    this.impactService = new ImpactService(dbService);
     this.flowService = new FlowService(dbService);
     this.featureDiscoveryService = new FeatureDiscoveryService(dbService, () => this.getDefaultRepoId());
     this.laravelSearch = new LaravelSearch(dbService);
@@ -324,10 +321,6 @@ export class McpTools {
 
   async listDependencies(args: any) {
     return this.dependencyService.listDependencies(args);
-  }
-
-  async impactOf(args: any) {
-    return this.impactService.impactOf(args);
   }
 
   async traceFlow(args: any) {

@@ -15,12 +15,6 @@ export const MAX_DEPTH = 20;
 export const DEFAULT_DEPENDENCY_DEPTH = 1;
 
 /**
- * Default depth for impact analysis
- * Optimized for "what breaks if I change this?" requiring cascade effects
- */
-export const DEFAULT_IMPACT_DEPTH = 5;
-
-/**
  * Threshold where transitive analysis becomes too expensive
  * Skip transitive queries when direct results exceed this count
  */
