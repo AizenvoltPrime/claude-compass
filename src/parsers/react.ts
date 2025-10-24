@@ -101,11 +101,11 @@ export class ReactParser extends BaseFrameworkParser {
         };
       }
 
-      // Extract basic symbols using our own parsing
-      const symbols = this.extractBasicSymbols(tree.rootNode, content);
-      const dependencies = this.extractBasicDependencies(tree.rootNode, content);
-      const imports = this.extractBasicImports(tree.rootNode, content);
-      const exports = this.extractBasicExports(tree.rootNode, content);
+      // Extract symbols using framework parsing
+      const symbols = this.extractSymbols(tree.rootNode, content);
+      const dependencies = this.extractDependencies(tree.rootNode, content);
+      const imports = this.extractImports(tree.rootNode, content);
+      const exports = this.extractExports(tree.rootNode, content);
       const errors = this.collectSyntaxErrors(tree.rootNode);
 
       // Detect framework entities if applicable
