@@ -11,7 +11,7 @@ import {
 } from './base';
 import { ParseFileResult } from './base-framework';
 import { DependencyType } from '../database/models';
-import { VueApiCall, VueTypeInterface } from './vue';
+import { VueApiCall, VueTypeInterface } from './vue/vue-types';
 import { LaravelApiSchema, LaravelRoute, ValidationRule } from './laravel';
 import {
   normalizeUrlPattern,
