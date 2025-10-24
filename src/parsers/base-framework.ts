@@ -13,7 +13,6 @@ import {
 } from './base';
 import { SymbolType, DependencyType, Visibility } from '../database/models';
 import { createComponentLogger } from '../utils/logger';
-import * as fs from 'fs/promises';
 import * as path from 'path';
 
 const logger = createComponentLogger('base-framework-parser');
@@ -71,14 +70,16 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     super(parser, `${frameworkType}-framework`);
     this.frameworkType = frameworkType;
     this.patterns = this.getFrameworkPatterns();
-
   }
 
   /**
    * Parse a file with framework-aware context
    */
-  async parseFile(filePath: string, content: string, options: FrameworkParseOptions = {}): Promise<ParseFileResult> {
-
+  async parseFile(
+    filePath: string,
+    content: string,
+    options: FrameworkParseOptions = {}
+  ): Promise<ParseFileResult> {
     try {
       // Check if file needs chunked parsing due to size constraints
       let baseResult: ParseResult;
@@ -106,9 +107,11 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       const frameworkResult = await this.detectFrameworkEntities(content, filePath, options);
 
       return this.mergeResults(baseResult, frameworkResult, filePath);
-
     } catch (error) {
-      logger.error(`Framework parsing failed for ${filePath}`, { error, framework: this.frameworkType });
+      logger.error(`Framework parsing failed for ${filePath}`, {
+        error,
+        framework: this.frameworkType,
+      });
 
       return {
         filePath,
@@ -116,12 +119,14 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `Framework parsing error: ${error.message}`,
-          line: 0,
-          column: 0,
-          severity: 'error',
-        }],
+        errors: [
+          {
+            message: `Framework parsing error: ${error.message}`,
+            line: 0,
+            column: 0,
+            severity: 'error',
+          },
+        ],
         frameworkEntities: [],
         metadata: {
           framework: this.frameworkType,
@@ -154,12 +159,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     const ext = path.extname(filePath);
     const fileName = path.basename(filePath);
 
-
     // Check file extension patterns
     const hasApplicableExtension = this.patterns.some(pattern =>
       pattern.fileExtensions.includes(ext)
     );
-
 
     if (!hasApplicableExtension) {
       return false;
@@ -175,7 +178,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         return false;
       }
     });
-
 
     return hasApplicableContent;
   }
@@ -338,9 +340,11 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     }
 
     const traverse = (node: any) => {
-      if (node.type === 'export_statement' ||
-          node.type === 'export_declaration' ||
-          node.type === 'export_default_declaration') {
+      if (
+        node.type === 'export_statement' ||
+        node.type === 'export_declaration' ||
+        node.type === 'export_default_declaration'
+      ) {
         exports.push(node);
       }
 
@@ -355,7 +359,6 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     traverse(tree.rootNode);
     return exports;
   }
-
 
   /**
    * Implementation of parseFileDirectly required by ChunkedParser
@@ -377,20 +380,22 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
     if (content.length > 28000 && !validatedOptions.bypassSizeLimit) {
       logger.warn('parseFileDirectly called with large content without bypass flag', {
         filePath,
-        contentSize: content.length
+        contentSize: content.length,
       });
       return {
         symbols: [],
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: `Content too large (${content.length} bytes) for direct parsing`,
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }],
-        frameworkEntities: []
+        errors: [
+          {
+            message: `Content too large (${content.length} bytes) for direct parsing`,
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
+        frameworkEntities: [],
       };
     }
 
@@ -401,30 +406,34 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         dependencies: [],
         imports: [],
         exports: [],
-        errors: [{
-          message: 'Failed to parse syntax tree',
-          line: 1,
-          column: 1,
-          severity: 'error'
-        }]
+        errors: [
+          {
+            message: 'Failed to parse syntax tree',
+            line: 1,
+            column: 1,
+            severity: 'error',
+          },
+        ],
       };
     }
 
-    // Use basic JavaScript-style parsing for all framework parsers
-    const symbols = this.extractBasicSymbols(tree.rootNode, content);
-    const dependencies = this.extractBasicDependencies(tree.rootNode, content);
-    const imports = this.extractBasicImports(tree.rootNode, content);
-    const exports = this.extractBasicExports(tree.rootNode, content);
+    // Use JavaScript-style parsing for all framework parsers
+    const symbols = this.extractSymbols(tree.rootNode, content);
+    const dependencies = this.extractDependencies(tree.rootNode, content);
+    const imports = this.extractImports(tree.rootNode, content);
+    const exports = this.extractExports(tree.rootNode, content);
 
     // Collect syntax errors from the AST
     const errors = this.collectSyntaxErrors(tree.rootNode);
 
     return {
-      symbols: validatedOptions.includePrivateSymbols ? symbols : symbols.filter(s => s.visibility !== 'private'),
+      symbols: validatedOptions.includePrivateSymbols
+        ? symbols
+        : symbols.filter(s => s.visibility !== 'private'),
       dependencies,
       imports,
       exports,
-      errors
+      errors,
     };
   }
 
@@ -440,7 +449,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
           message: `Parsing error in ${node.type}: ${node.text.slice(0, 50)}${node.text.length > 50 ? '...' : ''}`,
           line: node.startPosition.row + 1,
           column: node.startPosition.column + 1,
-          severity: 'error'
+          severity: 'error',
         });
       }
 
@@ -456,9 +465,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
   }
 
   /**
-   * Extract basic symbols (functions, classes, variables) from AST
+   * Extract symbols (functions, classes, variables) from AST
+   * Child classes can override this method for custom symbol extraction
    */
-  protected extractBasicSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
+  protected extractSymbols(rootNode: Parser.SyntaxNode, content: string): ParsedSymbol[] {
     const symbols: ParsedSymbol[] = [];
 
     // Extract function declarations
@@ -486,9 +496,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
   }
 
   /**
-   * Extract basic dependencies from AST
+   * Extract dependencies from AST
+   * Child classes can override this method for custom dependency extraction
    */
-  protected extractBasicDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
+  protected extractDependencies(rootNode: Parser.SyntaxNode, content: string): ParsedDependency[] {
     const dependencies: ParsedDependency[] = [];
 
     // Extract function calls
@@ -502,9 +513,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
   }
 
   /**
-   * Extract basic imports from AST
+   * Extract imports from AST
+   * Child classes can override this method for custom import extraction
    */
-  protected extractBasicImports(rootNode: Parser.SyntaxNode, content: string): ParsedImport[] {
+  protected extractImports(rootNode: Parser.SyntaxNode, content: string): ParsedImport[] {
     const imports: ParsedImport[] = [];
 
     // Extract ES6 imports
@@ -518,9 +530,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
   }
 
   /**
-   * Extract basic exports from AST
+   * Extract exports from AST
+   * Child classes can override this method for custom export extraction
    */
-  protected extractBasicExports(rootNode: Parser.SyntaxNode, content: string): ParsedExport[] {
+  protected extractExports(rootNode: Parser.SyntaxNode, content: string): ParsedExport[] {
     const exports: ParsedExport[] = [];
 
     // Extract ES6 exports
@@ -570,7 +583,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         end_line: node.endPosition.row + 1,
         is_exported: this.isExported(node),
         visibility: Visibility.PUBLIC,
-        signature: content.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 100))
+        signature: content.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 100)),
       };
     } catch (error) {
       return null;
@@ -593,7 +606,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         start_line: node.startPosition.row + 1,
         end_line: node.endPosition.row + 1,
         is_exported: this.isExported(node),
-        visibility: Visibility.PUBLIC
+        visibility: Visibility.PUBLIC,
       };
     } catch (error) {
       return null;
@@ -616,7 +629,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         start_line: node.startPosition.row + 1,
         end_line: node.endPosition.row + 1,
         is_exported: this.isExported(node),
-        visibility: Visibility.PUBLIC
+        visibility: Visibility.PUBLIC,
       };
     } catch (error) {
       return null;
@@ -626,7 +639,10 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
   /**
    * Extract call dependency from AST node
    */
-  protected extractCallDependency(node: Parser.SyntaxNode, content: string): ParsedDependency | null {
+  protected extractCallDependency(
+    node: Parser.SyntaxNode,
+    content: string
+  ): ParsedDependency | null {
     try {
       const functionNode = node.childForFieldName('function');
       if (!functionNode) return null;
@@ -637,7 +653,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         from_symbol: 'caller',
         to_symbol: functionName,
         dependency_type: 'calls' as DependencyType,
-        line_number: node.startPosition.row + 1
+        line_number: node.startPosition.row + 1,
       };
     } catch (error) {
       return null;
@@ -659,7 +675,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
         imported_names: ['*'],
         import_type: 'named',
         line_number: node.startPosition.row + 1,
-        is_dynamic: false
+        is_dynamic: false,
       };
     } catch (error) {
       return null;
@@ -674,7 +690,7 @@ export abstract class BaseFrameworkParser extends ChunkedParser {
       return {
         exported_names: ['*'],
         export_type: 'named',
-        line_number: node.startPosition.row + 1
+        line_number: node.startPosition.row + 1,
       };
     } catch (error) {
       return null;
