@@ -3,7 +3,7 @@ import { ParsedSymbol } from '../base';
 import { FrameworkParseOptions } from '../base-framework';
 import { SymbolType, Visibility } from '../../database/models';
 import { entityClassifier } from '../../utils/entity-classifier';
-import { PHPParsingContext } from './types';
+import { PHPParsingContext, createClosureSymbolName } from './types';
 import {
   extractPhpDocComment,
   buildQualifiedName,
@@ -151,6 +151,32 @@ export function extractFunctionSymbol(
     start_line: node.startPosition.row + 1,
     end_line: node.endPosition.row + 1,
     is_exported: true,
+    visibility: Visibility.PUBLIC,
+    signature,
+    description,
+  };
+}
+
+export function extractAnonymousFunctionSymbol(
+  node: Parser.SyntaxNode,
+  content: string,
+  context: { currentNamespace: string | null; currentClass: string | null },
+  getNodeText: (node: Parser.SyntaxNode, content: string) => string
+): ParsedSymbol | null {
+  const lineNumber = node.startPosition.row + 1;
+  const name = createClosureSymbolName(lineNumber);
+
+  const signature = extractFunctionSignature(node, content, getNodeText);
+  const description = extractPhpDocComment(node, content, getNodeText);
+  const qualifiedName = buildQualifiedName(context, name);
+
+  return {
+    name,
+    qualified_name: qualifiedName,
+    symbol_type: SymbolType.FUNCTION,
+    start_line: lineNumber,
+    end_line: node.endPosition.row + 1,
+    is_exported: false,
     visibility: Visibility.PUBLIC,
     signature,
     description,

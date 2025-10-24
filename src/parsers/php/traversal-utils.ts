@@ -18,6 +18,7 @@ import {
   extractInterfaceSymbol,
   extractTraitSymbol,
   extractFunctionSymbol,
+  extractAnonymousFunctionSymbol,
   extractMethodSymbol,
   extractPropertySymbols,
   extractConstantSymbols,
@@ -156,6 +157,22 @@ export function performSinglePassExtraction(
           symbols.push(symbol);
           const exportInfo = extractNamedExport(node, content, callbacks.getNodeText);
           if (exportInfo) exports.push(exportInfo);
+
+          const typeDeps = extractMethodTypeDependencies(
+            node,
+            content,
+            context,
+            callbacks.getNodeText
+          );
+          dependencies.push(...typeDeps);
+        }
+        break;
+      }
+      case 'anonymous_function':
+      case 'arrow_function': {
+        const symbol = extractAnonymousFunctionSymbol(node, content, context, callbacks.getNodeText);
+        if (symbol) {
+          symbols.push(symbol);
 
           const typeDeps = extractMethodTypeDependencies(
             node,
