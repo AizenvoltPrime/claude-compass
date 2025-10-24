@@ -14,6 +14,7 @@ import { ChunkedParseOptions } from './chunked-parser';
 import { SymbolType, Visibility, DependencyType } from '../database/models';
 import { entityClassifier } from '../utils/entity-classifier';
 import { FrameworkDetector } from './utils/framework-detector';
+import { convertMergedResult } from './javascript/';
 
 interface TypeScriptParsingContext {
   imports: ParsedImport[];
@@ -406,7 +407,7 @@ export class TypeScriptParser extends JavaScriptParser {
     // Always use chunking for large TypeScript files
     if (content.length > tsChunkThreshold) {
       const chunkedResult = await this.parseFileInChunks(filePath, content, { ...chunkedOptions, ...(this.currentOptions as any) });
-      return this.convertMergedResult(chunkedResult);
+      return convertMergedResult(chunkedResult);
     }
 
     // Use parent implementation for smaller files
