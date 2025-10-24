@@ -188,8 +188,7 @@ export class ClaudeCompassMCPServer {
                       'autoload',
                     ],
                   },
-                  description:
-                    'Framework-aware entity types (replaces Laravel-specific tools)',
+                  description: 'Framework-aware entity types (replaces Laravel-specific tools)',
                 },
                 framework: {
                   type: 'string',
@@ -214,7 +213,8 @@ export class ClaudeCompassMCPServer {
           },
           {
             name: 'who_calls',
-            description: 'Find all symbols that call or reference a specific symbol. Includes parameter analysis showing different usage patterns and insights when parameter context is available. Provides transitive analysis metadata when max_depth > 1.',
+            description:
+              'Find all symbols that call or reference a specific symbol. Includes parameter analysis showing different usage patterns and insights when parameter context is available. Provides transitive analysis metadata when max_depth > 1.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -298,37 +298,6 @@ export class ClaudeCompassMCPServer {
             },
           },
           {
-            name: 'impact_of',
-            description:
-              'Comprehensive impact analysis - calculate blast radius across all frameworks including routes, jobs, and tests. Returns categorized results with separate arrays for direct impact, indirect impact, routes, jobs, and tests.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                symbol_id: {
-                  type: 'number',
-                  description: 'The ID of the symbol to analyze impact for',
-                },
-                frameworks: {
-                  type: 'array',
-                  items: {
-                    type: 'string',
-                    enum: ['vue', 'laravel', 'react', 'node', 'godot'],
-                  },
-                  description: 'Multi-framework impact analysis (default: all detected frameworks)',
-                },
-                max_depth: {
-                  type: 'number',
-                  description: 'Transitive analysis depth (default: 5)',
-                  default: 5,
-                  minimum: 1,
-                  maximum: 20,
-                },
-              },
-              required: ['symbol_id'],
-              additionalProperties: false,
-            },
-          },
-          {
             name: 'trace_flow',
             description:
               'Find execution paths between two symbols. Can find shortest path or all paths up to max_depth. Useful for understanding how code flows from point A to B.',
@@ -369,7 +338,8 @@ export class ClaudeCompassMCPServer {
               properties: {
                 symbol_id: {
                   type: 'number',
-                  description: 'Symbol ID to start feature discovery from (e.g., a controller method, store function, or service)',
+                  description:
+                    'Symbol ID to start feature discovery from (e.g., a controller method, store function, or service)',
                 },
                 include_components: {
                   type: 'boolean',
@@ -388,26 +358,30 @@ export class ClaudeCompassMCPServer {
                 },
                 include_tests: {
                   type: 'boolean',
-                  description: 'Include test files and test symbols (default: false to filter out test noise)',
+                  description:
+                    'Include test files and test symbols (default: false to filter out test noise)',
                   default: false,
                 },
                 max_depth: {
                   type: 'number',
-                  description: 'Maximum depth for dependency graph traversal (lower = more focused results)',
-                  default: 3,
+                  description:
+                    'Maximum depth for dependency graph traversal (lower = more focused results)',
+                  default: 5,
                   minimum: 1,
                   maximum: 20,
                 },
                 max_symbols: {
                   type: 'number',
-                  description: 'Maximum number of symbols to return (prevents overwhelming responses)',
+                  description:
+                    'Maximum number of symbols to return (prevents overwhelming responses)',
                   default: 500,
                   minimum: 10,
                   maximum: 5000,
                 },
                 min_relevance_score: {
                   type: 'number',
-                  description: 'Minimum relevance score (0.0-1.0) for including symbols, based on dependency distance',
+                  description:
+                    'Minimum relevance score (0.0-1.0) for including symbols, based on dependency distance',
                   default: 0,
                   minimum: 0,
                   maximum: 1,
@@ -419,7 +393,8 @@ export class ClaudeCompassMCPServer {
           },
           {
             name: 'detect_dead_code',
-            description: 'Systematically detect dead code, interface bloat, and unused symbols in a codebase. Identifies interface methods implemented but never called, dead public/private methods, unused functions, dead classes, and unused exports. Excludes false positives like entry points, framework callbacks, test methods, and polymorphic methods. Results grouped by file path → category → confidence (high/medium/low).',
+            description:
+              'Systematically detect dead code, interface bloat, and unused symbols in a codebase. Identifies interface methods implemented but never called, dead public/private methods, unused functions, dead classes, and unused exports. Excludes false positives like entry points, framework callbacks, test methods, and polymorphic methods. Results grouped by file path → category → confidence (high/medium/low).',
             inputSchema: {
               type: 'object',
               properties: {
@@ -430,7 +405,8 @@ export class ClaudeCompassMCPServer {
                 },
                 include_exports: {
                   type: 'boolean',
-                  description: 'Include exported symbols in results (default: false - excludes exports)',
+                  description:
+                    'Include exported symbols in results (default: false - excludes exports)',
                 },
                 include_tests: {
                   type: 'boolean',
@@ -493,10 +469,6 @@ export class ClaudeCompassMCPServer {
 
           case 'list_dependencies':
             response = await this.tools.listDependencies(args);
-            break;
-
-          case 'impact_of':
-            response = await this.tools.impactOf(args);
             break;
 
           case 'trace_flow':

@@ -103,38 +103,6 @@ class TestController extends Controller
     });
   });
 
-  describe('MCP tool integration', () => {
-    it('should handle impactOf with non-existent symbol', async () => {
-      const result = await mcpTools.impactOf({
-        symbol_id: 999999
-      });
-
-      expect(result.content).toHaveLength(1);
-      const content = JSON.parse(result.content[0].text);
-      expect(content.symbol_id).toBe(999999);
-    });
-
-    it('should handle impactOf with another non-existent symbol', async () => {
-      const result = await mcpTools.impactOf({
-        symbol_id: 888888
-      });
-
-      expect(result.content).toHaveLength(1);
-      const content = JSON.parse(result.content[0].text);
-      expect(content.symbol_id).toBe(888888);
-    });
-
-    it('should handle impactOf with third non-existent symbol', async () => {
-      const result = await mcpTools.impactOf({
-        symbol_id: 777777
-      });
-
-      expect(result.content).toHaveLength(1);
-      const content = JSON.parse(result.content[0].text);
-      expect(content.symbol_id).toBe(777777);
-    });
-  });
-
   describe('error handling', () => {
     it('should handle missing project directory', async () => {
       const nonExistentPath = path.join(__dirname, 'non-existent-project');

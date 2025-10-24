@@ -155,14 +155,6 @@ Validates the `trace_flow` MCP tool:
 - Cross-stack path tracing (Vue → Laravel via API calls)
 - Call chain formatting
 
-### `test_impact_of_routes` / `test_impact_of_jobs` / `test_impact_of_tests` / `test_impact_of_transitive` / `test_impact_of_api_calls`
-Validates comprehensive `impact_of` analysis:
-- Route impact detection (getRoutesForSymbols query)
-- Background job impact tracking
-- Test file identification and impact
-- Transitive dependency analysis (multi-level)
-- API call dependency tracking (caller and endpoint symbols)
-
 ### `test_discover_feature_naming` / `test_discover_feature_categorization` / `test_discover_feature_test_filtering` / `test_discover_feature_reverse_callers`
 Validates complete `discover_feature` functionality:
 - Naming heuristics (finds UserController → UserService → UserModel)
@@ -339,16 +331,16 @@ Both are essential for ensuring system correctness!
 | `get_file` | ✅ `test_get_file_*` (by ID, by path, symbols) | Complete |
 | `who_calls` | ✅ `test_who_calls` | Complete |
 | `list_dependencies` | ✅ `test_list_dependencies` | Complete |
-| `impact_of` | ✅ `test_impact_of_*` (routes, jobs, tests, transitive, API calls) | Complete |
 | `trace_flow` | ✅ `test_trace_flow_*` (path finding, cross-stack) | Complete |
 | `discover_feature` | ✅ `test_discover_feature_*` + `test_cross_stack_discovery` | Complete |
+| `detect_dead_code` | ✅ `test_detect_dead_code_*` (interface bloat, confidence) | Complete |
 
 ## Future Enhancements
 
 - [x] Complete get_file tool tests ✅
 - [x] Complete trace_flow tool tests ✅
-- [x] Complete impact_of tool tests (routes, jobs, tests, transitive, API calls) ✅
 - [x] Complete discover_feature tool tests (naming, categorization, test filtering, reverse callers) ✅
+- [x] Complete detect_dead_code tool tests (interface bloat, confidence filtering) ✅
 - [ ] Add performance benchmarks (query execution time)
 - [ ] Test pagination queries
 - [ ] Test embedding-based search

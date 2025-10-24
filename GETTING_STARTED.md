@@ -349,9 +349,9 @@ The MCP server provides these tools for AI assistants:
 3. **`search_code`** - **Enhanced hybrid vector+lexical search** with framework awareness (replaces 4 specialized search tools)
 4. **`who_calls`** - Find callers of a symbol with cross-stack and transitive analysis
 5. **`list_dependencies`** - List symbol dependencies with cross-stack and transitive analysis
-6. **`impact_of`** - **Comprehensive blast radius tool** (replaces get_cross_stack_impact, get_api_calls, get_data_contracts)
-7. **`trace_flow`** - Find execution paths between two symbols (shortest or all paths)
-8. **`discover_feature`** - Discover complete feature modules across the entire stack with cross-stack API tracing
+6. **`trace_flow`** - Find execution paths between two symbols (shortest or all paths)
+7. **`discover_feature`** - Discover complete feature modules across the entire stack with cross-stack API tracing and structural parent discovery
+8. **`detect_dead_code`** - Systematically detect dead code, interface bloat, and unused symbols
 
 ### Resources Available
 
@@ -366,13 +366,6 @@ const searchResponse = await mcpClient.callTool('search_code', {
   entity_types: ['route', 'model', 'controller', 'component'],
   framework: 'laravel',
   search_mode: 'auto', // 'auto' (hybrid), 'exact' (lexical), 'vector' (embedding-based), 'qualified' (namespace-aware)
-});
-
-// Comprehensive blast radius analysis
-const impactResponse = await mcpClient.callTool('impact_of', {
-  symbol_id: 123,
-  frameworks: ['vue', 'laravel'],
-  max_depth: 5,
 });
 
 // Cross-stack dependency analysis
@@ -485,7 +478,7 @@ Claude Compass includes:
 - ✅ **Vue ↔ Laravel Integration**: Cross-stack dependency tracking, API mapping, full-stack impact analysis
 - ✅ **Tool Consolidation**: 12 overlapping tools consolidated into 8 core tools
 - ✅ **Enhanced Search**: Hybrid vector+lexical search with framework awareness and advanced ranking
-- ✅ **Comprehensive Impact Analysis**: Single impact_of tool replacing 6 specialized tools
+- ✅ **Feature Discovery**: Complete feature module discovery via dependency graph traversal with structural parent handling
 - ✅ **Vector Search Infrastructure**: pgvector database with embeddings, full-text search, and hybrid ranking
 - ✅ **Database stores all entities**: Complete schema for routes, components, composables, jobs, tests, ORM entities, packages, API calls, data contracts
 

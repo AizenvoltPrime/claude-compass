@@ -89,8 +89,8 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **MCP Integration (`src/mcp/`)**
 
 - Model Context Protocol server implementation
-- Tools for code search, dependency analysis, impact assessment, dead code detection
-- Consolidated tool interface (9 core tools)
+- Tools for code search, dependency analysis, feature discovery, dead code detection
+- Consolidated tool interface (8 core tools)
 - Framework-aware search with Laravel, Vue, React, and Godot support
 - Dead code detection with interface bloat analysis
 

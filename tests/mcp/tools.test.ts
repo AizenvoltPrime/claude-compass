@@ -609,11 +609,6 @@ describe('McpTools', () => {
         await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: 21 }))
           .rejects.toThrow('max_depth must be between 1 and 20');
       });
-
-      it('should reject 100 (far above maximum) for impactOf', async () => {
-        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: 100 }))
-          .rejects.toThrow('max_depth must be between 1 and 20');
-      });
     });
 
     describe('Type Validation', () => {
@@ -624,11 +619,6 @@ describe('McpTools', () => {
 
       it('should reject float 3.5 for listDependencies', async () => {
         await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: 3.5 }))
-          .rejects.toThrow('max_depth must be an integer');
-      });
-
-      it('should reject float 10.7 for impactOf', async () => {
-        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: 10.7 }))
           .rejects.toThrow('max_depth must be an integer');
       });
 
@@ -651,11 +641,6 @@ describe('McpTools', () => {
         expect(result).toBeDefined();
       });
 
-      it('should reject boolean true for impactOf', async () => {
-        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: true as any }))
-          .rejects.toThrow('max_depth must be a number');
-      });
-
       it('should reject boolean false for whoCalls', async () => {
         await expect(mcpTools.whoCalls({ symbol_id: 1, max_depth: false as any }))
           .rejects.toThrow('max_depth must be a number');
@@ -663,11 +648,6 @@ describe('McpTools', () => {
 
       it('should reject array [5] for listDependencies', async () => {
         await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: [5] as any }))
-          .rejects.toThrow('max_depth must be a number');
-      });
-
-      it('should reject object {value: 5} for impactOf', async () => {
-        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: {value: 5} as any }))
           .rejects.toThrow('max_depth must be a number');
       });
     });
@@ -680,11 +660,6 @@ describe('McpTools', () => {
 
       it('should reject -5 for listDependencies', async () => {
         await expect(mcpTools.listDependencies({ symbol_id: 1, max_depth: -5 }))
-          .rejects.toThrow('max_depth must be between 1 and 20');
-      });
-
-      it('should reject -100 for impactOf', async () => {
-        await expect(mcpTools.impactOf({ symbol_id: 1, max_depth: -100 }))
           .rejects.toThrow('max_depth must be between 1 and 20');
       });
     });
@@ -715,21 +690,6 @@ describe('McpTools', () => {
         (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
 
         const result = await mcpTools.listDependencies({ symbol_id: 1 });
-        expect(result).toBeDefined();
-      });
-
-      it('should use DEFAULT_IMPACT_DEPTH (5) for impactOf when not specified', async () => {
-        const mockSymbol = {
-          id: 1,
-          name: 'testFunction',
-          symbol_type: SymbolType.FUNCTION,
-          file: { id: 1, path: '/test.js' }
-        };
-        (mockDatabaseService.getSymbolWithFile as jest.Mock).mockResolvedValue(mockSymbol);
-        (mockDatabaseService.getDependenciesFromWithContext as jest.Mock).mockResolvedValue([]);
-        (mockDatabaseService.getDependenciesToWithContext as jest.Mock).mockResolvedValue([]);
-
-        const result = await mcpTools.impactOf({ symbol_id: 1 });
         expect(result).toBeDefined();
       });
     });

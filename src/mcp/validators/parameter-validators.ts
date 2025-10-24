@@ -5,7 +5,6 @@ import {
   SearchCodeArgs,
   WhoCallsArgs,
   ListDependenciesArgs,
-  ImpactOfArgs,
   TraceFlowArgs,
   DiscoverFeatureArgs,
 } from '../types';
@@ -137,23 +136,6 @@ export function validateListDependenciesArgs(args: any): ListDependenciesArgs {
   }
   validateMaxDepthParameter(args.max_depth);
   return args as ListDependenciesArgs;
-}
-
-export function validateImpactOfArgs(args: any): ImpactOfArgs {
-  if (args.symbol_id === undefined || args.symbol_id === null) {
-    throw new Error('symbol_id is required');
-  }
-  if (typeof args.symbol_id !== 'number') {
-    throw new Error('symbol_id must be a number');
-  }
-  if (args.symbol_id <= 0) {
-    throw new Error('symbol_id must be a positive number');
-  }
-  if (args.frameworks !== undefined && !Array.isArray(args.frameworks)) {
-    throw new Error('frameworks must be an array');
-  }
-  validateMaxDepthParameter(args.max_depth);
-  return args as ImpactOfArgs;
 }
 
 export function validateTraceFlowArgs(args: any): TraceFlowArgs {

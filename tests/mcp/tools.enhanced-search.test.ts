@@ -386,33 +386,6 @@ describe('Enhanced MCP Tools Search', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.query_info.symbol).toBe('TestService');
     });
-
-    test('should accept max_depth parameter in impact_of', async () => {
-      const vueFile = await dbService.createFile({
-        repo_id: repoId,
-        path: '/test/enhanced-mcp-search/ImpactComponent.vue',
-        language: 'vue',
-        is_generated: false,
-        is_test: false
-      });
-
-      const testSymbol = await dbService.createSymbol({
-        file_id: vueFile.id,
-        name: 'ImpactComponent',
-        symbol_type: SymbolType.COMPONENT,
-        is_exported: true,
-        signature: 'export default defineComponent(...)'
-      });
-
-      const result = await mcpTools.impactOf({
-        symbol_id: testSymbol.id,
-        max_depth: 5
-      });
-
-      expect(result.content).toBeDefined();
-      const response = JSON.parse(result.content[0].text);
-      expect(response.query_info.symbol).toBe('ImpactComponent');
-    });
   });
 
   describe('Search Mode Enhancement Tests', () => {
@@ -616,15 +589,6 @@ describe('Enhanced MCP Tools Search', () => {
         await mcpTools.listDependencies({
           symbol_id: 1,
           max_depth: 0 // below minimum of 1
-        });
-      }).rejects.toThrow();
-    });
-
-    test('should validate max_depth range for impact_of', async () => {
-      await expect(async () => {
-        await mcpTools.impactOf({
-          symbol_id: 1,
-          max_depth: -1 // below minimum of 1
         });
       }).rejects.toThrow();
     });

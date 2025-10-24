@@ -2,7 +2,7 @@
 
 > A dependency analysis development environment that solves the "context gap" problem by providing AI assistants with complete contextual understanding of codebases.
 
-Enhanced search with hybrid vector+lexical capabilities, 9 focused core tools for comprehensive code analysis, powerful impact analysis, dead code detection, and streamlined CLI interface for production use.
+Enhanced search with hybrid vector+lexical capabilities, 8 focused core tools for comprehensive code analysis, feature discovery, dead code detection, and streamlined CLI interface for production use.
 
 ## What is Claude Compass?
 
@@ -39,7 +39,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
 
 - Expose graphs and tools via Model Context Protocol
 - Enable AI assistants to query dependency information
-- Provide impact analysis and blast radius calculation
+- Provide comprehensive dependency analysis and feature discovery
 
 **🔧 Framework Understanding**
 
@@ -71,7 +71,7 @@ AI assistants suffer from **context gaps** - they make suggestions without under
   - **Collision Handling**: PHP (45% name collision), C# Godot (40% collision) vs TypeScript/Vue (0.18% collision)
 - ✅ **Background Jobs** - Bull, BullMQ, Agenda, Bee, Kue, Worker Threads
 - ✅ **Enhanced Search** - Hybrid embedding+lexical search with vector similarity
-- ✅ **Impact Analysis** - Comprehensive blast radius calculation
+- ✅ **Feature Discovery** - Complete feature module discovery via dependency graph traversal
 - ✅ **Dead Code Detection** - Systematic identification of unused code, interface bloat, and orphaned symbols
 
 ## Architecture
@@ -373,7 +373,7 @@ npm test
 
 ## MCP Tools
 
-Claude Compass exposes 9 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, impact assessment, feature discovery, and dead code detection.
+Claude Compass exposes 8 focused core tools via the Model Context Protocol for AI assistant integration. These tools provide comprehensive codebase understanding, dependency analysis, feature discovery, and dead code detection.
 
 ### Available Tools
 
@@ -455,29 +455,7 @@ List all dependencies of a specific symbol. Supports transitive analysis to find
 
 **Returns:** List of dependencies with relationship information, including call chains for transitive results
 
-#### 6. `impact_of`
-
-Comprehensive impact analysis - calculate blast radius across all frameworks including routes and jobs. Uses deep transitive analysis to find all affected code.
-
-**Parameters:**
-
-- `symbol_id` (required): The ID of the symbol to analyze impact for (number)
-- `frameworks`: Multi-framework impact analysis (default: all detected frameworks)
-  - Options: `vue`, `laravel`, `react`, `node`
-- `max_depth`: Transitive analysis depth (default: 5, min: 1, max: 20)
-  - Controls how deep to trace impact through the dependency graph
-  - Higher values provide more comprehensive impact analysis
-  - Default of 5 balances thoroughness with performance
-
-**Returns:** Comprehensive impact analysis with categorized results:
-- `direct_impact`: Symbols directly related to the target
-- `indirect_impact`: Symbols indirectly affected through transitive dependencies
-- `routes_affected`: Web routes that may be impacted
-- `jobs_affected`: Background jobs that may be impacted
-- `tests_affected`: Test files that should be run
-- `summary`: Aggregate metrics including total counts and frameworks affected
-
-#### 7. `trace_flow`
+#### 6. `trace_flow`
 
 Find execution paths between two symbols. Can find shortest path or all paths up to max_depth. Useful for understanding how code flows from point A to B.
 
@@ -492,9 +470,9 @@ Find execution paths between two symbols. Can find shortest path or all paths up
 
 **Returns:** Execution paths showing how code flows from the start symbol to the end symbol, including intermediate steps
 
-#### 8. `discover_feature`
+#### 7. `discover_feature`
 
-Discover complete feature modules across the entire stack using layer-based graph traversal. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point: backend-leaf entities (models/services) discover backward (who uses them), middle-layer entities (components/composables/controllers) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns.
+Discover complete feature modules across the entire stack using layer-based graph traversal. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point: backend-leaf entities (models/services) discover backward (who uses them), middle-layer entities (components/composables/controllers) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns. Includes structural parent discovery (stores containing methods, classes containing functions) for context without traversal noise.
 
 **Parameters:**
 
@@ -503,7 +481,7 @@ Discover complete feature modules across the entire stack using layer-based grap
 - `include_routes`: Include API routes in the feature manifest (boolean, default: true)
 - `include_models`: Include database models in the feature manifest (boolean, default: true)
 - `include_tests`: Include test files and test symbols (boolean, default: false to filter out test noise)
-- `max_depth`: Maximum depth for dependency graph traversal (default: 3, min: 1, max: 20)
+- `max_depth`: Maximum depth for dependency graph traversal (default: 5, min: 1, max: 20)
   - Lower values = more focused results
   - Higher values = more comprehensive discovery
 - `max_symbols`: Maximum number of symbols to return (default: 500, min: 10, max: 5000)
@@ -525,7 +503,7 @@ Discover complete feature modules across the entire stack using layer-based grap
 - `related_symbols`: Additional related symbols
 - `summary`: Aggregate metrics including counts for each category
 
-#### 9. `detect_dead_code`
+#### 8. `detect_dead_code`
 
 Systematically detect dead code, interface bloat, and unused symbols in a codebase. Identifies interface methods implemented but never called, dead public/private methods, unused functions, dead classes, and unused exports. Excludes false positives like entry points, framework callbacks, test methods, and polymorphic methods.
 
@@ -574,13 +552,6 @@ const vectorResults = await mcpClient.callTool('search_code', {
   search_mode: 'vector', // Vector similarity - finds login, auth, verify, etc.
 });
 
-// Get comprehensive impact analysis with deep transitive search
-const impact = await mcpClient.callTool('impact_of', {
-  symbol_id: 123,
-  frameworks: ['vue', 'laravel'],
-  max_depth: 10, // Deep analysis to find all indirect impacts
-});
-
 // Find who calls a specific function (with transitive analysis)
 const callers = await mcpClient.callTool('who_calls', {
   symbol_id: 456,
@@ -610,7 +581,7 @@ const feature = await mcpClient.callTool('discover_feature', {
   include_routes: true,
   include_models: true,
   include_tests: false, // Exclude test files
-  max_depth: 3, // Focused results
+  max_depth: 5, // Default depth - balanced between focus and comprehensiveness
   max_symbols: 500,
   min_relevance_score: 0.5, // Only highly relevant symbols
 });
@@ -1019,9 +990,9 @@ Tests Failed:       0
 | `get_file` | ✅ File retrieval by ID/path, symbol listing | Complete |
 | `who_calls` | ✅ Reverse dependencies | Complete |
 | `list_dependencies` | ✅ Outgoing dependencies | Complete |
-| `impact_of` | ✅ Routes, jobs, tests, transitive analysis, API calls | Complete |
 | `trace_flow` | ✅ Path finding, cross-stack connections | Complete |
-| `discover_feature` | ✅ Naming discovery, categorization, test filtering, bidirectional | Complete |
+| `discover_feature` | ✅ Structural parents, categorization, test filtering, bidirectional | Complete |
+| `detect_dead_code` | ✅ Interface bloat, confidence filtering, framework callbacks | Complete |
 
 ### Comparison: Database vs MCP Audits
 
