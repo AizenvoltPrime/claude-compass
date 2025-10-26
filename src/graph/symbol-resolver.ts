@@ -72,7 +72,8 @@ export class SymbolResolver {
     files: File[],
     allSymbols: Symbol[],
     importsMap: Map<number, ParsedImport[]>,
-    exportsMap: Map<number, ParsedExport[]>
+    exportsMap: Map<number, ParsedExport[]>,
+    dependenciesMap?: Map<number, ParsedDependency[]>
   ): void {
     this.contexts.clear();
 
@@ -92,11 +93,36 @@ export class SymbolResolver {
       this.contexts.set(file.id, context);
     }
 
-    this.indexManager.buildTransientIndexes(Array.from(this.contexts.values()));
+    // Extract IMPLEMENTS dependencies for interface resolution
+    const implementsDependencies: Array<{ fromSymbolId: number; toSymbolId: number }> = [];
+    if (dependenciesMap) {
+      for (const deps of dependenciesMap.values()) {
+        for (const dep of deps) {
+          if (dep.dependency_type === 'implements') {
+            // Find the actual symbol IDs
+            const fromSymbol = allSymbols.find(s => s.name === dep.from_symbol);
+            const toSymbol = allSymbols.find(s => s.name === dep.to_symbol);
+            if (fromSymbol && toSymbol) {
+              implementsDependencies.push({
+                fromSymbolId: fromSymbol.id,
+                toSymbolId: toSymbol.id
+              });
+            }
+          }
+        }
+      }
+    }
+
+    this.indexManager.buildTransientIndexes(
+      Array.from(this.contexts.values()),
+      allSymbols,
+      implementsDependencies
+    );
 
     logger.debug('Initialized with file contexts', {
       fileCount: files.length,
       symbolCount: allSymbols.length,
+      implementsDependencies: implementsDependencies.length,
     });
   }
 

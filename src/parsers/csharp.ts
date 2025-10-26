@@ -1014,6 +1014,16 @@ export class CSharpParser extends ChunkedParser {
       // Method call without object, likely on current class
       callingObject = 'this';
       resolvedClass = context.currentClass;
+    } else if (functionNode.type === 'generic_name') {
+      // Handle generic method calls like GetNode<T>()
+      // generic_name structure: child(0) = identifier, child(1) = type_argument_list
+      const identifierNode = functionNode.child(0);
+      methodName = identifierNode && identifierNode.type === 'identifier'
+        ? this.getNodeText(identifierNode, content)
+        : '';
+      // Generic method call without object, likely on current class
+      callingObject = 'this';
+      resolvedClass = context.currentClass;
     } else if (functionNode.type === 'conditional_access_expression') {
       // Handle nested conditional access
       return this.extractConditionalCall(functionNode, content, context);
@@ -1247,35 +1257,84 @@ export class CSharpParser extends ChunkedParser {
     content: string,
     context: ASTContext,
     godotContext: GodotContext,
-    _dependencies: ParsedDependency[]
+    dependencies: ParsedDependency[]
   ): void {
-    // Handle GetNode calls
+    const callerName = this.findContainingMethod(node, context, content);
+    if (!callerName) return;
+
+    // Handle GetNode calls - create dependency to the referenced scene node
     if (methodName === 'GetNode') {
-      const nodePathMatch = content
-        .substring(node.startIndex, node.endIndex)
-        .match(/GetNode(?:<\w+>)?\s*\(\s*["']([^"']+)["']\s*\)/);
+      // Extract generic type parameter (for metadata only)
+      const genericType = this.extractGenericTypeParameter(node, content);
 
-      if (nodePathMatch) {
-        godotContext.nodePaths.add(nodePathMatch[1]);
+      // Extract node path from first argument
+      const nodePath = this.extractStringArgument(node, content, 0);
 
-        // Check for autoload pattern
-        if (nodePathMatch[1].startsWith('/root/')) {
-          const autoloadName = nodePathMatch[1].substring(6);
+      if (nodePath) {
+        // Store node path for metadata
+        godotContext.nodePaths.add(nodePath);
+
+        // Check for autoload pattern (/root/ServiceName)
+        if (nodePath.startsWith('/root/')) {
+          const autoloadName = nodePath.substring(6);
           godotContext.autoloads.add(autoloadName);
+
+          // Create dependency to autoload singleton class
+          // Autoloads are actual C# classes that can be resolved
+          dependencies.push({
+            from_symbol: callerName,
+            to_symbol: autoloadName,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: node.startPosition.row + 1,
+            parameter_context: `GetNode("/root/${autoloadName}")`
+          });
+        } else {
+          // Regular scene node reference
+          // Create dependency to scene node (not framework type)
+          // Prefix with "node:" to indicate this is a scene node reference
+          // This can be resolved against godot_nodes table during graph building
+          dependencies.push({
+            from_symbol: callerName,
+            to_symbol: `node:${nodePath}`,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: node.startPosition.row + 1,
+            // Preserve type information in parameter_context
+            parameter_context: genericType
+              ? `GetNode<${genericType}>("${nodePath}")`
+              : `GetNode("${nodePath}")`
+          });
         }
       }
     }
 
-    // Handle EmitSignal calls
+    // Handle Connect calls - create dependency to signal handler method
+    else if (methodName === 'Connect') {
+      // Extract handler method name from Callable constructor using AST
+      // Pattern: .Connect(signalName, new Callable(this, MethodName.HandlerMethod))
+      const handlerMethodName = this.extractCallableHandlerName(node, content);
+
+      if (handlerMethodName) {
+        // Create dependency to the handler method
+        const handlerQualifiedName = context.currentClass
+          ? `${context.currentClass}::${handlerMethodName}`
+          : handlerMethodName;
+
+        dependencies.push({
+          from_symbol: callerName,
+          to_symbol: handlerQualifiedName,
+          dependency_type: DependencyType.REFERENCES,
+          line_number: node.startPosition.row + 1,
+          parameter_context: `Connect(signal, ${handlerMethodName})`
+        });
+      }
+    }
+
+    // Handle EmitSignal calls - track signal emissions for metadata
     else if (methodName === 'EmitSignal') {
-      const signalMatch = content
-        .substring(node.startIndex, node.endIndex)
-        .match(/EmitSignal\s*\(\s*(?:nameof\s*\()?["']?(\w+)/);
+      // Extract signal name from first argument using AST
+      const signalName = this.extractSignalName(node, content);
 
-      if (signalMatch) {
-        const signalName = signalMatch[1];
-        const callerName = this.findContainingMethod(node, context, content);
-
+      if (signalName) {
         if (!godotContext.signals.has(signalName)) {
           godotContext.signals.set(signalName, {
             name: signalName,
@@ -1287,6 +1346,181 @@ export class CSharpParser extends ChunkedParser {
         }
       }
     }
+  }
+
+  /**
+   * Extract string literal argument from invocation using AST.
+   * @param node - invocation_expression node
+   * @param content - file content
+   * @param argIndex - argument index (0-based)
+   * @returns string value without quotes, or null if not found/not a string
+   */
+  private extractStringArgument(
+    node: Parser.SyntaxNode,
+    content: string,
+    argIndex: number
+  ): string | null {
+    // Find argument_list child
+    const argumentList = node.children.find(child => child.type === 'argument_list');
+    if (!argumentList) return null;
+
+    // Get all argument nodes (named children of argument_list)
+    const args = argumentList.namedChildren;
+    if (argIndex >= args.length) return null;
+
+    const argNode = args[argIndex];
+
+    // Handle string_literal directly
+    if (argNode.type === 'string_literal') {
+      const text = this.getNodeText(argNode, content);
+      // Remove quotes (handles both " and @")
+      return text.replace(/^@?"(.*)"$/, '$1');
+    }
+
+    // Handle argument containing string_literal
+    const stringLiteral = argNode.children.find(child => child.type === 'string_literal');
+    if (stringLiteral) {
+      const text = this.getNodeText(stringLiteral, content);
+      return text.replace(/^@?"(.*)"$/, '$1');
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract handler method name from Callable constructor in Connect() call.
+   * Pattern: new Callable(this, MethodName.HandlerMethod)
+   * @param node - invocation_expression node for Connect() call
+   * @param content - file content
+   * @returns handler method name, or null if not found
+   */
+  private extractCallableHandlerName(
+    node: Parser.SyntaxNode,
+    content: string
+  ): string | null {
+    // Find argument_list of Connect() call
+    const argumentList = node.children.find(child => child.type === 'argument_list');
+    if (!argumentList) return null;
+
+    // Find object_creation_expression for "new Callable(...)"
+    let callableCreation: Parser.SyntaxNode | null = null;
+
+    for (const arg of argumentList.namedChildren) {
+      // Look for object_creation_expression directly or within argument
+      if (arg.type === 'object_creation_expression') {
+        callableCreation = arg;
+        break;
+      }
+
+      const creationNode = arg.children.find(c => c.type === 'object_creation_expression');
+      if (creationNode) {
+        callableCreation = creationNode;
+        break;
+      }
+    }
+
+    if (!callableCreation) return null;
+
+    // Find argument_list of Callable constructor
+    const callableArgs = callableCreation.children.find(child => child.type === 'argument_list');
+    if (!callableArgs) return null;
+
+    // Second argument is the handler method (MethodName.HandlerMethod or just handler name)
+    const namedArgs = callableArgs.namedChildren;
+    if (namedArgs.length < 2) return null;
+
+    const handlerArg = namedArgs[1];
+
+    // Handle member_access_expression (MethodName.OnPhaseChanged)
+    const memberAccess = handlerArg.type === 'member_access_expression'
+      ? handlerArg
+      : handlerArg.children.find(c => c.type === 'member_access_expression');
+
+    if (memberAccess) {
+      const nameNode = memberAccess.childForFieldName('name');
+      if (nameNode) {
+        return this.getNodeText(nameNode, content);
+      }
+    }
+
+    // Handle direct identifier
+    const identifier = handlerArg.type === 'identifier'
+      ? handlerArg
+      : handlerArg.children.find(c => c.type === 'identifier');
+
+    if (identifier) {
+      return this.getNodeText(identifier, content);
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract signal name from EmitSignal() call.
+   * Handles: EmitSignal("SignalName"), EmitSignal(nameof(SignalName)), EmitSignal(SignalName.SignalName)
+   * @param node - invocation_expression node for EmitSignal() call
+   * @param content - file content
+   * @returns signal name, or null if not found
+   */
+  private extractSignalName(
+    node: Parser.SyntaxNode,
+    content: string
+  ): string | null {
+    // Find argument_list
+    const argumentList = node.children.find(child => child.type === 'argument_list');
+    if (!argumentList || argumentList.namedChildren.length === 0) return null;
+
+    const firstArg = argumentList.namedChildren[0];
+
+    // Handle string literal: EmitSignal("SignalName")
+    if (firstArg.type === 'string_literal') {
+      const text = this.getNodeText(firstArg, content);
+      return text.replace(/^@?"(.*)"$/, '$1');
+    }
+
+    const stringLiteral = firstArg.children.find(c => c.type === 'string_literal');
+    if (stringLiteral) {
+      const text = this.getNodeText(stringLiteral, content);
+      return text.replace(/^@?"(.*)"$/, '$1');
+    }
+
+    // Handle nameof: EmitSignal(nameof(SignalName))
+    const nameofInvocation = firstArg.children.find(c => c.type === 'invocation_expression');
+    if (nameofInvocation) {
+      const nameofArgs = nameofInvocation.children.find(c => c.type === 'argument_list');
+      if (nameofArgs && nameofArgs.namedChildren.length > 0) {
+        const innerArg = nameofArgs.namedChildren[0];
+        const identifier = innerArg.type === 'identifier'
+          ? innerArg
+          : innerArg.children.find(c => c.type === 'identifier');
+        if (identifier) {
+          return this.getNodeText(identifier, content);
+        }
+      }
+    }
+
+    // Handle member access: EmitSignal(SignalName.SignalName)
+    const memberAccess = firstArg.type === 'member_access_expression'
+      ? firstArg
+      : firstArg.children.find(c => c.type === 'member_access_expression');
+
+    if (memberAccess) {
+      const nameNode = memberAccess.childForFieldName('name');
+      if (nameNode) {
+        return this.getNodeText(nameNode, content);
+      }
+    }
+
+    // Handle direct identifier: EmitSignal(SignalName)
+    const identifier = firstArg.type === 'identifier'
+      ? firstArg
+      : firstArg.children.find(c => c.type === 'identifier');
+
+    if (identifier) {
+      return this.getNodeText(identifier, content);
+    }
+
+    return null;
   }
 
   /**
@@ -2300,11 +2534,9 @@ export class CSharpParser extends ChunkedParser {
   }
 
   private resolveType(typeString: string): string {
-    if (PATTERNS.interfacePrefix.test(typeString)) {
-      const withoutPrefix = typeString.substring(1);
-      return withoutPrefix;
-    }
-
+    // Return the actual type name as declared in the code, including interface "I" prefix
+    // The type system and symbol resolution should handle interface vs implementation resolution,
+    // not arbitrary name transformations
     return typeString;
   }
 

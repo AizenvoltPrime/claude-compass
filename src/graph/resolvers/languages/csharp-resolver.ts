@@ -93,13 +93,7 @@ export class CSharpResolver extends BaseLanguageResolver {
           if (fieldTypeMatch) {
             const fieldType = fieldTypeMatch[1];
             const fieldName = fieldTypeMatch[2];
-
             fieldTypeMap[fieldName] = fieldType;
-
-            if (fieldType.startsWith('I') && fieldType.length > 1) {
-              const className = fieldType.substring(1);
-              fieldTypeMap[fieldName] = className;
-            }
           }
         }
       }
@@ -156,6 +150,17 @@ export class CSharpResolver extends BaseLanguageResolver {
   private resolveCSharpClassMethod(className: string, methodName: string): Symbol | null {
     const candidateMethods = this.indexManager.getSymbolsByName(methodName);
 
+    logger.debug('resolveCSharpClassMethod called', {
+      className,
+      methodName,
+      candidateCount: candidateMethods.length,
+      candidates: candidateMethods.map(m => ({
+        id: m.id,
+        qualified_name: m.qualified_name,
+        parent_symbol_id: m.parent_symbol_id
+      }))
+    });
+
     const expectedQualifiedNameEnding = `${className}.${methodName}`;
 
     for (const method of candidateMethods) {
@@ -165,10 +170,19 @@ export class CSharpResolver extends BaseLanguageResolver {
           method.qualified_name.endsWith(`.${expectedQualifiedNameEnding}`);
 
         if (endsWithPattern) {
+          logger.debug('Qualified name pattern matched', {
+            methodId: method.id,
+            qualified_name: method.qualified_name,
+            pattern: expectedQualifiedNameEnding,
+            parent_symbol_id: method.parent_symbol_id
+          });
+
           return method;
         }
       }
     }
+
+    logger.debug('Qualified name match completed, no match found');
 
     for (const method of candidateMethods) {
       const methodSymbol = this.indexManager.getSymbolById(method.id);
@@ -176,12 +190,9 @@ export class CSharpResolver extends BaseLanguageResolver {
         continue;
       }
 
-      const classSymbols = this.indexManager.getSymbolsByName(className);
-      for (const classSymbol of classSymbols) {
-        if (
-          classSymbol.symbol_type === 'class' ||
-          classSymbol.symbol_type === 'interface'
-        ) {
+      const classOrInterfaceSymbols = this.indexManager.getSymbolsByName(className);
+      for (const classSymbol of classOrInterfaceSymbols) {
+        if (classSymbol.symbol_type === 'class' || classSymbol.symbol_type === 'interface') {
           if (methodSymbol.file_id === classSymbol.file_id) {
             const isMethodInClass =
               methodSymbol.start_line >= classSymbol.start_line &&

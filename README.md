@@ -472,7 +472,7 @@ Find execution paths between two symbols. Can find shortest path or all paths up
 
 #### 7. `discover_feature`
 
-Discover complete feature modules across the entire stack using layer-based graph traversal. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point: backend-leaf entities (models/services) discover backward (who uses them), middle-layer entities (components/composables/controllers) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns. Includes structural parent discovery (stores containing methods, classes containing functions) for context without traversal noise.
+Discover complete feature modules across the entire stack using layer-based graph traversal with framework-specific optimizations. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point and framework: backend-leaf entities (models, Laravel services) discover backward (who uses them), middle-layer entities (components/composables/controllers, Godot managers/services/coordinators) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns. Includes structural parent discovery (stores containing methods, classes containing functions) for context without traversal noise. Godot-specific optimizations: lifecycle method filtering (_Ready, Dispose, _ExitTree), functional necessity filtering (UI bridges, routers), and C# interface resolution.
 
 **Parameters:**
 

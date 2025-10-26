@@ -77,7 +77,7 @@ export class SymbolGraphBuilder {
 
     // Initialize symbol resolver with file context if available
     if (files.length > 0) {
-      this.symbolResolver.initialize(files, symbols, importsMap, exportsMap);
+      this.symbolResolver.initialize(files, symbols, importsMap, exportsMap, dependenciesMap);
 
       if (repositoryPath) {
         await this.symbolResolver.buildGlobalSymbolIndex(files, symbols);
@@ -490,8 +490,36 @@ export class SymbolGraphBuilder {
             }
 
             // Try to find target symbols using enhanced qualified name lookup
-            const targetSymbols = this.enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap);
+            let targetSymbols = this.enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap);
 
+            // CROSS-LANGUAGE FILTERING: Prevent false dependencies between different language ecosystems
+            // E.g., Vue component importing TypeScript interface should NOT link to PHP model with same name
+            if (targetSymbols.length > 0 && useFileAwareResolution) {
+              const sourceFilePath = fileIdToPath.get(symbol.file_id) || '';
+              const sourceLanguage = this.getLanguageFromPath(sourceFilePath);
+
+              targetSymbols = targetSymbols.filter(ts => {
+                const targetFilePath = fileIdToPath.get(ts.fileId) || '';
+                const targetLanguage = this.getLanguageFromPath(targetFilePath);
+
+                // Same language ecosystem check
+                const isCompatible = this.areLanguagesCompatible(sourceLanguage, targetLanguage);
+
+                if (!isCompatible) {
+                  this.logger.debug('Filtered cross-language symbol resolution', {
+                    from: symbol.name,
+                    fromFile: sourceFilePath,
+                    fromLang: sourceLanguage,
+                    to: ts.name,
+                    toFile: targetFilePath,
+                    toLang: targetLanguage,
+                    dependency: dep.dependency_type
+                  });
+                }
+
+                return isCompatible;
+              });
+            }
 
             if (targetSymbols.length > 0) {
               // For method calls with multiple matches, try to disambiguate using context
@@ -502,6 +530,7 @@ export class SymbolGraphBuilder {
 
                 if (contextInfo) {
                   // resolved_class is "CardManager", qualified_context might be "field_call__cardManager"
+                  // For interfaces, resolved_class might be "HandOperationService" (parser strips "I" prefix)
                   const contextMatch = targetSymbols.filter(ts => {
                     // For resolved_class, it's already the class name
                     let className = contextInfo;
@@ -526,6 +555,30 @@ export class SymbolGraphBuilder {
 
                   if (contextMatch.length > 0) {
                     finalTargets = contextMatch;
+                  } else {
+                    // No exact class name match - check if this is an interface reference
+                    // resolved_class stores the actual declared type (e.g., "IHandOperationService")
+                    // Use interfaceMap (built from IMPLEMENTS dependencies) to find implementations
+                    const interfaceMatch = targetSymbols.filter(ts => {
+                      const symbolClassName = this.getSymbolClassName(ts, nodes, fileIdToPath);
+                      // Match interface method itself (method on the interface)
+                      if (symbolClassName.toLowerCase() === contextInfo.toLowerCase()) {
+                        return true;
+                      }
+                      // Match implementation method via interfaceMap (HandManagementService implements IHandOperationService)
+                      const implementations = interfaceMap.get(contextInfo) || [];
+                      return implementations.some(impl => impl.name.toLowerCase() === symbolClassName.toLowerCase());
+                    });
+
+                    if (interfaceMatch.length > 0) {
+                      finalTargets = interfaceMatch;
+                      this.logger?.debug('Resolved via interface mapping', {
+                        from_symbol: symbol.name,
+                        to_symbol: dep.to_symbol,
+                        interface: contextInfo,
+                        implementations: interfaceMatch.map(m => this.getSymbolClassName(m, nodes, fileIdToPath))
+                      });
+                    }
                   }
                 }
 
@@ -558,6 +611,13 @@ export class SymbolGraphBuilder {
               // Found target symbols, create edges
               for (const targetSymbol of finalTargets) {
                 if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
+                  continue;
+                }
+
+                // For CONTAINS dependencies, enforce same-file constraint
+                // CONTAINS represents structural containment (class contains method) which can only occur within a file
+                if (dep.dependency_type === DependencyType.CONTAINS &&
+                    symbol.file_id !== targetSymbol.fileId) {
                   continue;
                 }
 
@@ -624,6 +684,30 @@ export class SymbolGraphBuilder {
 
               if (contextMatch.length > 0) {
                 finalTargets = contextMatch;
+              } else {
+                // No exact class name match - check if this is an interface reference
+                // resolved_class stores the actual declared type (e.g., "IHandOperationService")
+                // Use interfaceMap (built from IMPLEMENTS dependencies) to find implementations
+                const interfaceMatch = targetSymbols.filter(ts => {
+                  const symbolClassName = this.getSymbolClassName(ts, nodes, fileIdToPath);
+                  // Match interface method itself (method on the interface)
+                  if (symbolClassName.toLowerCase() === contextInfo.toLowerCase()) {
+                    return true;
+                  }
+                  // Match implementation method via interfaceMap (HandManagementService implements IHandOperationService)
+                  const implementations = interfaceMap.get(contextInfo) || [];
+                  return implementations.some(impl => impl.name.toLowerCase() === symbolClassName.toLowerCase());
+                });
+
+                if (interfaceMatch.length > 0) {
+                  finalTargets = interfaceMatch;
+                  this.logger?.debug('Resolved via interface mapping (non-file-aware)', {
+                    from_symbol: symbol.name,
+                    to_symbol: dep.to_symbol,
+                    interface: contextInfo,
+                    implementations: interfaceMatch.map(m => this.getSymbolClassName(m, nodes, fileIdToPath))
+                  });
+                }
               }
             }
 
@@ -654,6 +738,13 @@ export class SymbolGraphBuilder {
 
           for (const targetSymbol of finalTargets) {
             if (symbol.id === targetSymbol.id && dep.dependency_type !== DependencyType.CALLS) {
+              continue;
+            }
+
+            // For CONTAINS dependencies, enforce same-file constraint
+            // CONTAINS represents structural containment (class contains method) which can only occur within a file
+            if (dep.dependency_type === DependencyType.CONTAINS &&
+                symbol.file_id !== targetSymbol.fileId) {
               continue;
             }
 
@@ -1069,6 +1160,38 @@ export class SymbolGraphBuilder {
       return name;
     }
     return name.substring(0, genericStart);
+  }
+
+  /**
+   * Extract language/ecosystem from file path
+   */
+  private getLanguageFromPath(filePath: string): string {
+    if (filePath.endsWith('.php')) return 'php';
+    if (filePath.endsWith('.ts') || filePath.endsWith('.tsx')) return 'typescript';
+    if (filePath.endsWith('.js') || filePath.endsWith('.jsx')) return 'javascript';
+    if (filePath.endsWith('.vue')) return 'vue';
+    if (filePath.endsWith('.cs')) return 'csharp';
+    if (filePath.endsWith('.py')) return 'python';
+    return 'unknown';
+  }
+
+  /**
+   * Check if two languages can reference each other's symbols
+   * Prevents false cross-language dependencies (e.g., Vue importing PHP class)
+   */
+  private areLanguagesCompatible(lang1: string, lang2: string): boolean {
+    if (lang1 === lang2) return true;
+
+    // Frontend ecosystem: TypeScript, JavaScript, Vue can cross-reference
+    const frontendLanguages = new Set(['typescript', 'javascript', 'vue']);
+    if (frontendLanguages.has(lang1) && frontendLanguages.has(lang2)) {
+      return true;
+    }
+
+    // Backend ecosystems are isolated
+    // PHP cannot reference TypeScript/Vue/JavaScript and vice versa
+    // C# cannot reference PHP/TypeScript/etc and vice versa
+    return false;
   }
 
   private isInstanceMemberAccess(name: string): boolean {

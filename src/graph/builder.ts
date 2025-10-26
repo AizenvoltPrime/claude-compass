@@ -225,10 +225,13 @@ export class GraphBuilder {
 
       // Store files and symbols in database
       const dbFiles = await this.storeFiles(repository.id, files, parseResults);
-      const symbols = await this.storeSymbols(dbFiles, parseResults);
+      let symbols = await this.storeSymbols(dbFiles, parseResults);
 
       // Link symbol parent-child relationships
       await this.linkSymbolHierarchy(repository.id);
+
+      // Reload symbols from database to get updated parent_symbol_id values
+      symbols = await this.dbService.getSymbolsByRepository(repository.id);
 
       // Generate embeddings for symbols
       if (!validatedOptions.skipEmbeddings) {
@@ -666,7 +669,15 @@ export class GraphBuilder {
     }
 
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
-    const symbols = await this.storeSymbols(dbFiles, parseResults);
+    await this.storeSymbols(dbFiles, parseResults);
+
+    // Link symbol hierarchy for newly added symbols
+    await this.linkSymbolHierarchy(repositoryId);
+
+    // Reload ALL symbols from database to ensure:
+    // 1. We have all repository symbols (not just changed files)
+    // 2. parent_symbol_id is populated for proper resolution
+    const symbols = await this.dbService.getSymbolsByRepository(repositoryId);
 
     // Generate embeddings for symbols
     if (!validatedOptions.skipEmbeddings) {
@@ -2169,6 +2180,162 @@ export class GraphBuilder {
           this.logger.error('Failed to create node-script dependency', {
             nodeName: node.node_name,
             scriptPath: node.script_path,
+            error: (error as Error).message,
+          });
+        }
+      }
+
+      // Create GetNode dependencies by extracting them from parseResults
+      // This works for ANY folder structure - node paths come from actual GetNode calls
+      this.logger.info('Creating GetNode node reference dependencies');
+
+      // Collect all GetNode dependencies from parse results
+      const getnodeDeps: Array<{
+        filePath: string;
+        dependency: ParsedDependency;
+      }> = [];
+
+      for (const parseResult of parseResults) {
+        if (parseResult.dependencies) {
+          for (const dep of parseResult.dependencies) {
+            // Look for dependencies with "node:" prefix in to_symbol
+            if (dep.to_symbol && dep.to_symbol.startsWith('node:')) {
+              getnodeDeps.push({
+                filePath: parseResult.filePath,
+                dependency: dep,
+              });
+            }
+          }
+        }
+      }
+
+      this.logger.info('Found GetNode dependencies in parseResults', { count: getnodeDeps.length });
+
+      // Create lookup maps
+      const pathToFileId = new Map<string, number>();
+      const allFiles = await this.dbService.getFilesByRepository(repositoryId);
+      for (const file of allFiles) {
+        pathToFileId.set(file.path, file.id);
+      }
+
+      const allSymbols = await this.dbService.getSymbolsByRepository(repositoryId);
+      const fileIdToSymbols = new Map<number, any[]>();
+      for (const symbol of allSymbols) {
+        const symbols = fileIdToSymbols.get(symbol.file_id) || [];
+        symbols.push(symbol);
+        fileIdToSymbols.set(symbol.file_id, symbols);
+      }
+
+      // Resolve and create each GetNode dependency
+      for (const { filePath, dependency } of getnodeDeps) {
+        try {
+          // Extract node path from "node:HoverPanel" -> "HoverPanel"
+          const fullNodePath = dependency.to_symbol.substring(5); // Remove "node:" prefix
+
+          // Extract the target node name from the path
+          // GetNode paths can be: "HoverPanel", "../CoreSystems/ServiceDiscoveryEngine", "HoverPanel/ButtonContainer/AttackerButton"
+          // Database stores node_name (final component only): "HoverPanel", "ServiceDiscoveryEngine", "AttackerButton"
+          const pathParts = fullNodePath.split('/').filter((p: string) => p && p !== '..' && p !== '.');
+          const targetNodeName = pathParts[pathParts.length - 1];
+
+          if (!targetNodeName) {
+            this.logger.warn('Could not extract node name from path', { fullNodePath });
+            continue;
+          }
+
+          // Get source file and symbol
+          const sourceFileId = pathToFileId.get(filePath);
+          if (!sourceFileId) {
+            this.logger.warn('Source file not found', { filePath });
+            continue;
+          }
+
+          const sourceSymbols = fileIdToSymbols.get(sourceFileId) || [];
+          // dependency.from_symbol may be fully qualified (e.g., "ClassName.MethodName")
+          // Try qualified_name first, then fall back to simple name match
+          const fromSymbol = sourceSymbols.find(s =>
+            s.qualified_name === dependency.from_symbol ||
+            s.name === dependency.from_symbol
+          );
+          if (!fromSymbol) {
+            this.logger.warn('Source symbol not found', {
+              fromSymbol: dependency.from_symbol,
+              filePath,
+              availableSymbols: sourceSymbols.map(s => s.name).join(', '),
+            });
+            continue;
+          }
+
+          // Look up the node in godot_nodes table (works for any project structure)
+          const nodes = await this.dbService.knex('godot_nodes as gn')
+            .join('godot_scenes as gs', 'gn.scene_id', 'gs.id')
+            .where('gs.repo_id', repositoryId)
+            .where('gn.node_name', targetNodeName)
+            .select('gn.*', 'gs.scene_path');
+
+          if (nodes.length === 0) {
+            this.logger.warn('Node not found in scenes', {
+              fullNodePath,
+              targetNodeName,
+              fromSymbol: fromSymbol.name,
+            });
+            continue;
+          }
+
+          // If multiple nodes with same name, log it (best-effort resolution)
+          if (nodes.length > 1) {
+            this.logger.debug('Multiple nodes with same name found', {
+              targetNodeName,
+              count: nodes.length,
+              scriptPaths: nodes.map((n: any) => n.script_path).filter(Boolean),
+            });
+          }
+
+          const node = nodes[0];
+          if (!node.script_path) {
+            this.logger.warn('Node has no script', {
+              targetNodeName,
+              nodeType: node.node_type,
+              scenePath: node.scene_path,
+            });
+            continue;
+          }
+
+          // Get the script class symbol using pre-built maps
+          const scriptFileId = pathToFileId.get(node.script_path);
+          if (!scriptFileId) {
+            this.logger.warn('Script file not found', { scriptPath: node.script_path });
+            continue;
+          }
+
+          const scriptSymbols = fileIdToSymbols.get(scriptFileId) || [];
+          const scriptClassSymbol = scriptSymbols.find(s => s.symbol_type === 'class');
+
+          if (!scriptClassSymbol) {
+            this.logger.warn('Script class not found', { scriptPath: node.script_path });
+            continue;
+          }
+
+          // Create dependency with resolved symbol IDs
+          await this.dbService.createDependency({
+            from_symbol_id: fromSymbol.id,
+            to_symbol_id: scriptClassSymbol.id,
+            dependency_type: dependency.dependency_type,
+            line_number: dependency.line_number,
+            parameter_context: dependency.parameter_context,
+          });
+
+          this.logger.info('Created GetNode dependency', {
+            fromSymbol: fromSymbol.name,
+            fullNodePath,
+            targetNodeName,
+            toScript: scriptClassSymbol.name,
+            fromId: fromSymbol.id,
+            toId: scriptClassSymbol.id,
+          });
+        } catch (error) {
+          this.logger.error('Failed to create GetNode dependency', {
+            nodePath: dependency.to_symbol,
             error: (error as Error).message,
           });
         }

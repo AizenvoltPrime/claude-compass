@@ -12,6 +12,7 @@ export class SymbolIndexManager implements ISymbolIndexManager {
 
   private symbolsByName: Map<string, Symbol[]> = new Map();
   private exportedSymbols: Map<string, ExportedSymbol[]> = new Map();
+  private interfaceToImplementationsMap: Map<string, Symbol[]> = new Map();
 
   buildGlobalIndex(files: File[], symbols: Symbol[]): void {
     this.globalSymbolIndex.clear();
@@ -55,9 +56,14 @@ export class SymbolIndexManager implements ISymbolIndexManager {
     });
   }
 
-  buildTransientIndexes(contexts: IResolutionContext[]): void {
+  buildTransientIndexes(
+    contexts: IResolutionContext[],
+    allSymbols: Symbol[],
+    implementsDependencies?: Array<{ fromSymbolId: number; toSymbolId: number }>
+  ): void {
     this.symbolsByName.clear();
     this.exportedSymbols.clear();
+    this.interfaceToImplementationsMap.clear();
 
     for (const context of contexts) {
       for (const symbol of context.symbols) {
@@ -73,9 +79,30 @@ export class SymbolIndexManager implements ISymbolIndexManager {
       }
     }
 
+    // Build interface-to-implementation map from actual IMPLEMENTS dependencies
+    // This uses the type system, not string parsing
+    if (implementsDependencies && implementsDependencies.length > 0) {
+      const symbolIdMap = new Map<number, Symbol>();
+      for (const symbol of allSymbols) {
+        symbolIdMap.set(symbol.id, symbol);
+      }
+
+      for (const { fromSymbolId, toSymbolId } of implementsDependencies) {
+        const implClass = symbolIdMap.get(fromSymbolId);
+        const interfaceSymbol = symbolIdMap.get(toSymbolId);
+
+        if (implClass && interfaceSymbol) {
+          const implementations = this.interfaceToImplementationsMap.get(interfaceSymbol.name) || [];
+          implementations.push(implClass);
+          this.interfaceToImplementationsMap.set(interfaceSymbol.name, implementations);
+        }
+      }
+    }
+
     logger.debug('Transient indexes built', {
       symbolsByName: this.symbolsByName.size,
       exportedSymbols: this.exportedSymbols.size,
+      interfaceMappings: this.interfaceToImplementationsMap.size,
     });
   }
 
@@ -123,6 +150,7 @@ export class SymbolIndexManager implements ISymbolIndexManager {
   clearTransient(): void {
     this.symbolsByName.clear();
     this.exportedSymbols.clear();
+    this.interfaceToImplementationsMap.clear();
     logger.debug('Transient indexes cleared');
   }
 
@@ -132,6 +160,7 @@ export class SymbolIndexManager implements ISymbolIndexManager {
     this.symbolIdToSymbolMap.clear();
     this.symbolsByName.clear();
     this.exportedSymbols.clear();
+    this.interfaceToImplementationsMap.clear();
     logger.debug('All indexes cleared');
   }
 
@@ -147,5 +176,14 @@ export class SymbolIndexManager implements ISymbolIndexManager {
       exportedSymbols: this.exportedSymbols.size,
       files: this.filePathToIdMap.size,
     };
+  }
+
+  findImplementingClasses(interfaceId: number): Symbol[] {
+    const interfaceSymbol = this.symbolIdToSymbolMap.get(interfaceId);
+    if (!interfaceSymbol) {
+      return [];
+    }
+
+    return this.interfaceToImplementationsMap.get(interfaceSymbol.name) || [];
   }
 }

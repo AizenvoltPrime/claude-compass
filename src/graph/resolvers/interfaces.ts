@@ -65,7 +65,11 @@ export interface ExportedSymbol {
 
 export interface ISymbolIndexManager {
   buildGlobalIndex(files: any[], symbols: Symbol[]): void;
-  buildTransientIndexes(contexts: IResolutionContext[]): void;
+  buildTransientIndexes(
+    contexts: IResolutionContext[],
+    allSymbols: Symbol[],
+    implementsDependencies?: Array<{ fromSymbolId: number; toSymbolId: number }>
+  ): void;
 
   getSymbolById(symbolId: number): Symbol | undefined;
   getSymbolsByName(name: string): Symbol[];
@@ -74,6 +78,7 @@ export interface ISymbolIndexManager {
   getSymbolByQualifiedName(qualifiedName: string): Symbol | undefined;
   getFileId(filePath: string): number | undefined;
   getFilePath(fileId: number): string | undefined;
+  findImplementingClasses(interfaceId: number): Symbol[];
 
   clearTransient(): void;
   clearAll(): void;

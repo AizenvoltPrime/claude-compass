@@ -332,7 +332,7 @@ export class ClaudeCompassMCPServer {
           {
             name: 'discover_feature',
             description:
-              'Discover complete feature modules across the entire stack using layer-based graph traversal. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point: backend-leaf entities (models/services) discover backward (who uses them), middle-layer entities (components/composables/controllers) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns.',
+              'Discover complete feature modules across the entire stack using layer-based graph traversal with framework-specific optimizations. Follows actual code relationships (calls, imports, API connections) through dependency graphs. Adapts discovery direction based on entry point and framework: backend-leaf entities (models, Laravel services) discover backward (who uses them), middle-layer entities (components/composables/controllers, Godot managers/services/coordinators) discover bidirectionally (callers + dependencies). Pure graph-based discovery with no heuristics or naming patterns. Godot-specific optimizations: lifecycle method filtering (_Ready, Dispose, _ExitTree), functional necessity filtering (UI bridges, routers), and C# interface resolution.',
             inputSchema: {
               type: 'object',
               properties: {
