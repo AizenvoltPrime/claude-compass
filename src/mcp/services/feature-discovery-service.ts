@@ -4,6 +4,7 @@ import { createComponentLogger } from '../../utils/logger';
 import {
   createStandardDiscoveryEngine,
   createPropDrivenDiscoveryEngine,
+  createComposableDrivenDiscoveryEngine,
 } from './discovery-strategies';
 
 const logger = createComponentLogger('feature-discovery-service');
@@ -149,10 +150,20 @@ export class FeatureDiscoveryService {
 
     const featureName = this.extractFeatureName(entrySymbol.name);
 
-    // Use prop-driven discovery for Vue components for more precise results
+    // Choose discovery strategy based on entry point entity type
+    // - Vue components: prop-driven (follows data flow through props)
+    // - Vue composables: composable-driven (follows execution flow from composable)
+    // - Everything else: standard (executor-centric graph traversal)
+    const useComposableDriven = entrySymbol.entity_type === 'composable';
     const usePropDriven = entrySymbol.entity_type === 'component';
 
-    const engine = usePropDriven
+    const engine = useComposableDriven
+      ? createComposableDrivenDiscoveryEngine(this.dbService, {
+          maxIterations: 3,
+          convergenceThreshold: 1,
+          debug: false,
+        })
+      : usePropDriven
       ? createPropDrivenDiscoveryEngine(this.dbService, {
           maxIterations: 3,
           convergenceThreshold: 1,
@@ -165,7 +176,7 @@ export class FeatureDiscoveryService {
         });
 
     logger.info('Using discovery strategy', {
-      strategy: usePropDriven ? 'prop-driven' : 'standard',
+      strategy: useComposableDriven ? 'composable-driven' : usePropDriven ? 'prop-driven' : 'standard',
       entryPoint: entrySymbol.name,
       entityType: entrySymbol.entity_type,
     });

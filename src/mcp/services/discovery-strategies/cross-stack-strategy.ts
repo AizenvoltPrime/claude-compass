@@ -62,15 +62,15 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
       frontendCallerIds.push(row.caller_symbol_id);
     }
 
-    // PARENT CONTAINER DISCOVERY: For frontend callers (store methods, component methods),
-    // discover their parent containers (stores, components) for architectural context
+    // PARENT CONTAINER DISCOVERY: For frontend callers (store methods, component methods, composables),
+    // discover their parent containers (stores, components, composables) for architectural context
     const parentContainerIds: number[] = [];
     if (frontendCallerIds.length > 0) {
       const parentContainers = await db('dependencies as d')
         .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
         .whereIn('d.to_symbol_id', frontendCallerIds)
         .where('d.dependency_type', 'contains')
-        .whereIn('parent.entity_type', ['store', 'component'])
+        .whereIn('parent.entity_type', ['store', 'component', 'composable'])
         .select('parent.id');
 
       for (const row of parentContainers) {
@@ -105,6 +105,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
       }
 
       // Find parent containers of those callers (components, composables)
+      // When we discover a component/composable that calls stores, add it to the feature
       if (storeCalls.length > 0) {
         const callerIds = storeCalls.map(r => r.from_symbol_id);
         const callerParents = await db('dependencies as d')

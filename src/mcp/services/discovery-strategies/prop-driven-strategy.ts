@@ -187,64 +187,22 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       return { symbolId, props: [], storeCallsInSetup: [] };
     }
 
-    // Get component source code
-    const file = await db('files')
-      .where({ id: symbol.file_id })
+    // Get props from components table (populated during analysis)
+    const component = await db('components')
+      .where({ symbol_id: symbolId })
       .first();
 
-    if (!file) {
-      return { symbolId, props: [], storeCallsInSetup: [] };
-    }
+    const props: PropInfo[] = component?.props || [];
 
-    // Parse props from source code
-    const props = await this.parsePropsFromSource(file.path, symbol.raw_source);
-
-    // Find direct store method calls in component
-    // Look for calls to store methods
-    const storeCallsInSetup = await this.findStoreMethodCalls(symbolId);
-
-    return { symbolId, props, storeCallsInSetup };
-  }
-
-  /**
-   * Parse defineProps from Vue component source
-   */
-  private async parsePropsFromSource(
-    filePath: string,
-    rawSource: string | null
-  ): Promise<PropInfo[]> {
-    if (!rawSource) {
-      throw new Error(
-        `Symbol raw_source is null for file ${filePath}. Database integrity issue - re-analyze repository.`
-      );
-    }
-
-    const props: PropInfo[] = [];
-
-    // Match: defineProps<{ propName: Type, ... }>()
-    const typePropsMatch = rawSource.match(/defineProps<\{([^}]+)\}>/);
-    if (typePropsMatch) {
-      const propsBlock = typePropsMatch[1];
-      const propLines = propsBlock.split(/[;,\n]/).filter(line => line.trim());
-
-      for (const line of propLines) {
-        const match = line.match(/^\s*(\w+)\s*\??\s*:\s*([^;,]+)/);
-        if (match) {
-          props.push({
-            name: match[1].trim(),
-            type: match[2].trim(),
-            required: !line.includes('?'),
-          });
-        }
-      }
-    }
-
-    logger.debug('Parsed props from component', {
-      filePath,
+    logger.debug('Retrieved props from components table', {
+      symbolId,
       propsCount: props.length,
     });
 
-    return props;
+    // Find direct store method calls in component
+    const storeCallsInSetup = await this.findStoreMethodCalls(symbolId);
+
+    return { symbolId, props, storeCallsInSetup };
   }
 
   /**
@@ -333,7 +291,6 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
 
       const propBindings = await this.parsePropBindings(
         file.path,
-        consumerSymbol.raw_source,
         componentId
       );
 
@@ -352,21 +309,28 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
 
   /**
    * Parse prop bindings from render location (template or h() call)
+   * Reads from filesystem (source of truth for code)
    */
   private async parsePropBindings(
     filePath: string,
-    rawSource: string | null,
     componentId: number
   ): Promise<PropBinding[]> {
-    if (!rawSource) {
-      throw new Error(
-        `Symbol raw_source is null for file ${filePath}. Database integrity issue - re-analyze repository.`
-      );
-    }
-
     const bindings: PropBinding[] = [];
     const componentSymbol = await this.dbService.getSymbol(componentId);
     if (!componentSymbol) return bindings;
+
+    // Read source from filesystem
+    const fs = await import('fs/promises');
+    let source: string;
+    try {
+      source = await fs.readFile(filePath, 'utf-8');
+    } catch (error) {
+      logger.warn('Could not read file for prop binding analysis', {
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return bindings;
+    }
 
     // Look for h(ComponentName, { prop: value, ... })
     const hCallRegex = new RegExp(
@@ -375,7 +339,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     );
 
     let match: RegExpExecArray | null;
-    while ((match = hCallRegex.exec(rawSource)) !== null) {
+    while ((match = hCallRegex.exec(source)) !== null) {
       const propsBlock = match[1];
       const propLines = propsBlock.split(',');
 
