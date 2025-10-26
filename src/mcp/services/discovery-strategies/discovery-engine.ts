@@ -13,14 +13,12 @@
 
 import { createComponentLogger } from '../../../utils/logger';
 import { DatabaseService } from '../../../database/services';
-import { DependencyType } from '../../../database/models';
 import {
   DiscoveryStrategy,
   DiscoveryContext,
   DiscoveryResult,
   DiscoveryEngineConfig,
   DiscoveryStats,
-  StrategyStatistics,
 } from './types';
 import { CRITICAL_STRATEGY_PRIORITY } from './constants';
 
@@ -31,7 +29,7 @@ export class DiscoveryEngine {
   private config: DiscoveryEngineConfig;
 
   constructor(
-    private dbService: DatabaseService,
+    _dbService: DatabaseService,
     config: Partial<DiscoveryEngineConfig> = {}
   ) {
     this.config = {
@@ -76,54 +74,6 @@ export class DiscoveryEngine {
       const startTime = Date.now();
       const symbolRelevance = new Map<number, number>([[entryPointId, 1.0]]);
 
-      // Determine if entry point is frontend-focused using graph relationships
-      // Check if the entry point is a store/composable/component OR contained within one
-      const entryPointSymbol = await this.dbService.getSymbol(entryPointId);
-      let isFrontendEntryPoint = entryPointSymbol?.entity_type === 'store' ||
-                                 entryPointSymbol?.entity_type === 'composable' ||
-                                 entryPointSymbol?.entity_type === 'component';
-
-      // If not directly a frontend entity, check if it's contained within one (via CONTAINS)
-      if (!isFrontendEntryPoint) {
-        const containers = await this.dbService.getDependenciesTo(entryPointId);
-        const containsDeps = containers.filter(dep => dep.dependency_type === DependencyType.CONTAINS);
-
-        for (const dep of containsDeps) {
-          const container = dep.from_symbol;
-          if (container?.entity_type === 'store' ||
-              container?.entity_type === 'composable' ||
-              container?.entity_type === 'component') {
-            isFrontendEntryPoint = true;
-            break;
-          }
-        }
-      }
-
-      // Classify entry point by layer for direction-aware discovery
-      let entryPointLayer: 'frontend-leaf' | 'backend-leaf' | 'middle-layer';
-      const entityType = entryPointSymbol?.entity_type;
-
-      if (entityType === 'model' || (entityType === 'service' && !isFrontendEntryPoint)) {
-        // Models and backend services are backend leaves - discover who uses them (backward)
-        entryPointLayer = 'backend-leaf';
-      } else if (entityType === 'component' || entityType === 'composable' || entityType === 'store' || entityType === 'method' || entityType === 'controller') {
-        // Components, composables, stores, methods, controllers are middle layers - discover both directions
-        // Components need bidirectional: forward (what they use) + backward (where their prop data comes from)
-        entryPointLayer = 'middle-layer';
-      } else {
-        // Default: treat as middle layer for bidirectional discovery
-        entryPointLayer = 'middle-layer';
-      }
-
-      logger.debug('Entry point context determined', {
-        entryPointId,
-        entityType: entryPointSymbol?.entity_type,
-        isFrontendEntryPoint,
-        entryPointLayer,
-      });
-
-      const graphValidatedSymbols = new Set<number>(); // Track symbols discovered via direct graph edges
-      const contextSymbols = new Set<number>(); // Track symbols for validation context only (not part of feature)
       const stats: DiscoveryStats = {
         iterations: 0,
         symbolsPerIteration: [],
@@ -167,14 +117,10 @@ export class DiscoveryEngine {
           entryPointId,
           options,
           iteration,
-          graphValidatedSymbols,
-          contextSymbols,
-          isFrontendEntryPoint,
-          entryPointLayer,
         };
 
         for (const strategy of this.strategies) {
-          if (strategy.shouldRun && !strategy.shouldRun(context)) {
+          if (strategy.shouldRun && !(await strategy.shouldRun(context))) {
             if (this.config.debug) {
               logger.debug(`Skipping strategy ${strategy.name}`, { iteration });
             }

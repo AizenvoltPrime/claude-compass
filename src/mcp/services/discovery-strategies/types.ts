@@ -23,7 +23,7 @@ export interface DiscoveryContext {
 
   /**
    * The feature name extracted from the entry point symbol.
-   * Used for naming pattern matching and filtering.
+   * Used for categorization and labeling.
    */
   featureName: string;
 
@@ -50,39 +50,6 @@ export interface DiscoveryContext {
    * Strategies can adjust behavior based on iteration depth.
    */
   iteration: number;
-
-  /**
-   * Symbol IDs that were discovered through direct graph edges (API calls, dependencies).
-   * Populated by cross-stack strategy when discovering controllers via API graph.
-   */
-  graphValidatedSymbols: Set<number>;
-
-  /**
-   * Symbol IDs added to provide validation context but NOT part of the feature itself.
-   *
-   * Context symbols are used for validation logic (e.g., checking if a request is used
-   * by discovered controller methods) but should NOT appear in the final feature manifest.
-   *
-   * This separation prevents route discovery from including unrelated CRUD endpoints
-   * when starting from backend models.
-   */
-  contextSymbols: Set<number>;
-
-  /**
-   * Indicates if the entry point is frontend-focused (store, composable, or component).
-   * Used to adjust depth filtering for components in dependency traversal:
-   * - Frontend entry points: Allow deeper component discovery
-   * - Backend entry points: Limit component depth to avoid UI noise
-   */
-  isFrontendEntryPoint: boolean;
-
-  /**
-   * Entry point layer classification for direction-aware discovery:
-   * - 'frontend-leaf': Component → traverse forward only (what does it need)
-   * - 'backend-leaf': Model/Service → traverse backward only (who uses it)
-   * - 'middle-layer': Composable/Store/Endpoint → traverse both (who uses + what needs)
-   */
-  entryPointLayer: 'frontend-leaf' | 'backend-leaf' | 'middle-layer';
 }
 
 /**
@@ -131,9 +98,9 @@ export interface DiscoveryStrategy {
    * Allows strategies to skip execution based on iteration depth or other factors.
    *
    * @param context - Current discovery state
-   * @returns true if strategy should execute, false to skip
+   * @returns true if strategy should execute, false to skip (can be async)
    */
-  shouldRun?(context: DiscoveryContext): boolean;
+  shouldRun?(context: DiscoveryContext): boolean | Promise<boolean>;
 
   /**
    * Optional: Reset internal state (caches, visited sets, etc.).

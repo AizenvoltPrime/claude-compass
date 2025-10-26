@@ -134,82 +134,75 @@ export class MemberExpressionResolver implements IMemberExpressionResolver {
       }
     }
 
-    if (candidateSymbols.length > 0) {
-      logger.info('Using fallback symbol resolution for nested member', {
-        baseObject: baseObject.name,
-        baseObjectType: baseObject.symbol_type,
-        member: finalMember.name,
-        candidateCount: candidateSymbols.length,
-        contextFile: context.filePath,
-      });
+    // Only allow cross-file resolution if there's an import relationship
+    // This prevents false positives like marker.setMap() → sentinelStore.setMap
+    const importedCandidates: Symbol[] = [];
 
-      // When multiple candidates exist, prefer symbols from the same language/stack
-      // For Pinia stores (TypeScript), prefer store methods over backend controller methods
-      if (candidateSymbols.length > 1) {
-        // Determine if base object is from frontend or backend based on context
-        const isFrontendBase = this.isFrontendFile(context.filePath);
-
-        logger.info('Multiple candidates found, applying disambiguation', {
-          baseObject: baseObject.name,
-          member: finalMember.name,
-          totalCandidates: candidateSymbols.length,
-          candidateFiles: candidateSymbols.map(c => ({
-            id: c.id,
-            file_id: c.file_id,
-            type: c.symbol_type
-          })),
-          isFrontendBase,
-        });
-
-        // Filter candidates by language preference
-        const preferredCandidates = candidateSymbols.filter(candidate => {
-          const candidateFilePath = indexManager.getFilePath(candidate.file_id);
-          if (!candidateFilePath) {
-            logger.warn('Could not get file path for candidate', {
-              candidateId: candidate.id,
-              fileId: candidate.file_id,
-            });
-            return false;
-          }
-
-          const isFrontendCandidate = this.isFrontendFile(candidateFilePath);
-          logger.info('Checking candidate', {
-            candidateId: candidate.id,
-            candidatePath: candidateFilePath,
-            isFrontendCandidate,
-            matches: isFrontendBase === isFrontendCandidate,
-          });
-          return isFrontendBase === isFrontendCandidate;
-        });
-
-        if (preferredCandidates.length > 0 && preferredCandidates.length < candidateSymbols.length) {
-          logger.info('Filtered candidates by language preference', {
-            baseObject: baseObject.name,
-            member: finalMember.name,
-            contextFile: context.filePath,
-            total: candidateSymbols.length,
-            preferred: preferredCandidates.length,
-            isFrontend: isFrontendBase,
-            selectedId: preferredCandidates[0].id,
-          });
-          return preferredCandidates[0];
-        } else {
-          logger.info('Disambiguation did not filter candidates', {
-            preferredCount: preferredCandidates.length,
-            totalCount: candidateSymbols.length,
-            reason: preferredCandidates.length === 0 ? 'No preferred candidates' : 'All candidates match preference',
-          });
-        }
+    for (const candidate of candidateSymbols) {
+      // Same file - always allowed
+      if (candidate.file_id === context.fileId) {
+        importedCandidates.push(candidate);
+        continue;
       }
 
-      logger.info('Returning first candidate without filtering', {
-        candidateId: candidateSymbols[0].id,
-        candidateName: candidateSymbols[0].name,
+      // Cross-file - check if candidate's file is imported
+      const isImported = context.imports.some(importDecl => {
+        // Check if any exported symbol from this import comes from candidate's file
+        const exportedSymbols = indexManager.getExportedSymbols(importDecl.source);
+        return exportedSymbols.some(exp => exp.fromFile === candidate.file_id);
       });
-      return candidateSymbols[0];
+
+      if (isImported) {
+        importedCandidates.push(candidate);
+      } else {
+        logger.debug('Excluding cross-file candidate without import', {
+          baseObject: baseObject.name,
+          member: finalMember.name,
+          candidateId: candidate.id,
+          candidateFileId: candidate.file_id,
+        });
+      }
     }
 
-    return null;
+    if (importedCandidates.length === 0) {
+      logger.debug('No valid candidates after import filtering', {
+        baseObject: baseObject.name,
+        member: finalMember.name,
+        totalCandidates: candidateSymbols.length,
+        contextFile: context.filePath,
+      });
+      return null;
+    }
+
+    // Apply language preference if multiple candidates
+    if (importedCandidates.length > 1) {
+      const isFrontendBase = this.isFrontendFile(context.filePath);
+
+      const preferredCandidates = importedCandidates.filter(candidate => {
+        const candidateFilePath = indexManager.getFilePath(candidate.file_id);
+        if (!candidateFilePath) return false;
+
+        const isFrontendCandidate = this.isFrontendFile(candidateFilePath);
+        return isFrontendBase === isFrontendCandidate;
+      });
+
+      if (preferredCandidates.length > 0) {
+        logger.debug('Resolved via language preference', {
+          baseObject: baseObject.name,
+          member: finalMember.name,
+          selectedId: preferredCandidates[0].id,
+        });
+        return preferredCandidates[0];
+      }
+    }
+
+    logger.debug('Resolved via import relationship', {
+      baseObject: baseObject.name,
+      member: finalMember.name,
+      selectedId: importedCandidates[0].id,
+      totalFiltered: candidateSymbols.length - importedCandidates.length,
+    });
+    return importedCandidates[0];
   }
 
   /**
