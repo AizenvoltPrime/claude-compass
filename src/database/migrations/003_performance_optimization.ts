@@ -19,10 +19,24 @@ export async function up(knex: Knex): Promise<void> {
     ON repositories (language_primary, last_indexed)
   `);
 
-  // Note: Additional composite indexes removed after analysis (2025-10-12)
-  // - symbols_repo_type_exported_idx with INCLUDE clause (2 MB, rarely used)
-  // - dependencies_full_context_idx with INCLUDE clause (premature optimization)
-  // Migration 001 already creates sufficient indexes for common query patterns
+  // Optimize symbol lookups across repository boundaries
+  // Used by search queries that filter symbols by repo_id through files join
+  await knex.raw(`
+    CREATE INDEX IF NOT EXISTS symbols_file_id_repo_lookup_idx
+    ON symbols (file_id) INCLUDE (id, name, symbol_type, is_exported, entity_type)
+  `);
+
+  // Optimize file-based symbol queries (used heavily in parsing/resolution)
+  await knex.raw(`
+    CREATE INDEX IF NOT EXISTS files_repo_id_id_idx
+    ON files (repo_id, id) INCLUDE (path, language)
+  `);
+
+  // Optimize dependency traversal queries (used in transitive analysis)
+  await knex.raw(`
+    CREATE INDEX IF NOT EXISTS dependencies_traversal_idx
+    ON dependencies (to_symbol_id, dependency_type) INCLUDE (from_symbol_id, line_number)
+  `);
 
   console.log('✅ Performance optimizations created');
 }
@@ -30,4 +44,7 @@ export async function up(knex: Knex): Promise<void> {
 export async function down(knex: Knex): Promise<void> {
   // Remove composite indexes
   await knex.raw('DROP INDEX IF EXISTS repositories_language_primary_last_indexed_index');
+  await knex.raw('DROP INDEX IF EXISTS symbols_file_id_repo_lookup_idx');
+  await knex.raw('DROP INDEX IF EXISTS files_repo_id_id_idx');
+  await knex.raw('DROP INDEX IF EXISTS dependencies_traversal_idx');
 }

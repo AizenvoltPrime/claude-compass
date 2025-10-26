@@ -594,6 +594,11 @@ export class DatabaseService {
   }
 
   // Symbol operations
+  /**
+   * Retrieves all symbols for a repository using optimized index-backed join.
+   * Leverages files(repo_id, id) composite index to filter files by repo_id,
+   * then joins to symbols using only matching file IDs to avoid full table scan.
+   */
   async getSymbolsByRepository(repoId: number): Promise<Symbol[]> {
     const symbols = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
@@ -844,6 +849,31 @@ export class DatabaseService {
       .where({ file_id: fileId })
       .orderBy(['start_line', 'name']);
     return symbols as Symbol[];
+  }
+
+  /**
+   * Batch version of getSymbolsByFile for performance-sensitive operations.
+   * Queries all file IDs in a single database roundtrip instead of N queries.
+   * Returns a Map of fileId to symbols array for efficient lookup.
+   */
+  async getSymbolsByFiles(fileIds: number[]): Promise<Map<number, Symbol[]>> {
+    if (fileIds.length === 0) {
+      return new Map();
+    }
+
+    const symbols = await this.db('symbols')
+      .whereIn('file_id', fileIds)
+      .orderBy(['file_id', 'start_line', 'name'])
+      .select('*');
+
+    const symbolsByFile = new Map<number, Symbol[]>();
+    for (const symbol of symbols) {
+      const fileSymbols = symbolsByFile.get(symbol.file_id) || [];
+      fileSymbols.push(symbol as Symbol);
+      symbolsByFile.set(symbol.file_id, fileSymbols);
+    }
+
+    return symbolsByFile;
   }
 
   /**
@@ -1187,6 +1217,12 @@ export class DatabaseService {
 
   /**
    * Vector similarity search using pgvector embeddings - FAIL FAST
+   *
+   * Optimizations:
+   * - Uses combined_embedding for single-vector search (faster than dual similarity)
+   * - Filters by repo_id first via files(repo_id, id) index
+   * - Leverages symbols(file_id) INCLUDE index for covering index benefits
+   * - Orders by distance ascending (smallest distance = most similar first)
    */
   async vectorSearch(
     query: string,
@@ -1226,14 +1262,12 @@ export class DatabaseService {
       `[VECTOR SEARCH DB] Search parameters: limit=${limit}, threshold=${similarityThreshold}`
     );
 
-    // Build the base query using combined_embedding (2x faster than double similarity)
     const baseQuery = this.db('symbols as s')
       .select([
         's.*',
         'f.path as file_path',
         'f.language as file_language',
         'r.name as repo_name',
-        // Use combined embedding for optimal speed and quality
         this.db.raw('(1 - (s.combined_embedding <=> ?)) as vector_score', [
           JSON.stringify(queryEmbedding),
         ]),
@@ -1246,7 +1280,7 @@ export class DatabaseService {
         JSON.stringify(queryEmbedding),
         similarityThreshold,
       ])
-      .orderByRaw('(1 - (s.combined_embedding <=> ?)) DESC', [JSON.stringify(queryEmbedding)])
+      .orderByRaw('s.combined_embedding <=> ?', [JSON.stringify(queryEmbedding)])
       .limit(limit);
 
     // Apply additional filters
