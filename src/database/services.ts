@@ -604,7 +604,7 @@ export class DatabaseService {
       .join('files', 'symbols.file_id', 'files.id')
       .where('files.repo_id', repoId)
       .select('symbols.*')
-      .orderBy('symbols.name');
+      .orderBy('symbols.id');
     return symbols as Symbol[];
   }
 
