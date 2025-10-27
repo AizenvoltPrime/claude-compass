@@ -1,4 +1,5 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../database/services/symbol-service';
 import { DependencyType } from '../../database/models';
 import { transitiveAnalyzer } from '../../graph/transitive-analyzer';
 import { TraceFlowArgs } from '../types';
@@ -8,7 +9,7 @@ import { createComponentLogger } from '../../utils/logger';
 const logger = createComponentLogger('flow-service');
 
 export class FlowService {
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   async traceFlow(args: any) {
     try {
@@ -17,8 +18,8 @@ export class FlowService {
       const findAllPaths = validatedArgs.find_all_paths || false;
       const maxDepth = validatedArgs.max_depth || 10;
 
-      const startSymbol = await this.dbService.getSymbolWithFile(validatedArgs.start_symbol_id);
-      const endSymbol = await this.dbService.getSymbolWithFile(validatedArgs.end_symbol_id);
+      const startSymbol = await SymbolService.getSymbolWithFile(this.db,validatedArgs.start_symbol_id);
+      const endSymbol = await SymbolService.getSymbolWithFile(this.db,validatedArgs.end_symbol_id);
 
       if (!startSymbol || !endSymbol) {
         throw new Error('Start or end symbol not found');

@@ -1,21 +1,20 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { DatabaseService } from '../../src/database/services';
 import { getDatabaseConnection } from '../../src/database/connection';
 import { CreateSymbol, CreateDependency, DependencyType, SymbolType, Visibility } from '../../src/database/models';
 import { McpTools } from '../../src/mcp/tools';
 import type { Knex } from 'knex';
+import * as DependencyService from '../../src/database/services/dependency-service';
+import * as ContextQueryService from '../../src/database/services/context-query-service';
 
 describe('Parameter Context Integration Tests', () => {
   let db: Knex;
-  let dbService: DatabaseService;
   let mcpTools: McpTools;
   let repoId: number;
   let fileId: number;
 
   beforeEach(async () => {
     db = getDatabaseConnection();
-    dbService = new DatabaseService();
-    mcpTools = new McpTools(dbService);
+    mcpTools = new McpTools(db);
 
     // Clean up any existing test data
     await db('dependencies').where('line_number', '>', 9000).del();
@@ -104,11 +103,11 @@ describe('Parameter Context Integration Tests', () => {
       qualified_context: 'CardManager.TestSetHandPositions'
     };
 
-    await dbService.createDependency(dependency1);
-    await dbService.createDependency(dependency2);
+    await DependencyService.createDependency(db,dependency1);
+    await DependencyService.createDependency(db,dependency2);
 
     // Step 3: Test parameter context grouping
-    const parameterAnalysis = await dbService.groupCallsByParameterContext(target.id);
+    const parameterAnalysis = await ContextQueryService.groupCallsByParameterContext(db,target.id);
 
     expect(parameterAnalysis.methodName).toBe('TestSetHandPositions');
     expect(parameterAnalysis.totalCalls).toBe(2);
@@ -206,13 +205,13 @@ describe('Parameter Context Integration Tests', () => {
 
     // Create dependencies
     await Promise.all([
-      dbService.createDependency({
+      DependencyService.createDependency(db, {
         from_symbol_id: caller1.id,
         to_symbol_id: caller2.id,
         dependency_type: DependencyType.CALLS,
         line_number: 9003,
       }),
-      dbService.createDependency({
+      DependencyService.createDependency(db, {
         from_symbol_id: caller2.id,
         to_symbol_id: target.id,
         dependency_type: DependencyType.CALLS,
@@ -274,7 +273,7 @@ describe('Parameter Context Integration Tests', () => {
     // Create the specific dependencies mentioned in the plan
     await Promise.all([
       // Call 1: SetHandPositions(_handPosition, null) (line 226 equivalent)
-      dbService.createDependency({
+      DependencyService.createDependency(db, {
         from_symbol_id: initializeServices[0].id,
         to_symbol_id: setHandPositions[0].id,
         dependency_type: DependencyType.CALLS,
@@ -285,7 +284,7 @@ describe('Parameter Context Integration Tests', () => {
         calling_object: '_cardManager'
       }),
       // Call 2: SetHandPositions(playerHandPos, _handPosition) (line 242 equivalent)
-      dbService.createDependency({
+      DependencyService.createDependency(db, {
         from_symbol_id: initializeServices[0].id,
         to_symbol_id: setHandPositions[0].id,
         dependency_type: DependencyType.CALLS,
@@ -298,7 +297,7 @@ describe('Parameter Context Integration Tests', () => {
     ]);
 
     // Test the parameter context analysis
-    const analysis = await dbService.groupCallsByParameterContext(setHandPositions[0].id);
+    const analysis = await ContextQueryService.groupCallsByParameterContext(db,setHandPositions[0].id);
 
     expect(analysis.methodName).toBe('SetHandPositions');
     expect(analysis.totalCalls).toBe(2);

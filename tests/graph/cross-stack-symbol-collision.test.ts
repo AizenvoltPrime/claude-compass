@@ -1,39 +1,23 @@
 import {
   CrossStackGraphBuilder,
 } from '../../src/graph/cross-stack-builder';
-import { DatabaseService } from '../../src/database/services';
 import {
   SymbolWithFile,
   SymbolType,
   Repository,
 } from '../../src/database/models';
 import { jest } from '@jest/globals';
+import type { Knex } from 'knex';
 
-const mockDatabaseService = {
-  getSymbol: jest.fn() as jest.MockedFunction<any>,
-  searchSymbols: jest.fn() as jest.MockedFunction<any>,
-  getRepository: jest.fn() as jest.MockedFunction<any>,
-  getFilesByRepository: jest.fn() as jest.MockedFunction<any>,
-  getApiCallsByRepository: jest.fn() as jest.MockedFunction<any>,
-  createApiCalls: jest.fn() as jest.MockedFunction<any>,
-  getRoutesByFramework: jest.fn() as jest.MockedFunction<any>,
-  streamCrossStackData: jest.fn() as jest.MockedFunction<any>,
-} as unknown as DatabaseService;
+// Create a minimal mock Knex instance for testing
+const mockDb = jest.fn() as unknown as Knex;
 
 describe('CrossStackGraphBuilder - Symbol Collision Fix', () => {
   let builder: CrossStackGraphBuilder;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    builder = new CrossStackGraphBuilder(mockDatabaseService);
-
-    (mockDatabaseService.getRepository as jest.MockedFunction<any>).mockResolvedValue({
-      id: 1,
-      name: 'test-repo',
-      path: '/test/repo',
-      created_at: new Date(),
-      updated_at: new Date(),
-    } as Repository);
+    builder = new CrossStackGraphBuilder(mockDb);
   });
 
   describe('selectBestMatchingSymbol', () => {

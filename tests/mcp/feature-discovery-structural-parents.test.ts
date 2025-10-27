@@ -1,29 +1,30 @@
 import { describe, beforeAll, afterAll, test, expect } from '@jest/globals';
 import { McpTools } from '../../src/mcp/tools';
-import { DatabaseService } from '../../src/database/services';
 import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { SymbolType } from '../../src/database/models';
 import { Knex } from 'knex';
+import * as RepositoryService from '../../src/database/services/repository-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import * as SearchService from '../../src/database/services/search-service';
 
 describe('Feature Discovery - Structural Parents', () => {
   let mcpTools: McpTools;
-  let dbService: DatabaseService;
-  let knex: Knex;
+  let db: Knex;
   let repoId: number;
 
   beforeAll(async () => {
-    knex = getDatabaseConnection();
-    dbService = new DatabaseService();
-    mcpTools = new McpTools(dbService);
+    db = getDatabaseConnection();
+    mcpTools = new McpTools(db);
 
-    const repo = await dbService.createRepository({
+    const repo = await RepositoryService.createRepository(db,{
       name: 'test-structural-parents',
       path: '/test/structural-parents',
       framework_stack: ['vue', 'typescript']
     });
     repoId = repo.id;
 
-    const storeFile = await dbService.createFile({
+    const storeFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/stores/personnelStore.ts',
       language: 'typescript',
@@ -31,7 +32,7 @@ describe('Feature Discovery - Structural Parents', () => {
       is_test: false
     });
 
-    const componentFile = await dbService.createFile({
+    const componentFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/components/PersonnelForm.vue',
       language: 'vue',
@@ -39,7 +40,7 @@ describe('Feature Discovery - Structural Parents', () => {
       is_test: false
     });
 
-    const storeSymbol = await dbService.createSymbol({
+    const storeSymbol = await SymbolService.createSymbol(db,{
       file_id: storeFile.id,
       name: 'usePersonnelStore',
       symbol_type: SymbolType.FUNCTION,
@@ -50,7 +51,7 @@ describe('Feature Discovery - Structural Parents', () => {
       end_line: 107
     });
 
-    const createMethodSymbol = await dbService.createSymbol({
+    const createMethodSymbol = await SymbolService.createSymbol(db,{
       file_id: storeFile.id,
       name: 'createPersonnel',
       symbol_type: SymbolType.FUNCTION,
@@ -61,7 +62,7 @@ describe('Feature Discovery - Structural Parents', () => {
       end_line: 52
     });
 
-    const updateMethodSymbol = await dbService.createSymbol({
+    const updateMethodSymbol = await SymbolService.createSymbol(db,{
       file_id: storeFile.id,
       name: 'updatePersonnel',
       symbol_type: SymbolType.FUNCTION,
@@ -72,7 +73,7 @@ describe('Feature Discovery - Structural Parents', () => {
       end_line: 61
     });
 
-    const componentSymbol = await dbService.createSymbol({
+    const componentSymbol = await SymbolService.createSymbol(db,{
       file_id: componentFile.id,
       name: 'PersonnelForm',
       symbol_type: SymbolType.COMPONENT,
@@ -83,21 +84,21 @@ describe('Feature Discovery - Structural Parents', () => {
       end_line: 150
     });
 
-    await knex('dependencies').insert({
+    await db('dependencies').insert({
       from_symbol_id: storeSymbol.id,
       to_symbol_id: createMethodSymbol.id,
       dependency_type: 'contains',
       file_id: storeFile.id
     });
 
-    await knex('dependencies').insert({
+    await db('dependencies').insert({
       from_symbol_id: storeSymbol.id,
       to_symbol_id: updateMethodSymbol.id,
       dependency_type: 'contains',
       file_id: storeFile.id
     });
 
-    await knex('dependencies').insert({
+    await db('dependencies').insert({
       from_symbol_id: componentSymbol.id,
       to_symbol_id: createMethodSymbol.id,
       dependency_type: 'calls',
@@ -108,20 +109,20 @@ describe('Feature Discovery - Structural Parents', () => {
   });
 
   afterAll(async () => {
-    await knex('dependencies').where('file_id', 'in',
-      knex('files').select('id').where('repo_id', repoId)
+    await db('dependencies').where('file_id', 'in',
+      db('files').select('id').where('repo_id', repoId)
     ).del();
-    await knex('symbols').where('file_id', 'in',
-      knex('files').select('id').where('repo_id', repoId)
+    await db('symbols').where('file_id', 'in',
+      db('files').select('id').where('repo_id', repoId)
     ).del();
-    await knex('files').where('repo_id', repoId).del();
-    await knex('repositories').where('id', repoId).del();
+    await db('files').where('repo_id', repoId).del();
+    await db('repositories').where('id', repoId).del();
 
     await closeDatabaseConnection();
   });
 
   test('should discover structural parent (store) when starting from method', async () => {
-    const symbols = await dbService.searchSymbols('createPersonnel', repoId);
+    const symbols = await SearchService.lexicalSearchSymbols(db,'createPersonnel', repoId);
     const createMethod = symbols.find(s => s.name === 'createPersonnel');
     expect(createMethod).toBeDefined();
 
@@ -140,7 +141,7 @@ describe('Feature Discovery - Structural Parents', () => {
   });
 
   test('should NOT discover updatePersonnel (noise) when starting from createPersonnel', async () => {
-    const symbols = await dbService.searchSymbols('createPersonnel', repoId);
+    const symbols = await SearchService.lexicalSearchSymbols(db,'createPersonnel', repoId);
     const createMethod = symbols.find(s => s.name === 'createPersonnel');
     expect(createMethod).toBeDefined();
 
@@ -165,7 +166,7 @@ describe('Feature Discovery - Structural Parents', () => {
   });
 
   test('should discover exactly 1 component (no noise from store traversal)', async () => {
-    const symbols = await dbService.searchSymbols('createPersonnel', repoId);
+    const symbols = await SearchService.lexicalSearchSymbols(db,'createPersonnel', repoId);
     const createMethod = symbols.find(s => s.name === 'createPersonnel');
     expect(createMethod).toBeDefined();
 
@@ -182,7 +183,7 @@ describe('Feature Discovery - Structural Parents', () => {
   });
 
   test('should assign high relevance (1.0) to structural parent store', async () => {
-    const symbols = await dbService.searchSymbols('createPersonnel', repoId);
+    const symbols = await SearchService.lexicalSearchSymbols(db,'createPersonnel', repoId);
     const createMethod = symbols.find(s => s.name === 'createPersonnel');
     expect(createMethod).toBeDefined();
 
@@ -198,7 +199,7 @@ describe('Feature Discovery - Structural Parents', () => {
   });
 
   test('should include store in results but not expand its other methods', async () => {
-    const symbols = await dbService.searchSymbols('createPersonnel', repoId);
+    const symbols = await SearchService.lexicalSearchSymbols(db,'createPersonnel', repoId);
     const createMethod = symbols.find(s => s.name === 'createPersonnel');
     expect(createMethod).toBeDefined();
 

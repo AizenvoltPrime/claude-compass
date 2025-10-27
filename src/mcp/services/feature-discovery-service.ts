@@ -1,4 +1,5 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../database/services/symbol-service';
 import { validateDiscoverFeatureArgs } from '../validators';
 import { createComponentLogger } from '../../utils/logger';
 import {
@@ -109,7 +110,7 @@ interface FeatureManifest {
 
 export class FeatureDiscoveryService {
   constructor(
-    private dbService: DatabaseService,
+    private db: Knex,
     private getDefaultRepoId: () => number | undefined
   ) {}
 
@@ -158,18 +159,18 @@ export class FeatureDiscoveryService {
     const usePropDriven = entrySymbol.entity_type === 'component';
 
     const engine = useComposableDriven
-      ? createComposableDrivenDiscoveryEngine(this.dbService, {
+      ? createComposableDrivenDiscoveryEngine(this.db, {
           maxIterations: 3,
           convergenceThreshold: 1,
           debug: false,
         })
       : usePropDriven
-      ? createPropDrivenDiscoveryEngine(this.dbService, {
+      ? createPropDrivenDiscoveryEngine(this.db, {
           maxIterations: 3,
           convergenceThreshold: 1,
           debug: false,
         })
-      : createStandardDiscoveryEngine(this.dbService, {
+      : createStandardDiscoveryEngine(this.db, {
           maxIterations: 3,
           convergenceThreshold: 1,
           debug: false,
@@ -289,7 +290,7 @@ export class FeatureDiscoveryService {
   }
 
   private async getSymbol(symbolId: number): Promise<FeatureSymbol | null> {
-    const symbol = await this.dbService.getSymbolWithFile(symbolId);
+    const symbol = await SymbolService.getSymbolWithFile(this.db,symbolId);
     if (!symbol) return null;
 
     return {
@@ -309,8 +310,7 @@ export class FeatureDiscoveryService {
   private async fetchSymbols(symbolIds: number[]): Promise<FeatureSymbol[]> {
     if (symbolIds.length === 0) return [];
 
-    const symbols = await this.dbService
-      .knex('symbols')
+    const symbols = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
       .whereIn('symbols.id', symbolIds)
       .select(
@@ -352,7 +352,7 @@ export class FeatureDiscoveryService {
     discoveredSymbols: FeatureSymbol[],
     repoId: number
   ): Promise<FeatureRoute[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Extract controller method IDs from discovered symbols
     // Routes are connected to controller methods via handler_symbol_id

@@ -1,4 +1,8 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../database/services/symbol-service';
+import * as DependencyService from '../../database/services/dependency-service';
+import * as ApiCallService from '../../database/services/api-call-service';
+import * as ContextQueryService from '../../database/services/context-query-service';
 import {
   DependencyType,
   SimplifiedDependency,
@@ -46,8 +50,8 @@ function generateParameterInsights(parameterVariations: Array<{ parameters: stri
   return insights;
 }
 
-export class DependencyService {
-  constructor(private dbService: DatabaseService) {}
+export class MCPDependencyService {
+  constructor(private db: Knex) {}
 
   async whoCalls(args: any) {
     const validatedArgs = validateWhoCallsArgs(args);
@@ -62,7 +66,7 @@ export class DependencyService {
 
     try {
       const symbol = (await Promise.race([
-        this.dbService.getSymbolWithFile(validatedArgs.symbol_id),
+        SymbolService.getSymbolWithFile(this.db,validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
       if (!symbol) {
@@ -70,13 +74,13 @@ export class DependencyService {
       }
 
       let callers = (await Promise.race([
-        this.dbService.getDependenciesToWithContext(validatedArgs.symbol_id),
+        DependencyService.getDependenciesToWithContext(this.db,validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
 
       if (validatedArgs.include_cross_stack) {
         try {
-          const crossStackCallers = await this.dbService.getCrossStackApiCallers(
+          const crossStackCallers = await ApiCallService.getCrossStackApiCallers(this.db,
             validatedArgs.symbol_id
           );
           if (crossStackCallers.length > 0) {
@@ -252,7 +256,7 @@ export class DependencyService {
       const hasParameterContext = directCallers.some(c => c.parameter_context);
       if (hasParameterContext) {
         try {
-          const paramAnalysis = await this.dbService.groupCallsByParameterContext(
+          const paramAnalysis = await ContextQueryService.groupCallsByParameterContext(this.db,
             validatedArgs.symbol_id
           );
 
@@ -329,7 +333,7 @@ export class DependencyService {
 
     try {
       const symbol = (await Promise.race([
-        this.dbService.getSymbolWithFile(validatedArgs.symbol_id),
+        SymbolService.getSymbolWithFile(this.db,validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
       if (!symbol) {
@@ -337,13 +341,13 @@ export class DependencyService {
       }
 
       let dependencies = (await Promise.race([
-        this.dbService.getDependenciesFromWithContext(validatedArgs.symbol_id),
+        DependencyService.getDependenciesFromWithContext(this.db,validatedArgs.symbol_id),
         timeoutPromise,
       ])) as any;
 
       if (validatedArgs.include_cross_stack) {
         try {
-          const crossStackDeps = await this.dbService.getCrossStackApiDependencies(
+          const crossStackDeps = await ApiCallService.getCrossStackApiDependencies(this.db,
             validatedArgs.symbol_id
           );
           if (crossStackDeps.length > 0) {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DeadCodeDetector } from './dead-code/detector.js';
 import { DetectDeadCodeParams } from './dead-code/types.js';
-import { databaseService } from '../../database/index.js';
+import { getDatabaseConnection } from '../../database/index.js';
 
 /// <summary>
 /// MCP tool for detecting dead code, interface bloat, and unused symbols
@@ -45,7 +45,7 @@ export async function detectDeadCode(input: DetectDeadCodeInput, repoId?: number
     file_pattern: input.file_pattern,
   };
 
-  const detector = new DeadCodeDetector(databaseService.knex);
+  const detector = new DeadCodeDetector(getDatabaseConnection());
   const result = await detector.detect(params, repoId);
 
   return {

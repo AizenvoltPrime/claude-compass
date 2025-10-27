@@ -20,7 +20,7 @@ import {
   UrlSimilarity,
 } from './utils/url-patterns';
 import { createComponentLogger } from '../utils/logger';
-import { DatabaseService } from '../database/services';
+import type { Knex } from 'knex';
 import {
   crossStackErrorHandler,
   CrossStackErrorType,
@@ -114,10 +114,10 @@ export interface SchemaMatch {
  * Main cross-stack parser class
  */
 export class CrossStackParser {
-  private database?: DatabaseService;
+  private db?: Knex;
 
-  constructor(database?: DatabaseService) {
-    this.database = database;
+  constructor(db?: Knex) {
+    this.db = db;
   }
 
   /**

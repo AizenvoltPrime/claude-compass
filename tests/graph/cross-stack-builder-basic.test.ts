@@ -1,32 +1,24 @@
 import { CrossStackGraphBuilder } from '../../src/graph/cross-stack-builder';
-import { DatabaseService } from '../../src/database/services';
 import { jest } from '@jest/globals';
+import type { Knex } from 'knex';
 
-// Mock the database service
-const mockDatabaseService = {
-  getSymbolsByType: jest.fn() as jest.MockedFunction<any>,
-  getFrameworkEntitiesByType: jest.fn() as jest.MockedFunction<any>,
-  getApiCallsByRepository: jest.fn() as jest.MockedFunction<any>,
-  getDataContractsByRepository: jest.fn() as jest.MockedFunction<any>,
-  createApiCalls: jest.fn() as jest.MockedFunction<any>,
-  createDataContracts: jest.fn() as jest.MockedFunction<any>,
-  getCrossStackDependencies: jest.fn() as jest.MockedFunction<any>,
-} as unknown as DatabaseService;
+// Create a minimal mock Knex instance for testing
+const mockDb = jest.fn() as unknown as Knex;
 
 describe('CrossStackGraphBuilder - Basic Tests', () => {
   let builder: CrossStackGraphBuilder;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    builder = new CrossStackGraphBuilder(mockDatabaseService);
+    builder = new CrossStackGraphBuilder(mockDb);
   });
 
   describe('constructor', () => {
-    it('should create builder with database service', () => {
+    it('should create builder with database connection', () => {
       expect(builder).toBeDefined();
     });
 
-    it('should handle null database service gracefully', () => {
+    it('should handle null database connection gracefully', () => {
       expect(() => {
         new CrossStackGraphBuilder(null as any);
       }).not.toThrow();
@@ -47,13 +39,12 @@ describe('CrossStackGraphBuilder - Basic Tests', () => {
 
   describe('error handling', () => {
     it('should handle database errors gracefully', async () => {
-      // Mock database to throw error
-      const erroringDbService = {
-        ...mockDatabaseService,
-        getSymbolsByType: (() => Promise.reject(new Error('Database error'))) as any
-      } as unknown as DatabaseService;
+      // Mock database to throw error - using a broken mock
+      const erroringDb = jest.fn(() => {
+        throw new Error('Database error');
+      }) as unknown as Knex;
 
-      const errorBuilder = new CrossStackGraphBuilder(erroringDbService);
+      const errorBuilder = new CrossStackGraphBuilder(erroringDb);
 
       // Should not throw, but handle the error gracefully
       await expect(async () => {

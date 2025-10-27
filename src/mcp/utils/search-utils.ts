@@ -1,5 +1,6 @@
+import type { Knex } from 'knex';
 import { SymbolType } from '../../database/models';
-import { DatabaseService } from '../../database/services';
+import * as SearchService from '../../database/services/search-service';
 import { createComponentLogger } from '../../utils/logger';
 
 const logger = createComponentLogger('search-utils');
@@ -20,7 +21,7 @@ export function mapEntityTypeToSymbolType(entityType: string): SymbolType | null
 }
 
 export async function performSearchByMode(
-  dbService: DatabaseService,
+  db: Knex,
   query: string,
   repoId: number,
   searchOptions: any,
@@ -30,7 +31,7 @@ export async function performSearchByMode(
     case 'vector':
       logger.info(`[VECTOR SEARCH] Attempting vector search for query: "${query}"`);
       try {
-        const vectorResults = await dbService.vectorSearchSymbols(query, repoId, {
+        const vectorResults = await SearchService.vectorSearchSymbols(db, query, repoId, {
           ...searchOptions,
           similarityThreshold: 0.35,
         });
@@ -38,25 +39,25 @@ export async function performSearchByMode(
         return vectorResults;
       } catch (error) {
         logger.warn('[VECTOR SEARCH] Failed, falling back to lexical search:', error);
-        return await dbService.lexicalSearchSymbols(query, repoId, searchOptions);
+        return await SearchService.lexicalSearchSymbols(db, query, repoId, searchOptions);
       }
 
     case 'exact':
-      return await dbService.lexicalSearchSymbols(query, repoId, searchOptions);
+      return await SearchService.lexicalSearchSymbols(db, query, repoId, searchOptions);
 
     case 'qualified':
       try {
-        return await dbService.searchQualifiedContext(query, undefined);
+        return await SearchService.searchQualifiedContext(db, query, undefined);
       } catch (error) {
         logger.warn('Qualified search failed, falling back to lexical search:', error);
-        return await dbService.lexicalSearchSymbols(query, repoId, searchOptions);
+        return await SearchService.lexicalSearchSymbols(db, query, repoId, searchOptions);
       }
 
     case 'auto':
     default:
       logger.info(`[VECTOR SEARCH] Auto mode: attempting vector search for query: "${query}"`);
       try {
-        const vectorResults = await dbService.vectorSearchSymbols(query, repoId, {
+        const vectorResults = await SearchService.vectorSearchSymbols(db, query, repoId, {
           ...searchOptions,
           similarityThreshold: 0.35,
         });
@@ -76,7 +77,7 @@ export async function performSearchByMode(
         );
       }
 
-      return await dbService.lexicalSearchSymbols(query, repoId, searchOptions);
+      return await SearchService.lexicalSearchSymbols(db, query, repoId, searchOptions);
   }
 }
 

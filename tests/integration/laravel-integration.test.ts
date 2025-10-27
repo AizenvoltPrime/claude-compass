@@ -1,36 +1,43 @@
 import { GraphBuilder } from '../../src/graph/builder';
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { Repository } from '../../src/database/models';
 import path from 'path';
 import fs from 'fs/promises';
 import { jest } from '@jest/globals';
+import type { Knex } from 'knex';
+import * as CleanupService from '../../src/database/services/cleanup-service';
+import * as RepositoryService from '../../src/database/services/repository-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import * as RouteService from '../../src/database/services/route-service';
+import * as FrameworkMetadataService from '../../src/database/services/framework-metadata-service';
+import * as DependencyService from '../../src/database/services/dependency-service';
 
 describe('Laravel Integration Tests', () => {
   let builder: GraphBuilder;
-  let dbService: DatabaseService;
+  let db: Knex;
   let testProjectPath: string;
 
   beforeAll(async () => {
-    // Initialize database service with test database
-    dbService = new DatabaseService();
-    // DatabaseService connects automatically in constructor
+    // Initialize database connection
+    db = getDatabaseConnection();
 
     // Create test project directory
     testProjectPath = path.join(__dirname, 'fixtures', 'laravel-project');
     await setupTestLaravelProject(testProjectPath);
 
-    builder = new GraphBuilder(dbService);
+    builder = new GraphBuilder(db);
   });
 
   afterAll(async () => {
     // Clean up test project
     await fs.rm(testProjectPath, { recursive: true, force: true });
-    await dbService.close();
+    await closeDatabaseConnection();
   });
 
   beforeEach(async () => {
     // Clear any existing repository data
-    await dbService.deleteRepositoryByName('laravel-project');
+    await CleanupService.deleteRepositoryByName(db, 'laravel-project');
 
     // Clean up any existing test project files
     await fs.rm(testProjectPath, { recursive: true, force: true });
@@ -72,8 +79,8 @@ describe('Laravel Integration Tests', () => {
       });
 
       // Query framework entities from database
-      const routes = await dbService.getRoutesByRepository(result.repository.id);
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
+      const routes = await RouteService.getRoutesByRepository(db,result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
       const controllers = symbols.filter(s => s.name.includes('Controller'));
       const models = symbols.filter(
         s => s.name.includes('Model') || s.name === 'User' || s.name === 'Post'
@@ -112,7 +119,7 @@ app.mount('#app');
       });
 
       // Should detect both PHP and JavaScript
-      const files = await dbService.getFilesByRepository(result.repository.id);
+      const files = await FileService.getFilesByRepository(db,result.repository.id);
       const phpFiles = files.filter(f => f.language === 'php');
       const jsFiles = files.filter(f => f.language === 'javascript');
 
@@ -127,8 +134,8 @@ app.mount('#app');
       const result = await builder.analyzeRepository(testProjectPath, { forceFullAnalysis: true });
 
       // Query relationships from database
-      const routes = await dbService.getRoutesByRepository(result.repository.id);
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
+      const routes = await RouteService.getRoutesByRepository(db,result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
       const controllers = symbols.filter(s => s.name.includes('Controller'));
 
       // Verify route -> controller relationships
@@ -146,7 +153,7 @@ app.mount('#app');
     it('should extract Eloquent model relationships', async () => {
       const result = await builder.analyzeRepository(testProjectPath, { forceFullAnalysis: true });
 
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
       const models = symbols.filter(s => s.name === 'User' || s.name === 'Post');
 
       expect(models.length).toBeGreaterThan(0);
@@ -177,7 +184,7 @@ app.mount('#app');
       expect(result.repository.framework_stack).toContain('laravel');
 
       // Query framework detection metadata
-      const frameworkStack = await dbService.getFrameworkStack(result.repository.id);
+      const frameworkStack = await FrameworkMetadataService.getFrameworkStack(db,result.repository.id);
       const laravelMetadata = frameworkStack.find(f => f.framework_type === 'laravel');
 
       expect(laravelMetadata).toBeDefined();
@@ -187,7 +194,7 @@ app.mount('#app');
       const result = await builder.analyzeRepository(testProjectPath, { forceFullAnalysis: true });
 
       // Verify Laravel directories are properly recognized
-      const files = await dbService.getFilesByRepository(result.repository.id);
+      const files = await FileService.getFilesByRepository(db,result.repository.id);
       const directories = [...new Set(files.map(f => path.dirname(f.path)))];
 
       expect(directories.some(d => d.includes('app/Http/Controllers'))).toBe(true);
@@ -228,7 +235,7 @@ class BrokenController extends Controller
       expect(result.filesProcessed).toBeGreaterThan(1); // Should process other files
 
       // Should still extract valid entities from other files
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
       const controllers = symbols.filter(s => s.name.includes('Controller'));
       expect(controllers.length).toBeGreaterThan(0);
     });
@@ -283,8 +290,8 @@ class GeneratedController${i} extends Controller
       const result = await builder.analyzeRepository(testProjectPath, { forceFullAnalysis: true });
 
       // Query symbols and dependencies
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
-      const dependencies = await dbService.getFileDependenciesByRepository(result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
+      const dependencies = await DependencyService.getFileDependenciesByRepository(db,result.repository.id);
 
       // Should have extracted symbols from controllers and models
       const controllerMethods = symbols.filter(s => s.symbol_type === 'method');
@@ -301,7 +308,7 @@ class GeneratedController${i} extends Controller
     it('should extract Laravel facade calls', async () => {
       const result = await builder.analyzeRepository(testProjectPath, { forceFullAnalysis: true });
 
-      const dependencies = await dbService.getFileDependenciesByRepository(result.repository.id);
+      const dependencies = await DependencyService.getFileDependenciesByRepository(db,result.repository.id);
 
       // Should detect facade usage (Route, Auth, etc.)
       const facadeCalls = dependencies.filter(d => d.dependency_type === 'imports');

@@ -1,23 +1,23 @@
-import { describe, beforeAll, afterAll, beforeEach, afterEach, test, expect } from '@jest/globals';
+import { describe, beforeAll, afterAll, test, expect } from '@jest/globals';
 import { McpTools } from '../../src/mcp/tools';
-import { DatabaseService } from '../../src/database/services';
 import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { SymbolType } from '../../src/database/models';
 import { Knex } from 'knex';
+import * as RepositoryService from '../../src/database/services/repository-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
 
 describe('Enhanced MCP Tools Search', () => {
   let mcpTools: McpTools;
-  let dbService: DatabaseService;
-  let knex: Knex;
+  let db: Knex;
   let repoId: number;
 
   beforeAll(async () => {
-    knex = getDatabaseConnection();
-    dbService = new DatabaseService();
-    mcpTools = new McpTools(dbService);
+    db = getDatabaseConnection();
+    mcpTools = new McpTools(db);
 
     // Create test repository
-    const repo = await dbService.createRepository({
+    const repo = await RepositoryService.createRepository(db,{
       name: 'test-enhanced-mcp-search',
       path: '/test/enhanced-mcp-search',
       framework_stack: ['javascript', 'typescript', 'vue', 'laravel']
@@ -25,7 +25,7 @@ describe('Enhanced MCP Tools Search', () => {
     repoId = repo.id;
 
     // Create test files
-    const jsFile = await dbService.createFile({
+    const jsFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/enhanced-mcp-search/components/UserComponent.vue',
       language: 'vue',
@@ -33,7 +33,7 @@ describe('Enhanced MCP Tools Search', () => {
       is_test: false
     });
 
-    const tsFile = await dbService.createFile({
+    const tsFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/enhanced-mcp-search/services/UserService.ts',
       language: 'typescript',
@@ -41,7 +41,7 @@ describe('Enhanced MCP Tools Search', () => {
       is_test: false
     });
 
-    const phpFile = await dbService.createFile({
+    const phpFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/enhanced-mcp-search/app/Services/UserApiService.php',
       language: 'php',
@@ -94,7 +94,7 @@ describe('Enhanced MCP Tools Search', () => {
     ];
 
     for (const symbolData of symbolsData) {
-      await dbService.createSymbol(symbolData);
+      await SymbolService.createSymbol(db,symbolData);
     }
 
     // Wait for search vectors to be populated
@@ -103,11 +103,11 @@ describe('Enhanced MCP Tools Search', () => {
 
   afterAll(async () => {
     // Clean up test data
-    await knex('symbols').where('file_id', 'in',
-      knex('files').select('id').where('repo_id', repoId)
+    await db('symbols').where('file_id', 'in',
+      db('files').select('id').where('repo_id', repoId)
     ).del();
-    await knex('files').where('repo_id', repoId).del();
-    await knex('repositories').where('id', repoId).del();
+    await db('files').where('repo_id', repoId).del();
+    await db('repositories').where('id', repoId).del();
 
     await closeDatabaseConnection();
   });
@@ -310,7 +310,7 @@ describe('Enhanced MCP Tools Search', () => {
 
     test('should validate against repository framework stack', async () => {
       // Create a repository with limited framework stack
-      const limitedRepo = await dbService.createRepository({
+      const limitedRepo = await RepositoryService.createRepository(db,{
         name: `test-limited-framework-${Date.now()}`,
         path: `/test/limited-${Date.now()}`,
         framework_stack: ['javascript'] // Only JavaScript, no Vue or Laravel
@@ -326,14 +326,14 @@ describe('Enhanced MCP Tools Search', () => {
       expect(response.query_filters.framework_auto_detected).toBeFalsy();
 
       // Clean up
-      await knex('repositories').where('id', limitedRepo.id).del();
+      await db('repositories').where('id', limitedRepo.id).del();
     });
   });
 
   describe('Max Depth Parameter Tests', () => {
     test('should accept max_depth parameter in who_calls', async () => {
       // First create a test symbol
-      const vueFile = await dbService.createFile({
+      const vueFile = await FileService.createFile(db,{
         repo_id: repoId,
         path: '/test/enhanced-mcp-search/TestComponent.vue',
         language: 'vue',
@@ -341,7 +341,7 @@ describe('Enhanced MCP Tools Search', () => {
         is_test: false
       });
 
-      const testSymbol = await dbService.createSymbol({
+      const testSymbol = await SymbolService.createSymbol(db,{
         file_id: vueFile.id,
         name: 'testMethod',
         symbol_type: SymbolType.FUNCTION,
@@ -361,7 +361,7 @@ describe('Enhanced MCP Tools Search', () => {
 
     test('should accept max_depth parameter in listDependencies', async () => {
       // Create a test symbol with dependencies
-      const jsFile = await dbService.createFile({
+      const jsFile = await FileService.createFile(db,{
         repo_id: repoId,
         path: '/test/enhanced-mcp-search/TestService.js',
         language: 'javascript',
@@ -369,7 +369,7 @@ describe('Enhanced MCP Tools Search', () => {
         is_test: false
       });
 
-      const testSymbol = await dbService.createSymbol({
+      const testSymbol = await SymbolService.createSymbol(db,{
         file_id: jsFile.id,
         name: 'TestService',
         symbol_type: SymbolType.CLASS,

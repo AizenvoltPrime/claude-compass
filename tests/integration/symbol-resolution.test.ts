@@ -2,19 +2,20 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { GraphBuilder } from '../../src/graph/builder';
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection } from '../../src/database/connection';
 import { MultiParser } from '../../src/parsers/multi-parser';
 import { autoloaderRegistry } from '../../src/config/autoloader-resolver';
+import type { Knex } from 'knex';
 
 describe('Symbol Resolution Integration Tests', () => {
   let tempDir: string;
-  let dbService: DatabaseService;
+  let db: Knex;
   let graphBuilder: GraphBuilder;
   let multiParser: MultiParser;
 
   beforeAll(async () => {
-    dbService = new DatabaseService();
-    graphBuilder = new GraphBuilder(dbService);
+    db = getDatabaseConnection();
+    graphBuilder = new GraphBuilder(db);
     multiParser = new MultiParser();
   });
 

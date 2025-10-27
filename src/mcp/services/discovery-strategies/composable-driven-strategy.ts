@@ -14,7 +14,8 @@
  */
 
 import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
-import { DatabaseService } from '../../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../../database/services/symbol-service';
 import { createComponentLogger } from '../../../utils/logger';
 
 const logger = createComponentLogger('ComposableDrivenStrategy');
@@ -30,7 +31,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
     'Discovers features by following composable execution flow from entry point to components, stores, and backend';
   readonly priority = 3; // Run before general traversal but after cross-stack
 
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   /**
    * Helper: Batch fetch symbols by IDs to avoid N+1 queries
@@ -38,8 +39,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
   private async batchGetSymbols(symbolIds: number[]): Promise<Map<number, any>> {
     if (symbolIds.length === 0) return new Map();
 
-    const db = this.dbService.knex;
-    const symbols = await db('symbols')
+    const symbols = await this.db('symbols')
       .whereIn('id', symbolIds)
       .select('*');
 
@@ -63,7 +63,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
     });
 
     for (const symbolId of currentSymbols) {
-      const symbol = await this.dbService.getSymbol(symbolId);
+      const symbol = await SymbolService.getSymbol(this.db,symbolId);
       if (!symbol) continue;
 
       // Only handle composables
@@ -162,7 +162,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * Phase 1a: Find nested functions contained by this composable
    */
   private async findNestedFunctions(composableId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     const nested = await db('dependencies')
       .select('to_symbol_id')
@@ -189,7 +189,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * Phase 1b: Find direct store method calls from a symbol
    */
   private async findStoreMethodCalls(symbolId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Optimized query: Find calls to methods that are contained by stores, all in one query
     const storeMethodCalls = await db('dependencies as call_edge')
@@ -214,7 +214,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * CRITICAL: Only return component containers, not their dependencies
    */
   private async findParentComponents(composableId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const parentComponents = new Set<number>();
 
     // Find who calls or references this composable (both dependency types capture usage)
@@ -277,7 +277,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * Phase 3: Find components that this composable references
    */
   private async findReferencedComponents(composableId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const components: number[] = [];
 
     // Find all references from this composable
@@ -286,7 +286,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: composableId, dependency_type: 'references' });
 
     for (const ref of references) {
-      const symbol = await this.dbService.getSymbol(ref.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,ref.to_symbol_id);
       if (symbol && symbol.entity_type === 'component') {
         components.push(ref.to_symbol_id);
       }
@@ -299,7 +299,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * Helper: Find parent store of a store method
    */
   private async findParentStore(storeMethodId: number): Promise<number | null> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Find parent via 'contains' backwards
     const parentContainer = await db('dependencies')
@@ -311,7 +311,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
       return null;
     }
 
-    const parent = await this.dbService.getSymbol(parentContainer.from_symbol_id);
+    const parent = await SymbolService.getSymbol(this.db,parentContainer.from_symbol_id);
     if (parent && parent.entity_type === 'store') {
       return parentContainer.from_symbol_id;
     }
@@ -325,7 +325,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
   private async getApiCallsFromStoreMethod(
     storeMethodId: number
   ): Promise<Array<{ endpointSymbolId?: number; path: string }>> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     const apiCalls = await db('api_calls')
       .select('endpoint_symbol_id', 'endpoint_path')
@@ -341,7 +341,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * Phase 5: Expand backend from controller method to parent controller and models/services
    */
   private async expandBackend(controllerMethodId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const backendSymbols: number[] = [];
 
     // CRITICAL: Find the parent controller class
@@ -351,7 +351,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
       .first();
 
     if (parentController) {
-      const controllerClass = await this.dbService.getSymbol(parentController.from_symbol_id);
+      const controllerClass = await SymbolService.getSymbol(this.db,parentController.from_symbol_id);
       if (controllerClass && controllerClass.entity_type === 'controller') {
         backendSymbols.push(parentController.from_symbol_id);
       }
@@ -363,7 +363,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: controllerMethodId, dependency_type: 'calls' });
 
     for (const call of calls) {
-      const symbol = await this.dbService.getSymbol(call.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,call.to_symbol_id);
       if (!symbol) continue;
 
       // Case 1: Called a service/model class directly
@@ -396,7 +396,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
           .first();
 
         if (parentClass) {
-          const parent = await this.dbService.getSymbol(parentClass.from_symbol_id);
+          const parent = await SymbolService.getSymbol(this.db,parentClass.from_symbol_id);
           if (
             parent &&
             (parent.entity_type === 'service' ||
@@ -422,7 +422,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
    * Helper: Discover models referenced by a service method
    */
   private async discoverModelsFromService(serviceMethodId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const models: number[] = [];
 
     // Find all references from this service method
@@ -431,7 +431,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: serviceMethodId, dependency_type: 'references' });
 
     for (const ref of references) {
-      const symbol = await this.dbService.getSymbol(ref.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,ref.to_symbol_id);
       if (symbol && symbol.entity_type === 'model') {
         models.push(ref.to_symbol_id);
       }

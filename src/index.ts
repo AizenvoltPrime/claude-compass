@@ -29,5 +29,5 @@ export * from './utils';
 // Main components for programmatic usage
 export { GraphBuilder } from './graph/builder';
 export { ClaudeCompassMCPServer } from './mcp/server';
-export { databaseService } from './database/services';
+export { getDatabaseConnection, closeDatabaseConnection } from './database/connection';
 export { logger, config } from './utils';

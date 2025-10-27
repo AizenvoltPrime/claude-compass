@@ -1,9 +1,11 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as FileService from '../../database/services/file-service';
+import * as SymbolService from '../../database/services/symbol-service';
 import { GetFileArgs } from '../types';
 import { validateGetFileArgs } from '../validators';
 
-export class FileService {
-  constructor(private dbService: DatabaseService) {}
+export class MCPFileService {
+  constructor(private db: Knex) {}
 
   async getFile(args: any) {
     const validatedArgs = validateGetFileArgs(args);
@@ -11,16 +13,16 @@ export class FileService {
     let file;
 
     if (validatedArgs.file_id) {
-      file = await this.dbService.getFileWithRepository(validatedArgs.file_id);
+      file = await FileService.getFileWithRepository(this.db, validatedArgs.file_id);
     } else if (validatedArgs.file_path) {
-      file = await this.dbService.getFileByPath(validatedArgs.file_path);
+      file = await FileService.getFileByPath(this.db, validatedArgs.file_path);
     }
 
     if (!file) {
       throw new Error('File not found');
     }
 
-    const symbols = await this.dbService.getSymbolsByFile(file.id);
+    const symbols = await SymbolService.getSymbolsByFile(this.db, file.id);
 
     return {
       content: [

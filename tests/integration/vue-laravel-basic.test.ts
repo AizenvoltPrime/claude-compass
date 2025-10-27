@@ -1,31 +1,33 @@
 import { GraphBuilder } from '../../src/graph/builder';
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { McpTools } from '../../src/mcp/tools';
 import path from 'path';
 import fs from 'fs/promises';
 import { jest } from '@jest/globals';
+import * as CleanupService from '../../src/database/services/cleanup-service';
+import type { Knex } from 'knex';
 
 describe('Vue-Laravel Integration - Basic Tests', () => {
   let builder: GraphBuilder;
-  let dbService: DatabaseService;
+  let db: Knex;
   let mcpTools: McpTools;
   let testProjectPath: string;
 
   beforeAll(async () => {
-    dbService = new DatabaseService();
-    mcpTools = new McpTools(dbService);
-    builder = new GraphBuilder(dbService);
+    db = getDatabaseConnection();
+    mcpTools = new McpTools(db);
+    builder = new GraphBuilder(db);
     testProjectPath = path.join(__dirname, 'fixtures', 'basic-vue-laravel');
   });
 
   afterAll(async () => {
     await fs.rm(testProjectPath, { recursive: true, force: true }).catch(() => {});
-    await dbService.close();
+    await closeDatabaseConnection();
   });
 
   beforeEach(async () => {
     // Clean up any existing test data
-    await dbService.deleteRepositoryByName('basic-vue-laravel').catch(() => {});
+    await CleanupService.deleteRepositoryByName(db, 'basic-vue-laravel').catch(() => {});
     await fs.rm(testProjectPath, { recursive: true, force: true }).catch(() => {});
   });
 

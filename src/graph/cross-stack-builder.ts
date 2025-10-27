@@ -19,7 +19,16 @@ import {
   File as DbFile,
 } from '../database/models';
 import { FrameworkEntity } from '../parsers/base';
-import { DatabaseService } from '../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../database/services/symbol-service';
+import * as RepositoryService from '../database/services/repository-service';
+import * as FileService from '../database/services/file-service';
+import * as RouteService from '../database/services/route-service';
+import * as ComponentService from '../database/services/component-service';
+import * as ApiCallService from '../database/services/api-call-service';
+import * as DependencyService from '../database/services/dependency-service';
+import * as SearchService from '../database/services/search-service';
+import * as QueryUtilities from '../database/services/query-utilities-service';
 import { CrossStackParser } from '../parsers/cross-stack';
 import { ApiCallExtractor } from '../parsers/utils/api-call-extractor';
 import { createComponentLogger } from '../utils/logger';
@@ -114,14 +123,14 @@ export interface FeatureCluster {
  * Cross-stack graph builder implementation
  */
 export class CrossStackGraphBuilder {
-  private database: DatabaseService;
+  private db: Knex;
   private crossStackParser: CrossStackParser;
   private apiCallExtractor: ApiCallExtractor;
   private logger: any;
 
-  constructor(database: DatabaseService) {
-    this.database = database;
-    this.crossStackParser = new CrossStackParser(database);
+  constructor(db: Knex) {
+    this.db = db;
+    this.crossStackParser = new CrossStackParser(db);
     this.apiCallExtractor = new ApiCallExtractor();
     this.logger = logger;
   }
@@ -177,7 +186,7 @@ export class CrossStackGraphBuilder {
         const laravelRoute = relationship.laravelRoute;
 
         // Look up caller symbol
-        const callerSymbols = await this.database.lexicalSearchSymbols(
+        const callerSymbols = await SearchService.lexicalSearchSymbols(this.db,
           vueCall.componentName,
           repoId
         );
@@ -201,7 +210,7 @@ export class CrossStackGraphBuilder {
 
         if (!routeEntity || !routeEntity.metadata.handlerSymbolId) continue;
 
-        const handlerSymbol = await this.database.getSymbol(routeEntity.metadata.handlerSymbolId);
+        const handlerSymbol = await SymbolService.getSymbol(this.db,routeEntity.metadata.handlerSymbolId);
         if (!handlerSymbol) continue;
 
         // Create edge
@@ -308,8 +317,8 @@ export class CrossStackGraphBuilder {
 
     // Create edges for data contracts
     for (const contract of safeDataContracts) {
-      const frontendType = await this.database.getSymbol(contract.frontend_type_id);
-      const backendType = await this.database.getSymbol(contract.backend_type_id);
+      const frontendType = await SymbolService.getSymbol(this.db,contract.frontend_type_id);
+      const backendType = await SymbolService.getSymbol(this.db,contract.backend_type_id);
 
       if (frontendType && backendType) {
         const edgeId = `data_contract_${contract.id}`;
@@ -427,7 +436,7 @@ export class CrossStackGraphBuilder {
    */
   async buildFullStackFeatureGraph(repoId: number): Promise<FullStackFeatureGraph> {
     try {
-      const repoExists = await this.database.getRepository(repoId);
+      const repoExists = await RepositoryService.getRepository(this.db,repoId);
     } catch (error) {
       this.logger.error('Failed to verify repository for cross-stack analysis', {
         repoId,
@@ -437,13 +446,13 @@ export class CrossStackGraphBuilder {
 
     try {
       // Get cross-stack data from database (now with caching)
-      const crossStackData = await this.database.getCrossStackDependencies(repoId);
+      const crossStackData = await ApiCallService.getCrossStackDependencies(this.db,repoId);
       const { apiCalls, dataContracts } = crossStackData;
 
       // Get framework entities - Fixed: Get Laravel routes from dedicated routes table
-      const vueComponentsRaw = await this.database.getComponentsByType(repoId, 'vue');
+      const vueComponentsRaw = await ComponentService.getComponentsByType(this.db,repoId, 'vue');
       const vueComponents = this.convertComponentsToFrameworkEntities(vueComponentsRaw);
-      const laravelRoutesRaw = await this.database.getRoutesByFramework(repoId, 'laravel');
+      const laravelRoutesRaw = await RouteService.getRoutesByFramework(this.db,repoId, 'laravel');
 
       const laravelRoutes = this.convertRoutesToFrameworkEntities(laravelRoutesRaw);
 
@@ -480,15 +489,15 @@ export class CrossStackGraphBuilder {
         }
       }
 
-      const allSymbols = await this.database.getSymbolsByRepository(repoId);
+      const allSymbols = await SymbolService.getSymbolsByRepository(this.db,repoId);
 
       // Get TypeScript interfaces and PHP DTOs
       const typescriptInterfaces = [
-        ...(await this.database.getSymbolsByType(repoId, 'interface')),
-        ...(await this.database.getSymbolsByType(repoId, 'type_alias')),
+        ...(await QueryUtilities.getSymbolsByType(this.db,repoId, 'interface')),
+        ...(await QueryUtilities.getSymbolsByType(this.db,repoId, 'type_alias')),
       ];
-      const phpClasses = await this.database.getSymbolsByType(repoId, 'class');
-      const phpInterfaces = await this.database.getSymbolsByType(repoId, 'interface');
+      const phpClasses = await QueryUtilities.getSymbolsByType(this.db,repoId, 'class');
+      const phpInterfaces = await QueryUtilities.getSymbolsByType(this.db,repoId, 'interface');
       const phpDtos = [...phpClasses, ...phpInterfaces]; // PHP DTOs are typically classes or interfaces
 
       // Detect data contract relationships between TypeScript interfaces and PHP DTOs
@@ -507,7 +516,7 @@ export class CrossStackGraphBuilder {
               ]),
             ];
 
-            const existingSymbols = await this.database.getSymbolsByRepository(repoId);
+            const existingSymbols = await SymbolService.getSymbolsByRepository(this.db,repoId);
             const existingSymbolIds = new Set(existingSymbols.map(s => s.id));
             const missingSymbolIds = allSymbolIds.filter(id => !existingSymbolIds.has(id));
 
@@ -530,11 +539,11 @@ export class CrossStackGraphBuilder {
                 drift_detected: false,
               }));
 
-              await this.database.createDataContracts(dataContractsToCreate);
+              await ApiCallService.createDataContracts(this.db,dataContractsToCreate);
             }
 
             // Refresh cross-stack data after detection
-            const updatedCrossStackData = await this.database.getCrossStackDependencies(repoId);
+            const updatedCrossStackData = await ApiCallService.getCrossStackDependencies(this.db,repoId);
             dataContracts.push(...updatedCrossStackData.dataContracts);
           }
         } catch (error) {
@@ -657,7 +666,7 @@ export class CrossStackGraphBuilder {
       // Store in database
       if (apiCallsToCreate.length > 0) {
         try {
-          await this.database.createApiCalls(apiCallsToCreate);
+          await ApiCallService.createApiCalls(this.db,apiCallsToCreate);
           this.logger.info('Created API calls in api_calls table', {
             count: apiCallsToCreate.length,
           });
@@ -674,7 +683,7 @@ export class CrossStackGraphBuilder {
 
       if (dataContractsToCreate.length > 0) {
         try {
-          await this.database.createDataContracts(dataContractsToCreate);
+          await ApiCallService.createDataContracts(this.db,dataContractsToCreate);
           this.logger.info('Created data contracts in data_contracts table', {
             count: dataContractsToCreate.length,
           });
@@ -691,7 +700,7 @@ export class CrossStackGraphBuilder {
 
       if (dependenciesToCreate.length > 0) {
         try {
-          await this.database.createDependencies(dependenciesToCreate);
+          await DependencyService.createDependencies(this.db,dependenciesToCreate);
           this.logger.info('Created cross-stack dependencies in dependencies table', {
             count: dependenciesToCreate.length,
             types: [...new Set(dependenciesToCreate.map(d => d.dependency_type))],
@@ -793,7 +802,7 @@ export class CrossStackGraphBuilder {
   }
 
   private async getFrontendFilesWithApiCalls(repoId: number): Promise<DbFile[]> {
-    const allFiles = await this.database.getFilesByRepository(repoId);
+    const allFiles = await FileService.getFilesByRepository(this.db,repoId);
 
     const frontendFiles = allFiles.filter(file => {
       const path = file.path.toLowerCase();
@@ -874,8 +883,7 @@ export class CrossStackGraphBuilder {
 
     try {
       // First, try to find exported symbols (preferred)
-      let symbols = await this.database
-        .knex('symbols')
+      let symbols = await this.db('symbols')
         .join('files', 'symbols.file_id', '=', 'files.id')
         .where('files.path', filePath)
         .andWhere('symbols.is_exported', true)
@@ -892,8 +900,7 @@ export class CrossStackGraphBuilder {
       // No exported symbols - try ANY symbol from this file to avoid name mismatch
       this.logger.debug('No exported symbols found, searching for any symbol', { filePath });
 
-      symbols = await this.database
-        .knex('symbols')
+      symbols = await this.db('symbols')
         .join('files', 'symbols.file_id', '=', 'files.id')
         .where('files.path', filePath)
         .whereIn('symbols.symbol_type', ['variable', 'function', 'class', 'component', 'method'])
@@ -1352,7 +1359,7 @@ export class CrossStackGraphBuilder {
    */
   async isMultiFrameworkProject(repoId: number, frameworks: string[]): Promise<boolean> {
     try {
-      const detectedFrameworks = await this.database.getRepositoryFrameworks(repoId);
+      const detectedFrameworks = await ApiCallService.getRepositoryFrameworks(this.db, repoId);
       return frameworks.every(framework => detectedFrameworks.includes(framework));
     } catch (error) {
       this.logger.warn('Failed to check multi-framework project', { error, repoId });

@@ -15,7 +15,8 @@
  */
 
 import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
-import { DatabaseService } from '../../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../../database/services/symbol-service';
 import { createComponentLogger } from '../../../utils/logger';
 
 const logger = createComponentLogger('PropDrivenStrategy');
@@ -51,7 +52,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     'Discovers features by following data flow through component props';
   readonly priority = 3; // Run before general traversal but after cross-stack
 
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   /**
    * Only run in iteration 0 when we have the component entry point
@@ -70,7 +71,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     });
 
     for (const symbolId of currentSymbols) {
-      const symbol = await this.dbService.getSymbol(symbolId);
+      const symbol = await SymbolService.getSymbol(this.db, symbolId);
       if (!symbol) continue;
 
       // Only handle Vue components for now
@@ -181,8 +182,8 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Phase 1: Analyze component to extract props and direct store calls
    */
   private async analyzeComponent(symbolId: number): Promise<ComponentAnalysis> {
-    const db = this.dbService.knex;
-    const symbol = await this.dbService.getSymbol(symbolId);
+    const db = this.db;
+    const symbol = await SymbolService.getSymbol(this.db,symbolId);
     if (!symbol) {
       return { symbolId, props: [], storeCallsInSetup: [] };
     }
@@ -209,7 +210,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Helper: Find parent store of a store method
    */
   private async findParentStore(storeMethodId: number): Promise<number | null> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Find parent via 'contains' backwards
     const parentContainer = await db('dependencies')
@@ -221,7 +222,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       return null;
     }
 
-    const parent = await this.dbService.getSymbol(parentContainer.from_symbol_id);
+    const parent = await SymbolService.getSymbol(this.db,parentContainer.from_symbol_id);
     if (parent && parent.entity_type === 'store') {
       return parentContainer.from_symbol_id;
     }
@@ -234,7 +235,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Returns symbol IDs of store methods
    */
   private async findStoreMethodCalls(symbolId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Find all calls from this symbol
     const calls = await db('dependencies')
@@ -244,7 +245,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     const storeMethodIds: number[] = [];
 
     for (const call of calls) {
-      const targetSymbol = await this.dbService.getSymbol(call.to_symbol_id);
+      const targetSymbol = await SymbolService.getSymbol(this.db,call.to_symbol_id);
       if (!targetSymbol) continue;
 
       // Check if target is a method inside a store
@@ -270,7 +271,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Phase 2: Find who renders/uses this component
    */
   private async findConsumers(componentId: number): Promise<ConsumerAnalysis[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const consumers: ConsumerAnalysis[] = [];
 
     // Find symbols that reference this component
@@ -279,7 +280,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .where({ to_symbol_id: componentId, dependency_type: 'references' });
 
     for (const ref of references) {
-      const consumerSymbol = await this.dbService.getSymbol(ref.from_symbol_id);
+      const consumerSymbol = await SymbolService.getSymbol(this.db,ref.from_symbol_id);
       if (!consumerSymbol) continue;
 
       // Get source to analyze prop bindings
@@ -316,7 +317,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     componentId: number
   ): Promise<PropBinding[]> {
     const bindings: PropBinding[] = [];
-    const componentSymbol = await this.dbService.getSymbol(componentId);
+    const componentSymbol = await SymbolService.getSymbol(this.db,componentId);
     if (!componentSymbol) return bindings;
 
     // Read source from filesystem
@@ -372,7 +373,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     entryAnalysis: ComponentAnalysis,
     consumer: ConsumerAnalysis
   ): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const relevantMethods = new Set<number>();
 
     // Add direct store calls from consumer
@@ -403,7 +404,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
   private async getApiCallsFromStoreMethod(
     storeMethodId: number
   ): Promise<Array<{ endpointSymbolId?: number; path: string }>> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     const apiCalls = await db('api_calls')
       .select('endpoint_symbol_id', 'endpoint_path')
@@ -419,7 +420,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Phase 5: Expand backend from controller method to parent controller and models/services
    */
   private async expandBackend(controllerMethodId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const backendSymbols: number[] = [];
 
     // CRITICAL: Find the parent controller class
@@ -430,7 +431,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .first();
 
     if (parentController) {
-      const controllerClass = await this.dbService.getSymbol(parentController.from_symbol_id);
+      const controllerClass = await SymbolService.getSymbol(this.db,parentController.from_symbol_id);
       if (controllerClass && controllerClass.entity_type === 'controller') {
         backendSymbols.push(parentController.from_symbol_id);
       }
@@ -442,7 +443,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: controllerMethodId, dependency_type: 'calls' });
 
     for (const call of calls) {
-      const symbol = await this.dbService.getSymbol(call.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,call.to_symbol_id);
       if (!symbol) continue;
 
       // Case 1: Called a service/model class directly
@@ -475,7 +476,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
           .first();
 
         if (parentClass) {
-          const parent = await this.dbService.getSymbol(parentClass.from_symbol_id);
+          const parent = await SymbolService.getSymbol(this.db,parentClass.from_symbol_id);
           if (
             parent &&
             (parent.entity_type === 'service' ||
@@ -501,7 +502,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Helper: Discover models referenced by a service method
    */
   private async discoverModelsFromService(serviceMethodId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const models: number[] = [];
 
     // Find all references from this service method
@@ -510,7 +511,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: serviceMethodId, dependency_type: 'references' });
 
     for (const ref of references) {
-      const symbol = await this.dbService.getSymbol(ref.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,ref.to_symbol_id);
       if (symbol && symbol.entity_type === 'model') {
         models.push(ref.to_symbol_id);
       }
@@ -523,7 +524,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Phase 1.5: Find child components used by entry point component
    */
   private async findChildComponents(componentId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const childComponents: number[] = [];
 
     // Find all components referenced by this component
@@ -532,7 +533,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: componentId, dependency_type: 'references' });
 
     for (const ref of references) {
-      const symbol = await this.dbService.getSymbol(ref.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,ref.to_symbol_id);
       if (symbol && symbol.entity_type === 'component') {
         childComponents.push(ref.to_symbol_id);
       }
@@ -545,7 +546,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Phase 2.5: Find parent components that use a composable/function
    */
   private async findParentComponents(composableId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const parentComponents = new Set<number>();
 
     // Find who calls this composable
@@ -554,7 +555,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .where({ to_symbol_id: composableId, dependency_type: 'calls' });
 
     for (const caller of callers) {
-      const symbol = await this.dbService.getSymbol(caller.from_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,caller.from_symbol_id);
       if (!symbol) continue;
 
       // If the caller is a component, add it directly
@@ -571,7 +572,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
         .first();
 
       if (container) {
-        const containerSymbol = await this.dbService.getSymbol(container.from_symbol_id);
+        const containerSymbol = await SymbolService.getSymbol(this.db,container.from_symbol_id);
         if (containerSymbol && containerSymbol.entity_type === 'component') {
           parentComponents.add(container.from_symbol_id);
           continue;
@@ -598,7 +599,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * Phase 2.5 helper: Find stores used by a component
    */
   private async findStoresUsedBy(componentId: number): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
     const stores: number[] = [];
 
     // Find all calls from this component
@@ -607,7 +608,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
       .where({ from_symbol_id: componentId, dependency_type: 'calls' });
 
     for (const call of calls) {
-      const symbol = await this.dbService.getSymbol(call.to_symbol_id);
+      const symbol = await SymbolService.getSymbol(this.db,call.to_symbol_id);
       if (!symbol) continue;
 
       // Check if it's a store (like useVehiclesStore())

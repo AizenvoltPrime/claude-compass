@@ -1,18 +1,24 @@
 import { GraphBuilder } from '../../src/graph/builder';
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { FileDependency } from '../../src/database/models';
 import path from 'path';
 import fs from 'fs/promises';
+import type { Knex } from 'knex';
+import * as CleanupService from '../../src/database/services/cleanup-service';
+import * as RepositoryService from '../../src/database/services/repository-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import * as DependencyService from '../../src/database/services/dependency-service';
 
 describe('C# File Discovery Integration Tests', () => {
   let builder: GraphBuilder;
-  let dbService: DatabaseService;
+  let db: Knex;
   let testProjectPath: string;
 
   beforeAll(async () => {
     // Initialize database service with test database
-    dbService = new DatabaseService();
-    builder = new GraphBuilder(dbService);
+    db = getDatabaseConnection();
+    builder = new GraphBuilder(db);
 
     // Create test project directory
     testProjectPath = path.join(__dirname, 'fixtures', 'csharp-test-project');
@@ -21,12 +27,12 @@ describe('C# File Discovery Integration Tests', () => {
   afterAll(async () => {
     // Clean up test project
     await fs.rm(testProjectPath, { recursive: true, force: true });
-    await dbService.close();
+    await closeDatabaseConnection();
   });
 
   beforeEach(async () => {
     // Clear any existing repository data
-    await dbService.deleteRepositoryByName('csharp-test-project');
+    await CleanupService.deleteRepositoryByName(db, 'csharp-test-project');
 
     // Clean up any existing test project files
     await fs.rm(testProjectPath, { recursive: true, force: true });
@@ -45,10 +51,10 @@ describe('C# File Discovery Integration Tests', () => {
       expect(result.filesProcessed).toBeGreaterThan(0);
 
       // Verify that C# files were discovered
-      const repository = await dbService.getRepository(result.repository.id);
+      const repository = await RepositoryService.getRepository(db,result.repository.id);
       expect(repository).toBeDefined();
 
-      const files = await dbService.getFilesByRepository(result.repository.id);
+      const files = await FileService.getFilesByRepository(db,result.repository.id);
       const csFiles = files.filter(f => f.path.endsWith('.cs'));
 
       expect(csFiles.length).toBeGreaterThan(0);
@@ -65,7 +71,7 @@ describe('C# File Discovery Integration Tests', () => {
 
       expect(result.filesProcessed).toBeGreaterThan(0);
 
-      const files = await dbService.getFilesByRepository(result.repository.id);
+      const files = await FileService.getFilesByRepository(db,result.repository.id);
       const csFiles = files.filter(f => f.path.endsWith('.cs'));
 
       expect(csFiles.length).toBeGreaterThan(0);
@@ -75,7 +81,7 @@ describe('C# File Discovery Integration Tests', () => {
     it('should correctly detect language as csharp for .cs files', async () => {
       const result = await builder.analyzeRepository(testProjectPath);
 
-      const files = await dbService.getFilesByRepository(result.repository.id);
+      const files = await FileService.getFilesByRepository(db,result.repository.id);
       const csFiles = files.filter(f => f.path.endsWith('.cs'));
 
       csFiles.forEach(file => {
@@ -88,7 +94,7 @@ describe('C# File Discovery Integration Tests', () => {
 
       expect(result.symbolsExtracted).toBeGreaterThan(0);
 
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
 
       // Should find CardManager class
       const cardManagerSymbol = symbols.find(s => s.name === 'CardManager');
@@ -112,12 +118,12 @@ describe('C# File Discovery Integration Tests', () => {
       expect(result.dependenciesCreated).toBeGreaterThan(0);
 
       // Get symbols to check for SetHandPositions
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
       const setHandPositionsSymbol = symbols.find(s => s.name === 'SetHandPositions');
 
       if (setHandPositionsSymbol) {
         // Check if there are dependencies to this symbol
-        const dependenciesTo = await dbService.getDependenciesTo(setHandPositionsSymbol.id);
+        const dependenciesTo = await DependencyService.getDependenciesTo(db,setHandPositionsSymbol.id);
         expect(dependenciesTo.length).toBeGreaterThan(0);
       }
     });
@@ -143,8 +149,8 @@ describe('C# File Discovery Integration Tests', () => {
     it('should detect complete SetHandPositions method chain', async () => {
       const result = await builder.analyzeRepository(testProjectPath);
 
-      const symbols = await dbService.getSymbolsByRepository(result.repository.id);
-      const dependencies = await dbService.getFileDependenciesByRepository(result.repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(db,result.repository.id);
+      const dependencies = await DependencyService.getFileDependenciesByRepository(db,result.repository.id);
 
       // 1. Interface definition: IHandManager.SetHandPositions
       const interfaceMethod = symbols.find(s =>
@@ -171,7 +177,7 @@ describe('C# File Discovery Integration Tests', () => {
       // Get SetHandPositions symbol and check for callers
       const setHandPositionsSymbol = symbols.find(s => s.name === 'SetHandPositions');
       if (setHandPositionsSymbol) {
-        const symbolDependencies = await dbService.getDependenciesTo(setHandPositionsSymbol.id);
+        const symbolDependencies = await DependencyService.getDependenciesTo(db,setHandPositionsSymbol.id);
         expect(symbolDependencies.length).toBeGreaterThan(0);
       }
     });

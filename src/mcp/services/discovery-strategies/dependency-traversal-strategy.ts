@@ -11,7 +11,8 @@
  * 4. Direction-aware: forward/backward/both based on entry point
  */
 
-import { DatabaseService } from '../../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../../database/services/symbol-service';
 import { createComponentLogger } from '../../../utils/logger';
 import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
 import {
@@ -38,14 +39,14 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
   private static readonly MAX_VISITED_NODES = 50000;
   private static readonly MAX_QUEUE_SIZE = 10000;
 
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   async shouldRun(context: DiscoveryContext): Promise<boolean> {
     if (context.iteration !== 0) {
       return false;
     }
 
-    const entrySymbol = await this.dbService.getSymbol(context.entryPointId);
+    const entrySymbol = await SymbolService.getSymbol(this.db,context.entryPointId);
     if (!entrySymbol) {
       return false;
     }
@@ -77,7 +78,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     const validatedFileIds = new Set<number>(); // Track files containing validated entities
 
     // Load entry point symbols
-    const symbolsBatch = await this.dbService.getSymbolsBatch(currentSymbols);
+    const symbolsBatch = await SymbolService.getSymbolsBatch(this.db, currentSymbols);
 
     // Initialize validated files with entry point files
     for (const [_, symbol] of symbolsBatch) {
@@ -90,7 +91,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     const startSymbols = await this.expandToExecutors(currentSymbols, symbolsBatch);
 
     // Fetch expanded executor symbols (critical: expanded symbols not in original batch)
-    const expandedSymbolsBatch = await this.dbService.getSymbolsBatch(startSymbols);
+    const expandedSymbolsBatch = await SymbolService.getSymbolsBatch(this.db, startSymbols);
 
     // Determine initial direction for each start symbol
     const queue: QueueItem[] = [];
@@ -148,7 +149,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
 
       if (depth >= maxDepth) continue;
 
-      const symbol = await this.dbService.getSymbol(id);
+      const symbol = await SymbolService.getSymbol(this.db,id);
       if (!symbol) continue;
 
       const role = classifySymbol(symbol);
@@ -160,7 +161,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       for (const targetId of edges) {
         if (visited.has(targetId)) continue;
 
-        const targetSymbol = await this.dbService.getSymbol(targetId);
+        const targetSymbol = await SymbolService.getSymbol(this.db,targetId);
         if (!targetSymbol) continue;
 
         const targetRole = classifySymbol(targetSymbol);
@@ -304,7 +305,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
         if (depth >= 1 && targetSymbol.symbol_type === 'method' && targetSymbol.file_id && !validatedFileIds.has(targetSymbol.file_id)) {
           const parentContainerId = await this.getParentContainer(targetId);
           if (parentContainerId) {
-            const parentContainer = await this.dbService.getSymbol(parentContainerId);
+            const parentContainer = await SymbolService.getSymbol(this.db,parentContainerId);
             if (parentContainer?.entity_type && ['controller', 'service', 'store'].includes(parentContainer.entity_type)) {
               // Architectural method - validate parent file NOW before filtering
               if (parentContainer.file_id) {
@@ -346,7 +347,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
           const parentContainerId = await this.getParentContainer(targetId);
           // Check discovered (not visited) - parent might be visited but not discovered during backward container traversal
           if (parentContainerId && !discovered.has(parentContainerId)) {
-            const parentContainer = await this.dbService.getSymbol(parentContainerId);
+            const parentContainer = await SymbolService.getSymbol(this.db,parentContainerId);
             if (parentContainer?.entity_type && ['controller', 'store', 'service'].includes(parentContainer.entity_type)) {
               visited.add(parentContainerId);
               discovered.set(parentContainerId, 1.0 - (depth + 2) / (maxDepth + 1));
@@ -395,7 +396,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     depth: number
   ): Promise<number[]> {
     const edges: number[] = [];
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Forward traversal
     if (direction === 'forward' || direction === 'both') {
@@ -489,7 +490,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     symbolsBatch: Map<number, SymbolInfo>
   ): Promise<number[]> {
     const executors: number[] = [];
-    const db = this.dbService.knex;
+    const db = this.db;
 
     for (const symbolId of symbolIds) {
       const symbol = symbolsBatch.get(symbolId);
@@ -597,7 +598,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
    * Used to determine architectural boundaries (controller, store, service).
    */
   private async getParentContainerEntityType(symbolId: number): Promise<string | null> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     const parent = await db('dependencies as d')
       .select('s.entity_type')
@@ -613,7 +614,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
    * Get the parent container ID for a symbol (e.g., controller class for a controller method).
    */
   private async getParentContainer(symbolId: number): Promise<number | null> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     const parent = await db('dependencies')
       .where('to_symbol_id', symbolId)
@@ -634,7 +635,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     containerId: number,
     sourceSymbolId: number
   ): Promise<number[]> {
-    const db = this.dbService.knex;
+    const db = this.db;
 
     // Get all methods in this container
     const methods = await db('symbols as method')

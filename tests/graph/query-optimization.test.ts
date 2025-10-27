@@ -1,6 +1,8 @@
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { TransitiveAnalyzer } from '../../src/graph/transitive-analyzer';
 import { SymbolWithFile } from '../../src/database/models';
+import * as SearchService from '../../src/database/services/search-service';
+import { Knex } from 'knex';
 
 /**
  * Integration test for query optimization and transitive analysis
@@ -9,22 +11,22 @@ import { SymbolWithFile } from '../../src/database/models';
  */
 
 describe('Query Optimization and Transitive Analysis', () => {
-    let dbService: DatabaseService;
+    let db: Knex;
     let transitiveAnalyzer: TransitiveAnalyzer;
 
     beforeAll(async () => {
-        dbService = new DatabaseService();
+        db = getDatabaseConnection();
         transitiveAnalyzer = new TransitiveAnalyzer();
     });
 
     afterAll(async () => {
-        await dbService.close();
+        await closeDatabaseConnection();
     });
 
     describe('Transitive Dependencies', () => {
         it('should find transitive dependencies efficiently', async () => {
             // Get a symbol to test with
-            const symbols: SymbolWithFile[] = await dbService.searchSymbols('');
+            const symbols: SymbolWithFile[] = await SearchService.lexicalSearchSymbols(db, '', undefined, {});
 
             if (symbols.length === 0) {
                 console.warn('No symbols found for testing - skipping transitive dependency test');
@@ -46,7 +48,7 @@ describe('Query Optimization and Transitive Analysis', () => {
         });
 
         it('should find transitive callers efficiently', async () => {
-            const symbols: SymbolWithFile[] = await dbService.searchSymbols('');
+            const symbols: SymbolWithFile[] = await SearchService.lexicalSearchSymbols(db, '', undefined, {});
 
             if (symbols.length === 0) {
                 console.warn('No symbols found for testing - skipping transitive caller test');
@@ -68,7 +70,7 @@ describe('Query Optimization and Transitive Analysis', () => {
         });
 
         it('should demonstrate query caching benefits', async () => {
-            const symbols: SymbolWithFile[] = await dbService.searchSymbols('');
+            const symbols: SymbolWithFile[] = await SearchService.lexicalSearchSymbols(db, '', undefined, {});
 
             if (symbols.length === 0) {
                 console.warn('No symbols found for testing - skipping caching test');

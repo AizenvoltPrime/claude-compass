@@ -1,14 +1,16 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as RouteService from '../../database/services/route-service';
+import * as SearchService from '../../database/services/search-service';
 
 export class LaravelSearch {
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   async searchRoutes(query: string, repoIds: number[], framework?: string): Promise<any[]> {
     const routes = [];
 
     for (const repoId of repoIds) {
       const frameworkType = framework || 'laravel';
-      const repoRoutes = await this.dbService.getRoutesByFramework(repoId, frameworkType);
+      const repoRoutes = await RouteService.getRoutesByFramework(this.db,repoId, frameworkType);
 
       const matchingRoutes = repoRoutes.filter(
         route =>
@@ -40,7 +42,7 @@ export class LaravelSearch {
   }
 
   async searchModels(query: string, repoIds: number[]): Promise<any[]> {
-    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
+    const symbols = await SearchService.searchSymbols(this.db,query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
       const isClass = symbol.symbol_type === 'class';
@@ -77,7 +79,7 @@ export class LaravelSearch {
   }
 
   async searchControllers(query: string, repoIds: number[]): Promise<any[]> {
-    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
+    const symbols = await SearchService.searchSymbols(this.db,query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
       const isClass = symbol.symbol_type === 'class' || symbol.symbol_type === 'method';
@@ -125,7 +127,7 @@ export class LaravelSearch {
   }
 
   async searchJobs(query: string, repoIds: number[]): Promise<any[]> {
-    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
+    const symbols = await SearchService.searchSymbols(this.db,query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
       const isClass = symbol.symbol_type === 'class';

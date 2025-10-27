@@ -1,10 +1,11 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as SearchService from '../../database/services/search-service';
 
 export class VueSearch {
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   async searchComponents(query: string, repoIds: number[], framework?: string): Promise<any[]> {
-    const symbols = await this.dbService.searchSymbols(query, repoIds?.[0]);
+    const symbols = await SearchService.searchSymbols(this.db, query, repoIds?.[0]);
 
     return symbols.filter(symbol => {
       if (framework === 'vue') {

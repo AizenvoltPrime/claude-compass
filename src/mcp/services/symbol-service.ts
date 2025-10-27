@@ -1,21 +1,23 @@
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as SymbolService from '../../database/services/symbol-service';
+import * as DependencyService from '../../database/services/dependency-service';
 import { SimplifiedSymbolResponse } from '../../database/models';
 import { GetSymbolArgs } from '../types';
 import { validateGetSymbolArgs } from '../validators';
 
-export class SymbolService {
-  constructor(private dbService: DatabaseService) {}
+export class MCPSymbolService {
+  constructor(private db: Knex) {}
 
   async getSymbol(args: any) {
     const validatedArgs = validateGetSymbolArgs(args);
 
-    const symbol = await this.dbService.getSymbolWithFile(validatedArgs.symbol_id);
+    const symbol = await SymbolService.getSymbolWithFile(this.db, validatedArgs.symbol_id);
     if (!symbol) {
       throw new Error('Symbol not found');
     }
 
-    const dependencies = await this.dbService.getDependenciesFrom(validatedArgs.symbol_id);
-    const callers = await this.dbService.getDependenciesTo(validatedArgs.symbol_id);
+    const dependencies = await DependencyService.getDependenciesFrom(this.db, validatedArgs.symbol_id);
+    const callers = await DependencyService.getDependenciesTo(this.db, validatedArgs.symbol_id);
 
     const response: SimplifiedSymbolResponse = {
       symbol: {

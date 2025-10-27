@@ -15,7 +15,22 @@ import {
   ApiCall,
   DataContract,
 } from '../database/models';
-import { DatabaseService } from '../database/services';
+import { getDatabaseConnection } from '../database/connection';
+import type { Knex } from 'knex';
+import * as RepositoryService from '../database/services/repository-service';
+import * as FileService from '../database/services/file-service';
+import * as SymbolService from '../database/services/symbol-service';
+import * as DependencyService from '../database/services/dependency-service';
+import * as CleanupService from '../database/services/cleanup-service';
+import * as EmbeddingUtils from '../database/services/embedding-utils';
+import * as QueryUtilities from '../database/services/query-utilities-service';
+import * as RouteService from '../database/services/route-service';
+import * as ComponentService from '../database/services/component-service';
+import * as ComposableService from '../database/services/composable-service';
+import * as JobService from '../database/services/job-service';
+import * as ORMService from '../database/services/orm-service';
+import * as GodotService from '../database/services/godot-service';
+import * as FrameworkMetadataService from '../database/services/framework-metadata-service';
 import { getParserForFile, ParseResult, MultiParser, ParserFactory } from '../parsers';
 import {
   VueComponent,
@@ -156,18 +171,18 @@ export interface CrossStackFeature {
 }
 
 export class GraphBuilder {
-  private dbService: DatabaseService;
+  private db: Knex;
   private fileGraphBuilder: FileGraphBuilder;
   private symbolGraphBuilder: SymbolGraphBuilder;
   private crossStackGraphBuilder: CrossStackGraphBuilder;
   private logger: any;
   private buildErrors: BuildError[] = [];
 
-  constructor(dbService: DatabaseService) {
-    this.dbService = dbService;
+  constructor(db: Knex) {
+    this.db = db;
     this.fileGraphBuilder = new FileGraphBuilder();
     this.symbolGraphBuilder = new SymbolGraphBuilder();
-    this.crossStackGraphBuilder = new CrossStackGraphBuilder(dbService);
+    this.crossStackGraphBuilder = new CrossStackGraphBuilder(db);
     this.logger = logger;
   }
 
@@ -208,7 +223,7 @@ export class GraphBuilder {
       this.logger.info('Performing full analysis, cleaning up existing data', {
         repositoryId: repository.id,
       });
-      await this.dbService.cleanupRepositoryData(repository.id);
+      await CleanupService.cleanupRepositoryData(this.db,repository.id);
 
       // Discover and process files
       const files = await this.discoverFiles(repositoryPath, validatedOptions);
@@ -231,7 +246,7 @@ export class GraphBuilder {
       await this.linkSymbolHierarchy(repository.id);
 
       // Reload symbols from database to get updated parent_symbol_id values
-      symbols = await this.dbService.getSymbolsByRepository(repository.id);
+      symbols = await SymbolService.getSymbolsByRepository(this.db,repository.id);
 
       // Generate embeddings for symbols
       if (!validatedOptions.skipEmbeddings) {
@@ -290,16 +305,16 @@ export class GraphBuilder {
 
       // Store file dependencies in separate table
       if (allFileDependencies.length > 0) {
-        await this.dbService.createFileDependencies(allFileDependencies);
+        await DependencyService.createFileDependencies(this.db,allFileDependencies);
       }
 
       // Store symbol dependencies
       if (symbolDependencies.length > 0) {
-        await this.dbService.createDependencies(symbolDependencies);
+        await DependencyService.createDependencies(this.db,symbolDependencies);
       }
 
       // Update repository with analysis results
-      await this.dbService.updateRepository(repository.id, {
+      await RepositoryService.updateRepository(this.db,repository.id, {
         last_indexed: new Date(),
         git_hash: await this.getGitHash(repositoryPath),
       });
@@ -328,15 +343,14 @@ export class GraphBuilder {
           );
 
           // Query database for actual API call counts after all storage operations
-          const apiCallStats: any = await this.dbService
-            .knex('api_calls as ac')
+          const apiCallStats: any = await this.db('api_calls as ac')
             .join('symbols as s', 'ac.caller_symbol_id', 's.id')
             .join('files as f', 's.file_id', 'f.id')
             .where('ac.repo_id', repository.id)
             .select(
-              this.dbService.knex.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.vue') as vue_calls"),
-              this.dbService.knex.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.ts') as ts_calls"),
-              this.dbService.knex.raw('COUNT(*) as total_calls')
+              this.db.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.vue') as vue_calls"),
+              this.db.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.ts') as ts_calls"),
+              this.db.raw('COUNT(*) as total_calls')
             )
             .first();
 
@@ -345,8 +359,7 @@ export class GraphBuilder {
           const tsApiCallCount = parseInt(apiCallStats?.ts_calls as string) || 0;
 
           // Query for backend API endpoint count
-          const backendEndpointCount = await this.dbService
-            .knex('routes')
+          const backendEndpointCount = await this.db('routes')
             .where('repo_id', repository.id)
             .where('framework_type', 'laravel')
             .count('* as count')
@@ -488,10 +501,10 @@ export class GraphBuilder {
     const currentFiles = await this.discoverFiles(repositoryPath, options);
     const currentFilePaths = currentFiles.map(f => f.path);
 
-    const deletedFiles = await this.dbService.findDeletedFiles(repository.id, currentFilePaths);
+    const deletedFiles = await FileService.findDeletedFiles(this.db,repository.id, currentFilePaths);
     deletedFileIds.push(...deletedFiles.map(f => f.id));
 
-    const dbPathsArray = await this.dbService.getFilePathsByRepository(repository.id);
+    const dbPathsArray = await FileService.getFilePathsByRepository(this.db,repository.id);
     const dbFilePaths = new Set<string>(dbPathsArray);
 
     for (const fileInfo of currentFiles) {
@@ -598,7 +611,7 @@ export class GraphBuilder {
       );
 
       // Update repository timestamp
-      await this.dbService.updateRepository(repository.id, {
+      await RepositoryService.updateRepository(this.db,repository.id, {
         last_indexed: new Date(),
       });
 
@@ -648,7 +661,7 @@ export class GraphBuilder {
     });
 
     // Fetch repository first for framework-aware validation
-    const repository = await this.dbService.getRepository(repositoryId);
+    const repository = await RepositoryService.getRepository(this.db,repositoryId);
     if (!repository) {
       throw new Error(`Repository with id ${repositoryId} not found`);
     }
@@ -658,14 +671,14 @@ export class GraphBuilder {
 
     const parseResults = await this.parseFiles(files as any[], validatedOptions);
 
-    const existingFiles = await this.dbService.getFilesByRepository(repositoryId);
+    const existingFiles = await FileService.getFilesByRepository(this.db,repositoryId);
     const fileIdsToCleanup = existingFiles.filter(f => filePaths.includes(f.path)).map(f => f.id);
 
     if (fileIdsToCleanup.length > 0) {
       this.logger.info('Cleaning up old data for changed files', {
         fileCount: fileIdsToCleanup.length,
       });
-      await this.dbService.cleanupFileData(fileIdsToCleanup);
+      await CleanupService.cleanupFileData(this.db,fileIdsToCleanup);
     }
 
     const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
@@ -677,7 +690,7 @@ export class GraphBuilder {
     // Reload ALL symbols from database to ensure:
     // 1. We have all repository symbols (not just changed files)
     // 2. parent_symbol_id is populated for proper resolution
-    const symbols = await this.dbService.getSymbolsByRepository(repositoryId);
+    const symbols = await SymbolService.getSymbolsByRepository(this.db,repositoryId);
 
     // Generate embeddings for symbols
     if (!validatedOptions.skipEmbeddings) {
@@ -738,15 +751,15 @@ export class GraphBuilder {
     ];
 
     if (allFileDependencies.length > 0) {
-      await this.dbService.createFileDependencies(allFileDependencies);
+      await DependencyService.createFileDependencies(this.db,allFileDependencies);
     }
 
     if (symbolDependencies.length > 0) {
-      await this.dbService.createDependencies(symbolDependencies);
+      await DependencyService.createDependencies(this.db,symbolDependencies);
     }
 
     // Re-resolve dependencies that reference changed symbols by qualified name
-    const resolvedCount = await this.dbService.resolveQualifiedNameDependencies(repositoryId);
+    const resolvedCount = await DependencyService.resolveQualifiedNameDependencies(this.db,repositoryId);
     this.logger.info('Re-resolved dependencies by qualified name', { resolvedCount });
 
     await this.buildGodotRelationships(repositoryId, parseResults);
@@ -782,7 +795,7 @@ export class GraphBuilder {
       fileCount: fileIds.length,
     });
 
-    const deletedCount = await this.dbService.deleteFilesWithTransaction(fileIds);
+    const deletedCount = await CleanupService.deleteFilesWithTransaction(this.db,fileIds);
 
     this.logger.info('File deletion completed', {
       filesDeleted: deletedCount,
@@ -815,7 +828,7 @@ export class GraphBuilder {
       throw new Error(`Repository path is not readable: ${absolutePath}`);
     }
 
-    let repository = await this.dbService.getRepositoryByPath(absolutePath);
+    let repository = await RepositoryService.getRepositoryByPath(this.db,absolutePath);
 
     if (!repository) {
       // Create new repository
@@ -823,7 +836,7 @@ export class GraphBuilder {
       const primaryLanguage = await this.detectPrimaryLanguage(absolutePath);
       const frameworkStack = await this.detectFrameworks(absolutePath);
 
-      repository = await this.dbService.createRepository({
+      repository = await RepositoryService.createRepository(this.db,{
         name,
         path: absolutePath,
         language_primary: primaryLanguage,
@@ -1210,7 +1223,7 @@ export class GraphBuilder {
       validIndices.push(i);
     }
 
-    const dbFiles = await this.dbService.createFilesBatch(createFiles);
+    const dbFiles = await FileService.createFilesBatch(this.db,createFiles);
     return dbFiles;
   }
 
@@ -1247,12 +1260,12 @@ export class GraphBuilder {
       }
     }
 
-    return await this.dbService.createSymbols(allSymbols);
+    return await SymbolService.createSymbols(this.db,allSymbols);
   }
 
   async generateSymbolEmbeddings(repositoryId: number): Promise<void> {
     // Count total symbols needing embeddings
-    const totalSymbols = await this.dbService.countSymbolsNeedingEmbeddings(repositoryId);
+    const totalSymbols = await SymbolService.countSymbolsNeedingEmbeddings(this.db,repositoryId);
     if (totalSymbols === 0) return;
 
     this.logger.info('Generating embeddings for symbols', {
@@ -1290,7 +1303,7 @@ export class GraphBuilder {
     let pendingAdjustment: Promise<any> | null = null;
 
     // Pre-fetch first chunk
-    let currentChunk = await this.dbService.getSymbolsForEmbedding(
+    let currentChunk = await SymbolService.getSymbolsForEmbedding(this.db,
       repositoryId,
       CHUNK_SIZE,
       lastProcessedId
@@ -1303,7 +1316,7 @@ export class GraphBuilder {
       let nextChunkPromise: Promise<any[]> | null = null;
       if (symbols.length === CHUNK_SIZE) {
         const nextLastProcessedId = Math.max(...symbols.map(s => s.id!));
-        nextChunkPromise = this.dbService.getSymbolsForEmbedding(
+        nextChunkPromise = SymbolService.getSymbolsForEmbedding(this.db,
           repositoryId,
           CHUNK_SIZE,
           nextLastProcessedId
@@ -1370,7 +1383,7 @@ export class GraphBuilder {
               embeddingModel: 'bge-m3',
             }));
 
-            await this.dbService.batchUpdateSymbolEmbeddings(updates);
+            await EmbeddingUtils.batchUpdateSymbolEmbeddings(this.db,updates);
 
             // Clear references immediately after write to free memory
             updates.length = 0;
@@ -1617,7 +1630,7 @@ export class GraphBuilder {
       parseResultsCount: parseResults.length,
     });
 
-    const allFiles = await this.dbService.getFilesByRepository(repositoryId);
+    const allFiles = await FileService.getFilesByRepository(this.db,repositoryId);
     const filesMap = new Map(allFiles.map(f => [f.path, f]));
     const normalizedFilesMap = new Map(allFiles.map(f => [path.normalize(f.path), f]));
 
@@ -1666,7 +1679,7 @@ export class GraphBuilder {
               fileSymbols
             );
 
-            await this.dbService.createRoute({
+            await RouteService.createRoute(this.db,{
               repo_id: repositoryId,
               path: laravelRoute.path,
               method: normalizedMethod,
@@ -1749,7 +1762,7 @@ export class GraphBuilder {
             const entityStartLine = entityMetadata?.line || 1;
             const entityEndLine = entityMetadata?.endLine || entityStartLine + 5;
 
-            const syntheticSymbol = await this.dbService.createSymbol({
+            const syntheticSymbol = await SymbolService.createSymbol(this.db,{
               file_id: matchingFile.id,
               name: entity.name,
               symbol_type: symbolType,
@@ -1766,7 +1779,7 @@ export class GraphBuilder {
           if (this.isLaravelController(entity)) {
             // Laravel controllers don't map directly to our component table
             // Store as metadata for now
-            await this.dbService.storeFrameworkMetadata({
+            await FrameworkMetadataService.storeFrameworkMetadata(this.db,{
               repo_id: repositoryId,
               framework_type: 'laravel',
               metadata: {
@@ -1779,7 +1792,7 @@ export class GraphBuilder {
             });
           } else if (this.isEloquentModel(entity)) {
             // Eloquent models could be stored as metadata
-            await this.dbService.storeFrameworkMetadata({
+            await FrameworkMetadataService.storeFrameworkMetadata(this.db,{
               repo_id: repositoryId,
               framework_type: 'laravel',
               metadata: {
@@ -1792,7 +1805,7 @@ export class GraphBuilder {
             });
           } else if (this.isRouteEntity(entity)) {
             const routeEntity = entity as NextJSRoute | ExpressRoute | FastifyRoute | VueRoute;
-            await this.dbService.createRoute({
+            await RouteService.createRoute(this.db,{
               repo_id: repositoryId,
               path: routeEntity.path || '/',
               method: (routeEntity as any).method || 'GET',
@@ -1819,7 +1832,7 @@ export class GraphBuilder {
               continue;
             }
 
-            await this.dbService.createComponent({
+            await ComponentService.createComponent(this.db,{
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
               component_type: 'vue' as any,
@@ -1831,7 +1844,7 @@ export class GraphBuilder {
             });
           } else if (this.isReactComponent(entity)) {
             const reactEntity = entity as ReactComponent;
-            await this.dbService.createComponent({
+            await ComponentService.createComponent(this.db,{
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
               component_type: 'react' as any,
@@ -1843,7 +1856,7 @@ export class GraphBuilder {
             });
           } else if (this.isVueComposable(entity)) {
             const composableEntity = entity as VueComposable;
-            await this.dbService.createComposable({
+            await ComposableService.createComposable(this.db,{
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
               composable_type: 'vue' as any,
@@ -1854,7 +1867,7 @@ export class GraphBuilder {
             });
           } else if (this.isReactHook(entity)) {
             const hookEntity = entity as ReactHook;
-            await this.dbService.createComposable({
+            await ComposableService.createComposable(this.db,{
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
               composable_type: 'react' as any,
@@ -1866,7 +1879,7 @@ export class GraphBuilder {
           } else if (this.isJobSystemEntity(entity)) {
             // Handle background job system entities
             const jobSystemEntity = entity as any;
-            await this.dbService.createJobQueue({
+            await JobService.createJobQueue(this.db,{
               repo_id: repositoryId,
               name: jobSystemEntity.name,
               queue_type: jobSystemEntity.jobSystems?.[0] || 'bull', // Use first detected system
@@ -1876,7 +1889,7 @@ export class GraphBuilder {
           } else if (this.isORMSystemEntity(entity)) {
             // Handle ORM system entities
             const ormSystemEntity = entity as any;
-            await this.dbService.createORMEntity({
+            await ORMService.createORMEntity(this.db,{
               repo_id: repositoryId,
               symbol_id: matchingSymbol.id,
               entity_name: ormSystemEntity.name,
@@ -1886,7 +1899,7 @@ export class GraphBuilder {
           } else if (this.isGodotScene(entity)) {
             const sceneEntity = entity as any;
 
-            const storedScene = await this.dbService.storeGodotScene({
+            const storedScene = await GodotService.storeGodotScene(this.db,{
               repo_id: repositoryId,
               scene_path: sceneEntity.scenePath || parseResult.filePath,
               scene_name: sceneEntity.name,
@@ -1905,7 +1918,7 @@ export class GraphBuilder {
 
               // First pass: Store all nodes and build path-to-id mapping
               for (const node of sceneEntity.nodes) {
-                const storedNode = await this.dbService.storeGodotNode({
+                const storedNode = await GodotService.storeGodotNode(this.db,{
                   repo_id: repositoryId,
                   scene_id: storedScene.id,
                   node_name: node.nodeName || node.name,
@@ -1969,7 +1982,7 @@ export class GraphBuilder {
                   .join(' ');
                 const nodeIds = parentUpdates.map(({ nodeId }) => nodeId).join(',');
 
-                await this.dbService.knex.raw(`
+                await this.db.raw(`
                   UPDATE godot_nodes
                   SET parent_node_id = CASE id ${caseStatement} END
                   WHERE id IN (${nodeIds})
@@ -1984,7 +1997,7 @@ export class GraphBuilder {
               // Third pass: Create scene instance dependencies (batched file lookups)
               const nodesWithInstances = sceneEntity.nodes.filter(n => n.instanceScene);
               if (nodesWithInstances.length > 0) {
-                const currentFile = await this.dbService.getFileByPath(
+                const currentFile = await FileService.getFileByPath(this.db,
                   sceneEntity.scenePath || parseResult.filePath
                 );
                 if (!currentFile) {
@@ -2000,7 +2013,7 @@ export class GraphBuilder {
 
                 for (let i = 0; i < instancePaths.length; i += BATCH_SIZE) {
                   const chunk = instancePaths.slice(i, i + BATCH_SIZE);
-                  const chunkFiles = await this.dbService.getFilesByPaths(chunk);
+                  const chunkFiles = await FileService.getFilesByPaths(this.db,chunk);
                   instanceFiles.push(...chunkFiles);
                 }
 
@@ -2039,7 +2052,7 @@ export class GraphBuilder {
                 }
 
                 if (dependencies.length > 0) {
-                  await this.dbService.createFileDependencies(dependencies);
+                  await DependencyService.createFileDependencies(this.db,dependencies);
                 }
               }
             }
@@ -2100,12 +2113,12 @@ export class GraphBuilder {
       });
 
       // Retrieve stored Godot entities from database with proper IDs
-      const storedScenes = await this.dbService.getGodotScenesByRepository(repositoryId);
+      const storedScenes = await GodotService.getGodotScenesByRepository(this.db,repositoryId);
 
       // Get all nodes from all scenes
       const storedNodes: any[] = [];
       for (const scene of storedScenes) {
-        const sceneNodes = await this.dbService.getGodotNodesByScene(scene.id);
+        const sceneNodes = await GodotService.getGodotNodesByScene(this.db,scene.id);
         storedNodes.push(...sceneNodes);
       }
 
@@ -2124,14 +2137,14 @@ export class GraphBuilder {
           if (!scene) continue;
 
           // Get the scene file to find node symbol
-          const sceneFile = await this.dbService.getFileByPath(scene.scene_path);
+          const sceneFile = await FileService.getFileByPath(this.db,scene.scene_path);
           if (!sceneFile) {
             this.logger.warn('Scene file not found', { scenePath: scene.scene_path });
             continue;
           }
 
           // Get all symbols in the scene file
-          const sceneSymbols = await this.dbService.getSymbolsByFile(sceneFile.id);
+          const sceneSymbols = await SymbolService.getSymbolsByFile(this.db,sceneFile.id);
           const nodeSymbol = sceneSymbols.find(s => s.name === node.node_name);
 
           if (!nodeSymbol) {
@@ -2144,14 +2157,14 @@ export class GraphBuilder {
           }
 
           // Get the script file
-          const scriptFile = await this.dbService.getFileByPath(node.script_path);
+          const scriptFile = await FileService.getFileByPath(this.db,node.script_path);
           if (!scriptFile) {
             this.logger.warn('Script file not found', { scriptPath: node.script_path });
             continue;
           }
 
           // Get the class symbol in the script
-          const scriptSymbols = await this.dbService.getSymbolsByFile(scriptFile.id);
+          const scriptSymbols = await SymbolService.getSymbolsByFile(this.db,scriptFile.id);
           const scriptClassSymbol = scriptSymbols.find(s => s.symbol_type === 'class');
 
           if (!scriptClassSymbol) {
@@ -2163,7 +2176,7 @@ export class GraphBuilder {
           }
 
           // Create dependency from node to script class
-          await this.dbService.createDependency({
+          await DependencyService.createDependency(this.db,{
             from_symbol_id: nodeSymbol.id,
             to_symbol_id: scriptClassSymbol.id,
             dependency_type: DependencyType.REFERENCES,
@@ -2213,12 +2226,12 @@ export class GraphBuilder {
 
       // Create lookup maps
       const pathToFileId = new Map<string, number>();
-      const allFiles = await this.dbService.getFilesByRepository(repositoryId);
+      const allFiles = await FileService.getFilesByRepository(this.db,repositoryId);
       for (const file of allFiles) {
         pathToFileId.set(file.path, file.id);
       }
 
-      const allSymbols = await this.dbService.getSymbolsByRepository(repositoryId);
+      const allSymbols = await SymbolService.getSymbolsByRepository(this.db,repositoryId);
       const fileIdToSymbols = new Map<number, any[]>();
       for (const symbol of allSymbols) {
         const symbols = fileIdToSymbols.get(symbol.file_id) || [];
@@ -2267,7 +2280,7 @@ export class GraphBuilder {
           }
 
           // Look up the node in godot_nodes table (works for any project structure)
-          const nodes = await this.dbService.knex('godot_nodes as gn')
+          const nodes = await this.db('godot_nodes as gn')
             .join('godot_scenes as gs', 'gn.scene_id', 'gs.id')
             .where('gs.repo_id', repositoryId)
             .where('gn.node_name', targetNodeName)
@@ -2317,7 +2330,7 @@ export class GraphBuilder {
           }
 
           // Create dependency with resolved symbol IDs
-          await this.dbService.createDependency({
+          await DependencyService.createDependency(this.db,{
             from_symbol_id: fromSymbol.id,
             to_symbol_id: scriptClassSymbol.id,
             dependency_type: dependency.dependency_type,
@@ -2415,8 +2428,8 @@ export class GraphBuilder {
   private async linkSymbolHierarchy(repositoryId: number): Promise<void> {
     this.logger.info('Linking symbol parent-child relationships', { repositoryId });
 
-    const symbols = await this.dbService.getSymbolsByRepository(repositoryId);
-    const files = await this.dbService.getFilesByRepository(repositoryId);
+    const symbols = await SymbolService.getSymbolsByRepository(this.db,repositoryId);
+    const files = await FileService.getFilesByRepository(this.db,repositoryId);
 
     const symbolsByFile = new Map<number, Symbol[]>();
     for (const symbol of symbols) {
@@ -2452,7 +2465,7 @@ export class GraphBuilder {
     }
 
     for (const update of updates) {
-      await this.dbService.updateSymbolParent(update.id, update.parent_symbol_id);
+      await RouteService.updateSymbolParent(this.db,update.id, update.parent_symbol_id);
     }
 
     this.logger.info('Symbol hierarchy linkage complete', {
@@ -2464,7 +2477,7 @@ export class GraphBuilder {
   private async linkRouteHandlers(repositoryId: number): Promise<void> {
     this.logger.info('Linking route handlers to symbols', { repositoryId });
 
-    const routes = await this.dbService.getRoutesByRepository(repositoryId);
+    const routes = await RouteService.getRoutesByRepository(this.db,repositoryId);
     const unlinkedRoutes = routes.filter(
       route =>
         route.framework_type === 'laravel' &&
@@ -2493,7 +2506,7 @@ export class GraphBuilder {
         routePath: route.path,
       });
 
-      const handlerSymbol = await this.dbService.findMethodInController(
+      const handlerSymbol = await RouteService.findMethodInController(this.db,
         repositoryId,
         route.controller_class!,
         route.controller_method!
@@ -2506,7 +2519,7 @@ export class GraphBuilder {
           qualifiedName: handlerSymbol.qualified_name,
         });
 
-        const symbolExists = await this.dbService.getSymbol(handlerSymbol.id);
+        const symbolExists = await SymbolService.getSymbol(this.db,handlerSymbol.id);
         if (!symbolExists) {
           this.logger.error('Handler symbol does not exist in database!', {
             symbolId: handlerSymbol.id,
@@ -2524,7 +2537,7 @@ export class GraphBuilder {
           symbolId: handlerSymbol.id,
         });
 
-        await this.dbService.updateRouteHandlerSymbolId(route.id, handlerSymbol.id);
+        await RouteService.updateRouteHandlerSymbolId(this.db,route.id, handlerSymbol.id);
         linked++;
       } else {
         this.logger.warn('Handler symbol not found for route', {
@@ -2967,12 +2980,12 @@ export class GraphBuilder {
     repository: Repository,
     repositoryPath: string
   ): Promise<{ fileGraph: FileGraphData; symbolGraph: SymbolGraphData }> {
-    const dbFiles = await this.dbService.getFilesByRepository(repository.id);
-    const symbols = await this.dbService.getSymbolsByRepository(repository.id);
-    const fileDependencyCount = await this.dbService.countFileDependenciesByRepository(
+    const dbFiles = await FileService.getFilesByRepository(this.db,repository.id);
+    const symbols = await SymbolService.getSymbolsByRepository(this.db,repository.id);
+    const fileDependencyCount = await DependencyService.countFileDependenciesByRepository(this.db,
       repository.id
     );
-    const symbolDependencyCount = await this.dbService.countSymbolDependenciesByRepository(
+    const symbolDependencyCount = await DependencyService.countSymbolDependenciesByRepository(this.db,
       repository.id
     );
 
@@ -3470,7 +3483,7 @@ export class GraphBuilder {
     const idMapping = new Map<number, number>();
 
     for (const [framework, nodes] of symbolsByFramework) {
-      const frameworkFile = await this.dbService.createFile({
+      const frameworkFile = await FileService.createFile(this.db,{
         repo_id: repository.id,
         path: `[Framework:${framework}]`,
         language: framework.toLowerCase(),
@@ -3496,7 +3509,7 @@ export class GraphBuilder {
         return createSymbol;
       });
 
-      const createdSymbols = await this.dbService.createSymbols(symbolsToCreate);
+      const createdSymbols = await SymbolService.createSymbols(this.db,symbolsToCreate);
 
       for (let i = 0; i < nodes.length; i++) {
         idMapping.set(nodes[i].id, createdSymbols[i].id);

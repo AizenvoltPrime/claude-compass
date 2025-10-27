@@ -10,7 +10,9 @@ import {
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { DatabaseService, databaseService } from '../database';
+import type { Knex } from 'knex';
+import { getDatabaseConnection, closeDatabaseConnection } from '../database';
+import * as RepositoryService from '../database/services/repository-service';
 import { createComponentLogger } from '../utils/logger';
 import {
   compressResponsePayload,
@@ -24,7 +26,7 @@ const logger = createComponentLogger('mcp-server');
 
 export class ClaudeCompassMCPServer {
   private server: Server;
-  private dbService: DatabaseService;
+  private db: Knex;
   private tools: McpTools;
   private resources: McpResources;
   private sessionId?: string;
@@ -45,9 +47,9 @@ export class ClaudeCompassMCPServer {
       }
     );
 
-    this.dbService = databaseService;
-    this.tools = new McpTools(this.dbService, this.sessionId);
-    this.resources = new McpResources(this.dbService, this.sessionId);
+    this.db = getDatabaseConnection();
+    this.tools = new McpTools(this.db, this.sessionId);
+    this.resources = new McpResources(this.db, this.sessionId);
 
     this.setupHandlers();
   }
@@ -60,7 +62,7 @@ export class ClaudeCompassMCPServer {
     }
 
     try {
-      const repository = await this.dbService.getRepositoryByName(defaultRepoName);
+      const repository = await RepositoryService.getRepositoryByName(this.db, defaultRepoName);
 
       if (repository) {
         this.defaultRepoId = repository.id;
@@ -543,7 +545,7 @@ export class ClaudeCompassMCPServer {
     logger.info('Closing MCP Server');
     try {
       // Close database connections
-      await this.dbService.close();
+      await closeDatabaseConnection();
       logger.info('Database connections closed');
     } catch (error) {
       logger.error('Error closing database connections', { error: (error as Error).message });

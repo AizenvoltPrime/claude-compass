@@ -1,13 +1,14 @@
-import { DatabaseService } from '../database/services';
+import type { Knex } from 'knex';
 import { SymbolType } from '../database/models';
+import * as RepositoryService from '../database/services/repository-service';
 import { createComponentLogger } from '../utils/logger';
 import { symbolImportanceRanker, SymbolForRanking } from '../graph/transitive-analyzer';
 
 import { validateSearchCodeArgs } from './validators';
 import {
-  FileService,
-  SymbolService,
-  DependencyService,
+  MCPFileService,
+  MCPSymbolService,
+  MCPDependencyService,
   FlowService,
   FeatureDiscoveryService,
 } from './services';
@@ -21,33 +22,33 @@ import {
 const logger = createComponentLogger('mcp-tools');
 
 export class McpTools {
-  private dbService: DatabaseService;
+  private db: Knex;
   private logger: any;
   private sessionId?: string;
   private defaultRepoId?: number;
 
-  private fileService: FileService;
-  private symbolService: SymbolService;
-  private dependencyService: DependencyService;
+  private fileService: MCPFileService;
+  private symbolService: MCPSymbolService;
+  private dependencyService: MCPDependencyService;
   private flowService: FlowService;
   private featureDiscoveryService: FeatureDiscoveryService;
   private laravelSearch: LaravelSearch;
   private vueSearch: VueSearch;
   private godotSearch: GodotSearch;
 
-  constructor(dbService: DatabaseService, sessionId?: string) {
-    this.dbService = dbService;
+  constructor(db: Knex, sessionId?: string) {
+    this.db = db;
     this.sessionId = sessionId;
     this.logger = logger;
 
-    this.fileService = new FileService(dbService);
-    this.symbolService = new SymbolService(dbService);
-    this.dependencyService = new DependencyService(dbService);
-    this.flowService = new FlowService(dbService);
-    this.featureDiscoveryService = new FeatureDiscoveryService(dbService, () => this.getDefaultRepoId());
-    this.laravelSearch = new LaravelSearch(dbService);
-    this.vueSearch = new VueSearch(dbService);
-    this.godotSearch = new GodotSearch(dbService);
+    this.fileService = new MCPFileService(db);
+    this.symbolService = new MCPSymbolService(db);
+    this.dependencyService = new MCPDependencyService(db);
+    this.flowService = new FlowService(db);
+    this.featureDiscoveryService = new FeatureDiscoveryService(db, () => this.getDefaultRepoId());
+    this.laravelSearch = new LaravelSearch(db);
+    this.vueSearch = new VueSearch(db);
+    this.godotSearch = new GodotSearch(db);
   }
 
   setDefaultRepoId(repoId: number): void {
@@ -76,7 +77,7 @@ export class McpTools {
 
     if (!detectedFramework && validatedArgs.entity_types && repoIds.length > 0) {
       const repositories = await Promise.all(
-        repoIds.map(repoId => this.dbService.getRepository(repoId))
+        repoIds.map(repoId => RepositoryService.getRepository(this.db, repoId))
       );
       const frameworkStacks = repositories
         .filter(repo => repo)
@@ -159,7 +160,7 @@ export class McpTools {
               searchOptions.symbolTypes = [symbolType];
             }
             const standardSymbols = await performSearchByMode(
-              this.dbService,
+              this.db,
               validatedArgs.query,
               repoIds[0] || defaultRepoId,
               searchOptions,
@@ -177,7 +178,7 @@ export class McpTools {
               }
             }
             const standardSymbols = await performSearchByMode(
-              this.dbService,
+              this.db,
               validatedArgs.query,
               repoIds[0] || defaultRepoId,
               searchOptions,
@@ -189,7 +190,7 @@ export class McpTools {
       }
     } else {
       symbols = await performSearchByMode(
-        this.dbService,
+        this.db,
         validatedArgs.query,
         repoIds[0] || defaultRepoId,
         searchOptions,

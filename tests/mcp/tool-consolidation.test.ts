@@ -1,23 +1,24 @@
-import { describe, beforeAll, afterAll, beforeEach, afterEach, test, expect } from '@jest/globals';
+import { describe, beforeAll, afterAll, test, expect } from '@jest/globals';
 import { McpTools } from '../../src/mcp/tools';
-import { DatabaseService } from '../../src/database/services';
 import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { SymbolType } from '../../src/database/models';
 import { Knex } from 'knex';
+import * as RepositoryService from '../../src/database/services/repository-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import * as RouteService from '../../src/database/services/route-service';
 
 describe('Tool Consolidation Validation', () => {
   let mcpTools: McpTools;
-  let dbService: DatabaseService;
-  let knex: Knex;
+  let db: Knex;
   let repoId: number;
 
   beforeAll(async () => {
-    knex = getDatabaseConnection();
-    dbService = new DatabaseService();
-    mcpTools = new McpTools(dbService);
+    db = getDatabaseConnection();
+    mcpTools = new McpTools(db);
 
     // Create test repository with Laravel and Vue stack
-    const repo = await dbService.createRepository({
+    const repo = await RepositoryService.createRepository(db,{
       name: 'test-tool-consolidation',
       path: '/test/tool-consolidation',
       framework_stack: ['laravel', 'vue', 'javascript', 'php']
@@ -25,7 +26,7 @@ describe('Tool Consolidation Validation', () => {
     repoId = repo.id;
 
     // Create test files for different frameworks
-    const vueFile = await dbService.createFile({
+    const vueFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/tool-consolidation/resources/js/components/UserList.vue',
       language: 'vue',
@@ -33,7 +34,7 @@ describe('Tool Consolidation Validation', () => {
       is_test: false
     });
 
-    const phpModelFile = await dbService.createFile({
+    const phpModelFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/tool-consolidation/app/Models/User.php',
       language: 'php',
@@ -41,7 +42,7 @@ describe('Tool Consolidation Validation', () => {
       is_test: false
     });
 
-    const phpControllerFile = await dbService.createFile({
+    const phpControllerFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/tool-consolidation/app/Http/Controllers/UserController.php',
       language: 'php',
@@ -49,7 +50,7 @@ describe('Tool Consolidation Validation', () => {
       is_test: false
     });
 
-    const phpJobFile = await dbService.createFile({
+    const phpJobFile = await FileService.createFile(db,{
       repo_id: repoId,
       path: '/test/tool-consolidation/app/Jobs/ProcessUserRegistration.php',
       language: 'php',
@@ -80,7 +81,7 @@ describe('Tool Consolidation Validation', () => {
     ];
 
     for (const route of routeData) {
-      await dbService.createRoute(route);
+      await RouteService.createRoute(db,route);
     }
 
     // Create test symbols representing various Laravel entities
@@ -140,7 +141,7 @@ describe('Tool Consolidation Validation', () => {
     ];
 
     for (const symbolData of symbolsData) {
-      await dbService.createSymbol(symbolData);
+      await SymbolService.createSymbol(db,symbolData);
     }
 
     // Wait for search vectors to be populated
@@ -149,12 +150,12 @@ describe('Tool Consolidation Validation', () => {
 
   afterAll(async () => {
     // Clean up test data
-    await knex('routes').where('repo_id', repoId).del();
-    await knex('symbols').where('file_id', 'in',
-      knex('files').select('id').where('repo_id', repoId)
+    await db('routes').where('repo_id', repoId).del();
+    await db('symbols').where('file_id', 'in',
+      db('files').select('id').where('repo_id', repoId)
     ).del();
-    await knex('files').where('repo_id', repoId).del();
-    await knex('repositories').where('id', repoId).del();
+    await db('files').where('repo_id', repoId).del();
+    await db('repositories').where('id', repoId).del();
 
     await closeDatabaseConnection();
   });

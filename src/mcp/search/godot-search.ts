@@ -1,17 +1,18 @@
 import path from 'path';
-import { DatabaseService } from '../../database/services';
+import type { Knex } from 'knex';
+import * as GodotService from '../../database/services/godot-service';
 import { createComponentLogger } from '../../utils/logger';
 
 const logger = createComponentLogger('godot-search');
 
 export class GodotSearch {
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   async searchScenes(query: string, repoIds: number[]): Promise<any[]> {
     try {
       const results = [];
       for (const repoId of repoIds) {
-        const scenes = await this.dbService.getGodotScenesByRepository(repoId);
+        const scenes = await GodotService.getGodotScenesByRepository(this.db,repoId);
         const filteredScenes = scenes.filter(
           scene =>
             scene.scene_name?.toLowerCase().includes(query.toLowerCase()) ||
@@ -50,14 +51,14 @@ export class GodotSearch {
     try {
       const results = [];
       for (const repoId of repoIds) {
-        const scenes = await this.dbService.getGodotScenesByRepository(repoId);
+        const scenes = await GodotService.getGodotScenesByRepository(this.db,repoId);
 
         if (scenes.length === 0) {
           continue;
         }
 
         const sceneIds = scenes.map(s => s.id);
-        const allNodes = await this.dbService.getGodotNodesByScenes(sceneIds);
+        const allNodes = await GodotService.getGodotNodesByScenes(this.db,sceneIds);
 
         const filteredNodes = allNodes.filter(
           node =>

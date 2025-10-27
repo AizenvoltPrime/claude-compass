@@ -1,24 +1,24 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { GraphBuilder } from '../../src/graph/builder';
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { CSharpParser } from '../../src/parsers/csharp';
-import { getDatabaseConnection } from '../../src/database/connection';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
+import * as CleanupService from '../../src/database/services/cleanup-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import type { Knex } from 'knex';
 
 describe('C# Dependency Extraction Fix', () => {
-  let knex: any;
-  let dbService: DatabaseService;
+  let db: Knex;
   let builder: GraphBuilder;
   let tempDir: string;
   let repositoryId: number;
 
   beforeAll(async () => {
     // Setup database connection
-    knex = getDatabaseConnection();
-    dbService = new DatabaseService();
-    builder = new GraphBuilder(dbService);
+    db = getDatabaseConnection();
+    builder = new GraphBuilder(db);
 
     // Create temporary directory for test files
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'csharp-test-'));
@@ -27,13 +27,13 @@ describe('C# Dependency Extraction Fix', () => {
   afterAll(async () => {
     // Cleanup database
     if (repositoryId) {
-      await dbService.cleanupRepositoryData(repositoryId);
+      await CleanupService.cleanupRepositoryData(db, repositoryId);
     }
     // Cleanup filesystem
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
-    await dbService.close();
+    await closeDatabaseConnection();
   });
 
   it('should correctly extract and store C# method call dependencies with qualified names', async () => {
@@ -123,7 +123,7 @@ namespace GameCore.Managers {
     repositoryId = result.repository.id;
 
     // Get all symbols
-    const symbols = await dbService.getSymbolsByRepository(repositoryId);
+    const symbols = await SymbolService.getSymbolsByRepository(db,repositoryId);
 
     // Find key symbols
     const cardManagerSetHandPositions = symbols.find(s =>
@@ -145,7 +145,7 @@ namespace GameCore.Managers {
     expect(deckControllerUpdatePlayerHand).toBeDefined();
 
     // Get dependencies for verification
-    const dependencies = await knex('dependencies')
+    const dependencies = await db('dependencies')
       .where('from_symbol_id', deckControllerInitializeHands!.id)
       .orWhere('from_symbol_id', deckControllerUpdatePlayerHand!.id);
 
@@ -160,7 +160,7 @@ namespace GameCore.Managers {
     expect(initToSetDep).toBeDefined();
 
     // Verify who_calls functionality works
-    const callers = await knex('dependencies')
+    const callers = await db('dependencies')
       .join('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
       .where('dependencies.to_symbol_id', cardManagerSetHandPositions!.id)
       .where('dependencies.dependency_type', 'calls')
@@ -420,7 +420,7 @@ namespace GameCore.Controllers {
 
     try {
       // Get all symbols
-      const symbols = await dbService.getSymbolsByRepository(testRepoId);
+      const symbols = await SymbolService.getSymbolsByRepository(db,testRepoId);
 
       // Find the three SetHandPositions methods
       const interfaceMethod = symbols.find(s =>
@@ -445,7 +445,7 @@ namespace GameCore.Controllers {
       expect(initializeDecks).toBeDefined();
 
       // Get all dependencies from InitializeDecks
-      const initializeDecksDeps = await knex('dependencies')
+      const initializeDecksDeps = await db('dependencies')
         .where('from_symbol_id', initializeDecks!.id)
         .where('dependency_type', 'calls');
 
@@ -466,7 +466,7 @@ namespace GameCore.Controllers {
       const calledSymbol = symbols.find(s => s.id === calledSetHandPositionsMethods[0].to_symbol_id);
       expect(calledSymbol).toBeDefined();
 
-      const calledSymbolFile = await knex('files')
+      const calledSymbolFile = await db('files')
         .where('id', calledSymbol!.file_id)
         .first();
 
@@ -481,7 +481,7 @@ namespace GameCore.Controllers {
       );
 
       if (handManagerSetHandPositions) {
-        const handManagerCallers = await knex('dependencies')
+        const handManagerCallers = await db('dependencies')
           .join('symbols as from_symbols', 'dependencies.from_symbol_id', 'from_symbols.id')
           .join('files as from_files', 'from_symbols.file_id', 'from_files.id')
           .where('dependencies.to_symbol_id', handManagerSetHandPositions.id)
@@ -496,7 +496,7 @@ namespace GameCore.Controllers {
       }
     } finally {
       // Cleanup test repository
-      await dbService.cleanupRepositoryData(testRepoId);
+      await CleanupService.cleanupRepositoryData(db,testRepoId);
     }
   }, 60000);
 });

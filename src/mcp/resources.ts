@@ -1,15 +1,16 @@
-import { DatabaseService } from '../database/services';
+import type { Knex } from 'knex';
+import * as RepositoryService from '../database/services/repository-service';
 import { createComponentLogger } from '../utils/logger';
 
 const logger = createComponentLogger('mcp-resources');
 
 export class McpResources {
-  private dbService: DatabaseService;
+  private db: Knex;
   private logger: any;
   private sessionId?: string;
 
-  constructor(dbService: DatabaseService, sessionId?: string) {
-    this.dbService = dbService;
+  constructor(db: Knex, sessionId?: string) {
+    this.db = db;
     this.sessionId = sessionId;
     this.logger = logger;
   }
@@ -47,7 +48,7 @@ export class McpResources {
   private async getRepositoriesList() {
     try {
       // Get all repositories from the database
-      const repositories = await this.dbService.getAllRepositories();
+      const repositories = await RepositoryService.getAllRepositories(this.db);
 
 
       return {

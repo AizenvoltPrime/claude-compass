@@ -1,5 +1,5 @@
 import { GraphBuilder } from '../../src/graph/builder';
-import { DatabaseService } from '../../src/database/services';
+import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { McpTools } from '../../src/mcp/tools';
 import {
   Repository,
@@ -11,35 +11,43 @@ import { CrossStackGraphBuilder } from '../../src/graph/cross-stack-builder';
 import path from 'path';
 import fs from 'fs/promises';
 import { jest } from '@jest/globals';
+import type { Knex } from 'knex';
+import * as CleanupService from '../../src/database/services/cleanup-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import * as ComponentService from '../../src/database/services/component-service';
+import * as ApiCallService from '../../src/database/services/api-call-service';
+import * as QueryUtilities from '../../src/database/services/query-utilities-service';
+import * as ContextQueryService from '../../src/database/services/context-query-service';
 
 describe('Vue-Laravel Integration', () => {
   let builder: GraphBuilder;
-  let dbService: DatabaseService;
+  let db: Knex;
   let mcpTools: McpTools;
   let testProjectPath: string;
   let repository: Repository;
 
   beforeAll(async () => {
-    // Initialize database service with test database
-    dbService = new DatabaseService();
-    mcpTools = new McpTools(dbService);
+    // Initialize database connection
+    db = getDatabaseConnection();
+    mcpTools = new McpTools(db);
 
     // Create test project directory
     testProjectPath = path.join(__dirname, 'fixtures', 'vue-laravel-project');
     await setupTestVueLaravelProject(testProjectPath);
 
-    builder = new GraphBuilder(dbService);
+    builder = new GraphBuilder(db);
   });
 
   afterAll(async () => {
     // Clean up test project
     await fs.rm(testProjectPath, { recursive: true, force: true });
-    await dbService.close();
+    await closeDatabaseConnection();
   });
 
   beforeEach(async () => {
     // Clear any existing repository data
-    await dbService.deleteRepositoryByName('vue-laravel-project');
+    await CleanupService.deleteRepositoryByName(db,'vue-laravel-project');
 
     // Clean up any existing test project files
     await fs.rm(testProjectPath, { recursive: true, force: true });
@@ -74,21 +82,21 @@ describe('Vue-Laravel Integration', () => {
       repository = result.repository;
 
       // Verify Vue files were parsed
-      const vueFiles = await dbService.getFilesByLanguage(repository.id, 'vue');
+      const vueFiles = await QueryUtilities.getFilesByLanguage(db,repository.id, 'vue');
       expect(vueFiles.length).toBeGreaterThan(0);
 
       // Verify PHP files were parsed
-      const phpFiles = await dbService.getFilesByLanguage(repository.id, 'php');
+      const phpFiles = await QueryUtilities.getFilesByLanguage(db,repository.id, 'php');
       expect(phpFiles.length).toBeGreaterThan(0);
 
       // Debug: Check what components and routes were stored
-      const vueComponents = await dbService.getComponentsByType(repository.id, 'vue');
-      const laravelRoutes = await dbService.getFrameworkEntitiesByType(repository.id, 'route');
-      const repositoryFrameworks = await dbService.getRepositoryFrameworks(repository.id);
-      const allFiles = await dbService.getFilesByRepository(repository.id);
+      const vueComponents = await ComponentService.getComponentsByType(db,repository.id, 'vue');
+      const laravelRoutes = await ContextQueryService.getFrameworkEntitiesByType(db,repository.id, 'route');
+      const repositoryFrameworks = await ApiCallService.getRepositoryFrameworks(db,repository.id);
+      const allFiles = await FileService.getFilesByRepository(db,repository.id);
 
       // Verify cross-stack relationships were detected
-      const crossStackDeps = await dbService.getCrossStackDependencies(repository.id);
+      const crossStackDeps = await ApiCallService.getCrossStackDependencies(db,repository.id);
       expect(crossStackDeps.apiCalls.length).toBeGreaterThan(0);
       expect(crossStackDeps.dataContracts.length).toBeGreaterThan(0);
 
@@ -110,11 +118,11 @@ describe('Vue-Laravel Integration', () => {
       repository = result.repository;
 
       // Find the UserList Vue component
-      const vueComponents = await dbService.getComponentsByType(repository.id, 'vue');
+      const vueComponents = await ComponentService.getComponentsByType(db,repository.id, 'vue');
       // Find UserList component by checking each component's associated symbol
       let userListComponent: Component | undefined;
       for (const component of vueComponents) {
-        const symbol = await dbService.getSymbol(component.symbol_id);
+        const symbol = await SymbolService.getSymbol(db,component.symbol_id);
         if (symbol && symbol.name === 'UserList') {
           userListComponent = component;
           break;
@@ -123,7 +131,7 @@ describe('Vue-Laravel Integration', () => {
       expect(userListComponent).toBeDefined();
 
       // Find the Laravel User route
-      const laravelRoutes = await dbService.getFrameworkEntitiesByType(repository.id, 'route');
+      const laravelRoutes = await ContextQueryService.getFrameworkEntitiesByType(db,repository.id, 'route');
       // Find the users index route by path pattern
       const usersIndexRoute = laravelRoutes
         .filter(r => 'path' in r && 'method' in r) // Filter for Route objects
@@ -134,7 +142,7 @@ describe('Vue-Laravel Integration', () => {
       expect(usersIndexRoute).toBeDefined();
 
       // Verify API call relationship exists
-      const crossStackDeps = await dbService.getCrossStackDependencies(repository.id);
+      const crossStackDeps = await ApiCallService.getCrossStackDependencies(db,repository.id);
       const userApiCall = crossStackDeps.apiCalls.find(
         call => call.endpoint_path === '/api/users' && call.http_method === 'GET'
       );
@@ -158,7 +166,7 @@ describe('Vue-Laravel Integration', () => {
       repository = result.repository;
 
       // Check for parameterized route detection
-      const crossStackDeps = await dbService.getCrossStackDependencies(repository.id);
+      const crossStackDeps = await ApiCallService.getCrossStackDependencies(db,repository.id);
       const userShowApiCall = crossStackDeps.apiCalls.find(
         call => call.endpoint_path.includes('${id}') && call.http_method === 'GET'
       );
@@ -242,7 +250,7 @@ describe('Vue-Laravel Integration', () => {
     });
 
     it('should validate cross-stack relationship accuracy', async () => {
-      const crossStackDeps = await dbService.getCrossStackDependencies(repository.id);
+      const crossStackDeps = await ApiCallService.getCrossStackDependencies(db,repository.id);
 
       // Validate API calls
       for (const apiCall of crossStackDeps.apiCalls) {
@@ -260,13 +268,13 @@ describe('Vue-Laravel Integration', () => {
     });
 
     it('should ensure relationship consistency', async () => {
-      const crossStackDeps = await dbService.getCrossStackDependencies(repository.id);
+      const crossStackDeps = await ApiCallService.getCrossStackDependencies(db,repository.id);
 
       // Check that all referenced symbols exist
       for (const apiCall of crossStackDeps.apiCalls) {
-        const frontendSymbol = await dbService.getSymbol(apiCall.caller_symbol_id);
+        const frontendSymbol = await SymbolService.getSymbol(db,apiCall.caller_symbol_id);
         const backendRoute = apiCall.endpoint_symbol_id
-          ? await dbService.getFrameworkEntityById(apiCall.endpoint_symbol_id)
+          ? await ApiCallService.getFrameworkEntityById(db,apiCall.endpoint_symbol_id)
           : null;
 
         expect(frontendSymbol).toBeDefined();
@@ -275,8 +283,8 @@ describe('Vue-Laravel Integration', () => {
 
       // Check that all data contract symbols exist
       for (const dataContract of crossStackDeps.dataContracts) {
-        const frontendType = await dbService.getSymbol(dataContract.frontend_type_id);
-        const backendType = await dbService.getSymbol(dataContract.backend_type_id);
+        const frontendType = await SymbolService.getSymbol(db,dataContract.frontend_type_id);
+        const backendType = await SymbolService.getSymbol(db,dataContract.backend_type_id);
 
         expect(frontendType).toBeDefined();
         expect(backendType).toBeDefined();

@@ -8,7 +8,7 @@
  * Backward: Backend endpoints → frontend symbols that call them
  */
 
-import { DatabaseService } from '../../../database/services';
+import type { Knex } from 'knex';
 import { createComponentLogger } from '../../../utils/logger';
 import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
 
@@ -21,7 +21,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
   readonly description = 'Bridge frontend-backend via API calls';
   readonly priority = 5;
 
-  constructor(private dbService: DatabaseService) {}
+  constructor(private db: Knex) {}
 
   shouldRun(_context: DiscoveryContext): boolean {
     return true; // Run every iteration to catch new connections
@@ -29,7 +29,6 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
 
   async discover(context: DiscoveryContext): Promise<DiscoveryResult> {
     const { currentSymbols } = context;
-    const db = this.dbService.knex;
     const discovered = new Map<number, number>();
 
     logger.debug('Starting cross-stack discovery', {
@@ -41,7 +40,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     }
 
     // Find API calls FROM current symbols (frontend → backend)
-    const forwardCalls = await db('api_calls')
+    const forwardCalls = await this.db('api_calls')
       .whereIn('caller_symbol_id', currentSymbols)
       .whereNotNull('endpoint_symbol_id')
       .select('endpoint_symbol_id');
@@ -51,7 +50,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     }
 
     // Find API calls TO current symbols (backend → frontend)
-    const backwardCalls = await db('api_calls')
+    const backwardCalls = await this.db('api_calls')
       .whereIn('endpoint_symbol_id', currentSymbols)
       .whereNotNull('caller_symbol_id')
       .select('caller_symbol_id');
@@ -66,7 +65,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     // discover their parent containers (stores, components, composables) for architectural context
     const parentContainerIds: number[] = [];
     if (frontendCallerIds.length > 0) {
-      const parentContainers = await db('dependencies as d')
+      const parentContainers = await this.db('dependencies as d')
         .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
         .whereIn('d.to_symbol_id', frontendCallerIds)
         .where('d.dependency_type', 'contains')
@@ -93,7 +92,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
 
     if (frontendSymbolsToExpand.length > 0) {
       // Find direct callers of store methods
-      const storeCalls = await db('dependencies')
+      const storeCalls = await this.db('dependencies')
         .whereIn('to_symbol_id', frontendCallerIds)
         .where('dependency_type', 'calls')
         .select('from_symbol_id');
@@ -108,7 +107,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
       // When we discover a component/composable that calls stores, add it to the feature
       if (storeCalls.length > 0) {
         const callerIds = storeCalls.map(r => r.from_symbol_id);
-        const callerParents = await db('dependencies as d')
+        const callerParents = await this.db('dependencies as d')
           .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
           .whereIn('d.to_symbol_id', callerIds)
           .where('d.dependency_type', 'contains')
@@ -136,7 +135,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     // Follow references/imports from composables to discover related components
     // Example: createCameraAlertMarkers references CameraAlertInfoWindow component
     if (composableIds.length > 0) {
-      const composableRefs = await db('dependencies')
+      const composableRefs = await this.db('dependencies')
         .whereIn('from_symbol_id', composableIds)
         .whereIn('dependency_type', ['references', 'imports'])
         .select('to_symbol_id');
@@ -145,7 +144,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
 
       if (referencedSymbolIds.length > 0) {
         // Get the referenced symbols and filter for components
-        const referencedComponents = await db('symbols')
+        const referencedComponents = await this.db('symbols')
           .whereIn('id', referencedSymbolIds)
           .where('entity_type', 'component')
           .select('id');

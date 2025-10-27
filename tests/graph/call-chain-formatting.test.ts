@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { TransitiveAnalyzer, transitiveAnalyzer } from '../../src/graph/transitive-analyzer';
-import { DatabaseService } from '../../src/database/services';
 import { getDatabaseConnection } from '../../src/database/connection';
 import type { Knex } from 'knex';
 

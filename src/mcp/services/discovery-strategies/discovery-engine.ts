@@ -12,7 +12,7 @@
  */
 
 import { createComponentLogger } from '../../../utils/logger';
-import { DatabaseService } from '../../../database/services';
+import type { Knex } from 'knex';
 import {
   DiscoveryStrategy,
   DiscoveryContext,
@@ -29,7 +29,7 @@ export class DiscoveryEngine {
   private config: DiscoveryEngineConfig;
 
   constructor(
-    _dbService: DatabaseService,
+    _db: Knex,
     config: Partial<DiscoveryEngineConfig> = {}
   ) {
     this.config = {

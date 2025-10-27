@@ -4,7 +4,11 @@ import path from 'path';
 
 import { Command } from 'commander';
 import { GraphBuilder } from '../graph';
-import { DatabaseService, databaseService } from '../database';
+import { getDatabaseConnection, closeDatabaseConnection } from '../database';
+import * as AdminService from '../database/services/admin-service';
+import * as SearchService from '../database/services/search-service';
+import * as RepositoryService from '../database/services/repository-service';
+import * as CleanupService from '../database/services/cleanup-service';
 import { ClaudeCompassMCPServer } from '../mcp';
 import { logger, config, flushLogs } from '../utils';
 import { FileSizeUtils, DEFAULT_POLICY } from '../config/file-size-policy';
@@ -327,7 +331,7 @@ program
       spinner.succeed('Database connection established');
 
       // Create graph builder
-      const graphBuilder = new GraphBuilder(databaseService);
+      const graphBuilder = new GraphBuilder(getDatabaseConnection());
 
       // Parse options
       const buildOptions = {
@@ -474,7 +478,7 @@ program
       await flushLogs();
 
       // Close database connection
-      await databaseService.close();
+      await closeDatabaseConnection();
 
       // Exit cleanly
       await cleanExit(0);
@@ -487,7 +491,7 @@ program
 
       // Close database connection even in error case
       try {
-        await databaseService.close();
+        await closeDatabaseConnection();
       } catch (closeError) {
         // Ignore close errors
       }
@@ -512,7 +516,7 @@ program
 
     try {
       // Initialize database connection
-      await databaseService.runMigrations();
+      await AdminService.runMigrations();
       spinner.succeed('Database connection established');
 
       console.log(chalk.blue('\n🚀 Starting Claude Compass MCP Server (stdio)...'));
@@ -550,7 +554,7 @@ program
 
     try {
       // Initialize database connection
-      await databaseService.runMigrations();
+      await AdminService.runMigrations();
       spinner.succeed('Database connection established');
 
       // Set environment variables for the HTTP server
@@ -590,10 +594,10 @@ program
     const spinner = ora('Searching symbols...').start();
 
     try {
-      await databaseService.runMigrations();
+      await AdminService.runMigrations();
 
       const repoId = options.repoId ? parseInt(options.repoId) : undefined;
-      const symbols = await databaseService.searchSymbols(query, repoId);
+      const symbols = await SearchService.searchSymbols(getDatabaseConnection(),query, repoId);
 
       let filteredSymbols = symbols;
 
@@ -633,7 +637,7 @@ program
       );
 
       // Close database connection
-      await databaseService.close();
+      await closeDatabaseConnection();
     } catch (error) {
       spinner.fail('Search failed');
       console.error(chalk.red('\n❌ Error during search:'));
@@ -641,7 +645,7 @@ program
 
       // Close database connection even in error case
       try {
-        await databaseService.close();
+        await closeDatabaseConnection();
       } catch (closeError) {
         // Ignore close errors
       }
@@ -659,7 +663,7 @@ program
     const spinner = ora('Loading statistics...').start();
 
     try {
-      await databaseService.runMigrations();
+      await AdminService.runMigrations();
 
       // This would need additional database methods to get statistics
       spinner.succeed('Statistics loaded');
@@ -669,7 +673,7 @@ program
       console.log(chalk.gray('This requires additional database methods to aggregate data.'));
 
       // Close database connection
-      await databaseService.close();
+      await closeDatabaseConnection();
     } catch (error) {
       spinner.fail('Failed to load statistics');
       console.error(chalk.red('\n❌ Error loading statistics:'));
@@ -677,7 +681,7 @@ program
 
       // Close database connection even in error case
       try {
-        await databaseService.close();
+        await closeDatabaseConnection();
       } catch (closeError) {
         // Ignore close errors
       }
@@ -694,13 +698,13 @@ program
     const spinner = ora('Running migrations...').start();
 
     try {
-      await databaseService.runMigrations();
+      await AdminService.runMigrations();
       spinner.succeed('Migrations completed successfully');
 
       console.log(chalk.green('\n✅ Database migrations completed!'));
 
       // Close database connection
-      await databaseService.close();
+      await closeDatabaseConnection();
     } catch (error) {
       spinner.fail('Migration failed');
       console.error(chalk.red('\n❌ Migration error:'));
@@ -708,7 +712,7 @@ program
 
       // Close database connection even in error case
       try {
-        await databaseService.close();
+        await closeDatabaseConnection();
       } catch (closeError) {
         // Ignore close errors
       }
@@ -724,13 +728,13 @@ program
     const spinner = ora('Rolling back migrations...').start();
 
     try {
-      await databaseService.rollbackMigrations();
+      await AdminService.rollbackMigrations();
       spinner.succeed('Migration rollback completed');
 
       console.log(chalk.green('\n✅ Database migration rollback completed!'));
 
       // Close database connection
-      await databaseService.close();
+      await closeDatabaseConnection();
     } catch (error) {
       spinner.fail('Rollback failed');
       console.error(chalk.red('\n❌ Rollback error:'));
@@ -738,7 +742,7 @@ program
 
       // Close database connection even in error case
       try {
-        await databaseService.close();
+        await closeDatabaseConnection();
       } catch (closeError) {
         // Ignore close errors
       }
@@ -765,12 +769,13 @@ program
 
       // Handle "all" case
       if (repositoryName.toLowerCase() === 'all') {
-        const allRepos = await databaseService.getAllRepositories();
+        const db = getDatabaseConnection();
+        const allRepos = await RepositoryService.getAllRepositories(db);
 
         if (allRepos.length === 0) {
           spinner.succeed('No repositories to clear');
           console.log(chalk.gray('\nNo repositories found in database'));
-          await databaseService.close();
+          await closeDatabaseConnection();
           await cleanExit(0);
         }
 
@@ -803,7 +808,7 @@ program
 
           if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
             console.log(chalk.gray('\nOperation cancelled.'));
-            await databaseService.close();
+            await closeDatabaseConnection();
             await cleanExit(0);
           }
         }
@@ -813,7 +818,8 @@ program
 
         for (const repo of allRepos) {
           clearSpinner.text = `Deleting ${repo.name}...`;
-          await databaseService.deleteRepositoryCompletely(repo.id);
+          await CleanupService.cleanupRepositoryData(db, repo.id);
+          await RepositoryService.deleteRepository(db, repo.id);
         }
 
         clearSpinner.succeed(`Successfully deleted ${allRepos.length} repositories`);
@@ -823,12 +829,13 @@ program
           )
         );
 
-        await databaseService.close();
+        await closeDatabaseConnection();
         await cleanExit(0);
       }
 
       // Check if specific repository exists
-      const repository = await databaseService.getRepositoryByName(repositoryName);
+      const db = getDatabaseConnection();
+      const repository = await RepositoryService.getRepositoryByName(db, repositoryName);
 
       if (!repository) {
         spinner.fail('Repository not found');
@@ -839,7 +846,7 @@ program
         );
 
         // Show available repositories
-        const allRepos = await databaseService.getAllRepositories();
+        const allRepos = await RepositoryService.getAllRepositories(db);
         if (allRepos.length > 0) {
           console.log(chalk.gray('\nAvailable repositories:'));
           allRepos.forEach(repo => {
@@ -849,7 +856,7 @@ program
           console.log(chalk.gray('\nNo repositories found in database'));
         }
 
-        await databaseService.close();
+        await closeDatabaseConnection();
         process.exit(1);
       }
 
@@ -885,7 +892,7 @@ program
 
         if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
           console.log(chalk.gray('\nOperation cancelled'));
-          await databaseService.close();
+          await closeDatabaseConnection();
           await cleanExit(0);
         }
       }
@@ -893,7 +900,8 @@ program
       // Perform deletion
       const deleteSpinner = ora('Deleting repository data...').start();
 
-      const success = await databaseService.deleteRepositoryByName(repositoryName);
+      await CleanupService.cleanupRepositoryData(db, repository.id);
+      const success = await RepositoryService.deleteRepository(db, repository.id);
 
       if (success) {
         deleteSpinner.succeed('Repository data cleared successfully');
@@ -907,7 +915,7 @@ program
       }
 
       // Close database connection
-      await databaseService.close();
+      await closeDatabaseConnection();
       await cleanExit(0);
     } catch (error) {
       spinner.fail('Clear operation failed');
@@ -916,7 +924,7 @@ program
 
       // Close database connection even in error case
       try {
-        await databaseService.close();
+        await closeDatabaseConnection();
       } catch (closeError) {
         // Ignore close errors
       }

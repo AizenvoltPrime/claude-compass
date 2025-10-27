@@ -1,21 +1,22 @@
-import { describe, beforeAll, afterAll, beforeEach, afterEach, test, expect } from '@jest/globals';
-import { DatabaseService } from '../../src/database/services';
+import { describe, beforeAll, afterAll, test, expect } from '@jest/globals';
 import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
 import { SymbolSearchOptions, SymbolType } from '../../src/database/models';
 import { Knex } from 'knex';
+import * as RepositoryService from '../../src/database/services/repository-service';
+import * as FileService from '../../src/database/services/file-service';
+import * as SymbolService from '../../src/database/services/symbol-service';
+import * as SearchService from '../../src/database/services/search-service';
 
 describe('Enhanced Search Functionality', () => {
-  let dbService: DatabaseService;
-  let knex: Knex;
+  let db: Knex;
   let repoId: number;
   let testSymbols: { id: number; name: string; type: string }[] = [];
 
   beforeAll(async () => {
-    knex = getDatabaseConnection();
-    dbService = new DatabaseService();
+    db = getDatabaseConnection();
 
     // Create test repository
-    const repo = await dbService.createRepository({
+    const repo = await RepositoryService.createRepository(db, {
       name: 'test-enhanced-search',
       path: '/test/enhanced-search',
       framework_stack: ['javascript', 'typescript']
@@ -23,7 +24,7 @@ describe('Enhanced Search Functionality', () => {
     repoId = repo.id;
 
     // Create test file
-    const file = await dbService.createFile({
+    const file = await FileService.createFile(db, {
       repo_id: repoId,
       path: '/test/enhanced-search/test.ts',
       language: 'typescript',
@@ -76,7 +77,7 @@ describe('Enhanced Search Functionality', () => {
     ];
 
     for (const symbolData of symbolsData) {
-      const symbol = await dbService.createSymbol(symbolData);
+      const symbol = await SymbolService.createSymbol(db, symbolData);
       testSymbols.push({
         id: symbol.id,
         name: symbol.name,
@@ -90,18 +91,18 @@ describe('Enhanced Search Functionality', () => {
 
   afterAll(async () => {
     // Clean up test data
-    await knex('symbols').where('file_id', 'in',
-      knex('files').select('id').where('repo_id', repoId)
+    await db('symbols').where('file_id', 'in',
+      db('files').select('id').where('repo_id', repoId)
     ).del();
-    await knex('files').where('repo_id', repoId).del();
-    await knex('repositories').where('id', repoId).del();
+    await db('files').where('repo_id', repoId).del();
+    await db('repositories').where('id', repoId).del();
 
     await closeDatabaseConnection();
   });
 
   describe('Enhanced searchSymbols method', () => {
     test('should use lexical search by default', async () => {
-      const results = await dbService.searchSymbols('user', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db, 'user', repoId, {});
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(r => r.name.toLowerCase().includes('user'))).toBe(true);
@@ -112,7 +113,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 10
       };
 
-      const results = await dbService.hybridSearchSymbols('user', repoId, options);
+      const results = await SearchService.hybridSearchSymbols(db,'user', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(r => r.name.toLowerCase().includes('user'))).toBe(true);
@@ -123,7 +124,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 10
       };
 
-      const results = await dbService.fulltextSearchSymbols('user service', repoId, options);
+      const results = await SearchService.fulltextSearchSymbols(db,'user service', repoId, options);
 
       // Full-text search may fall back to lexical search in test environment
       expect(Array.isArray(results)).toBe(true);
@@ -135,7 +136,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 10
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.every(r => r.symbol_type === SymbolType.FUNCTION)).toBe(true);
@@ -147,7 +148,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 10
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.every(r => r.is_exported === true)).toBe(true);
@@ -159,7 +160,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 10
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.every(r => r.is_exported === false)).toBe(true);
@@ -171,7 +172,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 10
       };
 
-      const results = await dbService.searchSymbols('user', undefined, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', undefined, options);
 
       expect(results.length).toBeGreaterThan(0);
     });
@@ -181,13 +182,13 @@ describe('Enhanced Search Functionality', () => {
         limit: 2
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', repoId, options);
 
       expect(results.length).toBeLessThanOrEqual(2);
     });
 
     test('should handle empty query gracefully', async () => {
-      const results = await dbService.searchSymbols('', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'', repoId);
 
       expect(Array.isArray(results)).toBe(true);
       // Empty query should return few or no results
@@ -195,7 +196,7 @@ describe('Enhanced Search Functionality', () => {
     });
 
     test('should handle non-existent terms', async () => {
-      const results = await dbService.searchSymbols('nonexistentfunctionname12345', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'nonexistentfunctionname12345', repoId);
 
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBe(0);
@@ -208,7 +209,7 @@ describe('Enhanced Search Functionality', () => {
         limit: 5
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', repoId, options);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.every(r =>
@@ -219,28 +220,28 @@ describe('Enhanced Search Functionality', () => {
 
   describe('Search ranking and relevance', () => {
     test('should prioritize exact name matches', async () => {
-      const results = await dbService.searchSymbols('findUser', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'findUser', repoId);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].name).toBe('findUser');
     });
 
     test('should find partial matches', async () => {
-      const results = await dbService.searchSymbols('User', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'User', repoId);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(r => r.name.includes('User'))).toBe(true);
     });
 
     test('should search in signatures', async () => {
-      const results = await dbService.searchSymbols('Promise', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'Promise', repoId);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(r => r.signature?.includes('Promise'))).toBe(true);
     });
 
     test('should search in descriptions', async () => {
-      const results = await dbService.searchSymbols('identifier', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'identifier', repoId);
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(r => r.description?.includes('identifier'))).toBe(true);
@@ -253,14 +254,14 @@ describe('Enhanced Search Functionality', () => {
         limit: 1000
       };
 
-      const results = await dbService.searchSymbols('user', repoId, options);
+      const results = await SearchService.lexicalSearchSymbols(db,'user', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBeLessThanOrEqual(1000);
     });
 
     test('should handle special characters in query', async () => {
-      const results = await dbService.searchSymbols('user-service@test', repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,'user-service@test', repoId);
 
       expect(Array.isArray(results)).toBe(true);
       // Should not crash and return reasonable results
@@ -269,20 +270,20 @@ describe('Enhanced Search Functionality', () => {
     test('should handle SQL injection attempts', async () => {
       const maliciousQuery = "'; DROP TABLE symbols; --";
 
-      const results = await dbService.searchSymbols(maliciousQuery, repoId);
+      const results = await SearchService.lexicalSearchSymbols(db,maliciousQuery, repoId);
 
       expect(Array.isArray(results)).toBe(true);
       // Should not crash and database should remain intact
 
       // Verify database integrity
-      const symbolCount = await knex('symbols').count('* as count').first();
+      const symbolCount = await db('symbols').count('* as count').first();
       expect(Number(symbolCount?.count)).toBeGreaterThan(0);
     });
 
     test('should return results within reasonable time', async () => {
       const startTime = Date.now();
 
-      await dbService.searchSymbols('user', repoId);
+      await SearchService.lexicalSearchSymbols(db,'user', repoId);
 
       const endTime = Date.now();
       const duration = endTime - startTime;
@@ -296,7 +297,7 @@ describe('Enhanced Search Functionality', () => {
     test('should support phrase searching with fulltext mode', async () => {
       const options = {};
 
-      const results = await dbService.fulltextSearchSymbols('user service', repoId, options);
+      const results = await SearchService.fulltextSearchSymbols(db,'user service', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
     });
@@ -304,7 +305,7 @@ describe('Enhanced Search Functionality', () => {
     test('should support boolean queries in fulltext mode', async () => {
       const options = {};
 
-      const results = await dbService.fulltextSearchSymbols('user & service', repoId, options);
+      const results = await SearchService.fulltextSearchSymbols(db,'user & service', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
     });
@@ -312,7 +313,7 @@ describe('Enhanced Search Functionality', () => {
     test('should handle fulltext search with no results', async () => {
       const options = {};
 
-      const results = await dbService.fulltextSearchSymbols('nonexistent terms that should not match', repoId, options);
+      const results = await SearchService.fulltextSearchSymbols(db,'nonexistent terms that should not match', repoId, options);
 
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBe(0);
@@ -326,7 +327,7 @@ describe('Enhanced Search Functionality', () => {
       };
 
       try {
-        await dbService.vectorSearchSymbols('user', repoId, options);
+        await SearchService.vectorSearchSymbols(db,'user', repoId, options);
         // Should not reach here if no embeddings
         expect(false).toBe(true);
       } catch (error) {
@@ -340,7 +341,7 @@ describe('Enhanced Search Functionality', () => {
       };
 
       try {
-        const results = await dbService.vectorSearchSymbols('user', repoId, options);
+        const results = await SearchService.vectorSearchSymbols(db,'user', repoId, options);
         expect(Array.isArray(results)).toBe(true);
       } catch (error) {
         // Vector search may fail if no embeddings are available
