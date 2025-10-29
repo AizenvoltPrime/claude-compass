@@ -1,200 +1,134 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { execSync } from 'child_process';
-import pLimit from 'p-limit';
-import {
-  Repository,
-  File,
-  Symbol,
-  SymbolType,
-  Visibility,
-  CreateFile,
-  CreateSymbol,
-  CreateFileDependency,
-  DependencyType,
-  ApiCall,
-  DataContract,
-} from '../database/models';
-import { getDatabaseConnection } from '../database/connection';
 import type { Knex } from 'knex';
+import { Repository, File, Symbol } from '../database/models';
 import * as RepositoryService from '../database/services/repository-service';
-import * as FileService from '../database/services/file-service';
-import * as SymbolService from '../database/services/symbol-service';
 import * as DependencyService from '../database/services/dependency-service';
 import * as CleanupService from '../database/services/cleanup-service';
-import * as EmbeddingUtils from '../database/services/embedding-utils';
-import * as QueryUtilities from '../database/services/query-utilities-service';
-import * as RouteService from '../database/services/route-service';
-import * as ComponentService from '../database/services/component-service';
-import * as ComposableService from '../database/services/composable-service';
-import * as JobService from '../database/services/job-service';
-import * as ORMService from '../database/services/orm-service';
-import * as GodotService from '../database/services/godot-service';
-import * as FrameworkMetadataService from '../database/services/framework-metadata-service';
-import { getParserForFile, ParseResult, MultiParser, ParserFactory } from '../parsers';
-import {
-  VueComponent,
-  ReactComponent,
-  VueComposable,
-  ReactHook,
-  NextJSRoute,
-  ExpressRoute,
-  FastifyRoute,
-  VueRoute,
-  ParsedDependency,
-} from '../parsers/base';
-import { LaravelRoute, LaravelController, EloquentModel } from '../parsers/laravel';
+import * as SymbolService from '../database/services/symbol-service';
+import { ParseResult } from '../parsers';
 import { FileGraphBuilder, FileGraphData } from './file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
 import { CrossStackGraphBuilder } from './cross-stack-builder';
 import { createComponentLogger } from '../utils/logger';
-import { FileSizeManager, FileSizePolicy, DEFAULT_POLICY } from '../config/file-size-policy';
-import { EncodingConverter } from '../utils/encoding-converter';
-import { CompassIgnore } from '../utils/compassignore';
-import { getEmbeddingService } from '../services/embedding-service';
-import { AdaptiveEmbeddingController } from '../utils/adaptive-embedding-controller';
-import { isClosureSymbolName } from '../parsers/php/types';
+
+// Import all extracted modules
+import {
+  BuildOptions,
+  BuildResult,
+  BuildError,
+  CrossStackGraphData,
+  CrossStackGraphNode,
+  CrossStackGraphEdge,
+  CrossStackFeature,
+  FileDiscoveryService,
+  RepositoryManager,
+  StorageOrchestrator,
+  ChangeDetectionService,
+  FileParsingOrchestrator,
+  EmbeddingOrchestrator,
+  GodotRelationshipBuilder,
+  FrameworkEntityPersister,
+  createImportsMap,
+  createExportsMap,
+  createDependenciesMap,
+  createCrossFileFileDependencies,
+  createExternalCallFileDependencies,
+  createExternalImportFileDependencies,
+} from './builder/';
+
+// Re-export types for backward compatibility
+export type {
+  BuildOptions,
+  BuildResult,
+  BuildError,
+  CrossStackGraphData,
+  CrossStackGraphNode,
+  CrossStackGraphEdge,
+  CrossStackFeature,
+};
 
 const logger = createComponentLogger('graph-builder');
 
-export interface BuildOptions {
-  includeTestFiles?: boolean;
-  includeNodeModules?: boolean;
-  maxFiles?: number;
-  fileExtensions?: string[];
-
-  fileSizePolicy?: FileSizePolicy;
-  chunkOverlapLines?: number;
-  encodingFallback?: string;
-  compassignorePath?: string;
-  enableParallelParsing?: boolean;
-  maxConcurrency?: number;
-  skipEmbeddings?: boolean;
-  forceFullAnalysis?: boolean;
-
-  // Phase 5 - Cross-stack analysis options
-  enableCrossStackAnalysis?: boolean;
-  detectFrameworks?: boolean;
-  verbose?: boolean;
-
-  /** Eloquent relationship registry shared across repository for semantic analysis */
-  eloquentRelationshipRegistry?: Map<string, Map<string, string>>;
-}
-
-export interface BuildResult {
-  repository: Repository;
-  filesProcessed: number;
-  symbolsExtracted: number;
-  dependenciesCreated: number;
-  fileGraph: FileGraphData;
-  symbolGraph: SymbolGraphData;
-  errors: BuildError[];
-
-  // Phase 5 - Cross-stack analysis results
-  crossStackGraph?: CrossStackGraphData;
-  totalFiles?: number;
-  totalSymbols?: number;
-}
-
-export interface BuildError {
-  filePath: string;
-  message: string;
-  stack?: string;
-}
-
-// Cross-stack graph data structure for Phase 5
-export interface CrossStackGraphData {
-  apiCallGraph?: {
-    nodes: CrossStackGraphNode[];
-    edges: CrossStackGraphEdge[];
-    metadata: {
-      vueComponents: number;
-      laravelRoutes: number;
-      apiCalls: number;
-      vueApiCalls?: number;
-      typescriptApiCalls?: number;
-      backendEndpoints?: number;
-      dataContracts: number;
-    };
-  };
-  dataContractGraph?: {
-    nodes: CrossStackGraphNode[];
-    edges: CrossStackGraphEdge[];
-    metadata: {
-      vueComponents: number;
-      laravelRoutes: number;
-      apiCalls: number;
-      vueApiCalls?: number;
-      typescriptApiCalls?: number;
-      backendEndpoints?: number;
-      dataContracts: number;
-    };
-  };
-  features?: CrossStackFeature[];
-  metadata?: {
-    totalApiCalls?: number;
-    totalDataContracts?: number;
-    analysisTimestamp?: Date;
-  };
-}
-
-export interface CrossStackGraphNode {
-  id: string;
-  type:
-    | 'vue_component'
-    | 'laravel_route'
-    | 'typescript_interface'
-    | 'php_dto'
-    | 'api_call'
-    | 'data_contract';
-  name: string;
-  filePath: string;
-  framework: 'vue' | 'laravel' | 'cross-stack';
-  symbolId?: number;
-}
-
-export interface CrossStackGraphEdge {
-  id: string;
-  from: string;
-  to: string;
-  type: 'api_call' | 'shares_schema' | 'frontend_backend';
-  metadata?: Record<string, any>;
-}
-
-export interface CrossStackFeature {
-  id: string;
-  name: string;
-  description?: string;
-  components: CrossStackGraphNode[];
-  apiCalls: ApiCall[];
-  dataContracts: DataContract[];
-}
-
+/**
+ * GraphBuilder - Main Orchestrator
+ *
+ * Coordinates repository analysis by delegating to specialized services:
+ * - FileDiscoveryService: File system traversal
+ * - RepositoryManager: Repository lifecycle
+ * - FileParsingOrchestrator: File parsing with size policies
+ * - StorageOrchestrator: Database persistence
+ * - EmbeddingOrchestrator: Embedding generation
+ * - FrameworkEntityPersister: Framework entity storage
+ * - ChangeDetectionService: Incremental analysis
+ * - GodotRelationshipBuilder: Godot-specific relationships
+ */
 export class GraphBuilder {
   private db: Knex;
-  private fileGraphBuilder: FileGraphBuilder;
-  private symbolGraphBuilder: SymbolGraphBuilder;
-  private crossStackGraphBuilder: CrossStackGraphBuilder;
   private logger: any;
   private buildErrors: BuildError[] = [];
 
+  // Graph builders
+  private fileGraphBuilder: FileGraphBuilder;
+  private symbolGraphBuilder: SymbolGraphBuilder;
+  private crossStackGraphBuilder: CrossStackGraphBuilder;
+
+  // Extracted services
+  private fileDiscoveryService: FileDiscoveryService;
+  private repositoryManager: RepositoryManager;
+  private storageOrchestrator: StorageOrchestrator;
+  private changeDetectionService: ChangeDetectionService;
+  private fileParsingOrchestrator: FileParsingOrchestrator;
+  private embeddingOrchestrator: EmbeddingOrchestrator;
+  private godotRelationshipBuilder: GodotRelationshipBuilder;
+  private frameworkEntityPersister: FrameworkEntityPersister;
+
   constructor(db: Knex) {
     this.db = db;
+    this.logger = logger;
+
+    // Initialize graph builders
     this.fileGraphBuilder = new FileGraphBuilder();
     this.symbolGraphBuilder = new SymbolGraphBuilder();
     this.crossStackGraphBuilder = new CrossStackGraphBuilder(db);
-    this.logger = logger;
+
+    // Initialize extracted services
+    this.fileDiscoveryService = new FileDiscoveryService();
+    this.repositoryManager = new RepositoryManager(db, this.fileDiscoveryService, logger);
+    this.fileParsingOrchestrator = new FileParsingOrchestrator(db, logger);
+    this.storageOrchestrator = new StorageOrchestrator(db, logger);
+    this.embeddingOrchestrator = new EmbeddingOrchestrator(db, logger);
+    this.frameworkEntityPersister = new FrameworkEntityPersister(db, logger);
+    this.godotRelationshipBuilder = new GodotRelationshipBuilder(db, logger);
+
+    // ChangeDetectionService depends on other services
+    this.changeDetectionService = new ChangeDetectionService(
+      db,
+      this.fileDiscoveryService,
+      this.repositoryManager,
+      this.storageOrchestrator,
+      this.fileParsingOrchestrator,
+      this.embeddingOrchestrator,
+      this.frameworkEntityPersister,
+      this.godotRelationshipBuilder,
+      this.fileGraphBuilder,
+      this.symbolGraphBuilder,
+      logger
+    );
   }
 
-  /**
-   * Analyze a repository and build complete graphs
-   */
+  getBuildErrors(): BuildError[] {
+    return this.buildErrors;
+  }
+
+  clearBuildErrors(): void {
+    this.buildErrors = [];
+  }
+
   async analyzeRepository(
     repositoryPath: string,
     options: BuildOptions = {}
   ): Promise<BuildResult> {
     const startTime = Date.now();
-    this.buildErrors = []; // Reset errors for new analysis
+    this.buildErrors = [];
 
     this.logger.info('Starting repository analysis', {
       path: repositoryPath,
@@ -202,15 +136,19 @@ export class GraphBuilder {
 
     try {
       // Create or get repository record first to detect frameworks
-      const repository = await this.ensureRepository(repositoryPath);
+      const repository = await this.repositoryManager.ensureRepository(repositoryPath);
 
       // Validate options with repository context for smart defaults
-      const validatedOptions = this.validateOptions(options, repository);
+      const validatedOptions = this.repositoryManager.validateOptions(options, repository);
 
       // Automatically detect if incremental analysis is possible (unless forced full analysis)
       if (repository.last_indexed && !validatedOptions.forceFullAnalysis) {
         this.logger.info('Previous analysis detected, using incremental analysis mode');
-        return await this.performIncrementalAnalysis(repositoryPath, repository, validatedOptions);
+        return await this.changeDetectionService.performIncrementalAnalysis(
+          repositoryPath,
+          repository,
+          validatedOptions
+        );
       } else {
         if (validatedOptions.forceFullAnalysis) {
           this.logger.info('Forcing full analysis mode');
@@ -223,14 +161,14 @@ export class GraphBuilder {
       this.logger.info('Performing full analysis, cleaning up existing data', {
         repositoryId: repository.id,
       });
-      await CleanupService.cleanupRepositoryData(this.db,repository.id);
+      await CleanupService.cleanupRepositoryData(this.db, repository.id);
 
       // Discover and process files
-      const files = await this.discoverFiles(repositoryPath, validatedOptions);
+      const files = await this.fileDiscoveryService.discoverFiles(repositoryPath, validatedOptions);
       this.logger.info(`Discovered ${files.length} files`);
 
       // Parse files and extract symbols
-      const parseResults = await this.parseFiles(files, validatedOptions);
+      const parseResults = await this.fileParsingOrchestrator.parseFiles(files, validatedOptions);
       const errors = parseResults.flatMap(r =>
         r.errors.map(e => ({
           filePath: r.filePath,
@@ -239,32 +177,40 @@ export class GraphBuilder {
       );
 
       // Store files and symbols in database
-      const dbFiles = await this.storeFiles(repository.id, files, parseResults);
-      let symbols = await this.storeSymbols(dbFiles, parseResults);
+      const dbFiles = await this.storageOrchestrator.storeFiles(
+        repository.id,
+        files,
+        parseResults
+      );
+      await this.storageOrchestrator.storeSymbols(dbFiles, parseResults);
 
       // Link symbol parent-child relationships
-      await this.linkSymbolHierarchy(repository.id);
+      await this.storageOrchestrator.linkSymbolHierarchy(repository.id);
 
       // Reload symbols from database to get updated parent_symbol_id values
-      symbols = await SymbolService.getSymbolsByRepository(this.db,repository.id);
+      const symbols = await SymbolService.getSymbolsByRepository(this.db, repository.id);
 
       // Generate embeddings for symbols
       if (!validatedOptions.skipEmbeddings) {
-        await this.generateSymbolEmbeddings(repository.id);
+        await this.embeddingOrchestrator.generateSymbolEmbeddings(repository.id);
       } else {
         this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
       }
 
       // Store framework entities
-      await this.storeFrameworkEntities(repository.id, symbols, parseResults);
+      await this.frameworkEntityPersister.storeFrameworkEntities(
+        repository.id,
+        symbols,
+        parseResults
+      );
 
       // Link route handlers to symbols
-      await this.linkRouteHandlers(repository.id);
+      await this.storageOrchestrator.linkRouteHandlers(repository.id);
 
       // Build graphs
-      const importsMap = this.createImportsMap(dbFiles, parseResults);
-      const exportsMap = this.createExportsMap(dbFiles, parseResults);
-      const dependenciesMap = this.createDependenciesMap(symbols, parseResults, dbFiles);
+      const importsMap = createImportsMap(dbFiles, parseResults);
+      const exportsMap = createExportsMap(dbFiles, parseResults);
+      const dependenciesMap = createDependenciesMap(symbols, parseResults, dbFiles);
 
       const [fileGraph, symbolGraph] = await Promise.all([
         this.fileGraphBuilder.buildFileGraph(repository, dbFiles, importsMap, exportsMap),
@@ -279,21 +225,30 @@ export class GraphBuilder {
       ]);
 
       // Persist virtual framework symbols before creating dependencies
-      await this.persistVirtualFrameworkSymbols(repository, symbolGraph, symbols);
+      await this.frameworkEntityPersister.persistVirtualFrameworkSymbols(
+        repository,
+        symbolGraph,
+        symbols
+      );
 
       // Store dependencies
       const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
       const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
 
-      const [
-        crossFileFileDependencies,
-        externalCallFileDependencies,
-        externalImportFileDependencies,
-      ] = await Promise.all([
-        this.createCrossFileFileDependencies(symbolDependencies, symbols, dbFiles),
-        this.createExternalCallFileDependencies(parseResults, dbFiles, symbols),
-        this.createExternalImportFileDependencies(parseResults, dbFiles),
-      ]);
+      const crossFileFileDependencies = createCrossFileFileDependencies(
+        symbolDependencies,
+        symbols,
+        dbFiles
+      );
+      const externalCallFileDependencies = createExternalCallFileDependencies(
+        parseResults,
+        dbFiles,
+        symbols
+      );
+      const externalImportFileDependencies = createExternalImportFileDependencies(
+        parseResults,
+        dbFiles
+      );
 
       // Combine file dependencies
       const allFileDependencies = [
@@ -305,3231 +260,206 @@ export class GraphBuilder {
 
       // Store file dependencies in separate table
       if (allFileDependencies.length > 0) {
-        await DependencyService.createFileDependencies(this.db,allFileDependencies);
+        await DependencyService.createFileDependencies(this.db, allFileDependencies);
       }
 
       // Store symbol dependencies
       if (symbolDependencies.length > 0) {
-        await DependencyService.createDependencies(this.db,symbolDependencies);
+        await DependencyService.createDependencies(this.db, symbolDependencies);
       }
 
+      // Build Godot-specific relationships (node-script, GetNode)
+      await this.godotRelationshipBuilder.buildGodotRelationships(repository.id, parseResults);
+
       // Update repository with analysis results
-      await RepositoryService.updateRepository(this.db,repository.id, {
+      const gitHash = await this.repositoryManager.getGitHash(repositoryPath);
+      await RepositoryService.updateRepository(this.db, repository.id, {
         last_indexed: new Date(),
-        git_hash: await this.getGitHash(repositoryPath),
+        git_hash: gitHash,
       });
+
+      // Phase 5 - Cross-stack analysis
+      let crossStackGraph: CrossStackGraphData | undefined;
+      if (validatedOptions.enableCrossStackAnalysis) {
+        crossStackGraph = await this.performCrossStackAnalysis(repository.id);
+      }
+
+      // Query database for actual dependency counts after ALL storage operations (including cross-stack)
+      const [fileDepsCount, symbolDepsCount] = await Promise.all([
+        this.db('file_dependencies as fd')
+          .join('files as f', 'fd.from_file_id', 'f.id')
+          .where('f.repo_id', repository.id)
+          .count('* as count')
+          .first()
+          .then(result => parseInt(result?.count as string) || 0),
+        this.db('dependencies as d')
+          .join('symbols as s', 'd.from_symbol_id', 's.id')
+          .join('files as f', 's.file_id', 'f.id')
+          .where('f.repo_id', repository.id)
+          .count('* as count')
+          .first()
+          .then(result => parseInt(result?.count as string) || 0),
+      ]);
+
+      const totalDependenciesCreated = fileDepsCount + symbolDepsCount;
 
       const duration = Date.now() - startTime;
       this.logger.info('Repository analysis completed', {
         duration,
         filesProcessed: files.length,
         symbolsExtracted: symbols.length,
+        dependenciesCreated: totalDependenciesCreated,
       });
-
-      // Phase 5 - Cross-stack analysis
-      let crossStackGraph: CrossStackGraphData | undefined;
-      if (validatedOptions.enableCrossStackAnalysis) {
-        this.logger.info('Starting cross-stack analysis', {
-          repositoryId: repository.id,
-        });
-        try {
-          const fullStackGraph = await this.crossStackGraphBuilder.buildFullStackFeatureGraph(
-            repository.id
-          );
-
-          await this.crossStackGraphBuilder.storeCrossStackRelationships(
-            fullStackGraph,
-            repository.id
-          );
-
-          // Query database for actual API call counts after all storage operations
-          const apiCallStats: any = await this.db('api_calls as ac')
-            .join('symbols as s', 'ac.caller_symbol_id', 's.id')
-            .join('files as f', 's.file_id', 'f.id')
-            .where('ac.repo_id', repository.id)
-            .select(
-              this.db.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.vue') as vue_calls"),
-              this.db.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.ts') as ts_calls"),
-              this.db.raw('COUNT(*) as total_calls')
-            )
-            .first();
-
-          const actualApiCallCount = parseInt(apiCallStats?.total_calls as string) || 0;
-          const vueApiCallCount = parseInt(apiCallStats?.vue_calls as string) || 0;
-          const tsApiCallCount = parseInt(apiCallStats?.ts_calls as string) || 0;
-
-          // Query for backend API endpoint count
-          const backendEndpointCount = await this.db('routes')
-            .where('repo_id', repository.id)
-            .where('framework_type', 'laravel')
-            .count('* as count')
-            .first()
-            .then(result => parseInt((result as any)?.count as string) || 0);
-
-          // Update graph metadata with actual database counts
-          fullStackGraph.apiCallGraph.metadata.apiCalls = actualApiCallCount;
-          fullStackGraph.apiCallGraph.metadata.vueApiCalls = vueApiCallCount;
-          fullStackGraph.apiCallGraph.metadata.typescriptApiCalls = tsApiCallCount;
-          fullStackGraph.apiCallGraph.metadata.backendEndpoints = backendEndpointCount;
-
-          // Convert CrossStackGraphBuilder types to GraphBuilder types
-          const convertGraph = (graph: any) => ({
-            nodes: graph.nodes.map((node: any) => ({
-              id: node.id,
-              type: node.type,
-              name: node.name,
-              filePath: node.filePath,
-              framework: node.framework,
-              symbolId: node.metadata?.symbolId,
-            })),
-            edges: graph.edges.map((edge: any) => ({
-              id: edge.id,
-              from: edge.from,
-              to: edge.to,
-              type:
-                edge.relationshipType === 'api_call'
-                  ? 'api_call'
-                  : edge.relationshipType === 'shares_schema'
-                    ? 'shares_schema'
-                    : 'frontend_backend',
-              metadata: edge.metadata,
-            })),
-            metadata: graph.metadata || {
-              vueComponents: 0,
-              laravelRoutes: 0,
-              apiCalls: 0,
-              vueApiCalls: 0,
-              typescriptApiCalls: 0,
-              backendEndpoints: 0,
-              dataContracts: 0,
-            },
-          });
-
-          crossStackGraph = {
-            apiCallGraph: convertGraph(fullStackGraph.apiCallGraph),
-            dataContractGraph: convertGraph(fullStackGraph.dataContractGraph),
-            features: fullStackGraph.features.map((feature: any) => ({
-              id: feature.id,
-              name: feature.name,
-              description: `Vue-Laravel feature: ${feature.name}`,
-              components: [
-                ...feature.vueComponents.map((c: any) => ({
-                  id: c.id,
-                  type: c.type,
-                  name: c.name,
-                  filePath: c.filePath,
-                  framework: c.framework,
-                  symbolId: c.metadata?.symbolId,
-                })),
-                ...feature.laravelRoutes.map((r: any) => ({
-                  id: r.id,
-                  type: r.type,
-                  name: r.name,
-                  filePath: r.filePath,
-                  framework: r.framework,
-                  symbolId: r.metadata?.symbolId,
-                })),
-              ],
-              apiCalls: [], // Will be populated from database if needed
-              dataContracts: [], // Will be populated from database if needed
-            })),
-            metadata: {
-              totalApiCalls: fullStackGraph.apiCallGraph.edges.length,
-              totalDataContracts: fullStackGraph.dataContractGraph.edges.length,
-              analysisTimestamp: new Date(),
-            },
-          };
-          this.logger.info('Cross-stack analysis completed', {
-            apiCalls: crossStackGraph.metadata.totalApiCalls,
-            dataContracts: crossStackGraph.metadata.totalDataContracts,
-          });
-        } catch (error) {
-          this.logger.error('Cross-stack analysis failed', { error });
-          // Continue without cross-stack graph
-        }
-      }
 
       return {
         repository,
         filesProcessed: files.length,
         symbolsExtracted: symbols.length,
-        dependenciesCreated: fileDependencies.length + symbolDependencies.length,
+        dependenciesCreated: totalDependenciesCreated,
         fileGraph,
         symbolGraph,
         errors: [...errors, ...this.buildErrors],
-        totalFiles: files.length,
-        totalSymbols: symbols.length,
         crossStackGraph,
-      };
-    } catch (error) {
-      this.logger.error('Repository analysis failed', { error });
-      throw error;
-    }
-  }
-
-  /**
-   * Detect files that have changed since last analysis
-   */
-  private async detectChangedFiles(
-    repositoryPath: string,
-    repository: Repository,
-    options: BuildOptions
-  ): Promise<{
-    changedFiles: string[];
-    deletedFileIds: number[];
-    newFiles: string[];
-  }> {
-    const changedFiles: string[] = [];
-    const newFiles: string[] = [];
-    const deletedFileIds: number[] = [];
-
-    const lastIndexed = repository.last_indexed;
-    if (!lastIndexed) {
-      this.logger.info('No previous analysis found, treating all files as new');
-      const allFiles = await this.discoverFiles(repositoryPath, options);
-      return {
-        changedFiles: [],
-        deletedFileIds: [],
-        newFiles: allFiles.map(f => f.path),
-      };
-    }
-
-    this.logger.info('Detecting changes since last analysis', {
-      lastIndexed: lastIndexed.toISOString(),
-    });
-
-    const currentFiles = await this.discoverFiles(repositoryPath, options);
-    const currentFilePaths = currentFiles.map(f => f.path);
-
-    const deletedFiles = await FileService.findDeletedFiles(this.db,repository.id, currentFilePaths);
-    deletedFileIds.push(...deletedFiles.map(f => f.id));
-
-    const dbPathsArray = await FileService.getFilePathsByRepository(this.db,repository.id);
-    const dbFilePaths = new Set<string>(dbPathsArray);
-
-    for (const fileInfo of currentFiles) {
-      if (!dbFilePaths.has(fileInfo.path)) {
-        newFiles.push(fileInfo.path);
-      } else {
-        try {
-          const stats = await fs.stat(fileInfo.path);
-          if (stats.mtime > lastIndexed) {
-            changedFiles.push(fileInfo.path);
-          }
-        } catch (error) {
-          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-            this.logger.debug('File no longer exists during stat check', {
-              file: fileInfo.path,
-            });
-          } else {
-            this.logger.error('Unexpected error checking file modification time', {
-              file: fileInfo.path,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            throw new Error(
-              `Failed to check modification time for ${fileInfo.path}: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-          }
-        }
-      }
-    }
-
-    this.logger.info('Change detection completed', {
-      totalFiles: currentFiles.length,
-      changedFiles: changedFiles.length,
-      newFiles: newFiles.length,
-      deletedFiles: deletedFileIds.length,
-    });
-
-    return { changedFiles, deletedFileIds, newFiles };
-  }
-
-  /**
-   * Perform incremental analysis on a repository
-   */
-  private async performIncrementalAnalysis(
-    repositoryPath: string,
-    repository: Repository,
-    options: BuildOptions
-  ): Promise<BuildResult> {
-    this.logger.info('Starting incremental analysis', {
-      repositoryId: repository.id,
-      repositoryPath,
-    });
-
-    // Detect changed files
-    const { changedFiles, deletedFileIds, newFiles } = await this.detectChangedFiles(
-      repositoryPath,
-      repository,
-      options
-    );
-
-    try {
-      // Handle deletions first
-      if (deletedFileIds.length > 0) {
-        await this.deleteFiles(deletedFileIds);
-      }
-
-      // Combine changed and new files for re-analysis
-      const filesToAnalyze = changedFiles.concat(newFiles);
-
-      if (filesToAnalyze.length === 0 && deletedFileIds.length === 0) {
-        this.logger.info('No changed files detected, skipping analysis');
-
-        // Build statistics from database
-        const { fileGraph, symbolGraph } = await this.buildGraphStatistics(
-          repository,
-          repository.path
-        );
-
-        return {
-          repository,
-          filesProcessed: 0,
-          symbolsExtracted: 0,
-          dependenciesCreated: 0,
-          fileGraph,
-          symbolGraph,
-          errors: [...this.buildErrors],
-          totalFiles: fileGraph.nodes.length,
-          totalSymbols: symbolGraph.nodes.length,
-        };
-      }
-
-      this.logger.info(
-        `Processing ${filesToAnalyze.length} files (${changedFiles.length} changed, ${newFiles.length} new)`
-      );
-
-      // Re-analyze changed and new files
-      const partialResult = await this.reanalyzeFiles(repository.id, filesToAnalyze, options);
-
-      // Build statistics from database
-      const { fileGraph, symbolGraph } = await this.buildGraphStatistics(
-        repository,
-        repository.path
-      );
-
-      // Update repository timestamp
-      await RepositoryService.updateRepository(this.db,repository.id, {
-        last_indexed: new Date(),
-      });
-
-      this.logger.info('Incremental analysis completed', {
-        filesProcessed: partialResult.filesProcessed || 0,
-        symbolsExtracted: partialResult.symbolsExtracted || 0,
-        dependenciesCreated: partialResult.dependenciesCreated || 0,
-        errors: partialResult.errors?.length || 0,
-      });
-
-      return {
-        repository,
-        filesProcessed: partialResult.filesProcessed || 0,
-        symbolsExtracted: partialResult.symbolsExtracted || 0,
-        dependenciesCreated: partialResult.dependenciesCreated || 0,
-        fileGraph,
-        symbolGraph,
-        errors: [...(partialResult.errors || []), ...this.buildErrors],
         totalFiles: fileGraph.nodes.length,
         totalSymbols: symbolGraph.nodes.length,
       };
     } catch (error) {
-      this.logger.error('Incremental analysis failed', {
-        repositoryId: repository.id,
-        repositoryPath,
+      this.logger.error('Repository analysis failed', {
+        path: repositoryPath,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw new Error(
-        `Incremental analysis failed for repository ${repository.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      throw error;
     }
   }
 
-  /**
-   * Re-analyze specific files (for incremental updates)
-   */
-  async reanalyzeFiles(
-    repositoryId: number,
-    filePaths: string[],
-    options: BuildOptions = {}
-  ): Promise<Partial<BuildResult>> {
-    this.logger.info('Re-analyzing files', {
-      repositoryId,
-      fileCount: filePaths.length,
-    });
+  private async performCrossStackAnalysis(repositoryId: number): Promise<CrossStackGraphData> {
+    this.logger.info('Starting cross-stack analysis', { repositoryId });
 
-    // Fetch repository first for framework-aware validation
-    const repository = await RepositoryService.getRepository(this.db,repositoryId);
-    if (!repository) {
-      throw new Error(`Repository with id ${repositoryId} not found`);
-    }
-
-    const validatedOptions = this.validateOptions(options, repository);
-    const files = filePaths.map(filePath => ({ path: filePath }));
-
-    const parseResults = await this.parseFiles(files as any[], validatedOptions);
-
-    const existingFiles = await FileService.getFilesByRepository(this.db,repositoryId);
-    const fileIdsToCleanup = existingFiles.filter(f => filePaths.includes(f.path)).map(f => f.id);
-
-    if (fileIdsToCleanup.length > 0) {
-      this.logger.info('Cleaning up old data for changed files', {
-        fileCount: fileIdsToCleanup.length,
-      });
-      await CleanupService.cleanupFileData(this.db,fileIdsToCleanup);
-    }
-
-    const dbFiles = await this.storeFiles(repositoryId, files as any[], parseResults);
-    await this.storeSymbols(dbFiles, parseResults);
-
-    // Link symbol hierarchy for newly added symbols
-    await this.linkSymbolHierarchy(repositoryId);
-
-    // Reload ALL symbols from database to ensure:
-    // 1. We have all repository symbols (not just changed files)
-    // 2. parent_symbol_id is populated for proper resolution
-    const symbols = await SymbolService.getSymbolsByRepository(this.db,repositoryId);
-
-    // Generate embeddings for symbols
-    if (!validatedOptions.skipEmbeddings) {
-      await this.generateSymbolEmbeddings(repositoryId);
-    } else {
-      this.logger.info('Skipping embedding generation (--skip-embeddings enabled)');
-    }
-
-    await this.storeFrameworkEntities(repositoryId, symbols, parseResults);
-
-    const importsMap = this.createImportsMap(dbFiles, parseResults);
-    const exportsMap = this.createExportsMap(dbFiles, parseResults);
-    const dependenciesMap = this.createDependenciesMap(symbols, parseResults, dbFiles);
-
-    const fileGraph = await this.fileGraphBuilder.buildFileGraph(
-      repository,
-      dbFiles,
-      importsMap,
-      exportsMap
-    );
-
-    const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
-      symbols,
-      dependenciesMap,
-      dbFiles,
-      importsMap,
-      exportsMap,
-      repository.path
-    );
-
-    await this.persistVirtualFrameworkSymbols(repository, symbolGraph, symbols);
-
-    const fileDependencies = this.fileGraphBuilder.createFileDependencies(fileGraph, new Map());
-    const symbolDependencies = this.symbolGraphBuilder.createSymbolDependencies(symbolGraph);
-
-    const crossFileFileDependencies = this.createCrossFileFileDependencies(
-      symbolDependencies,
-      symbols,
-      dbFiles
-    );
-
-    const externalCallFileDependencies = this.createExternalCallFileDependencies(
-      parseResults,
-      dbFiles,
-      symbols
-    );
-
-    const externalImportFileDependencies = this.createExternalImportFileDependencies(
-      parseResults,
-      dbFiles
-    );
-
-    const allFileDependencies = [
-      ...fileDependencies,
-      ...crossFileFileDependencies,
-      ...externalCallFileDependencies,
-      ...externalImportFileDependencies,
-    ];
-
-    if (allFileDependencies.length > 0) {
-      await DependencyService.createFileDependencies(this.db,allFileDependencies);
-    }
-
-    if (symbolDependencies.length > 0) {
-      await DependencyService.createDependencies(this.db,symbolDependencies);
-    }
-
-    // Re-resolve dependencies that reference changed symbols by qualified name
-    const resolvedCount = await DependencyService.resolveQualifiedNameDependencies(this.db,repositoryId);
-    this.logger.info('Re-resolved dependencies by qualified name', { resolvedCount });
-
-    await this.buildGodotRelationships(repositoryId, parseResults);
-
-    const totalDependencies = allFileDependencies.length + symbolDependencies.length;
-
-    this.logger.info('File re-analysis completed', {
-      filesProcessed: files.length,
-      symbolsExtracted: symbols.length,
-      dependenciesCreated: totalDependencies,
-    });
-
-    return {
-      filesProcessed: files.length,
-      symbolsExtracted: symbols.length,
-      dependenciesCreated: totalDependencies,
-      errors: parseResults.flatMap(r =>
-        r.errors.map(e => ({
-          filePath: r.filePath,
-          message: e.message,
-        }))
-      ),
-    };
-  }
-
-  /**
-   * Delete files and all related data from the database using atomic transaction
-   */
-  private async deleteFiles(fileIds: number[]): Promise<void> {
-    if (fileIds.length === 0) return;
-
-    this.logger.info('Deleting files from database', {
-      fileCount: fileIds.length,
-    });
-
-    const deletedCount = await CleanupService.deleteFilesWithTransaction(this.db,fileIds);
-
-    this.logger.info('File deletion completed', {
-      filesDeleted: deletedCount,
-    });
-  }
-
-  private async ensureRepository(repositoryPath: string): Promise<Repository> {
-    const absolutePath = path.resolve(repositoryPath);
-
-    // Validate that the repository path exists and is a directory
     try {
-      const stats = await fs.stat(absolutePath);
-      if (!stats.isDirectory()) {
-        throw new Error(`Repository path is not a directory: ${absolutePath}`);
-      }
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        throw new Error(`Repository path does not exist: ${absolutePath}`);
-      } else if (error.code === 'EACCES') {
-        throw new Error(`Repository path is not accessible: ${absolutePath}`);
-      } else {
-        throw error; // Re-throw other unexpected errors
-      }
-    }
-
-    // Additional check for read access
-    try {
-      await fs.access(absolutePath, fs.constants.R_OK);
-    } catch (error) {
-      throw new Error(`Repository path is not readable: ${absolutePath}`);
-    }
-
-    let repository = await RepositoryService.getRepositoryByPath(this.db,absolutePath);
-
-    if (!repository) {
-      // Create new repository
-      const name = path.basename(absolutePath);
-      const primaryLanguage = await this.detectPrimaryLanguage(absolutePath);
-      const frameworkStack = await this.detectFrameworks(absolutePath);
-
-      repository = await RepositoryService.createRepository(this.db,{
-        name,
-        path: absolutePath,
-        language_primary: primaryLanguage,
-        framework_stack: frameworkStack,
-      });
-
-      this.logger.info('Created new repository', {
-        name,
-        path: absolutePath,
-        id: repository.id,
-      });
-    }
-
-    return repository;
-  }
-
-  private async discoverFiles(
-    repositoryPath: string,
-    options: BuildOptions
-  ): Promise<Array<{ path: string; relativePath: string }>> {
-    const files: Array<{ path: string; relativePath: string }> = [];
-    const compassIgnore = await this.loadCompassIgnore(repositoryPath, options);
-
-    this.logger.info('Starting file discovery', {
-      repositoryPath,
-      allowedExtensions: options.fileExtensions,
-    });
-
-    const traverse = async (currentPath: string): Promise<void> => {
-      try {
-        const lstats = await fs.lstat(currentPath);
-
-        if (lstats.isSymbolicLink()) {
-          try {
-            await fs.stat(currentPath);
-          } catch (symlinkError) {
-            this.logger.debug('Skipping broken symlink', { path: currentPath });
-            return;
-          }
-        }
-
-        const stats = lstats.isSymbolicLink() ? await fs.stat(currentPath) : lstats;
-
-        if (stats.isDirectory()) {
-          const dirName = path.basename(currentPath);
-          const relativePath = path.relative(repositoryPath, currentPath);
-
-          // Check .compassignore patterns first
-          if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
-            return;
-          }
-
-          // Then check built-in skip logic
-          if (this.shouldSkipDirectory(dirName, options)) {
-            return;
-          }
-
-          const entries = await fs.readdir(currentPath);
-
-          await Promise.all(
-            entries.map(async entry => {
-              const entryPath = path.join(currentPath, entry);
-              await traverse(entryPath);
-            })
-          );
-        } else if (stats.isFile()) {
-          const relativePath = path.relative(repositoryPath, currentPath);
-
-          // Check .compassignore patterns first
-          if (compassIgnore.shouldIgnore(currentPath, relativePath)) {
-            return;
-          }
-
-          // Then check built-in include logic
-          if (this.shouldIncludeFile(currentPath, relativePath, options)) {
-            this.logger.info('Including file', { path: relativePath });
-            files.push({
-              path: currentPath,
-              relativePath: relativePath,
-            });
-          } else {
-          }
-        }
-      } catch (error) {
-        this.logger.error('Error traversing path', { path: currentPath, error: error.message });
-      }
-    };
-
-    await traverse(repositoryPath);
-
-    // Generate file extension statistics
-    const extensionStats: Record<string, number> = {};
-    files.forEach(file => {
-      const ext = path.extname(file.path);
-      extensionStats[ext] = (extensionStats[ext] || 0) + 1;
-    });
-
-    this.logger.info('File discovery completed', {
-      totalFiles: files.length,
-      extensionStats,
-      allowedExtensions: options.fileExtensions,
-      patternsUsed: compassIgnore.getPatterns(),
-    });
-
-    // Limit the number of files if specified
-    if (options.maxFiles && files.length > options.maxFiles) {
-      this.logger.warn(`Limiting analysis to ${options.maxFiles} files`);
-      return files.slice(0, options.maxFiles);
-    }
-
-    return files;
-  }
-
-  /**
-   * Load CompassIgnore configuration from repository directory
-   */
-  private async loadCompassIgnore(
-    repositoryPath: string,
-    options: BuildOptions
-  ): Promise<CompassIgnore> {
-    if (options.compassignorePath) {
-      // Use custom path if provided
-      const customPath = path.isAbsolute(options.compassignorePath)
-        ? options.compassignorePath
-        : path.join(repositoryPath, options.compassignorePath);
-      const compassIgnore = await CompassIgnore.fromFile(customPath);
-
-      // Add default patterns if no custom .compassignore file exists
-      if (!(await this.fileExists(customPath))) {
-        compassIgnore.addPatterns(require('../utils/compassignore').DEFAULT_IGNORE_PATTERNS);
-      }
-
-      return compassIgnore;
-    }
-
-    // Use default .compassignore in repository root, with fallback to default patterns
-    const compassIgnore = await CompassIgnore.fromDirectory(repositoryPath);
-    const compassIgnorePath = path.join(repositoryPath, '.compassignore');
-
-    // If no .compassignore file exists, add default patterns
-    if (!(await this.fileExists(compassIgnorePath))) {
-      compassIgnore.addPatterns(require('../utils/compassignore').DEFAULT_IGNORE_PATTERNS);
-    }
-
-    return compassIgnore;
-  }
-
-  /**
-   * Check if file exists
-   */
-  private async fileExists(filePath: string): Promise<boolean> {
-    try {
-      await fs.stat(filePath);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Build Eloquent relationship registry from all model files
-   * This enables semantic analysis of with() relationship chains
-   */
-  private async buildEloquentRelationshipRegistry(
-    files: Array<{ path: string; relativePath?: string }>,
-    options: BuildOptions
-  ): Promise<Map<string, Map<string, string>>> {
-    const registry = new Map<string, Map<string, string>>();
-
-    // Identify model files (Laravel: app/Models/, app/Model/)
-    const modelFiles = files.filter(file => {
-      const normalized = file.path.replace(/\\/g, '/');
-      return (
-        normalized.includes('/app/Models/') ||
-        normalized.includes('/app/Model/')
-      ) && file.path.endsWith('.php');
-    });
-
-    if (modelFiles.length === 0) {
-      return registry;
-    }
-
-    this.logger.info('Building Eloquent relationship registry', {
-      modelFileCount: modelFiles.length
-    });
-
-    /**
-     * Parse model files in parallel to build registry efficiently.
-     * Map is thread-safe in Node.js, allowing concurrent registry updates.
-     */
-    const { PHPParser } = await import('../parsers/php');
-    const phpParser = new PHPParser();
-
-    const parseResults = await Promise.all(
-      modelFiles.map(async (file) => {
-        try {
-          const content = await this.readFileWithEncodingRecovery(file.path, options);
-          if (!content) {
-            return { success: false, file: file.path };
-          }
-
-          await phpParser.parseFile(file.path, content, {
-            eloquentRelationshipRegistry: registry
-          });
-          return { success: true };
-        } catch (error) {
-          this.logger.warn('Failed to parse model file for registry', {
-            path: file.path,
-            error: (error as Error).message,
-          });
-          return { success: false, file: file.path };
-        }
-      })
-    );
-
-    const successCount = parseResults.filter(r => r.success).length;
-    const failureCount = parseResults.filter(r => !r.success).length;
-    const failedFiles = parseResults.filter(r => !r.success && r.file).map(r => r.file!);
-
-    this.logger.info('Eloquent relationship registry built', {
-      modelCount: registry.size,
-      totalRelationships: Array.from(registry.values()).reduce((sum, m) => sum + m.size, 0),
-      successfulParses: successCount,
-      failedParses: failureCount,
-      ...(failureCount > 0 && { failedFiles: failedFiles.slice(0, 5) })
-    });
-
-    return registry;
-  }
-
-  private async parseFiles(
-    files: Array<{ path: string; relativePath?: string }>,
-    options: BuildOptions
-  ): Promise<Array<ParseResult & { filePath: string }>> {
-    const multiParser = new MultiParser();
-
-    // Build Eloquent relationship registry from model files first
-    const eloquentRegistry = await this.buildEloquentRelationshipRegistry(files, options);
-
-    const concurrency = options.maxConcurrency || 10;
-    const limit = pLimit(concurrency);
-
-    const parsePromises = files.map(file =>
-      limit(async () => {
-        try {
-          const content = await this.readFileWithEncodingRecovery(file.path, options);
-          if (!content) {
-            return null;
-          }
-
-          // Pass registry to all file parses
-          const enhancedOptions = {
-            ...options,
-            eloquentRelationshipRegistry: eloquentRegistry
-          };
-
-          const parseResult = await this.processFileWithSizePolicyMultiParser(
-            file,
-            content,
-            multiParser,
-            enhancedOptions
-          );
-          if (!parseResult) {
-            return null;
-          }
-
-          return {
-            ...parseResult,
-            filePath: file.path,
-          };
-        } catch (error) {
-          this.logger.error('Failed to parse file', {
-            path: file.path,
-            error: (error as Error).message,
-          });
-
-          return {
-            filePath: file.path,
-            symbols: [],
-            dependencies: [],
-            imports: [],
-            exports: [],
-            errors: [
-              {
-                message: (error as Error).message,
-                line: 0,
-                column: 0,
-                severity: 'error',
-              },
-            ],
-            success: false,
-          };
-        }
-      })
-    );
-
-    const parsedResults = await Promise.all(parsePromises);
-
-    const results = parsedResults.filter(
-      (result): result is ParseResult & { filePath: string } => result !== null
-    );
-
-    // Generate parsing statistics
-    const parseStats = {
-      totalFiles: files.length,
-      successfulParses: results.filter(r => r.success !== false && r.errors.length === 0).length,
-      failedParses: results.filter(r => r.success === false || r.errors.length > 0).length,
-      totalSymbols: results.reduce((sum, r) => sum + r.symbols.length, 0),
-      totalDependencies: results.reduce((sum, r) => sum + r.dependencies.length, 0),
-      byExtension: {} as Record<string, { files: number; symbols: number; errors: number }>,
-    };
-
-    // Calculate per-extension statistics
-    results.forEach(result => {
-      const ext = path.extname(result.filePath);
-      if (!parseStats.byExtension[ext]) {
-        parseStats.byExtension[ext] = { files: 0, symbols: 0, errors: 0 };
-      }
-      parseStats.byExtension[ext].files++;
-      parseStats.byExtension[ext].symbols += result.symbols.length;
-      parseStats.byExtension[ext].errors += result.errors.length;
-    });
-
-    this.logger.info('File parsing completed', parseStats);
-
-    // Log any significant parsing failures
-    if (parseStats.failedParses > 0) {
-      const failedFiles = results
-        .filter(r => r.success === false || r.errors.length > 0)
-        .map(r => ({ path: r.filePath, errors: r.errors.length }));
-
-      this.logger.warn('Parsing failures detected', {
-        failedCount: parseStats.failedParses,
-        failedFiles: failedFiles.slice(0, 10), // Limit to first 10 for readability
-      });
-    }
-
-    return results;
-  }
-
-  private async storeFiles(
-    repositoryId: number,
-    files: Array<{ path: string }>,
-    parseResults: Array<ParseResult & { filePath: string }>
-  ): Promise<File[]> {
-    const statsPromises = files.map((file, i) => {
-      if (!parseResults[i]) return Promise.resolve(null);
-
-      return fs.stat(file.path).catch(error => {
-        this.logger.error('Failed to stat file', {
-          path: file.path,
-          error: (error as Error).message,
-        });
-        return null;
-      });
-    });
-
-    const allStats = await Promise.all(statsPromises);
-
-    const createFiles: CreateFile[] = [];
-    const validIndices: number[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const stats = allStats[i];
-      const parseResult = parseResults[i];
-
-      if (!parseResult || !stats) {
-        continue;
-      }
-
-      const language = this.detectLanguageFromPath(file.path);
-
-      createFiles.push({
-        repo_id: repositoryId,
-        path: file.path,
-        language,
-        size: stats.size,
-        last_modified: stats.mtime,
-        is_generated: this.isGeneratedFile(file.path),
-        is_test: this.isTestFile(file.path),
-      });
-
-      validIndices.push(i);
-    }
-
-    const dbFiles = await FileService.createFilesBatch(this.db,createFiles);
-    return dbFiles;
-  }
-
-  private async storeSymbols(
-    files: File[],
-    parseResults: Array<ParseResult & { filePath: string }>
-  ): Promise<Symbol[]> {
-    const allSymbols: CreateSymbol[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const parseResult = parseResults.find(r => r.filePath === file.path);
-
-      if (!parseResult) continue;
-
-      for (const symbol of parseResult.symbols) {
-        allSymbols.push({
-          file_id: file.id,
-          name: symbol.name,
-          qualified_name: symbol.qualified_name,
-          parent_symbol_id: symbol.parent_symbol_id,
-          symbol_type: symbol.symbol_type,
-          entity_type: symbol.entity_type,
-          framework: symbol.framework,
-          base_class: symbol.base_class,
-          namespace: symbol.namespace,
-          start_line: symbol.start_line,
-          end_line: symbol.end_line,
-          is_exported: symbol.is_exported,
-          visibility: symbol.visibility as any,
-          signature: symbol.signature,
-          description: symbol.description,
-        });
-      }
-    }
-
-    return await SymbolService.createSymbols(this.db,allSymbols);
-  }
-
-  async generateSymbolEmbeddings(repositoryId: number): Promise<void> {
-    // Count total symbols needing embeddings
-    const totalSymbols = await SymbolService.countSymbolsNeedingEmbeddings(this.db,repositoryId);
-    if (totalSymbols === 0) return;
-
-    this.logger.info('Generating embeddings for symbols', {
-      repositoryId,
-      symbolCount: totalSymbols,
-    });
-
-    const embeddingService = getEmbeddingService();
-    await embeddingService.initialize();
-
-    const isGPU = embeddingService.modelInfo.gpu;
-
-    // Initialize adaptive controller with universal safe defaults
-    // The adaptive system will automatically adjust based on runtime conditions:
-    //   - Starts conservative (16 for GPU, 32 for CPU)
-    //   - Increases if memory < 60% and performance is good
-    //   - Decreases if memory > 80% or processing slows down
-    const initialBatchSize = isGPU ? 16 : 32;
-    const adaptiveController = new AdaptiveEmbeddingController(initialBatchSize, isGPU);
-
-    this.logger.info('Starting adaptive embedding generation', {
-      totalSymbols,
-      isGPU,
-      initialBatchSize,
-      modelName: embeddingService.modelInfo.name,
-      modelDimensions: embeddingService.modelInfo.dimensions,
-      mode: 'adaptive (zero-config: adjusts batch size and session resets based on runtime conditions)',
-    });
-
-    // Stream from database in chunks with pre-fetching pipeline
-    const CHUNK_SIZE = 1000; // Fetch 1000 symbols at a time
-    let lastProcessedId = 0;
-    let processed = 0;
-    let chunkIndex = 0;
-    let pendingAdjustment: Promise<any> | null = null;
-
-    // Pre-fetch first chunk
-    let currentChunk = await SymbolService.getSymbolsForEmbedding(this.db,
-      repositoryId,
-      CHUNK_SIZE,
-      lastProcessedId
-    );
-
-    while (currentChunk.length > 0) {
-      const symbols = currentChunk;
-
-      // Start pre-fetching NEXT chunk while processing CURRENT chunk
-      let nextChunkPromise: Promise<any[]> | null = null;
-      if (symbols.length === CHUNK_SIZE) {
-        const nextLastProcessedId = Math.max(...symbols.map(s => s.id!));
-        nextChunkPromise = SymbolService.getSymbolsForEmbedding(this.db,
-          repositoryId,
-          CHUNK_SIZE,
-          nextLastProcessedId
-        );
-      }
-
-      this.logger.info(`Processing chunk ${chunkIndex + 1}`, {
-        symbolsInChunk: symbols.length,
-        processed,
-        total: totalSymbols,
-      });
-
-      // Process chunk in adaptive batches
-      let i = 0;
-      while (i < symbols.length) {
-        // Non-blocking adaptive adjustment check (every 10 batches)
-        const batchNum = adaptiveController.getState().totalBatches;
-        if (batchNum % 10 === 0 && !pendingAdjustment) {
-          pendingAdjustment = adaptiveController.adjustBatchSize().then(adjustment => {
-            if (adjustment.changed) {
-              this.logger.info('Adaptive batch size adjustment', {
-                newSize: adjustment.newBatchSize,
-                reason: adjustment.reason,
-              });
-            }
-            pendingAdjustment = null;
-            return adjustment;
-          });
-        }
-
-        // Await pending adjustment every 20 batches to apply changes
-        if (pendingAdjustment && batchNum % 20 === 0) {
-          await pendingAdjustment;
-        }
-
-        // Single-pass batch preparation (optimization: 7 operations → 1)
-        const prepared = adaptiveController.prepareBatch(symbols.slice(i));
-        const { nameTexts, descriptionTexts, decidedBatchSize, finalBatch } = prepared;
-
-        let batchProcessed = false;
-        let retryCount = 0;
-        const maxRetries = 3;
-
-        while (!batchProcessed && retryCount < maxRetries) {
-          try {
-            // Generate combined embeddings (name + description)
-            const batchStart = Date.now();
-            const combinedTexts = nameTexts.map((name, idx) => {
-              const desc = descriptionTexts[idx];
-              return desc ? `${name} ${desc}` : name;
-            });
-            const combinedEmbeddings =
-              await embeddingService.generateBatchEmbeddings(combinedTexts);
-
-            const batchDuration = Date.now() - batchStart;
-
-            // Record processing time for adaptive learning
-            // Pass actual batch size so controller knows if it was text-reduced
-            adaptiveController.recordBatchTime(batchDuration, decidedBatchSize);
-
-            const updates = finalBatch.map((symbol, j) => ({
-              id: symbol.id!,
-              combinedEmbedding: combinedEmbeddings[j],
-              embeddingModel: 'bge-m3',
-            }));
-
-            await EmbeddingUtils.batchUpdateSymbolEmbeddings(this.db,updates);
-
-            // Clear references immediately after write to free memory
-            updates.length = 0;
-            combinedEmbeddings.length = 0;
-
-            processed += finalBatch.length;
-            i += decidedBatchSize;
-            batchProcessed = true;
-
-            // Log progress with adaptive state
-            const controllerState = adaptiveController.getState();
-            this.logger.debug('Batch embeddings generated', {
-              processed,
-              total: totalSymbols,
-              batchSize: decidedBatchSize,
-              progress: `${Math.round((processed / totalSymbols) * 100)}%`,
-              adaptiveBatchSize: controllerState.currentBatchSize,
-              batchDurationMs: batchDuration,
-            });
-
-            // Adaptive session reset based on runtime conditions
-            const resetDecision = await adaptiveController.shouldResetSession();
-            if (resetDecision.shouldReset && processed < totalSymbols) {
-              const percentComplete = Math.round((processed / totalSymbols) * 100);
-              this.logger.info('Adaptive ONNX session reset triggered', {
-                processed,
-                total: totalSymbols,
-                progress: `${percentComplete}%`,
-                reason: resetDecision.reason,
-                gpuMemory: resetDecision.memoryInfo
-                  ? {
-                      used: `${resetDecision.memoryInfo.used}MB`,
-                      total: `${resetDecision.memoryInfo.total}MB`,
-                      utilization: `${resetDecision.memoryInfo.utilizationPercent.toFixed(1)}%`,
-                    }
-                  : undefined,
-              });
-
-              const resetStart = Date.now();
-              await embeddingService.dispose();
-              await embeddingService.initialize();
-              adaptiveController.recordSessionReset();
-
-              const resetDuration = Date.now() - resetStart;
-              this.logger.info('ONNX session reset complete', {
-                durationMs: resetDuration,
-              });
-            }
-          } catch (error) {
-            retryCount++;
-            const errorMessage = (error as Error).message;
-
-            if (
-              errorMessage.includes('Failed to allocate memory') ||
-              errorMessage.includes('FusedMatMul')
-            ) {
-              this.logger.warn('GPU OOM detected - adaptive controller will handle', {
-                error: errorMessage,
-                retry: retryCount,
-                maxRetries,
-              });
-
-              // Force immediate session reset to clear GPU memory
-              await embeddingService.dispose();
-              await embeddingService.initialize();
-              adaptiveController.recordSessionReset();
-
-              // Adaptive controller will reduce batch size on next iteration
-              if (retryCount >= maxRetries) {
-                this.logger.error('Failed after retries, skipping batch', {
-                  batchStart: i,
-                  decidedBatchSize,
-                });
-                i += decidedBatchSize; // Skip this batch
-                batchProcessed = true;
-              }
-            } else {
-              this.logger.error('Failed to generate embeddings for batch', {
-                batchStart: i,
-                batchSize: decidedBatchSize,
-                error: errorMessage,
-              });
-              i += decidedBatchSize; // Skip this batch
-              batchProcessed = true;
-            }
-          }
-        } // end retry while loop
-      } // end batch while loop
-
-      // Fetch next chunk (or wait for pre-fetched chunk)
-      if (nextChunkPromise) {
-        currentChunk = await nextChunkPromise;
-      } else {
-        currentChunk = [];
-      }
-      chunkIndex++;
-    }
-
-    // Log final adaptive statistics
-    const finalState = adaptiveController.getState();
-    this.logger.info('Embedding generation completed', {
-      symbolsProcessed: processed,
-      totalBatches: finalState.totalBatches,
-      finalBatchSize: finalState.currentBatchSize,
-      initialBatchSize: finalState.initialBatchSize,
-      baselineProcessingTime: finalState.baselineProcessingTime
-        ? `${Math.round(finalState.baselineProcessingTime)}ms`
-        : 'N/A',
-      recentAvgProcessingTime: finalState.recentAvgProcessingTime
-        ? `${Math.round(finalState.recentAvgProcessingTime)}ms`
-        : 'N/A',
-    });
-  }
-
-  private findFileForEntity(
-    filePath: string,
-    filesMap: Map<string, File>,
-    normalizedFilesMap: Map<string, File>,
-    allFiles: File[]
-  ): File | null {
-    let matchingFile = filesMap.get(filePath);
-
-    if (matchingFile) {
-      return matchingFile;
-    }
-
-    const normalizedPath = path.normalize(filePath);
-    matchingFile = normalizedFilesMap.get(normalizedPath);
-
-    if (matchingFile) {
-      return matchingFile;
-    }
-
-    const parseResultBasename = path.basename(filePath);
-    const parseResultDir = path.dirname(filePath);
-    const normalizedDir = path.normalize(parseResultDir);
-
-    matchingFile = allFiles.find(f => {
-      const dbPathBasename = path.basename(f.path);
-
-      if (dbPathBasename !== parseResultBasename) {
-        return false;
-      }
-
-      const dbPathDir = path.dirname(f.path);
-      const normalizedDbDir = path.normalize(dbPathDir);
-
-      if (normalizedDir === normalizedDbDir) {
-        return true;
-      }
-
-      const parseResultDirParts = normalizedDir.split(path.sep).filter(Boolean);
-      const dbPathDirParts = normalizedDbDir.split(path.sep).filter(Boolean);
-
-      const minLength = Math.min(parseResultDirParts.length, dbPathDirParts.length);
-
-      if (minLength >= 3) {
-        const parseResultLast3 = parseResultDirParts.slice(-3).join(path.sep);
-        const dbPathLast3 = dbPathDirParts.slice(-3).join(path.sep);
-
-        if (parseResultLast3 === dbPathLast3) {
-          return true;
-        }
-      }
-
-      if (minLength >= 2) {
-        const parseResultLast2 = parseResultDirParts.slice(-2).join(path.sep);
-        const dbPathLast2 = dbPathDirParts.slice(-2).join(path.sep);
-
-        if (parseResultLast2 === dbPathLast2) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-
-    if (!matchingFile) {
-      this.logger.debug('File lookup failed for entity', {
-        requestedPath: filePath,
-        normalizedPath,
-        basename: parseResultBasename,
-        directory: parseResultDir,
-        normalizedDirectory: normalizedDir,
-        availableFilesWithSameBasename: allFiles
-          .filter(f => path.basename(f.path) === parseResultBasename)
-          .map(f => ({
-            path: f.path,
-            normalized: path.normalize(f.path),
-            dir: path.dirname(f.path),
-          })),
-      });
-    }
-
-    return matchingFile || null;
-  }
-
-  private isClosureRouteLinkedDuringPersistence(route: { controller_class?: string | null; action?: string | null }): boolean {
-    return route.controller_class === 'Closure' || route.action === 'Closure';
-  }
-
-  private findClosureSymbolForRoute(
-    route: LaravelRoute,
-    fileSymbols: Symbol[]
-  ): number | null {
-    if (route.action !== 'Closure' || !route.metadata?.closureLineNumber) {
-      return null;
-    }
-
-    const closureSymbol = fileSymbols.find(
-      s => s.start_line === route.metadata.closureLineNumber &&
-           s.symbol_type === SymbolType.FUNCTION &&
-           isClosureSymbolName(s.name)
-    );
-
-    if (closureSymbol) {
-      this.logger.debug('Linked closure route to symbol during persistence', {
-        routePath: route.path,
-        closureSymbolId: closureSymbol.id,
-        closureSymbolName: closureSymbol.name,
-        lineNumber: route.metadata.closureLineNumber,
-      });
-      return closureSymbol.id;
-    }
-
-    this.logger.warn('Closure symbol not found for route', {
-      routePath: route.path,
-      expectedLineNumber: route.metadata.closureLineNumber,
-      availableSymbols: fileSymbols
-        .filter(s => s.symbol_type === SymbolType.FUNCTION)
-        .map(s => ({ name: s.name, line: s.start_line })),
-    });
-
-    return null;
-  }
-
-  private async storeFrameworkEntities(
-    repositoryId: number,
-    symbols: Symbol[],
-    parseResults: Array<ParseResult & { filePath: string }>
-  ): Promise<void> {
-    this.logger.info('Storing framework entities', {
-      repositoryId,
-      parseResultsCount: parseResults.length,
-    });
-
-    const allFiles = await FileService.getFilesByRepository(this.db,repositoryId);
-    const filesMap = new Map(allFiles.map(f => [f.path, f]));
-    const normalizedFilesMap = new Map(allFiles.map(f => [path.normalize(f.path), f]));
-
-    for (const parseResult of parseResults) {
-      if (!parseResult.frameworkEntities || parseResult.frameworkEntities.length === 0) {
-        continue;
-      }
-
-      const fileSymbols = symbols.filter(s => {
-        return parseResult.symbols.some(
-          ps => ps.name === s.name && ps.symbol_type === s.symbol_type
-        );
-      });
-
-      for (const entity of parseResult.frameworkEntities) {
-        let matchingSymbol: Symbol | undefined;
-
-        try {
-          if (this.isLaravelRoute(entity)) {
-            const laravelRoute = entity as LaravelRoute;
-            let normalizedMethod = laravelRoute.method;
-            if (normalizedMethod === 'RESOURCE') {
-              normalizedMethod = 'ANY';
-            }
-
-            const matchingFile = this.findFileForEntity(
-              parseResult.filePath,
-              filesMap,
-              normalizedFilesMap,
-              allFiles
-            );
-
-            if (!matchingFile) {
-              this.logger.error('Cannot persist Laravel route: file not found in database', {
-                routePath: laravelRoute.path,
-                routeMethod: laravelRoute.method,
-                filePath: parseResult.filePath,
-                normalizedFilePath: path.normalize(parseResult.filePath),
-                entityName: entity.name,
-              });
-              continue;
-            }
-
-            const closureSymbolId = this.findClosureSymbolForRoute(
-              laravelRoute,
-              fileSymbols
-            );
-
-            await RouteService.createRoute(this.db,{
-              repo_id: repositoryId,
-              path: laravelRoute.path,
-              method: normalizedMethod,
-              handler_symbol_id: closureSymbolId,
-              framework_type: 'laravel',
-              middleware: laravelRoute.middleware || [],
-              dynamic_segments: [],
-              auth_required: false,
-              name: laravelRoute.routeName,
-              controller_class: laravelRoute.controller,
-              controller_method: laravelRoute.action,
-              action: laravelRoute.action,
-              file_path: laravelRoute.filePath,
-              line_number: laravelRoute.metadata?.closureLineNumber || laravelRoute.metadata?.line || 1,
-            });
-            continue;
-          }
-
-          const symbolTypeMap: Record<string, SymbolType> = {
-            component: SymbolType.COMPONENT,
-            composable: SymbolType.FUNCTION,
-            hook: SymbolType.FUNCTION,
-            route: SymbolType.FUNCTION,
-            store: SymbolType.CLASS,
-          };
-
-          const expectedSymbolType = symbolTypeMap[entity.type];
-
-          matchingSymbol = fileSymbols.find(
-            s =>
-              s.name === entity.name &&
-              (expectedSymbolType ? s.symbol_type === expectedSymbolType : true)
-          );
-
-          if (
-            !matchingSymbol &&
-            entity.type !== 'api_call' &&
-            !this.isGodotScene(entity) &&
-            !this.isGodotNode(entity)
-          ) {
-            const matchingFile = this.findFileForEntity(
-              parseResult.filePath,
-              filesMap,
-              normalizedFilesMap,
-              allFiles
-            );
-
-            if (!matchingFile) {
-              this.logger.warn('Could not find file record for framework entity', {
-                filePath: parseResult.filePath,
-                normalizedFilePath: path.normalize(parseResult.filePath),
-                entityName: entity.name,
-                entityType: entity.type,
-                availableFilesCount: allFiles.length,
-                sampleAvailableFiles: allFiles
-                  .map(f => ({
-                    path: f.path,
-                    normalized: path.normalize(f.path),
-                  }))
-                  .slice(0, 5),
-                parseResultDirectory: path.dirname(parseResult.filePath),
-                parseResultBasename: path.basename(parseResult.filePath),
-              });
-              continue;
-            }
-
-            const symbolTypeMap: Record<string, SymbolType> = {
-              component: SymbolType.COMPONENT,
-              composable: SymbolType.FUNCTION,
-              hook: SymbolType.FUNCTION,
-              route: SymbolType.FUNCTION,
-              store: SymbolType.CLASS,
-            };
-
-            const symbolType = symbolTypeMap[entity.type] || SymbolType.FUNCTION;
-
-            const entityMetadata = entity.metadata as
-              | { line?: number; endLine?: number }
-              | undefined;
-            const entityStartLine = entityMetadata?.line || 1;
-            const entityEndLine = entityMetadata?.endLine || entityStartLine + 5;
-
-            const syntheticSymbol = await SymbolService.createSymbol(this.db,{
-              file_id: matchingFile.id,
-              name: entity.name,
-              symbol_type: symbolType,
-              start_line: entityStartLine,
-              end_line: entityEndLine,
-              is_exported: true,
-              signature: `${entity.type} ${entity.name}`,
-              description: entity.description,
-            });
-
-            matchingSymbol = syntheticSymbol;
-          }
-
-          if (this.isLaravelController(entity)) {
-            // Laravel controllers don't map directly to our component table
-            // Store as metadata for now
-            await FrameworkMetadataService.storeFrameworkMetadata(this.db,{
-              repo_id: repositoryId,
-              framework_type: 'laravel',
-              metadata: {
-                entityType: 'controller',
-                name: entity.name,
-                actions: (entity as LaravelController).actions,
-                middleware: (entity as LaravelController).middleware,
-                resourceController: (entity as LaravelController).resourceController,
-              },
-            });
-          } else if (this.isEloquentModel(entity)) {
-            // Eloquent models could be stored as metadata
-            await FrameworkMetadataService.storeFrameworkMetadata(this.db,{
-              repo_id: repositoryId,
-              framework_type: 'laravel',
-              metadata: {
-                entityType: 'model',
-                name: entity.name,
-                tableName: (entity as EloquentModel).tableName,
-                fillable: (entity as EloquentModel).fillable,
-                relationships: (entity as EloquentModel).relationships,
-              },
-            });
-          } else if (this.isRouteEntity(entity)) {
-            const routeEntity = entity as NextJSRoute | ExpressRoute | FastifyRoute | VueRoute;
-            await RouteService.createRoute(this.db,{
-              repo_id: repositoryId,
-              path: routeEntity.path || '/',
-              method: (routeEntity as any).method || 'GET',
-              handler_symbol_id: matchingSymbol?.id || null,
-              framework_type: (routeEntity as any).framework || 'unknown',
-              middleware: (routeEntity as any).middleware || [],
-              dynamic_segments: (routeEntity as any).dynamicSegments || [],
-              auth_required: false,
-            });
-          } else if (this.isVueComponent(entity)) {
-            const vueEntity = entity as VueComponent;
-
-            if (!matchingSymbol) {
-              const errorMessage = `Vue component symbol not found: ${vueEntity.name}`;
-              this.buildErrors.push({
-                filePath: parseResult.filePath,
-                message: errorMessage,
-              });
-              this.logger.error(errorMessage, {
-                component: vueEntity.name,
-                file: parseResult.filePath,
-                availableSymbols: fileSymbols.map(s => `${s.name} (${s.symbol_type})`),
-              });
-              continue;
-            }
-
-            await ComponentService.createComponent(this.db,{
-              repo_id: repositoryId,
-              symbol_id: matchingSymbol.id,
-              component_type: 'vue' as any,
-              props: vueEntity.props || [],
-              emits: vueEntity.emits || [],
-              slots: vueEntity.slots || [],
-              hooks: vueEntity.composables || [],
-              template_dependencies: vueEntity.template_dependencies || [],
-            });
-          } else if (this.isReactComponent(entity)) {
-            const reactEntity = entity as ReactComponent;
-            await ComponentService.createComponent(this.db,{
-              repo_id: repositoryId,
-              symbol_id: matchingSymbol.id,
-              component_type: 'react' as any,
-              props: reactEntity.props || [],
-              emits: [],
-              slots: [],
-              hooks: reactEntity.hooks || [],
-              template_dependencies: reactEntity.jsxDependencies || [],
-            });
-          } else if (this.isVueComposable(entity)) {
-            const composableEntity = entity as VueComposable;
-            await ComposableService.createComposable(this.db,{
-              repo_id: repositoryId,
-              symbol_id: matchingSymbol.id,
-              composable_type: 'vue' as any,
-              returns: composableEntity.returns || [],
-              dependencies: composableEntity.dependencies || [],
-              reactive_refs: composableEntity.reactive_refs || [],
-              dependency_array: [],
-            });
-          } else if (this.isReactHook(entity)) {
-            const hookEntity = entity as ReactHook;
-            await ComposableService.createComposable(this.db,{
-              repo_id: repositoryId,
-              symbol_id: matchingSymbol.id,
-              composable_type: 'react' as any,
-              returns: hookEntity.returns || [],
-              dependencies: hookEntity.dependencies || [],
-              reactive_refs: [],
-              dependency_array: [],
-            });
-          } else if (this.isJobSystemEntity(entity)) {
-            // Handle background job system entities
-            const jobSystemEntity = entity as any;
-            await JobService.createJobQueue(this.db,{
-              repo_id: repositoryId,
-              name: jobSystemEntity.name,
-              queue_type: jobSystemEntity.jobSystems?.[0] || 'bull', // Use first detected system
-              symbol_id: matchingSymbol.id,
-              config_data: jobSystemEntity.config || {},
-            });
-          } else if (this.isORMSystemEntity(entity)) {
-            // Handle ORM system entities
-            const ormSystemEntity = entity as any;
-            await ORMService.createORMEntity(this.db,{
-              repo_id: repositoryId,
-              symbol_id: matchingSymbol.id,
-              entity_name: ormSystemEntity.name,
-              orm_type: ormSystemEntity.metadata?.orm || ormSystemEntity.name || 'unknown',
-              fields: ormSystemEntity.metadata?.fields || {},
-            });
-          } else if (this.isGodotScene(entity)) {
-            const sceneEntity = entity as any;
-
-            const storedScene = await GodotService.storeGodotScene(this.db,{
-              repo_id: repositoryId,
-              scene_path: sceneEntity.scenePath || parseResult.filePath,
-              scene_name: sceneEntity.name,
-              node_count: sceneEntity.nodes?.length || 0,
-              has_script: sceneEntity.nodes?.some((node: any) => node.script) || false,
-              metadata: {
-                rootNodeType: sceneEntity.rootNode?.nodeType,
-                connections: sceneEntity.connections?.length || 0,
-                resources: sceneEntity.resources?.length || 0,
-              },
-            });
-
-            if (sceneEntity.nodes && Array.isArray(sceneEntity.nodes)) {
-              const nodePathToId = new Map<string, number>();
-              const storedNodeIds = new Map<any, number>();
-
-              // First pass: Store all nodes and build path-to-id mapping
-              for (const node of sceneEntity.nodes) {
-                const storedNode = await GodotService.storeGodotNode(this.db,{
-                  repo_id: repositoryId,
-                  scene_id: storedScene.id,
-                  node_name: node.nodeName || node.name,
-                  node_type: node.nodeType || node.type || 'Node',
-                  script_path: node.script,
-                  properties: node.properties || {},
-                });
-
-                storedNodeIds.set(node, storedNode.id);
-
-                // Build the full path for this node
-                const nodeName = node.nodeName || node.name;
-                const nodePath = node.parentPath ? `${node.parentPath}/${nodeName}` : nodeName;
-                nodePathToId.set(nodePath, storedNode.id);
-
-                this.logger.debug('Stored Godot node with path', {
-                  nodeName,
-                  nodePath,
-                  nodeId: storedNode.id,
-                  scenePath: sceneEntity.scenePath,
-                });
-              }
-
-              // Second pass: Resolve parent relationships using full paths (batched)
-              const parentUpdates: Array<{ nodeId: number; parentId: number }> = [];
-
-              for (const node of sceneEntity.nodes) {
-                if (node.parentPath) {
-                  const nodeId = storedNodeIds.get(node);
-                  if (!nodeId) {
-                    throw new Error(
-                      `Node storage failed but no error thrown for ${node.nodeName || node.name || 'unknown'} in ${sceneEntity.scenePath || parseResult.filePath || 'unknown scene'}`
-                    );
-                  }
-
-                  const parentId = nodePathToId.get(node.parentPath);
-                  if (!parentId) {
-                    this.logger.warn('Parent node not found by path', {
-                      nodeName: node.nodeName || node.name,
-                      parentPath: node.parentPath,
-                      scenePath: sceneEntity.scenePath,
-                      availablePaths: Array.from(nodePathToId.keys()),
-                    });
-                    continue;
-                  }
-
-                  parentUpdates.push({ nodeId, parentId });
-
-                  this.logger.debug('Queued parent link for batch update', {
-                    nodeName: node.nodeName || node.name,
-                    parentPath: node.parentPath,
-                    nodeId,
-                    parentId,
-                  });
-                }
-              }
-
-              if (parentUpdates.length > 0) {
-                const caseStatement = parentUpdates
-                  .map(({ nodeId, parentId }) => `WHEN ${nodeId} THEN ${parentId}`)
-                  .join(' ');
-                const nodeIds = parentUpdates.map(({ nodeId }) => nodeId).join(',');
-
-                await this.db.raw(`
-                  UPDATE godot_nodes
-                  SET parent_node_id = CASE id ${caseStatement} END
-                  WHERE id IN (${nodeIds})
-                `);
-
-                this.logger.debug('Batch updated parent relationships', {
-                  scenePath: sceneEntity.scenePath,
-                  updatedCount: parentUpdates.length,
-                });
-              }
-
-              // Third pass: Create scene instance dependencies (batched file lookups)
-              const nodesWithInstances = sceneEntity.nodes.filter(n => n.instanceScene);
-              if (nodesWithInstances.length > 0) {
-                const currentFile = await FileService.getFileByPath(this.db,
-                  sceneEntity.scenePath || parseResult.filePath
-                );
-                if (!currentFile) {
-                  throw new Error(
-                    `Current scene file not found in database: ${sceneEntity.scenePath || parseResult.filePath}`
-                  );
-                }
-
-                const instancePaths = nodesWithInstances.map((n: any) => n.instanceScene!);
-
-                const BATCH_SIZE = 500;
-                const instanceFiles: any[] = [];
-
-                for (let i = 0; i < instancePaths.length; i += BATCH_SIZE) {
-                  const chunk = instancePaths.slice(i, i + BATCH_SIZE);
-                  const chunkFiles = await FileService.getFilesByPaths(this.db,chunk);
-                  instanceFiles.push(...chunkFiles);
-                }
-
-                const pathToFileMap = new Map(instanceFiles.map(f => [f.path, f]));
-
-                const dependencies = [];
-                for (const node of nodesWithInstances) {
-                  const nodeId = storedNodeIds.get(node);
-                  if (!nodeId) {
-                    throw new Error(
-                      `Node storage failed for ${node.nodeName || node.name || 'unknown'} but no error was thrown`
-                    );
-                  }
-
-                  const instanceFile = pathToFileMap.get(node.instanceScene!);
-                  if (!instanceFile) {
-                    this.logger.warn('Scene instance file not found in database', {
-                      instancePath: node.instanceScene,
-                      nodeName: node.nodeName || node.name,
-                      scenePath: sceneEntity.scenePath,
-                    });
-                    continue;
-                  }
-
-                  dependencies.push({
-                    from_file_id: currentFile.id,
-                    to_file_id: instanceFile.id,
-                    dependency_type: DependencyType.REFERENCES,
-                  });
-
-                  this.logger.debug('Created scene instance dependency', {
-                    fromScene: sceneEntity.scenePath,
-                    toScene: node.instanceScene,
-                    nodeName: node.nodeName || node.name,
-                  });
-                }
-
-                if (dependencies.length > 0) {
-                  await DependencyService.createFileDependencies(this.db,dependencies);
-                }
-              }
-            }
-          } else if (entity.type === 'api_call') {
-            // API calls from Vue components - these will be extracted later by cross-stack builder
-            // API calls will be processed by cross-stack builder
-          }
-        } catch (error) {
-          this.logger.error(
-            `Failed to store ${entity.type} entity '${entity.name}': ${error instanceof Error ? error.message : String(error)}`,
-            {
-              entityType: entity.type,
-              entityName: entity.name,
-              filePath: parseResult.filePath,
-              symbolId: matchingSymbol?.id,
-              repositoryId: repositoryId,
-            }
-          );
-        }
-      }
-    }
-
-    // Build Godot framework relationships after all entities have been stored
-    await this.buildGodotRelationships(repositoryId, parseResults);
-  }
-
-  /**
-   * Build Godot framework relationships after all entities have been stored
-   */
-  private async buildGodotRelationships(
-    repositoryId: number,
-    parseResults: Array<ParseResult & { filePath: string }>
-  ): Promise<void> {
-    try {
-      // Collect all Godot framework entities from parse results
-      const godotEntities: any[] = [];
-
-      for (const parseResult of parseResults) {
-        if (parseResult.frameworkEntities) {
-          const godotFrameworkEntities = parseResult.frameworkEntities.filter(
-            entity =>
-              (entity as any).framework === 'godot' ||
-              this.isGodotScene(entity) ||
-              this.isGodotNode(entity)
-          );
-          godotEntities.push(...godotFrameworkEntities);
-        }
-      }
-
-      if (godotEntities.length === 0) {
-        return;
-      }
-
-      this.logger.info('Building Godot framework relationships', {
-        repositoryId,
-        totalGodotEntities: godotEntities.length,
-        entityTypes: [...new Set(godotEntities.map(e => e.type))],
-      });
-
-      // Retrieve stored Godot entities from database with proper IDs
-      const storedScenes = await GodotService.getGodotScenesByRepository(this.db,repositoryId);
-
-      // Get all nodes from all scenes
-      const storedNodes: any[] = [];
-      for (const scene of storedScenes) {
-        const sceneNodes = await GodotService.getGodotNodesByScene(this.db,scene.id);
-        storedNodes.push(...sceneNodes);
-      }
-
-      // Create dependencies between nodes and their scripts (Second pass - symbols exist now)
-      this.logger.info('Creating node-script dependencies', {
-        totalNodes: storedNodes.length,
-        nodesWithScripts: storedNodes.filter((n: any) => n.script_path).length,
-      });
-
-      for (const node of storedNodes) {
-        if (!node.script_path) continue;
-
-        try {
-          // Find the scene this node belongs to
-          const scene = storedScenes.find((s: any) => s.id === node.scene_id);
-          if (!scene) continue;
-
-          // Get the scene file to find node symbol
-          const sceneFile = await FileService.getFileByPath(this.db,scene.scene_path);
-          if (!sceneFile) {
-            this.logger.warn('Scene file not found', { scenePath: scene.scene_path });
-            continue;
-          }
-
-          // Get all symbols in the scene file
-          const sceneSymbols = await SymbolService.getSymbolsByFile(this.db,sceneFile.id);
-          const nodeSymbol = sceneSymbols.find(s => s.name === node.node_name);
-
-          if (!nodeSymbol) {
-            this.logger.warn('Node symbol not found', {
-              nodeName: node.node_name,
-              scenePath: scene.scene_path,
-              totalSymbols: sceneSymbols.length,
-            });
-            continue;
-          }
-
-          // Get the script file
-          const scriptFile = await FileService.getFileByPath(this.db,node.script_path);
-          if (!scriptFile) {
-            this.logger.warn('Script file not found', { scriptPath: node.script_path });
-            continue;
-          }
-
-          // Get the class symbol in the script
-          const scriptSymbols = await SymbolService.getSymbolsByFile(this.db,scriptFile.id);
-          const scriptClassSymbol = scriptSymbols.find(s => s.symbol_type === 'class');
-
-          if (!scriptClassSymbol) {
-            this.logger.warn('Script class symbol not found', {
-              scriptPath: node.script_path,
-              totalSymbols: scriptSymbols.length,
-            });
-            continue;
-          }
-
-          // Create dependency from node to script class
-          await DependencyService.createDependency(this.db,{
-            from_symbol_id: nodeSymbol.id,
-            to_symbol_id: scriptClassSymbol.id,
-            dependency_type: DependencyType.REFERENCES,
-            line_number: (node.metadata as any)?.line || 1,
-          });
-
-          this.logger.info('Created node-script dependency', {
-            nodeSymbol: nodeSymbol.name,
-            scriptClass: scriptClassSymbol.name,
-            fromId: nodeSymbol.id,
-            toId: scriptClassSymbol.id,
-          });
-        } catch (error) {
-          this.logger.error('Failed to create node-script dependency', {
-            nodeName: node.node_name,
-            scriptPath: node.script_path,
-            error: (error as Error).message,
-          });
-        }
-      }
-
-      // Create GetNode dependencies by extracting them from parseResults
-      // This works for ANY folder structure - node paths come from actual GetNode calls
-      this.logger.info('Creating GetNode node reference dependencies');
-
-      // Collect all GetNode dependencies from parse results
-      const getnodeDeps: Array<{
-        filePath: string;
-        dependency: ParsedDependency;
-      }> = [];
-
-      for (const parseResult of parseResults) {
-        if (parseResult.dependencies) {
-          for (const dep of parseResult.dependencies) {
-            // Look for dependencies with "node:" prefix in to_symbol
-            if (dep.to_symbol && dep.to_symbol.startsWith('node:')) {
-              getnodeDeps.push({
-                filePath: parseResult.filePath,
-                dependency: dep,
-              });
-            }
-          }
-        }
-      }
-
-      this.logger.info('Found GetNode dependencies in parseResults', { count: getnodeDeps.length });
-
-      // Create lookup maps
-      const pathToFileId = new Map<string, number>();
-      const allFiles = await FileService.getFilesByRepository(this.db,repositoryId);
-      for (const file of allFiles) {
-        pathToFileId.set(file.path, file.id);
-      }
-
-      const allSymbols = await SymbolService.getSymbolsByRepository(this.db,repositoryId);
-      const fileIdToSymbols = new Map<number, any[]>();
-      for (const symbol of allSymbols) {
-        const symbols = fileIdToSymbols.get(symbol.file_id) || [];
-        symbols.push(symbol);
-        fileIdToSymbols.set(symbol.file_id, symbols);
-      }
-
-      // Resolve and create each GetNode dependency
-      for (const { filePath, dependency } of getnodeDeps) {
-        try {
-          // Extract node path from "node:HoverPanel" -> "HoverPanel"
-          const fullNodePath = dependency.to_symbol.substring(5); // Remove "node:" prefix
-
-          // Extract the target node name from the path
-          // GetNode paths can be: "HoverPanel", "../CoreSystems/ServiceDiscoveryEngine", "HoverPanel/ButtonContainer/AttackerButton"
-          // Database stores node_name (final component only): "HoverPanel", "ServiceDiscoveryEngine", "AttackerButton"
-          const pathParts = fullNodePath.split('/').filter((p: string) => p && p !== '..' && p !== '.');
-          const targetNodeName = pathParts[pathParts.length - 1];
-
-          if (!targetNodeName) {
-            this.logger.warn('Could not extract node name from path', { fullNodePath });
-            continue;
-          }
-
-          // Get source file and symbol
-          const sourceFileId = pathToFileId.get(filePath);
-          if (!sourceFileId) {
-            this.logger.warn('Source file not found', { filePath });
-            continue;
-          }
-
-          const sourceSymbols = fileIdToSymbols.get(sourceFileId) || [];
-          // dependency.from_symbol may be fully qualified (e.g., "ClassName.MethodName")
-          // Try qualified_name first, then fall back to simple name match
-          const fromSymbol = sourceSymbols.find(s =>
-            s.qualified_name === dependency.from_symbol ||
-            s.name === dependency.from_symbol
-          );
-          if (!fromSymbol) {
-            this.logger.warn('Source symbol not found', {
-              fromSymbol: dependency.from_symbol,
-              filePath,
-              availableSymbols: sourceSymbols.map(s => s.name).join(', '),
-            });
-            continue;
-          }
-
-          // Look up the node in godot_nodes table (works for any project structure)
-          const nodes = await this.db('godot_nodes as gn')
-            .join('godot_scenes as gs', 'gn.scene_id', 'gs.id')
-            .where('gs.repo_id', repositoryId)
-            .where('gn.node_name', targetNodeName)
-            .select('gn.*', 'gs.scene_path');
-
-          if (nodes.length === 0) {
-            this.logger.warn('Node not found in scenes', {
-              fullNodePath,
-              targetNodeName,
-              fromSymbol: fromSymbol.name,
-            });
-            continue;
-          }
-
-          // If multiple nodes with same name, log it (best-effort resolution)
-          if (nodes.length > 1) {
-            this.logger.debug('Multiple nodes with same name found', {
-              targetNodeName,
-              count: nodes.length,
-              scriptPaths: nodes.map((n: any) => n.script_path).filter(Boolean),
-            });
-          }
-
-          const node = nodes[0];
-          if (!node.script_path) {
-            this.logger.warn('Node has no script', {
-              targetNodeName,
-              nodeType: node.node_type,
-              scenePath: node.scene_path,
-            });
-            continue;
-          }
-
-          // Get the script class symbol using pre-built maps
-          const scriptFileId = pathToFileId.get(node.script_path);
-          if (!scriptFileId) {
-            this.logger.warn('Script file not found', { scriptPath: node.script_path });
-            continue;
-          }
-
-          const scriptSymbols = fileIdToSymbols.get(scriptFileId) || [];
-          const scriptClassSymbol = scriptSymbols.find(s => s.symbol_type === 'class');
-
-          if (!scriptClassSymbol) {
-            this.logger.warn('Script class not found', { scriptPath: node.script_path });
-            continue;
-          }
-
-          // Create dependency with resolved symbol IDs
-          await DependencyService.createDependency(this.db,{
-            from_symbol_id: fromSymbol.id,
-            to_symbol_id: scriptClassSymbol.id,
-            dependency_type: dependency.dependency_type,
-            line_number: dependency.line_number,
-            parameter_context: dependency.parameter_context,
-          });
-
-          this.logger.info('Created GetNode dependency', {
-            fromSymbol: fromSymbol.name,
-            fullNodePath,
-            targetNodeName,
-            toScript: scriptClassSymbol.name,
-            fromId: fromSymbol.id,
-            toId: scriptClassSymbol.id,
-          });
-        } catch (error) {
-          this.logger.error('Failed to create GetNode dependency', {
-            nodePath: dependency.to_symbol,
-            error: (error as Error).message,
-          });
-        }
-      }
-    } catch (error) {
-      this.logger.error('Failed to build Godot relationships', {
-        repositoryId,
-        error: (error as Error).message,
-      });
-      // Don't throw - relationship building is optional for overall analysis success
-    }
-  }
-
-  // Type guards for framework entities
-  private isRouteEntity(
-    entity: any
-  ): entity is NextJSRoute | ExpressRoute | FastifyRoute | VueRoute {
-    return (
-      entity.type === 'route' ||
-      entity.type === 'nextjs-page-route' ||
-      entity.type === 'nextjs-api-route' ||
-      entity.type === 'express-route' ||
-      entity.type === 'fastify-route' ||
-      'path' in entity
-    );
-  }
-
-  private isVueComponent(entity: any): entity is VueComponent {
-    // Vue components are identified by type 'component' and being in a .vue file
-    return entity.type === 'component' && entity.filePath && entity.filePath.endsWith('.vue');
-  }
-
-  private isReactComponent(entity: any): entity is ReactComponent {
-    return (
-      entity.type === 'component' &&
-      'componentType' in entity &&
-      'hooks' in entity &&
-      'jsxDependencies' in entity
-    );
-  }
-
-  private isVueComposable(entity: any): entity is VueComposable {
-    return entity.type === 'composable' && 'reactive_refs' in entity;
-  }
-
-  private isReactHook(entity: any): entity is ReactHook {
-    return entity.type === 'hook' && 'returns' in entity && 'dependencies' in entity;
-  }
-
-  // Laravel entity type guards
-  private isLaravelRoute(entity: any): entity is LaravelRoute {
-    return entity.type === 'route' && entity.framework === 'laravel';
-  }
-
-  private isLaravelController(entity: any): entity is LaravelController {
-    return entity.type === 'controller' && entity.framework === 'laravel';
-  }
-
-  private isEloquentModel(entity: any): entity is EloquentModel {
-    return entity.type === 'model' && entity.framework === 'laravel';
-  }
-
-  /**
-   * Extract controller method from Laravel action string
-   * Examples: "App\\Http\\Controllers\\UserController@index" -> "index"
-   *           "UserController@show" -> "show"
-   */
-  private extractControllerMethod(action?: string): string | undefined {
-    if (!action) return undefined;
-
-    const atIndex = action.lastIndexOf('@');
-    if (atIndex === -1) return undefined;
-
-    return action.substring(atIndex + 1);
-  }
-
-  private async linkSymbolHierarchy(repositoryId: number): Promise<void> {
-    this.logger.info('Linking symbol parent-child relationships', { repositoryId });
-
-    const symbols = await SymbolService.getSymbolsByRepository(this.db,repositoryId);
-    const files = await FileService.getFilesByRepository(this.db,repositoryId);
-
-    const symbolsByFile = new Map<number, Symbol[]>();
-    for (const symbol of symbols) {
-      if (!symbolsByFile.has(symbol.file_id)) {
-        symbolsByFile.set(symbol.file_id, []);
-      }
-      symbolsByFile.get(symbol.file_id)!.push(symbol);
-    }
-
-    let linked = 0;
-    const updates: Array<{ id: number; parent_symbol_id: number }> = [];
-
-    for (const [fileId, fileSymbols] of symbolsByFile) {
-      const parentTypes = ['class', 'interface', 'trait'];
-      const childTypes = ['method', 'property'];
-
-      const potentialParents = fileSymbols.filter(s => parentTypes.includes(s.symbol_type));
-      const potentialChildren = fileSymbols.filter(s => childTypes.includes(s.symbol_type));
-
-      for (const child of potentialChildren) {
-        for (const parent of potentialParents) {
-          if (
-            child.start_line >= parent.start_line &&
-            child.end_line <= parent.end_line &&
-            child.id !== parent.id
-          ) {
-            updates.push({ id: child.id, parent_symbol_id: parent.id });
-            linked++;
-            break;
-          }
-        }
-      }
-    }
-
-    for (const update of updates) {
-      await RouteService.updateSymbolParent(this.db,update.id, update.parent_symbol_id);
-    }
-
-    this.logger.info('Symbol hierarchy linkage complete', {
-      total: symbols.length,
-      linked,
-    });
-  }
-
-  private async linkRouteHandlers(repositoryId: number): Promise<void> {
-    this.logger.info('Linking route handlers to symbols', { repositoryId });
-
-    const routes = await RouteService.getRoutesByRepository(this.db,repositoryId);
-    const unlinkedRoutes = routes.filter(
-      route =>
-        route.framework_type === 'laravel' &&
-        !route.handler_symbol_id &&
-        route.controller_class &&
-        route.controller_method
-    );
-
-    if (unlinkedRoutes.length === 0) {
-      this.logger.info('No Laravel routes need handler linkage');
-      return;
-    }
-
-    let linked = 0;
-    let failed = 0;
-
-    for (const route of unlinkedRoutes) {
-      if (this.isClosureRouteLinkedDuringPersistence(route)) {
-        continue;
-      }
-
-      this.logger.debug('Looking for handler method', {
-        repositoryId,
-        controllerClass: route.controller_class,
-        controllerMethod: route.controller_method,
-        routePath: route.path,
-      });
-
-      const handlerSymbol = await RouteService.findMethodInController(this.db,
-        repositoryId,
-        route.controller_class!,
-        route.controller_method!
+      const fullStackGraph = await this.crossStackGraphBuilder.buildFullStackFeatureGraph(
+        repositoryId
       );
 
-      if (handlerSymbol) {
-        this.logger.debug('Found handler symbol', {
-          symbolId: handlerSymbol.id,
-          symbolName: handlerSymbol.name,
-          qualifiedName: handlerSymbol.qualified_name,
-        });
-
-        const symbolExists = await SymbolService.getSymbol(this.db,handlerSymbol.id);
-        if (!symbolExists) {
-          this.logger.error('Handler symbol does not exist in database!', {
-            symbolId: handlerSymbol.id,
-            symbolName: handlerSymbol.name,
-            routeId: route.id,
-            routePath: route.path,
-          });
-          failed++;
-          continue;
-        }
-
-        this.logger.debug('Linking route to symbol', {
-          routeId: route.id,
-          routePath: route.path,
-          symbolId: handlerSymbol.id,
-        });
-
-        await RouteService.updateRouteHandlerSymbolId(this.db,route.id, handlerSymbol.id);
-        linked++;
-      } else {
-        this.logger.warn('Handler symbol not found for route', {
-          routePath: route.path,
-          routeMethod: route.method,
-          controllerClass: route.controller_class,
-          controllerMethod: route.controller_method,
-        });
-        failed++;
-      }
-    }
-
-    this.logger.info('Route handler linkage complete', {
-      total: unlinkedRoutes.length,
-      linked,
-      failed,
-    });
-  }
-
-  // Phase 3 entity type guards
-  private isJobSystemEntity(entity: any): boolean {
-    return entity.type === 'job_system';
-  }
-
-  private isORMSystemEntity(entity: any): boolean {
-    return entity.type === 'orm_system';
-  }
-
-  // Phase 7B: Godot Framework Entity type guards
-  private isGodotScene(entity: any): boolean {
-    return (
-      entity != null &&
-      typeof entity === 'object' &&
-      entity.type === 'godot_scene' &&
-      entity.framework === 'godot'
-    );
-  }
-
-  private isGodotNode(entity: any): boolean {
-    return (
-      entity != null &&
-      typeof entity === 'object' &&
-      entity.type === 'godot_node' &&
-      entity.framework === 'godot'
-    );
-  }
-
-  private createImportsMap(files: File[], parseResults: Array<ParseResult & { filePath: string }>) {
-    const map = new Map();
-
-    for (const file of files) {
-      const parseResult = parseResults.find(r => r.filePath === file.path);
-      if (parseResult) {
-        map.set(file.id, parseResult.imports);
-      }
-    }
-
-    return map;
-  }
-
-  private createExportsMap(files: File[], parseResults: Array<ParseResult & { filePath: string }>) {
-    const map = new Map();
-
-    for (const file of files) {
-      const parseResult = parseResults.find(r => r.filePath === file.path);
-      if (parseResult) {
-        map.set(file.id, parseResult.exports);
-      }
-    }
-
-    return map;
-  }
-
-  private createDependenciesMap(
-    symbols: Symbol[],
-    parseResults: Array<ParseResult & { filePath: string }>,
-    dbFiles: File[]
-  ) {
-    const map = new Map();
-
-    // Create a file-to-symbols map for efficient lookup
-    const fileToSymbolsMap = new Map<string, Symbol[]>();
-
-    // Create a mapping from file_id to file path
-    const fileIdToPathMap = new Map<number, string>();
-    for (const file of dbFiles) {
-      fileIdToPathMap.set(file.id, file.path);
-    }
-
-    for (const symbol of symbols) {
-      const filePath = fileIdToPathMap.get(symbol.file_id);
-      if (filePath) {
-        if (!fileToSymbolsMap.has(filePath)) {
-          fileToSymbolsMap.set(filePath, []);
-        }
-        fileToSymbolsMap.get(filePath)!.push(symbol);
-      }
-    }
-
-    // Process dependencies with file context preserved
-    for (const parseResult of parseResults) {
-      const filePath = parseResult.filePath;
-      const fileSymbols = fileToSymbolsMap.get(filePath) || [];
-
-      const dependencies = parseResult.dependencies.filter(
-        d =>
-          d.from_symbol && d.from_symbol.trim() !== '' && d.to_symbol && d.to_symbol.trim() !== ''
+      await this.crossStackGraphBuilder.storeCrossStackRelationships(
+        fullStackGraph,
+        repositoryId
       );
 
-      for (const dependency of dependencies) {
-        // Extract the method/function name from qualified names (e.g., "Class.Method" -> "Method")
-        // This handles C# qualified names like "CardManager.SetHandPositions" or "Namespace.Class.Method"
-        const extractMethodName = (qualifiedName: string): string => {
-          const parts = qualifiedName.split('.');
-          // For patterns like "Class.<lambda>" or "Method.<local>", take the first meaningful part
-          const lastPart = parts[parts.length - 1];
-          if (lastPart.startsWith('<') && parts.length > 1) {
-            return parts[parts.length - 2];
-          }
-          return lastPart;
-        };
+      // Query database for actual API call counts after all storage operations
+      const apiCallStats: any = await this.db('api_calls as ac')
+        .join('symbols as s', 'ac.caller_symbol_id', 's.id')
+        .join('files as f', 's.file_id', 'f.id')
+        .where('ac.repo_id', repositoryId)
+        .select(
+          this.db.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.vue') as vue_calls"),
+          this.db.raw("COUNT(*) FILTER (WHERE f.path LIKE '%.ts') as ts_calls"),
+          this.db.raw('COUNT(*) as total_calls')
+        )
+        .first();
 
-        const fromMethodName = extractMethodName(dependency.from_symbol);
+      const actualApiCallCount = parseInt(apiCallStats?.total_calls as string) || 0;
+      const vueApiCallCount = parseInt(apiCallStats?.vue_calls as string) || 0;
+      const tsApiCallCount = parseInt(apiCallStats?.ts_calls as string) || 0;
 
-        // Find the specific symbol that contains this dependency call
-        // Must match: name (supporting both simple and qualified), file, and line range
-        const containingSymbol = fileSymbols.find(symbol => {
-          // Direct match (for non-qualified names)
-          if (symbol.name === dependency.from_symbol) {
-            return (
-              dependency.line_number >= symbol.start_line &&
-              dependency.line_number <= symbol.end_line
-            );
-          }
+      // Query for backend API endpoint count
+      const backendEndpointCount = await this.db('routes')
+        .where('repo_id', repositoryId)
+        .where('framework_type', 'laravel')
+        .count('* as count')
+        .first()
+        .then(result => parseInt((result as any)?.count as string) || 0);
 
-          // Qualified name match (for C# and similar languages)
-          if (symbol.name === fromMethodName) {
-            return (
-              dependency.line_number >= symbol.start_line &&
-              dependency.line_number <= symbol.end_line
-            );
-          }
-
-          // Enhanced matching: check if dependency is within symbol line range
-          // This handles cases where the dependency call is inside a method/function
-          // but the from_symbol name doesn't exactly match the containing symbol name
-          if (
-            dependency.line_number >= symbol.start_line &&
-            dependency.line_number <= symbol.end_line
-          ) {
-            // Prioritize methods/functions/properties over classes to avoid creating dependencies from the class
-            if (
-              symbol.symbol_type === SymbolType.METHOD ||
-              symbol.symbol_type === SymbolType.FUNCTION ||
-              symbol.symbol_type === SymbolType.PROPERTY
-            ) {
-              return true;
-            }
-
-            // Only match class if no method/function/property contains this line
-            if (symbol.symbol_type === SymbolType.CLASS) {
-              const hasContainingMethod = fileSymbols.some(
-                s =>
-                  (s.symbol_type === SymbolType.METHOD ||
-                    s.symbol_type === SymbolType.FUNCTION ||
-                    s.symbol_type === SymbolType.PROPERTY) &&
-                  dependency.line_number >= s.start_line &&
-                  dependency.line_number <= s.end_line
-              );
-              if (!hasContainingMethod) {
-                return true;
-              }
-              return false;
-            }
-
-            // Fallback: if no method/function/property/class contains this line,
-            // accept any symbol that contains it
-            const hasMethodOrFunction = fileSymbols.some(
-              s =>
-                (s.symbol_type === SymbolType.METHOD ||
-                  s.symbol_type === SymbolType.FUNCTION ||
-                  s.symbol_type === SymbolType.PROPERTY ||
-                  s.symbol_type === SymbolType.CLASS) &&
-                dependency.line_number >= s.start_line &&
-                dependency.line_number <= s.end_line
-            );
-
-            if (!hasMethodOrFunction) {
-              return true;
-            }
-          }
-
-          return false;
-        });
-
-        if (containingSymbol) {
-          const existingDeps = map.get(containingSymbol.id) || [];
-          existingDeps.push(dependency);
-          map.set(containingSymbol.id, existingDeps);
-        }
-      }
-    }
-
-    return map;
-  }
-
-  private shouldSkipDirectory(dirName: string, options: BuildOptions): boolean {
-    const skipDirs = [
-      'node_modules',
-      '.git',
-      '.svn',
-      '.hg',
-      'dist',
-      'build',
-      'coverage',
-      '.nyc_output',
-    ];
-
-    if (skipDirs.includes(dirName)) {
-      if (dirName === 'node_modules' && options.includeNodeModules) {
-        return false;
-      }
-      return true;
-    }
-
-    return dirName.startsWith('.');
-  }
-
-  private shouldIncludeFile(
-    filePath: string,
-    relativePath: string,
-    options: BuildOptions
-  ): boolean {
-    const ext = path.extname(filePath);
-
-    // Use provided extensions if specified, otherwise fall back to defaults
-    const allowedExtensions = options.fileExtensions || [
-      '.js',
-      '.jsx',
-      '.ts',
-      '.tsx',
-      '.mjs',
-      '.cjs',
-      '.vue',
-      '.php',
-      '.cs',
-    ];
-
-    if (!allowedExtensions.includes(ext)) {
-      return false;
-    }
-
-    if (!options.includeTestFiles && this.isTestFile(relativePath)) {
-      return false;
-    }
-
-    this.logger.info('File should be included', { filePath });
-    return true;
-  }
-
-  private isTestFile(relativePath: string): boolean {
-    const fileName = path.basename(relativePath).toLowerCase();
-
-    // Check filename patterns first
-    if (
-      fileName.includes('.test.') ||
-      fileName.includes('.spec.') ||
-      fileName.endsWith('.test') ||
-      fileName.endsWith('.spec')
-    ) {
-      return true;
-    }
-
-    // Check directory patterns within the project (relative path only)
-    const normalizedPath = relativePath.replace(/\\/g, '/');
-    const pathSegments = normalizedPath.split('/');
-
-    // Look for test directories in the project structure
-    return pathSegments.some(
-      segment =>
-        segment === '__tests__' ||
-        segment === 'test' ||
-        segment === 'tests' ||
-        segment === 'spec' ||
-        segment === 'specs'
-    );
-  }
-
-  private isGeneratedFile(filePath: string): boolean {
-    const fileName = path.basename(filePath).toLowerCase();
-    return (
-      fileName.includes('.generated.') ||
-      fileName.includes('.gen.') ||
-      filePath.includes('/generated/') ||
-      filePath.includes('/.next/') ||
-      filePath.includes('/dist/') ||
-      filePath.includes('/build/')
-    );
-  }
-
-  private detectLanguageFromPath(filePath: string): string {
-    const ext = path.extname(filePath);
-
-    switch (ext) {
-      case '.js':
-      case '.jsx':
-      case '.mjs':
-      case '.cjs':
-        return 'javascript';
-      case '.ts':
-      case '.tsx':
-        return 'typescript';
-      case '.vue':
-        return 'vue';
-      case '.php':
-        return 'php';
-      case '.cs':
-        return 'csharp';
-      case '.tscn':
-        return 'godot_scene';
-      case '.godot':
-        return 'godot';
-      default:
-        return 'unknown';
-    }
-  }
-
-  private async detectPrimaryLanguage(repositoryPath: string): Promise<string> {
-    const files = await this.discoverFiles(repositoryPath, {
-      fileExtensions: [
-        '.js',
-        '.ts',
-        '.jsx',
-        '.tsx',
-        '.mjs',
-        '.cjs',
-        '.php',
-        '.vue',
-        '.cs',
-        '.tscn',
-        '.godot',
-        '.py',
-        '.rb',
-        '.go',
-        '.java',
-        '.cpp',
-        '.c',
-        '.h',
-      ],
-      includeTestFiles: false,
-    });
-
-    if (files.length === 0) {
-      return 'unknown';
-    }
-
-    const languageCounts = new Map<string, number>();
-
-    for (const file of files) {
-      const language = this.detectLanguageFromPath(file.path);
-
-      if (language && language !== 'unknown') {
-        languageCounts.set(language, (languageCounts.get(language) || 0) + 1);
-      }
-    }
-
-    if (languageCounts.size === 0) {
-      return 'unknown';
-    }
-
-    const sortedLanguages = Array.from(languageCounts.entries()).sort((a, b) => b[1] - a[1]);
-
-    const primaryLanguage = sortedLanguages[0][0];
-    const primaryCount = sortedLanguages[0][1];
-    const totalFiles = files.length;
-    const percentage = ((primaryCount / totalFiles) * 100).toFixed(1);
-
-    this.logger.info('Detected primary language', {
-      language: primaryLanguage,
-      fileCount: primaryCount,
-      totalFiles,
-      percentage: `${percentage}%`,
-      allLanguages: Object.fromEntries(sortedLanguages),
-    });
-
-    return primaryLanguage;
-  }
-
-  private async detectFrameworks(repositoryPath: string): Promise<string[]> {
-    const frameworks: string[] = [];
-
-    // Check for JavaScript/Node.js frameworks
-    try {
-      const packageJsonPath = path.join(repositoryPath, 'package.json');
-      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-
-      const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-
-      if (deps.vue || deps['@vue/cli-service']) frameworks.push('vue');
-      if (deps.react) frameworks.push('react');
-      if (deps.next) frameworks.push('nextjs');
-      if (deps.nuxt) frameworks.push('nuxt');
-      if (deps.express) frameworks.push('express');
-      if (deps.fastify) frameworks.push('fastify');
-    } catch {
-      // Ignore errors
-    }
-
-    // Check for PHP/Laravel frameworks
-    try {
-      const composerJsonPath = path.join(repositoryPath, 'composer.json');
-      const composerJson = JSON.parse(await fs.readFile(composerJsonPath, 'utf-8'));
-
-      const deps = { ...composerJson.require, ...composerJson['require-dev'] };
-
-      if (deps['laravel/framework']) frameworks.push('laravel');
-      if (deps['symfony/framework-bundle']) frameworks.push('symfony');
-      if (deps['codeigniter4/framework']) frameworks.push('codeigniter');
-    } catch {
-      // Ignore errors - composer.json might not exist for non-PHP projects
-    }
-
-    // Check for Godot framework
-    try {
-      const projectGodotPath = path.join(repositoryPath, 'project.godot');
-      await fs.access(projectGodotPath);
-      frameworks.push('godot');
-    } catch {
-      // Ignore errors - project.godot might not exist for non-Godot projects
-    }
-
-    return frameworks;
-  }
-
-  /// <summary>
-  /// Build lightweight graph statistics from database for summary reporting
-  /// Extracts duplicated statistics gathering logic
-  /// </summary>
-  private async buildGraphStatistics(
-    repository: Repository,
-    repositoryPath: string
-  ): Promise<{ fileGraph: FileGraphData; symbolGraph: SymbolGraphData }> {
-    const dbFiles = await FileService.getFilesByRepository(this.db,repository.id);
-    const symbols = await SymbolService.getSymbolsByRepository(this.db,repository.id);
-    const fileDependencyCount = await DependencyService.countFileDependenciesByRepository(this.db,
-      repository.id
-    );
-    const symbolDependencyCount = await DependencyService.countSymbolDependenciesByRepository(this.db,
-      repository.id
-    );
-
-    const fileGraph = {
-      nodes: dbFiles.map(f => ({
-        id: f.id,
-        path: f.path,
-        relativePath: path.relative(repositoryPath, f.path),
-        language: f.language,
-        isTest: f.is_test,
-        isGenerated: f.is_generated,
-      })),
-      edges: Array(fileDependencyCount).fill(null),
-    };
-
-    const symbolGraph = {
-      nodes: symbols.map(s => ({
-        id: s.id,
-        name: s.name,
-        type: s.symbol_type,
-        fileId: s.file_id,
-        startLine: s.start_line || 0,
-        endLine: s.end_line || 0,
-        isExported: s.is_exported,
-        visibility: s.visibility,
-        signature: s.signature,
-      })),
-      edges: Array(symbolDependencyCount).fill(null),
-    };
-
-    return { fileGraph, symbolGraph };
-  }
-
-  private async getGitHash(repoPath: string): Promise<string | null> {
-    try {
-      const hash = execSync('git rev-parse HEAD', {
-        cwd: repoPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 5000,
-      }).trim();
-
-      if (!hash || hash.length !== 40 || !/^[0-9a-f]{40}$/i.test(hash)) {
-        this.logger.error('Invalid git hash format', {
-          hash: hash ? hash.substring(0, 8) : '(empty)',
-          length: hash?.length ?? 0,
-          repoPath,
-        });
-        return null;
+      // Update graph metadata with actual database counts
+      if (fullStackGraph.apiCallGraph?.metadata) {
+        fullStackGraph.apiCallGraph.metadata.apiCalls = actualApiCallCount;
+        fullStackGraph.apiCallGraph.metadata.vueApiCalls = vueApiCallCount;
+        fullStackGraph.apiCallGraph.metadata.typescriptApiCalls = tsApiCallCount;
+        fullStackGraph.apiCallGraph.metadata.backendEndpoints = backendEndpointCount;
       }
 
-      this.logger.info('Retrieved git hash', { hash: hash.substring(0, 8), repoPath });
-      return hash;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error('Failed to retrieve git hash', {
-        error: errorMessage,
-        repoPath,
-        isTimeout: errorMessage.includes('ETIMEDOUT'),
-        isNotGitRepo: errorMessage.includes('not a git repository'),
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Read file with encoding recovery support
-   */
-  private async readFileWithEncodingRecovery(
-    filePath: string,
-    _options: BuildOptions
-  ): Promise<string | null> {
-    try {
-      // First attempt: Standard UTF-8 read
-      const content = await fs.readFile(filePath, 'utf-8');
-
-      // Quick encoding issue check
-      if (!content.includes('\uFFFD')) {
-        return content;
-      }
-
-      // Encoding recovery needed
-      this.logger.info('Attempting encoding recovery', { filePath });
-      const buffer = await fs.readFile(filePath);
-      const recovered = await EncodingConverter.convertToUtf8(buffer);
-      return recovered;
-    } catch (error) {
-      this.logger.warn('File reading failed', { filePath, error: (error as Error).message });
-      return null;
-    }
-  }
-
-  /**
-   * Process file with unified size policy
-   */
-  private async processFileWithSizePolicy(
-    file: { path: string; relativePath?: string },
-    content: string,
-    parser: any,
-    options: BuildOptions
-  ): Promise<ParseResult | null> {
-    // Create file size manager with policy
-    const fileSizePolicy = options.fileSizePolicy || this.createDefaultFileSizePolicy(options);
-    const sizeManager = new FileSizeManager(fileSizePolicy);
-    const action = sizeManager.getRecommendedAction(content.length);
-
-    switch (action) {
-      case 'reject':
-        this.logger.warn('File rejected due to size policy', {
-          path: file.path,
-          size: content.length,
-        });
-        return null;
-
-      case 'skip':
-        this.logger.info('File skipped due to size policy', {
-          path: file.path,
-          size: content.length,
-        });
-        return null;
-
-      case 'chunk':
-        // Use chunked parsing
-        const parseOptions = {
-          includePrivateSymbols: true,
-          includeTestFiles: options.includeTestFiles,
-          enableChunking: true,
-          enableEncodingRecovery: true,
-          chunkSize: fileSizePolicy.chunkingThreshold,
-          chunkOverlapLines: options.chunkOverlapLines || 100,
-        };
-        return await parser.parseFile(file.path, content, parseOptions);
-
-      case 'truncate':
-        // This case should no longer occur since truncation is replaced with chunking
-        this.logger.warn('Truncate action requested but using chunking instead', {
-          path: file.path,
-          size: content.length,
-        });
-        // Fall through to chunked parsing
-        const fallbackParseOptions = {
-          includePrivateSymbols: true,
-          includeTestFiles: options.includeTestFiles,
-          enableChunking: true,
-          enableEncodingRecovery: true,
-          chunkSize: fileSizePolicy.truncationFallback,
-          chunkOverlapLines: options.chunkOverlapLines || 100,
-        };
-        return await parser.parseFile(file.path, content, fallbackParseOptions);
-
-      case 'warn':
-        this.logger.warn('Processing large file', {
-          path: file.path,
-          size: content.length,
-        });
-      // Fall through to normal processing
-
-      case 'process':
-      default:
-        // All files use enhanced parsing
-        return await parser.parseFile(file.path, content, {
-          includePrivateSymbols: true,
-          includeTestFiles: options.includeTestFiles,
-          enableChunking: true,
-          enableEncodingRecovery: true,
-          chunkOverlapLines: options.chunkOverlapLines || 100,
-        });
-    }
-  }
-
-  /**
-   * Process file with unified size policy using MultiParser
-   */
-  private async processFileWithSizePolicyMultiParser(
-    file: { path: string; relativePath?: string },
-    content: string,
-    multiParser: MultiParser,
-    options: BuildOptions
-  ): Promise<ParseResult | null> {
-    // Create file size manager with policy
-    const fileSizePolicy = options.fileSizePolicy || this.createDefaultFileSizePolicy(options);
-    const sizeManager = new FileSizeManager(fileSizePolicy);
-    const action = sizeManager.getRecommendedAction(content.length);
-
-    switch (action) {
-      case 'reject':
-        this.logger.warn('File rejected due to size policy', {
-          path: file.path,
-          size: content.length,
-        });
-        return null;
-
-      case 'skip':
-        this.logger.info('File skipped due to size policy', {
-          path: file.path,
-          size: content.length,
-        });
-        return null;
-
-      case 'chunk':
-      case 'truncate':
-      case 'warn':
-      case 'process':
-      default:
-        // Use MultiParser for comprehensive parsing including Phase 3 features
-        const parseOptions = {
-          includePrivateSymbols: true,
-          includeTestFiles: options.includeTestFiles,
-          enableChunking: action === 'chunk',
-          enableEncodingRecovery: true,
-          chunkSize: action === 'chunk' ? fileSizePolicy.chunkingThreshold : undefined,
-          chunkOverlapLines: options.chunkOverlapLines || 100,
-          eloquentRelationshipRegistry: options.eloquentRelationshipRegistry,
-        };
-
-        const multiResult = await multiParser.parseFile(content, file.path, parseOptions);
-
-        // Convert MultiParseResult to ParseResult
-        return {
-          symbols: multiResult.symbols,
-          dependencies: multiResult.dependencies,
-          imports: multiResult.imports,
-          exports: multiResult.exports,
-          errors: multiResult.errors,
-          frameworkEntities: multiResult.frameworkEntities || [],
-          success: multiResult.errors.length === 0,
-        };
-    }
-  }
-
-  /**
-   * Create default file size policy
-   */
-  private createDefaultFileSizePolicy(_options: BuildOptions): FileSizePolicy {
-    return { ...DEFAULT_POLICY };
-  }
-
-  private validateOptions(options: BuildOptions, repository?: Repository): Required<BuildOptions> {
-    return {
-      includeTestFiles: options.includeTestFiles ?? true,
-      includeNodeModules: options.includeNodeModules ?? false,
-      maxFiles: options.maxFiles ?? 10000,
-      fileExtensions: options.fileExtensions ?? [
-        '.js',
-        '.jsx',
-        '.ts',
-        '.tsx',
-        '.mjs',
-        '.cjs',
-        '.vue',
-        '.php',
-        '.cs',
-      ],
-
-      fileSizePolicy: options.fileSizePolicy || this.createDefaultFileSizePolicy(options),
-      chunkOverlapLines: options.chunkOverlapLines ?? 100,
-      encodingFallback: options.encodingFallback ?? 'iso-8859-1',
-      compassignorePath: options.compassignorePath,
-      enableParallelParsing: options.enableParallelParsing ?? true,
-      maxConcurrency: options.maxConcurrency ?? 10,
-      skipEmbeddings: options.skipEmbeddings ?? false,
-      forceFullAnalysis: options.forceFullAnalysis ?? false,
-
-      // Phase 5 - Cross-stack analysis options
-      enableCrossStackAnalysis: this.shouldEnableCrossStackAnalysis(options, repository),
-      detectFrameworks: options.detectFrameworks ?? false,
-      verbose: options.verbose ?? false,
-
-      eloquentRelationshipRegistry: options.eloquentRelationshipRegistry,
-    };
-  }
-
-  /**
-   * Determine if cross-stack analysis should be enabled based on detected frameworks
-   */
-  private shouldEnableCrossStackAnalysis(options: BuildOptions, repository?: Repository): boolean {
-    // Explicit option takes precedence
-    if (options.enableCrossStackAnalysis !== undefined) {
-      return options.enableCrossStackAnalysis;
-    }
-
-    // Auto-enable for Vue + Laravel projects
-    if (
-      repository?.framework_stack &&
-      Array.isArray(repository.framework_stack) &&
-      repository.framework_stack.includes('vue') &&
-      repository.framework_stack.includes('laravel')
-    ) {
-      this.logger.info('Auto-enabling cross-stack analysis for Vue + Laravel project', {
-        repositoryId: repository.id,
-        frameworks: repository.framework_stack,
-      });
-      return true;
-    }
-
-    // Default: disabled
-    return false;
-  }
-
-  /**
-   * Create file dependencies for unresolved external calls (e.g., Laravel model calls)
-   */
-  private createExternalCallFileDependencies(
-    parseResults: Array<ParseResult & { filePath: string }>,
-    dbFiles: File[],
-    symbols: Symbol[]
-  ): CreateFileDependency[] {
-    const fileDependencies: CreateFileDependency[] = [];
-
-    // Create lookup maps for efficiency
-    const pathToFileId = new Map<string, number>();
-    const symbolIdToFileId = new Map<number, number>();
-
-    // Populate file mappings
-    for (const file of dbFiles) {
-      pathToFileId.set(file.path, file.id);
-    }
-
-    // Populate symbol to file mapping
-    for (const symbol of symbols) {
-      symbolIdToFileId.set(symbol.id, symbol.file_id);
-    }
-
-    // Track existing symbol dependencies to avoid duplicates
-    const existingSymbolDeps = new Set<string>();
-    // Note: We'll populate this by checking if symbols were successfully resolved
-
-    for (const parseResult of parseResults) {
-      const sourceFileId = pathToFileId.get(parseResult.filePath);
-      if (!sourceFileId) continue;
-
-      // Check each dependency to see if it was resolved to a symbol dependency
-      for (const dependency of parseResult.dependencies) {
-        // Handle both 'calls' and 'imports' dependencies for external calls
-        if (dependency.dependency_type !== 'calls' && dependency.dependency_type !== 'imports') {
-          continue;
-        }
-
-        // Check if this is likely an external call
-        // For calls: contains :: for static methods (User::all, User::create)
-        // For imports: Laravel facades and framework calls
-        const isExternalCall =
-          dependency.to_symbol.includes('::') || dependency.dependency_type === 'imports';
-
-        if (isExternalCall) {
-          // Create a file dependency representing this external call
-          // The "target" will be the same file for now, representing the external call
-          fileDependencies.push({
-            from_file_id: sourceFileId,
-            to_file_id: sourceFileId, // External calls don't have a target file in our codebase
-            dependency_type: dependency.dependency_type,
-            line_number: dependency.line_number,
-          });
-        }
-      }
-    }
-
-    this.logger.info('Created external call file dependencies', {
-      count: fileDependencies.length,
-    });
-
-    return fileDependencies;
-  }
-
-  /**
-   * Create file dependencies for external imports (e.g., Laravel facades, npm packages)
-   */
-  private createExternalImportFileDependencies(
-    parseResults: Array<ParseResult & { filePath: string }>,
-    dbFiles: File[]
-  ): CreateFileDependency[] {
-    const fileDependencies: CreateFileDependency[] = [];
-
-    // Create lookup map for efficiency
-    const pathToFileId = new Map<string, number>();
-    for (const file of dbFiles) {
-      pathToFileId.set(file.path, file.id);
-    }
-
-    for (const parseResult of parseResults) {
-      const sourceFileId = pathToFileId.get(parseResult.filePath);
-      if (!sourceFileId) continue;
-
-      // Process imports to identify external packages
-      for (const importInfo of parseResult.imports) {
-        // Check if this is an external import (not relative/absolute path to local file)
-        const isExternalImport =
-          !importInfo.source.startsWith('./') &&
-          !importInfo.source.startsWith('../') &&
-          !importInfo.source.startsWith('/') &&
-          !importInfo.source.startsWith('src/') &&
-          !importInfo.source.startsWith('@/');
-
-        if (isExternalImport) {
-          // Create a file dependency representing this external import
-          // Since we can't reference a real external file, we create a self-reference
-          // The presence of this dependency with dependency_type 'imports' indicates external usage
-          fileDependencies.push({
-            from_file_id: sourceFileId,
-            to_file_id: sourceFileId, // Self-reference to indicate external import
-            dependency_type: DependencyType.IMPORTS,
-            line_number: importInfo.line_number || 1,
-          });
-        }
-      }
-    }
-
-    this.logger.info('Created external import file dependencies', {
-      count: fileDependencies.length,
-    });
-
-    return fileDependencies;
-  }
-
-  /**
-   * Create file dependencies from cross-file symbol dependencies
-   */
-  private createCrossFileFileDependencies(
-    symbolDependencies: any[],
-    symbols: Symbol[],
-    dbFiles: File[]
-  ): CreateFileDependency[] {
-    const fileDependencies: CreateFileDependency[] = [];
-
-    // Create lookup maps for efficiency
-    const symbolIdToFileId = new Map<number, number>();
-    const fileIdToPath = new Map<number, string>();
-    const pathToFileId = new Map<string, number>();
-
-    // Populate symbol to file mapping
-    for (const symbol of symbols) {
-      symbolIdToFileId.set(symbol.id, symbol.file_id);
-    }
-
-    // Populate file mappings
-    for (const file of dbFiles) {
-      fileIdToPath.set(file.id, file.path);
-      pathToFileId.set(file.path, file.id);
-    }
-
-    // Process each symbol dependency
-    for (const symbolDep of symbolDependencies) {
-      const fromFileId = symbolIdToFileId.get(symbolDep.from_symbol_id);
-      const toFileId = symbolIdToFileId.get(symbolDep.to_symbol_id);
-
-      // Only create file dependency if symbols are in different files
-      if (fromFileId && toFileId && fromFileId !== toFileId) {
-        // Check if this file dependency already exists in our list
-        const existingDep = fileDependencies.find(
-          fd =>
-            fd.from_file_id === fromFileId &&
-            fd.to_file_id === toFileId &&
-            fd.dependency_type === symbolDep.dependency_type
-        );
-
-        if (!existingDep) {
-          fileDependencies.push({
-            from_file_id: fromFileId,
-            to_file_id: toFileId,
-            dependency_type: symbolDep.dependency_type,
-            line_number: symbolDep.line_number,
-          });
-        }
-      }
-    }
-
-    return fileDependencies;
-  }
-
-  private async persistVirtualFrameworkSymbols(
-    repository: Repository,
-    symbolGraph: SymbolGraphData,
-    existingSymbols: Symbol[]
-  ): Promise<void> {
-    const virtualNodes = symbolGraph.nodes.filter(node => node.fileId < 0);
-
-    if (virtualNodes.length === 0) {
-      return;
-    }
-
-    this.logger.info('Persisting virtual framework symbols', { count: virtualNodes.length });
-
-    const symbolsByFramework = new Map<string, typeof virtualNodes>();
-
-    for (const node of virtualNodes) {
-      const existingSymbol = existingSymbols.find(s => s.id === node.id);
-      const framework = existingSymbol?.framework || 'unknown';
-
-      if (!symbolsByFramework.has(framework)) {
-        symbolsByFramework.set(framework, []);
-      }
-      symbolsByFramework.get(framework)!.push(node);
-    }
-
-    const idMapping = new Map<number, number>();
-
-    for (const [framework, nodes] of symbolsByFramework) {
-      const frameworkFile = await FileService.createFile(this.db,{
-        repo_id: repository.id,
-        path: `[Framework:${framework}]`,
-        language: framework.toLowerCase(),
-        size: 0,
-        is_generated: true,
-      });
-
-      const symbolsToCreate: CreateSymbol[] = nodes.map(node => {
-        const createSymbol: CreateSymbol = {
-          file_id: frameworkFile.id,
+      // Convert CrossStackGraphBuilder types to GraphBuilder types
+      const convertGraph = (graph: any) => ({
+        nodes: (graph?.nodes || []).map((node: any) => ({
+          id: node.id,
+          type: node.type,
           name: node.name,
-          symbol_type: node.type,
-          start_line: node.startLine,
-          end_line: node.endLine,
-          is_exported: node.isExported,
-          signature: node.signature,
-        };
-
-        if (node.visibility) {
-          createSymbol.visibility = node.visibility as any;
-        }
-
-        return createSymbol;
+          filePath: node.filePath,
+          framework: node.framework,
+          symbolId: node.metadata?.symbolId,
+        })),
+        edges: (graph?.edges || []).map((edge: any) => ({
+          id: edge.id,
+          from: edge.from,
+          to: edge.to,
+          type:
+            edge.relationshipType === 'api_call'
+              ? 'api_call'
+              : edge.relationshipType === 'shares_schema'
+                ? 'shares_schema'
+                : 'frontend_backend',
+          metadata: edge.metadata,
+        })),
+        metadata: graph?.metadata || {
+          vueComponents: 0,
+          laravelRoutes: 0,
+          apiCalls: actualApiCallCount,
+          vueApiCalls: vueApiCallCount,
+          typescriptApiCalls: tsApiCallCount,
+          backendEndpoints: backendEndpointCount,
+          dataContracts: 0,
+        },
       });
 
-      const createdSymbols = await SymbolService.createSymbols(this.db,symbolsToCreate);
+      const crossStackGraph: CrossStackGraphData = {
+        apiCallGraph: convertGraph(fullStackGraph.apiCallGraph),
+        dataContractGraph: convertGraph(fullStackGraph.dataContractGraph),
+        features: (fullStackGraph.features || []).map((feature: any) => ({
+          id: feature.id,
+          name: feature.name,
+          description: `Vue-Laravel feature: ${feature.name}`,
+          components: [
+            ...(feature.vueComponents || []).map((c: any) => ({
+              id: c.id,
+              type: c.type,
+              name: c.name,
+              filePath: c.filePath,
+              framework: c.framework,
+              symbolId: c.metadata?.symbolId,
+            })),
+            ...(feature.laravelRoutes || []).map((r: any) => ({
+              id: r.id,
+              type: r.type,
+              name: r.name,
+              filePath: r.filePath,
+              framework: r.framework,
+              symbolId: r.metadata?.symbolId,
+            })),
+          ],
+          apiCalls: [],
+          dataContracts: [],
+        })),
+        metadata: {
+          totalApiCalls: actualApiCallCount,
+          totalDataContracts: fullStackGraph.dataContractGraph?.metadata?.dataContracts || 0,
+          analysisTimestamp: new Date(),
+        },
+      };
 
-      for (let i = 0; i < nodes.length; i++) {
-        idMapping.set(nodes[i].id, createdSymbols[i].id);
-        const originalNode = symbolGraph.nodes.find(n => n.id === nodes[i].id);
-        if (originalNode) {
-          originalNode.id = createdSymbols[i].id;
-          originalNode.fileId = createdSymbols[i].file_id;
-        }
-      }
+      this.logger.info('Cross-stack analysis completed', {
+        apiCalls: actualApiCallCount,
+        vueApiCalls: vueApiCallCount,
+        tsApiCalls: tsApiCallCount,
+        backendEndpoints: backendEndpointCount,
+        features: crossStackGraph.features?.length || 0,
+      });
+
+      return crossStackGraph;
+    } catch (error) {
+      this.logger.error('Cross-stack analysis failed', {
+        repositoryId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
-
-    for (const edge of symbolGraph.edges) {
-      if (idMapping.has(edge.from)) {
-        edge.from = idMapping.get(edge.from)!;
-      }
-      if (idMapping.has(edge.to)) {
-        edge.to = idMapping.get(edge.to)!;
-      }
-    }
-
-    this.logger.info('Virtual framework symbols persisted', { count: idMapping.size });
   }
 }
