@@ -2,12 +2,86 @@
 """
 Claude Code Hook: Tool Validator
 Enforces preferred tool usage and blocks prohibited commands.
+Prevents scanning of expensive directories (node_modules, .git, etc.) to avoid token waste.
 """
 
 import json
 import sys
 import re
 import shlex
+
+# Blocked directory patterns that waste tokens (inspired by Reddit post)
+# These directories should never be scanned by search tools
+# Organized by category for maintainability
+BLOCKED_DIRECTORIES = [
+    # General dependencies & package managers
+    'node_modules',
+    'vendor',              # PHP/Composer, Go modules
+    'venv',
+    '.venv',
+    'packages',            # Legacy NuGet packages
+
+    # Version control & environment
+    '.git/',
+    '.git',
+    '.env',
+    '.envrc',
+
+    # Python caches
+    '__pycache__',
+    '.pytest_cache',
+    '.tox',
+    '.mypy_cache',
+    '.ruff_cache',
+
+    # Build outputs (general)
+    'dist/',
+    'dist',
+    'build/',
+    'build',
+    'builds/',             # Godot export builds
+    'out/',
+    'output/',
+    'target',              # Rust, Java builds
+    'coverage',
+
+    # JavaScript/TypeScript frameworks
+    '.next',               # Next.js
+    '.nuxt',               # Nuxt 2
+    '.output',             # Nuxt 3
+    '.cache',              # Various build caches
+    '.parcel-cache',
+    '.turbo',
+    '.docusaurus',
+    '.vitepress',
+
+    # .NET / C# specific
+    'bin/',
+    'bin',
+    'obj/',
+    'obj',
+    '.vs/',                # Visual Studio cache
+    '.vscode/',            # VSCode settings (optional, can be useful sometimes)
+    'TestResults/',
+    '.mono/',              # Godot Mono/C# cache
+
+    # PHP / Laravel specific
+    'storage/framework/',  # Laravel cache, sessions, views
+    'storage/logs/',       # Laravel logs
+    'bootstrap/cache/',    # Laravel bootstrap cache
+    'public/build/',       # Laravel Vite/Mix compiled assets
+    'public/hot',          # Laravel hot reload indicator
+
+    # Godot specific
+    '.godot/',             # Godot 4.x cache & imported assets
+    '.import/',            # Godot 3.x import cache
+    'addons/',             # Third-party Godot addons (debatable - may want to read)
+    '.addons/',
+
+    # Vue specific (most covered above, but adding extras)
+    'node_modules/.cache',
+    '.nuxt-build-cache',
+]
 
 # Tool mappings: prohibited -> preferred
 TOOL_MAPPINGS = {
@@ -154,6 +228,43 @@ def check_contextual_requirements(command):
 
     return None, None
 
+def check_blocked_directories(command):
+    """
+    Check if command references any blocked directories.
+    Returns (blocked_pattern, None) if found, otherwise (None, None).
+
+    This prevents token waste from scanning node_modules, .git, dist, etc.
+    Inspired by Reddit post: https://www.reddit.com/r/ClaudeAI/comments/1keukw4
+    """
+    # Split command into path components to check for exact directory matches
+    # This avoids false positives like "build" matching "builder"
+    path_separators = ['/', '\\']
+
+    for pattern in BLOCKED_DIRECTORIES:
+        # Remove trailing slash from pattern for consistent matching
+        clean_pattern = pattern.rstrip('/')
+
+        # Method 1: Check for exact path component matches
+        # Split on both / and \ to handle cross-platform paths
+        path_parts = re.split(r'[/\\]', command)
+        if clean_pattern in path_parts:
+            return pattern, None
+
+        # Method 2: Check for pattern with explicit path separators
+        # This catches cases like "/node_modules/" or "\node_modules\"
+        if f'/{clean_pattern}/' in command or f'\\{clean_pattern}\\' in command:
+            return pattern, None
+
+        # Method 3: Check for pattern at start or end of path with separator
+        # Start: "node_modules/" or "node_modules\"
+        if command.startswith(f'{clean_pattern}/') or command.startswith(f'{clean_pattern}\\'):
+            return pattern, None
+        # End: "/node_modules" or "\node_modules"
+        if command.endswith(f'/{clean_pattern}') or command.endswith(f'\\{clean_pattern}'):
+            return pattern, None
+
+    return None, None
+
 def main():
     try:
         # Read hook input from stdin
@@ -163,10 +274,38 @@ def main():
         tool_name = hook_input.get('tool_name', hook_input.get('toolName', ''))
         tool_input = hook_input.get('tool_input', hook_input.get('toolInput', {}))
 
-        # Allow modern native tools (Grep and Glob are already modern equivalents)
+        # Check modern native tools (Grep and Glob) for blocked directories
         if tool_name in ['Grep', 'Glob']:
-            # These are Claude Code's native modern tools - allow them
+            # Extract path from tool input
+            path = ''
+            if isinstance(tool_input, dict):
+                path = tool_input.get('path', '') or tool_input.get('pattern', '')
+
+            # Check if path references blocked directories
+            if path:
+                blocked_dir, _ = check_blocked_directories(path)
+                if blocked_dir:
+                    print(f"❌ Blocked directory '{blocked_dir}' in {tool_name} path.", file=sys.stderr)
+                    print(f"🚫 Searching {blocked_dir} wastes tokens.", file=sys.stderr)
+                    print(f"💡 Use more specific paths or add to .gitignore.", file=sys.stderr)
+                    sys.exit(2)
+
+            # Allow these modern tools
             sys.exit(0)
+
+        # Check Read tool for blocked directories
+        if tool_name == 'Read':
+            file_path = ''
+            if isinstance(tool_input, dict):
+                file_path = tool_input.get('file_path', '')
+
+            if file_path:
+                blocked_dir, _ = check_blocked_directories(file_path)
+                if blocked_dir:
+                    print(f"❌ Blocked directory '{blocked_dir}' in file path.", file=sys.stderr)
+                    print(f"🚫 Reading from {blocked_dir} wastes tokens.", file=sys.stderr)
+                    print(f"💡 Dependency files are typically not needed for context.", file=sys.stderr)
+                    sys.exit(2)
 
         # Check for native tool usage (Read, Edit, Write, MultiEdit)
         if tool_name in NATIVE_TOOL_REPLACEMENTS:
@@ -186,6 +325,19 @@ def main():
                 print(f"✅ Use {preferred_tool['tool']} instead.", file=sys.stderr)
                 print(f"💡 {preferred_tool['tips']}", file=sys.stderr)
                 print("💡 This follows your CLAUDE.md tool preferences.", file=sys.stderr)
+                sys.exit(2)
+
+            # Check for blocked directories (prevents token waste)
+            blocked_dir, _ = check_blocked_directories(command)
+            if blocked_dir:
+                print(f"❌ Blocked directory '{blocked_dir}' detected in command.", file=sys.stderr)
+                print(f"🚫 Scanning {blocked_dir} wastes tokens and slows down operations.", file=sys.stderr)
+                print(f"💡 These directories are typically ignored by .gitignore and contain:", file=sys.stderr)
+                print(f"   - Dependencies (node_modules, vendor)", file=sys.stderr)
+                print(f"   - Build artifacts (dist, build, target)", file=sys.stderr)
+                print(f"   - Version control (.git)", file=sys.stderr)
+                print(f"   - Environment files (.env)", file=sys.stderr)
+                print(f"💡 Consider using more specific paths or file patterns instead.", file=sys.stderr)
                 sys.exit(2)
 
             # Check contextual requirements
