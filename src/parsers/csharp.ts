@@ -11,207 +11,89 @@ import {
 } from './base';
 import { FrameworkParseOptions } from './base-framework';
 import { createComponentLogger } from '../utils/logger';
-import { entityClassifier } from '../utils/entity-classifier';
 import {
   ChunkedParser,
   MergedParseResult,
   ChunkedParseOptions,
   ChunkResult,
 } from './chunked-parser';
-import { SymbolType, DependencyType, Visibility } from '../database/models';
+
+// Import types
+import type { ASTContext, GodotContext } from './csharp/types';
+
+// Import utilities from individual modules
+import {
+  buildQualifiedName,
+  generateCallInstanceId,
+  buildQualifiedContext,
+  captureParseError as captureParseErrorUtil,
+} from './csharp/helper-utils';
+import {
+  findContainingMethod,
+  findNodesOfType,
+  findParentDeclaration,
+} from './csharp/traversal-utils';
+import {
+  resolveObjectType,
+  resolveFQN,
+  resolveType,
+  resolveClassNameWithUsings,
+  extractGenericTypeParameter,
+  inferTypeFromExpression,
+} from './csharp/type-utils';
+import { initializeASTContext } from './csharp/context-utils';
+import { extractParameters, extractBaseTypesFromList } from './csharp/signature-utils';
+import {
+  processClass,
+  processInterface,
+  processStruct,
+  processEnum,
+  processDelegate,
+  processMethod,
+  processConstructor,
+  processProperty,
+  processField,
+  processEvent,
+  processLocalDeclaration,
+  processMemberAccess,
+  processInheritance,
+  processNamespace,
+} from './csharp/symbol-extractors';
+import {
+  processUsing,
+  processExternAlias,
+  extractConstructorDependencies,
+  extractContainmentDependencies,
+  processDependency,
+} from './csharp/dependency-extractors';
+import {
+  initializeGodotContext,
+  processGodotMethodCall,
+  enhanceGodotRelationships,
+} from './csharp/godot-utils';
+import {
+  shouldUseChunking,
+  getChunkBoundaries,
+  extractStructuralContext,
+  enrichChunksWithStructuralContext,
+  mergeChunkResults,
+  removeDuplicateSymbols as removeDuplicateSymbolsUtil,
+} from './csharp/chunking-utils';
+import {
+  createErrorResult as createErrorResultUtil,
+  finalizeResult as finalizeResultUtil,
+  convertMergedResult as convertMergedResultUtil,
+} from './csharp/result-utils';
 
 const logger = createComponentLogger('csharp-parser');
 
 /**
- * Type information with complete context
- */
-interface TypeInfo {
-  type: string;
-  fullQualifiedName: string;
-  source: 'field' | 'property' | 'variable' | 'parameter' | 'method';
-  declarationLine?: number;
-  namespace?: string;
-  genericArgs?: string[];
-}
-
-/**
- * Method information for enhanced resolution
- */
-interface MethodInfo {
-  name: string;
-  className: string;
-  returnType: string;
-  parameters: ParameterInfo[];
-  isStatic: boolean;
-  visibility: Visibility;
-  line: number;
-}
-
-/**
- * Parameter information
- */
-interface ParameterInfo {
-  name: string;
-  type: string;
-  defaultValue?: string;
-  isRef?: boolean;
-  isOut?: boolean;
-  isParams?: boolean;
-}
-
-/**
- * AST context for efficient traversal
- */
-interface ASTContext {
-  typeMap: Map<string, TypeInfo>;
-  methodMap: Map<string, MethodInfo[]>;
-  namespaceStack: string[];
-  classStack: string[];
-  currentNamespace?: string;
-  currentClass?: string;
-  currentClassFramework?: string; // Track framework of current class for method inheritance
-  usingDirectives: Set<string>;
-  symbolCache: Map<string, ParsedSymbol>;
-  nodeCache: Map<string, Parser.SyntaxNode[]>;
-  partialClassFields: Map<string, Map<string, TypeInfo>>;
-  isPartialClass: boolean;
-  currentMethodParameters: Map<string, string>;
-  filePath?: string; // File path for entity classification
-  options?: FrameworkParseOptions; // Parse options including repository frameworks
-}
-
-/**
- * Godot integration context
- */
-interface GodotContext {
-  signals: Map<string, SignalInfo>;
-  exports: Map<string, ExportInfo>;
-  nodePaths: Set<string>;
-  autoloads: Set<string>;
-  sceneReferences: Set<string>;
-}
-
-interface SignalInfo {
-  name: string;
-  parameters: string[];
-  emitters: string[];
-}
-
-interface ExportInfo {
-  name: string;
-  type: string;
-  exportType?: string;
-  defaultValue?: any;
-}
-
-interface StructuralContext {
-  type: 'class' | 'interface' | 'namespace';
-  name: string;
-  qualifiedName: string;
-  startLine: number;
-  endLine: number;
-  namespace?: string;
-  parentClass?: string;
-}
-
-interface MethodCall {
-  methodName: string;
-  callingObject: string;
-  resolvedClass?: string;
-  parameters: string[];
-  parameterTypes: string[];
-  fullyQualifiedName: string;
-}
-
-/**
- * Pre-compiled regex patterns for performance
- */
-const PATTERNS = {
-  // Method patterns
-  methodCall: /(\w+)\s*\(/g,
-  qualifiedCall: /(\w+)\.(\w+)\s*\(/g,
-  conditionalAccess: /([_\w]+)\?\s*\.?\s*([_\w]+)\s*\(/g,
-  memberAccess: /([_\w]+)\.([_\w]+)\s*\(/g,
-  fieldAccess: /([_\w]+)\s*\(/g,
-
-  // Godot patterns
-  godotSignal: /\[Signal\]\s*(?:public\s+)?delegate\s+\w+\s+(\w+)\s*\(([^)]*)\)/g,
-  godotExport: /\[Export(?:\(([^)]+)\))?\]\s*(?:public\s+)?(\w+)\s+(\w+)/g,
-  godotNode: /GetNode(?:<(\w+)>)?\s*\(\s*["']([^"']+)["']\s*\)/g,
-  godotAutoload: /GetNode<(\w+)>\s*\(\s*["']\/root\/(\w+)["']\s*\)/g,
-  emitSignal: /EmitSignal\s*\(\s*(?:nameof\s*\()?["']?(\w+)/g,
-
-  // Type patterns
-  genericType: /^([^<]+)<(.+)>$/,
-  interfacePrefix: /^I[A-Z]/,
-
-  // Class patterns
-  classDeclaration:
-    /(?:public\s+|private\s+|internal\s+)?(?:partial\s+)?(?:static\s+)?(?:abstract\s+)?(?:sealed\s+)?class\s+(\w+)(?:\s*:\s*([^{]+))?/g,
-  interfaceDeclaration:
-    /(?:public\s+|private\s+|internal\s+)?interface\s+(\w+)(?:\s*:\s*([^{]+))?/g,
-} as const;
-
-/**
  * Ultimate C# Parser with Godot integration
  * Optimized for performance with single-pass AST traversal
+ *
+ * Delegates to modular utilities in ./csharp/ for maintainability
  */
 export class CSharpParser extends ChunkedParser {
-  private static readonly MODIFIER_KEYWORDS = new Set([
-    'public',
-    'private',
-    'protected',
-    'internal',
-    'static',
-    'partial',
-    'abstract',
-    'sealed',
-    'virtual',
-    'override',
-    'readonly',
-    'async',
-    'const',
-    'new',
-    'extern',
-    'unsafe',
-    'volatile',
-  ]);
-
-  private static readonly GODOT_BASE_CLASSES = new Set([
-    'Node',
-    'Node2D',
-    'Node3D',
-    'Control',
-    'Resource',
-    'RefCounted',
-    'Object',
-    'PackedScene',
-    'GodotObject',
-    'Area2D',
-    'Area3D',
-    'RigidBody2D',
-    'RigidBody3D',
-    'CharacterBody2D',
-    'CharacterBody3D',
-    'StaticBody2D',
-    'StaticBody3D',
-  ]);
-
-  private static readonly GODOT_LIFECYCLE_METHODS = new Set([
-    '_Ready',
-    '_EnterTree',
-    '_ExitTree',
-    '_Process',
-    '_PhysicsProcess',
-    '_Input',
-    '_UnhandledInput',
-    '_UnhandledKeyInput',
-    '_Draw',
-    '_Notification',
-    '_GetPropertyList',
-    '_PropertyCanRevert',
-  ]);
-
   private currentChunkNamespace?: string;
   private currentChunkStructures?: {
     namespace?: string;
@@ -268,7 +150,7 @@ export class CSharpParser extends ChunkedParser {
     if (shouldChunk) {
       this.logger.info('Using chunked parsing', { filePath, size: content.length });
       const chunkedResult = await this.parseFileInChunks(filePath, content, chunkedOptions);
-      return this.convertMergedResult(chunkedResult);
+      return convertMergedResultUtil(chunkedResult);
     }
 
     return this.parseFileDirectly(filePath, content, chunkedOptions);
@@ -300,54 +182,36 @@ export class CSharpParser extends ChunkedParser {
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
 
-        try {
-          const chunkResult = await this.parseChunk(chunk, filePath, options);
-          chunkResults.push(chunkResult);
-        } catch (error) {
-          this.logger.warn(`Failed to parse chunk ${i + 1}`, {
-            error: (error as Error).message,
-            chunkIndex: i,
-          });
-
-          chunkResults.push({
-            symbols: [],
-            dependencies: [],
-            imports: [],
-            exports: [],
-            errors: [
-              {
-                message: `Chunk parsing failed: ${(error as Error).message}`,
-                line: chunk.startLine,
-                column: 1,
-                severity: 'error',
-              },
-            ],
-          });
+        if (chunk.namespaceContext) {
+          this.currentChunkNamespace = chunk.namespaceContext;
         }
+
+        if (chunk.metadata?.enclosingStructures) {
+          this.currentChunkStructures = chunk.metadata.enclosingStructures;
+        }
+
+        const chunkResult = await this.parseChunk(chunk, filePath, options);
+        chunkResults.push(chunkResult);
+
+        this.currentChunkNamespace = undefined;
+        this.currentChunkStructures = undefined;
       }
 
-      const mergedResult = this.mergeChunkResults(chunkResults, chunks);
-      return mergedResult;
+      return this.mergeChunkResults(chunkResults, chunks);
     } catch (error) {
       this.logger.error('Chunked parsing failed', {
         filePath,
         error: (error as Error).message,
       });
-
+      const errorResult = createErrorResultUtil('Chunked parsing failed');
       return {
-        symbols: [],
-        dependencies: [],
-        imports: [],
-        exports: [],
-        errors: [
-          {
-            message: `Chunked parsing failed: ${(error as Error).message}`,
-            line: 1,
-            column: 1,
-            severity: 'error',
-          },
-        ],
+        ...errorResult,
         chunksProcessed: 0,
+        metadata: {
+          totalChunks: 0,
+          duplicatesRemoved: 0,
+          crossChunkReferencesFound: 0,
+        },
       };
     }
   }
@@ -357,35 +221,44 @@ export class CSharpParser extends ChunkedParser {
     originalFilePath: string,
     options?: ChunkedParseOptions
   ): Promise<ParseResult> {
-    this.currentChunkNamespace = chunk.namespaceContext;
-    this.currentChunkStructures = chunk.metadata?.enclosingStructures;
-    const result = await super.parseChunk(chunk, originalFilePath, options);
-    this.currentChunkNamespace = undefined;
-    this.currentChunkStructures = undefined;
-    return result;
+    this.logger.debug(
+      `Parsing chunk ${chunk.chunkIndex + 1}/${chunk.metadata?.totalChunks || 'unknown'}`,
+      {
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        size: chunk.content.length,
+      }
+    );
+
+    return this.parseFileDirectly(originalFilePath, chunk.content, {
+      ...options,
+      bypassSizeLimit: true,
+    });
   }
 
-  /**
-   * Optimized direct parsing with single AST traversal
-   */
   protected async parseFileDirectly(
     filePath: string,
     content: string,
     options?: ChunkedParseOptions
   ): Promise<ParseResult> {
     const tree = this.parseContent(content, options);
+
     if (!tree?.rootNode) {
-      return this.createErrorResult('Failed to parse syntax tree');
+      return createErrorResultUtil('Failed to parse content');
     }
 
-    try {
-      // Initialize context for single-pass traversal
-      const context = this.initializeASTContext();
-      context.filePath = filePath; // Store file path for entity classification
-      context.options = options as FrameworkParseOptions; // Store options for framework detection
-      const godotContext = this.initializeGodotContext();
+    // Initialize context with enclosing structures from chunk metadata
+    const context = initializeASTContext(this.currentChunkNamespace, this.currentChunkStructures);
+    context.filePath = filePath;
 
-      // Single traversal to extract everything
+    // Store framework options in context for entity classification
+    if (options && 'repositoryFrameworks' in options) {
+      context.options = options as FrameworkParseOptions;
+    }
+
+    const godotContext = initializeGodotContext();
+
+    try {
       const result = this.performSinglePassExtraction(
         tree.rootNode,
         content,
@@ -393,23 +266,21 @@ export class CSharpParser extends ChunkedParser {
         godotContext
       );
 
-      // Enhance with Godot relationships
-      this.enhanceGodotRelationships(result, godotContext);
+      // Enhance with Godot-specific relationships
+      enhanceGodotRelationships(result, godotContext);
 
-      // Validate and filter based on options
-      return this.finalizeResult(result, options);
+      return finalizeResultUtil(result, options, this.logger);
     } catch (error) {
-      logger.error('C# parsing failed', {
+      this.logger.error('Parsing failed', {
         filePath,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: (error as Error).message,
+        stack: (error as Error).stack,
       });
-      return this.createErrorResult(`Parsing failed: ${error}`);
+
+      return createErrorResultUtil((error as Error).message);
     }
   }
 
-  /**
-   * Single-pass AST traversal for optimal performance
-   */
   private performSinglePassExtraction(
     rootNode: Parser.SyntaxNode,
     content: string,
@@ -424,10 +295,15 @@ export class CSharpParser extends ChunkedParser {
     const exports: ParsedExport[] = [];
     const errors: ParseError[] = [];
 
+    // Bind instance methods as callbacks for delegation
+    const getNodeText = this.getNodeText.bind(this);
+    const findContainingMethodWrapper = (node: Parser.SyntaxNode, ctx: ASTContext, cnt: string) =>
+      findContainingMethod(node, ctx, cnt, getNodeText, buildQualifiedName);
+
     // Single traversal function
     const traverse = (node: Parser.SyntaxNode, depth: number = 0) => {
       if (node.type === 'ERROR') {
-        this.captureParseError(node, content, errors);
+        captureParseErrorUtil(node, content, errors);
       }
 
       // Cache node by type for efficient lookup
@@ -436,39 +312,39 @@ export class CSharpParser extends ChunkedParser {
       }
       context.nodeCache.get(node.type)!.push(node);
 
-      // Process based on node type
+      // Process based on node type - delegate to extracted modules
       switch (node.type) {
         // Namespace handling
         case 'namespace_declaration':
         case 'file_scoped_namespace_declaration':
-          this.processNamespace(node, content, context, symbols);
+          processNamespace(node, content, context, symbols, getNodeText);
           break;
 
-        // Type declarations
+        // Type declarations - delegate to symbol-extractors
         case 'class_declaration':
-          this.processClass(node, content, context, godotContext, symbols, exports);
+          processClass(node, content, context, godotContext, symbols, exports, getNodeText);
           break;
         case 'interface_declaration':
-          this.processInterface(node, content, context, symbols, exports);
+          processInterface(node, content, context, symbols, exports, getNodeText);
           break;
         case 'struct_declaration':
-          this.processStruct(node, content, context, symbols, exports);
+          processStruct(node, content, context, symbols, exports, getNodeText);
           break;
         case 'enum_declaration':
-          this.processEnum(node, content, context, symbols, exports);
+          processEnum(node, content, context, symbols, exports, getNodeText);
           break;
         case 'delegate_declaration':
-          this.processDelegate(node, content, context, symbols);
+          processDelegate(node, content, context, symbols, getNodeText);
           break;
 
-        // Members
+        // Members - delegate to symbol-extractors
         case 'method_declaration': {
-          const methodParams = this.extractParameters(node, content);
+          const methodParams = extractParameters(node, content, getNodeText);
           context.currentMethodParameters.clear();
           for (const param of methodParams) {
             context.currentMethodParameters.set(param.name, param.type);
           }
-          this.processMethod(node, content, context, godotContext, symbols);
+          processMethod(node, content, context, godotContext, symbols, getNodeText);
           for (let i = 0; i < node.namedChildCount; i++) {
             const child = node.namedChild(i);
             if (child) traverse(child, depth + 1);
@@ -477,18 +353,21 @@ export class CSharpParser extends ChunkedParser {
           return;
         }
         case 'constructor_declaration': {
-          const ctorParams = this.extractParameters(node, content);
+          const ctorParams = extractParameters(node, content, getNodeText);
           context.currentMethodParameters.clear();
           for (const param of ctorParams) {
             context.currentMethodParameters.set(param.name, param.type);
           }
-          this.processConstructor(node, content, context, symbols);
-          const constructorDeps = this.extractConstructorDependencies(
+          processConstructor(node, content, context, symbols, getNodeText);
+
+          const constructorDeps = extractConstructorDependencies(
             ctorParams,
             context,
-            node.startPosition.row + 1
+            node.startPosition.row + 1,
+            (className: string, ctx: ASTContext) => resolveFQN(className, ctx)
           );
           dependencies.push(...constructorDeps);
+
           for (let i = 0; i < node.namedChildCount; i++) {
             const child = node.namedChild(i);
             if (child) traverse(child, depth + 1);
@@ -497,23 +376,40 @@ export class CSharpParser extends ChunkedParser {
           return;
         }
         case 'property_declaration':
-          this.processProperty(node, content, context, godotContext, symbols);
+          processProperty(node, content, context, godotContext, symbols, getNodeText);
           break;
         case 'field_declaration':
-          this.processField(node, content, context, godotContext, symbols);
+          processField(node, content, context, godotContext, symbols, getNodeText);
           break;
         case 'event_declaration':
-          this.processEvent(node, content, context, symbols);
+          processEvent(node, content, context, symbols, getNodeText);
           break;
         case 'local_declaration_statement':
-          this.processLocalDeclaration(node, content, context);
+          processLocalDeclaration(node, content, context, getNodeText, inferTypeFromExpression);
           break;
 
-        // Dependencies - unified dependency detection
+        // Dependencies - delegate to dependency-extractors and godot-utils
         case 'invocation_expression':
         case 'conditional_access_expression':
         case 'object_creation_expression':
-          this.processDependency(node, content, context, godotContext, dependencies);
+          processDependency(
+            node,
+            content,
+            context,
+            godotContext,
+            dependencies,
+            getNodeText,
+            this.callInstanceCounters,
+            findContainingMethodWrapper,
+            buildQualifiedName,
+            buildQualifiedContext,
+            generateCallInstanceId,
+            resolveObjectType,
+            resolveType,
+            resolveClassNameWithUsings,
+            processGodotMethodCall,
+            extractGenericTypeParameter
+          );
           break;
         case 'member_access_expression':
           // Only process if not part of an invocation (to avoid duplicates)
@@ -521,19 +417,34 @@ export class CSharpParser extends ChunkedParser {
             node.parent?.type !== 'invocation_expression' &&
             node.parent?.type !== 'conditional_access_expression'
           ) {
-            this.processMemberAccess(node, content, context, dependencies);
+            processMemberAccess(
+              node,
+              content,
+              context,
+              dependencies,
+              getNodeText,
+              findContainingMethodWrapper
+            );
           }
           break;
         case 'base_list':
-          this.processInheritance(node, content, context, dependencies);
+          processInheritance(
+            node,
+            content,
+            context,
+            dependencies,
+            getNodeText,
+            findParentDeclaration,
+            extractBaseTypesFromList
+          );
           break;
 
-        // Imports
+        // Imports - delegate to dependency-extractors
         case 'using_directive':
-          this.processUsing(node, content, context, imports);
+          processUsing(node, content, context, imports, getNodeText);
           break;
         case 'extern_alias_directive':
-          this.processExternAlias(node, content, imports);
+          processExternAlias(node, content, imports, getNodeText);
           break;
       }
 
@@ -547,2467 +458,121 @@ export class CSharpParser extends ChunkedParser {
     traverse(rootNode);
 
     // Extract containment relationships (classes/interfaces containing methods)
-    const containmentDeps = this.extractContainmentDependencies(symbols);
+    const containmentDeps = extractContainmentDependencies(symbols);
     dependencies.push(...containmentDeps);
 
     return { symbols, dependencies, imports, exports, errors };
   }
 
   /**
-   * Initialize AST context for efficient traversal
+   * Chunking support - delegates to chunking-utils
    */
-  private initializeASTContext(enclosingStructures?: {
-    namespace?: string;
-    classes?: string[];
-    qualifiedClassName?: string;
-  }): ASTContext {
-    const namespaceStack: string[] = [];
-    let currentNamespace: string | undefined;
-    const classStack: string[] = [];
-    let currentClass: string | undefined;
-
-    if (this.currentChunkNamespace) {
-      namespaceStack.push(this.currentChunkNamespace);
-      currentNamespace = this.currentChunkNamespace;
-    }
-
-    const structures = enclosingStructures || this.currentChunkStructures;
-
-    if (structures) {
-      if (structures.namespace) {
-        if (!namespaceStack.includes(structures.namespace)) {
-          namespaceStack.push(structures.namespace);
-          currentNamespace = structures.namespace;
-        }
-      }
-
-      if (structures.classes && structures.classes.length > 0) {
-        classStack.push(...structures.classes);
-        currentClass = classStack[classStack.length - 1];
-      }
-    }
-
-    return {
-      typeMap: new Map(),
-      methodMap: new Map(),
-      namespaceStack,
-      classStack,
-      currentNamespace,
-      currentClass,
-      usingDirectives: new Set(),
-      symbolCache: new Map(),
-      nodeCache: new Map(),
-      partialClassFields: new Map(),
-      isPartialClass: false,
-      currentMethodParameters: new Map(),
-    };
-  }
-
-  /**
-   * Initialize Godot-specific context
-   */
-  private initializeGodotContext(): GodotContext {
-    return {
-      signals: new Map(),
-      exports: new Map(),
-      nodePaths: new Set(),
-      autoloads: new Set(),
-      sceneReferences: new Set(),
-    };
-  }
-
-  /**
-   * Process namespace declaration
-   */
-  private processNamespace(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    context.currentNamespace = name;
-    context.namespaceStack.push(name);
-
-    const description = this.extractXmlDocComment(node, content);
-
-    symbols.push({
-      name,
-      symbol_type: SymbolType.NAMESPACE,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: true,
-      visibility: Visibility.PUBLIC,
-      description,
-    });
-  }
-
-  private extractXmlDocComment(node: Parser.SyntaxNode, content: string): string | undefined {
-    const parent = node.parent;
-    if (!parent) return undefined;
-
-    const nodeIndex = parent.children.indexOf(node);
-    if (nodeIndex <= 0) return undefined;
-
-    const xmlCommentLines: string[] = [];
-
-    for (let i = nodeIndex - 1; i >= 0; i--) {
-      const sibling = parent.children[i];
-
-      if (sibling.type === '\n' || sibling.type === 'whitespace') continue;
-
-      if (sibling.type !== 'comment') break;
-
-      const commentText = this.getNodeText(sibling, content);
-
-      if (commentText.trim().startsWith('///')) {
-        xmlCommentLines.unshift(commentText);
-      } else {
-        break;
-      }
-    }
-
-    if (xmlCommentLines.length === 0) return undefined;
-
-    const xmlText = xmlCommentLines.join('\n');
-    return this.extractXmlSummary(xmlText);
-  }
-
-  private extractXmlSummary(xmlText: string): string | undefined {
-    const cleaned = xmlText
-      .split('\n')
-      .map(line => line.replace(/^\s*\/\/\/\s?/, ''))
-      .join('\n');
-
-    const summaryMatch = cleaned.match(/<summary>\s*([\s\S]*?)\s*<\/summary>/i);
-    if (!summaryMatch) return undefined;
-
-    return summaryMatch[1]
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
-      .join('\n')
-      .trim();
-  }
-
-  /**
-   * Process class declaration with Godot awareness
-   */
-  private processClass(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    _godotContext: GodotContext,
-    symbols: ParsedSymbol[],
-    exports: ParsedExport[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-    const baseTypes = this.extractBaseTypes(node, content);
-    const isGodotClass = this.isGodotClass(baseTypes);
-    const isPartial = modifiers.includes('partial');
-
-    context.currentClass = name;
-    context.classStack.push(name);
-    context.isPartialClass = isPartial;
-
-    // Add to type map for resolution
-    const qualifiedName = this.buildQualifiedName(context, name);
-    context.typeMap.set(name, {
-      type: name,
-      fullQualifiedName: qualifiedName,
-      source: 'method',
-      namespace: context.currentNamespace,
-    });
-
-    const description = this.extractXmlDocComment(node, content);
-
-    // Classify entity type using configuration-driven classifier
-    const classification = entityClassifier.classify(
-      'class',
-      name,
-      baseTypes,
-      context.filePath || '',
-      undefined, // Auto-detect framework
-      context.currentNamespace, // Pass namespace for framework detection
-      context.options?.repositoryFrameworks // Pass repository frameworks from options
-    );
-
-    // Store class framework in context so methods can inherit it
-    context.currentClassFramework = classification.framework;
-
-    const symbol: ParsedSymbol = {
-      name,
-      qualified_name: qualifiedName,
-      symbol_type: SymbolType.CLASS,
-      entity_type: classification.entityType,
-      framework: classification.framework,
-      base_class: classification.baseClass || undefined,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility,
-      signature: this.buildClassSignature(name, modifiers, baseTypes),
-      description,
-    };
-
-    symbols.push(symbol);
-    context.symbolCache.set(qualifiedName, symbol);
-
-    if (modifiers.includes('public')) {
-      exports.push({
-        exported_names: [name],
-        export_type: 'named',
-        line_number: node.startPosition.row + 1,
-      });
-    }
-  }
-
-  /**
-   * Process method declaration with Godot lifecycle detection
-   */
-  private processMethod(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    _godotContext: GodotContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-    const returnType = this.extractReturnType(node, content);
-    const parameters = this.extractParameters(node, content);
-    const isGodotLifecycle = CSharpParser.GODOT_LIFECYCLE_METHODS.has(name);
-
-    // Extract explicit interface qualifier if present
-    const explicitInterfaceQualifier = this.extractExplicitInterfaceQualifier(node, content);
-    const fullMethodName = explicitInterfaceQualifier
-      ? `${explicitInterfaceQualifier}.${name}`
-      : name;
-
-    // Add to method map for resolution
-    const methodInfo: MethodInfo = {
-      name,
-      className: context.currentClass || '',
-      returnType,
-      parameters,
-      isStatic: modifiers.includes('static'),
-      visibility,
-      line: node.startPosition.row + 1,
-    };
-
-    if (!context.methodMap.has(name)) {
-      context.methodMap.set(name, []);
-    }
-    context.methodMap.get(name)!.push(methodInfo);
-
-    const methodQualifiedName = this.buildQualifiedName(context, name);
-    const description = this.extractXmlDocComment(node, content);
-
-    // Methods inherit framework from their parent class
-    // No need to call entityClassifier for methods - they don't have independent framework context
-    const methodFramework = context.currentClassFramework;
-
-    // Interface members are implicitly public
-    const isInterfaceMember = this.isInsideInterface(node);
-    const isExported = isInterfaceMember || modifiers.includes('public');
-
-    const symbol: ParsedSymbol = {
-      name,
-      qualified_name: methodQualifiedName,
-      symbol_type: SymbolType.METHOD,
-      framework: methodFramework,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: isExported,
-      visibility,
-      signature: this.buildMethodSignature(fullMethodName, modifiers, returnType, parameters),
-      description,
-    };
-
-    symbols.push(symbol);
-  }
-
-  /**
-   * Process field declaration with Godot export detection
-   */
-  private processField(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    godotContext: GodotContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const variableDeclaration = node.children.find(child => child.type === 'variable_declaration');
-    if (!variableDeclaration) return;
-
-    const typeNode = variableDeclaration.childForFieldName('type');
-    const fieldType = typeNode ? this.getNodeText(typeNode, content) : 'object';
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-
-    // Check for Godot Export attribute
-    const hasExportAttribute = this.hasAttribute(node, 'Export', content);
-    const description = this.extractXmlDocComment(node, content);
-
-    // Extract each variable declarator
-    const declaratorNodes = this.findNodesOfType(variableDeclaration, 'variable_declarator');
-    for (const declarator of declaratorNodes) {
-      const nameNode = declarator.childForFieldName('name');
-      if (!nameNode) continue;
-
-      const fieldName = this.getNodeText(nameNode, content);
-
-      const typeInfo: TypeInfo = {
-        type: this.resolveType(fieldType),
-        fullQualifiedName: fieldType,
-        source: 'field',
-        namespace: context.currentNamespace,
-      };
-
-      // Add to type map for resolution
-      context.typeMap.set(fieldName, typeInfo);
-
-      // If this is a partial class, also store in partialClassFields
-      if (context.isPartialClass && context.currentClass) {
-        const qualifiedClassName = this.buildQualifiedName(context, context.currentClass);
-        if (!context.partialClassFields.has(qualifiedClassName)) {
-          context.partialClassFields.set(qualifiedClassName, new Map());
-        }
-        context.partialClassFields.get(qualifiedClassName)!.set(fieldName, typeInfo);
-      }
-
-      // Track Godot exports
-      if (hasExportAttribute) {
-        godotContext.exports.set(fieldName, {
-          name: fieldName,
-          type: fieldType,
-        });
-      }
-
-      symbols.push({
-        name: fieldName,
-        symbol_type: modifiers.includes('const') ? SymbolType.CONSTANT : SymbolType.VARIABLE,
-        framework: context.currentClassFramework,
-        namespace: context.currentNamespace,
-        start_line: declarator.startPosition.row + 1,
-        end_line: declarator.endPosition.row + 1,
-        is_exported: modifiers.includes('public'),
-        visibility,
-        signature: `${modifiers.join(' ')} ${fieldType} ${fieldName}`.trim(),
-        description,
-      });
-    }
-  }
-
-  /**
-   * Unified dependency processing for all call types with complete AST analysis
-   */
-  private processDependency(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    godotContext: GodotContext,
-    dependencies: ParsedDependency[]
-  ): void {
-    const callerName = this.findContainingMethod(node, context, content);
-    if (!callerName || callerName.trim() === '') return;
-
-    const isClassOnly = context.currentClass && callerName === context.currentClass;
-    if (isClassOnly) return;
-
-    let methodCall: MethodCall | null = null;
-
-    switch (node.type) {
-      case 'invocation_expression':
-        methodCall = this.extractMethodCall(node, content, context);
-        break;
-      case 'conditional_access_expression':
-        methodCall = this.extractConditionalCall(node, content, context);
-        break;
-      case 'object_creation_expression':
-        methodCall = this.extractConstructorCall(node, content, context);
-        break;
-    }
-
-    if (!methodCall) return;
-
-    // Process Godot-specific method calls
-    this.processGodotMethodCall(
-      methodCall.methodName,
-      node,
-      content,
-      context,
-      godotContext,
-      dependencies
-    );
-
-    const callInstanceId = this.generateCallInstanceId(
-      methodCall.methodName,
-      node.startPosition.row + 1
-    );
-    const qualifiedContext = this.buildQualifiedContext(methodCall);
-
-    const fullyQualifiedClassName = methodCall.resolvedClass
-      ? this.resolveClassNameWithUsings(methodCall.resolvedClass, context)
-      : undefined;
-
-    const toQualifiedName = fullyQualifiedClassName
-      ? `${fullyQualifiedClassName}::${methodCall.methodName}`
-      : undefined;
-
-    // Create dependency entry
-    dependencies.push({
-      from_symbol: callerName,
-      to_symbol: methodCall.fullyQualifiedName,
-      to_qualified_name: toQualifiedName,
-      dependency_type: DependencyType.CALLS,
-      line_number: node.startPosition.row + 1,
-      calling_object: methodCall.callingObject || undefined,
-      resolved_class: methodCall.resolvedClass,
-      parameter_context:
-        methodCall.parameters.length > 0 ? methodCall.parameters.join(', ') : undefined,
-      parameter_types: methodCall.parameterTypes.length > 0 ? methodCall.parameterTypes : undefined,
-      call_instance_id: callInstanceId,
-      qualified_context: qualifiedContext,
-    });
-  }
-
-  /**
-   * Extract method call information from invocation expression
-   */
-  private extractMethodCall(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext
-  ): MethodCall | null {
-    const functionNode = node.childForFieldName('function');
-    if (!functionNode) return null;
-
-    let methodName = '';
-    let callingObject = '';
-    let resolvedClass: string | undefined;
-
-    if (functionNode.type === 'member_access_expression') {
-      const nameNode = functionNode.childForFieldName('name');
-      const objectNode = functionNode.childForFieldName('expression');
-
-      methodName = nameNode ? this.getNodeText(nameNode, content) : '';
-      callingObject = objectNode ? this.getNodeText(objectNode, content) : '';
-
-      resolvedClass = this.resolveObjectType(callingObject, context);
-    } else if (functionNode.type === 'identifier') {
-      methodName = this.getNodeText(functionNode, content);
-      // Method call without object, likely on current class
-      callingObject = 'this';
-      resolvedClass = context.currentClass;
-    } else if (functionNode.type === 'generic_name') {
-      // Handle generic method calls like GetNode<T>()
-      // generic_name structure: child(0) = identifier, child(1) = type_argument_list
-      const identifierNode = functionNode.child(0);
-      methodName = identifierNode && identifierNode.type === 'identifier'
-        ? this.getNodeText(identifierNode, content)
-        : '';
-      // Generic method call without object, likely on current class
-      callingObject = 'this';
-      resolvedClass = context.currentClass;
-    } else if (functionNode.type === 'conditional_access_expression') {
-      // Handle nested conditional access
-      return this.extractConditionalCall(functionNode, content, context);
-    }
-
-    const { values: parameters, types: parameterTypes } = this.extractCallParameters(
-      node,
-      content,
-      context
-    );
-
-    // Handle Godot's CallDeferred(nameof(MethodName)) pattern
-    // This creates a reflection-based call that should be tracked as a dependency
-    if (
-      (methodName === 'CallDeferred' || methodName === 'CallDeferredThreadGroup') &&
-      parameters.length > 0
-    ) {
-      const deferredMethodName = this.extractNameofIdentifier(node, content);
-      if (deferredMethodName) {
-        // Create a call to the deferred method instead of CallDeferred
-        methodName = deferredMethodName;
-        // The deferred method is on the current class (this)
-        callingObject = 'this';
-        resolvedClass = context.currentClass;
-      }
-    }
-
-    const fullyQualifiedName = resolvedClass ? `${resolvedClass}.${methodName}` : methodName;
-
-    return {
-      methodName,
-      callingObject,
-      resolvedClass,
-      parameters,
-      parameterTypes,
-      fullyQualifiedName,
-    };
-  }
-
-  /**
-   * Extract method call from conditional access expression (?.operator)
-   */
-  private extractConditionalCall(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext
-  ): MethodCall | null {
-    // For conditional access, the structure is:
-    // conditional_access_expression -> identifier + member_binding_expression
-
-    if (node.namedChildCount < 2) return null;
-
-    const objectNode = node.namedChild(0); // The object being accessed (_handManager)
-    const memberBindingNode = node.namedChild(1); // The member binding (.SetHandPositions)
-
-    if (!objectNode || !memberBindingNode) return null;
-
-    const callingObject = this.getNodeText(objectNode, content);
-
-    // Extract method name from member binding expression
-    let methodName = '';
-    if (memberBindingNode.type === 'member_binding_expression') {
-      // Find the identifier within the member binding
-      const identifierNode = this.findChildByType(memberBindingNode, 'identifier');
-      if (identifierNode) {
-        methodName = this.getNodeText(identifierNode, content);
-      }
-    }
-
-    if (!methodName) return null;
-
-    const resolvedClass = this.resolveObjectType(callingObject, context);
-
-    let parameters: string[] = [];
-    let parameterTypes: string[] = [];
-    if (node.parent?.type === 'invocation_expression') {
-      const extracted = this.extractCallParameters(node.parent, content, context);
-      parameters = extracted.values;
-      parameterTypes = extracted.types;
-    }
-
-    const fullyQualifiedName = resolvedClass ? `${resolvedClass}.${methodName}` : methodName;
-
-    return {
-      methodName,
-      callingObject,
-      resolvedClass,
-      parameters,
-      parameterTypes,
-      fullyQualifiedName,
-    };
-  }
-
-  /**
-   * Extract constructor call information
-   */
-  private extractConstructorCall(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext
-  ): MethodCall | null {
-    const typeNode = node.childForFieldName('type');
-    if (!typeNode) return null;
-
-    const typeName = this.getNodeText(typeNode, content);
-    const { values: parameters, types: parameterTypes } = this.extractCallParameters(
-      node,
-      content,
-      context
-    );
-    const resolvedClass = this.resolveType(typeName);
-
-    return {
-      methodName: 'constructor',
-      callingObject: '',
-      resolvedClass,
-      parameters,
-      parameterTypes,
-      fullyQualifiedName: `${resolvedClass}.constructor`,
-    };
-  }
-
-  /**
-   * Comprehensive object type resolution
-   */
-  private resolveObjectType(objectExpression: string, context: ASTContext): string | undefined {
-    if (!objectExpression) return undefined;
-
-    // Handle this. prefix
-    const cleanedObject = objectExpression.replace(/^this\./, '');
-
-    // Try direct lookup first
-    let typeInfo = context.typeMap.get(cleanedObject);
-
-    // Handle private field naming conventions
-    if (!typeInfo) {
-      // Try with underscore prefix for private fields
-      if (!cleanedObject.startsWith('_')) {
-        typeInfo = context.typeMap.get('_' + cleanedObject);
-      }
-      // Try without underscore prefix
-      else if (cleanedObject.startsWith('_')) {
-        typeInfo = context.typeMap.get(cleanedObject.substring(1));
-      }
-    }
-
-    // Try parameter resolution (TODO: Add parameter type tracking)
-
-    return typeInfo?.type;
-  }
-
-  private resolveClassNameWithUsings(className: string, context: ASTContext): string {
-    if (!className) return className;
-
-    if (className.includes('.')) {
-      return className;
-    }
-
-    if (context.currentNamespace && this.isDefinedInCurrentNamespace(className, context)) {
-      return `${context.currentNamespace}.${className}`;
-    }
-
-    for (const usingDirective of context.usingDirectives) {
-      const potentialFqn = `${usingDirective}.${className}`;
-      return potentialFqn;
-    }
-
-    return className;
-  }
-
-  private isDefinedInCurrentNamespace(className: string, context: ASTContext): boolean {
-    return false;
-  }
-
-  private generateCallInstanceId(methodName: string, lineNumber: number): string {
-    const key = `${methodName}_${lineNumber}`;
-    const counter = this.callInstanceCounters.get(key) || 0;
-    this.callInstanceCounters.set(key, counter + 1);
-    return `${methodName}_${lineNumber}_${counter + 1}`;
-  }
-
-  private buildQualifiedContext(methodCall: MethodCall): string | undefined {
-    if (!methodCall.resolvedClass) return undefined;
-    if (!methodCall.callingObject) {
-      return `${methodCall.resolvedClass}.${methodCall.methodName}`;
-    }
-    return `${methodCall.resolvedClass}.${methodCall.callingObject}->${methodCall.methodName}`;
-  }
-
-  private captureParseError(node: Parser.SyntaxNode, content: string, errors: ParseError[]): void {
-    const errorType = node.type === 'ERROR' ? 'Syntax error' : 'Parse error';
-    const context = this.getErrorContext(node, content);
-
-    errors.push({
-      message: `${errorType} detected: ${context}`,
-      line: node.startPosition.row + 1,
-      column: node.startPosition.column,
-      severity: 'error',
-    });
-  }
-
-  private getErrorContext(node: Parser.SyntaxNode, content: string): string {
-    const lines = content.split('\n');
-    const errorLine = node.startPosition.row;
-    const line = lines[errorLine] || '';
-    return line.substring(0, 100);
-  }
-
-  /**
-   * Find child node by type
-   */
-  private findChildByType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === type) {
-        return child;
-      }
-      // Recursively search in children
-      const found = this.findChildByType(child!, type);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  /**
-   * Process Godot-specific method calls
-   */
-  private processGodotMethodCall(
-    methodName: string,
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    godotContext: GodotContext,
-    dependencies: ParsedDependency[]
-  ): void {
-    const callerName = this.findContainingMethod(node, context, content);
-    if (!callerName) return;
-
-    // Handle GetNode calls - create dependency to the referenced scene node
-    if (methodName === 'GetNode') {
-      // Extract generic type parameter (for metadata only)
-      const genericType = this.extractGenericTypeParameter(node, content);
-
-      // Extract node path from first argument
-      const nodePath = this.extractStringArgument(node, content, 0);
-
-      if (nodePath) {
-        // Store node path for metadata
-        godotContext.nodePaths.add(nodePath);
-
-        // Check for autoload pattern (/root/ServiceName)
-        if (nodePath.startsWith('/root/')) {
-          const autoloadName = nodePath.substring(6);
-          godotContext.autoloads.add(autoloadName);
-
-          // Create dependency to autoload singleton class
-          // Autoloads are actual C# classes that can be resolved
-          dependencies.push({
-            from_symbol: callerName,
-            to_symbol: autoloadName,
-            dependency_type: DependencyType.REFERENCES,
-            line_number: node.startPosition.row + 1,
-            parameter_context: `GetNode("/root/${autoloadName}")`
-          });
-        } else {
-          // Regular scene node reference
-          // Create dependency to scene node (not framework type)
-          // Prefix with "node:" to indicate this is a scene node reference
-          // This can be resolved against godot_nodes table during graph building
-          dependencies.push({
-            from_symbol: callerName,
-            to_symbol: `node:${nodePath}`,
-            dependency_type: DependencyType.REFERENCES,
-            line_number: node.startPosition.row + 1,
-            // Preserve type information in parameter_context
-            parameter_context: genericType
-              ? `GetNode<${genericType}>("${nodePath}")`
-              : `GetNode("${nodePath}")`
-          });
-        }
-      }
-    }
-
-    // Handle Connect calls - create dependency to signal handler method
-    else if (methodName === 'Connect') {
-      // Extract handler method name from Callable constructor using AST
-      // Pattern: .Connect(signalName, new Callable(this, MethodName.HandlerMethod))
-      const handlerMethodName = this.extractCallableHandlerName(node, content);
-
-      if (handlerMethodName) {
-        // Create dependency to the handler method
-        const handlerQualifiedName = context.currentClass
-          ? `${context.currentClass}::${handlerMethodName}`
-          : handlerMethodName;
-
-        dependencies.push({
-          from_symbol: callerName,
-          to_symbol: handlerQualifiedName,
-          dependency_type: DependencyType.REFERENCES,
-          line_number: node.startPosition.row + 1,
-          parameter_context: `Connect(signal, ${handlerMethodName})`
-        });
-      }
-    }
-
-    // Handle EmitSignal calls - track signal emissions for metadata
-    else if (methodName === 'EmitSignal') {
-      // Extract signal name from first argument using AST
-      const signalName = this.extractSignalName(node, content);
-
-      if (signalName) {
-        if (!godotContext.signals.has(signalName)) {
-          godotContext.signals.set(signalName, {
-            name: signalName,
-            parameters: [],
-            emitters: [callerName],
-          });
-        } else {
-          godotContext.signals.get(signalName)!.emitters.push(callerName);
-        }
-      }
-    }
-  }
-
-  /**
-   * Extract string literal argument from invocation using AST.
-   * @param node - invocation_expression node
-   * @param content - file content
-   * @param argIndex - argument index (0-based)
-   * @returns string value without quotes, or null if not found/not a string
-   */
-  private extractStringArgument(
-    node: Parser.SyntaxNode,
-    content: string,
-    argIndex: number
-  ): string | null {
-    // Find argument_list child
-    const argumentList = node.children.find(child => child.type === 'argument_list');
-    if (!argumentList) return null;
-
-    // Get all argument nodes (named children of argument_list)
-    const args = argumentList.namedChildren;
-    if (argIndex >= args.length) return null;
-
-    const argNode = args[argIndex];
-
-    // Handle string_literal directly
-    if (argNode.type === 'string_literal') {
-      const text = this.getNodeText(argNode, content);
-      // Remove quotes (handles both " and @")
-      return text.replace(/^@?"(.*)"$/, '$1');
-    }
-
-    // Handle argument containing string_literal
-    const stringLiteral = argNode.children.find(child => child.type === 'string_literal');
-    if (stringLiteral) {
-      const text = this.getNodeText(stringLiteral, content);
-      return text.replace(/^@?"(.*)"$/, '$1');
-    }
-
-    return null;
-  }
-
-  /**
-   * Extract handler method name from Callable constructor in Connect() call.
-   * Pattern: new Callable(this, MethodName.HandlerMethod)
-   * @param node - invocation_expression node for Connect() call
-   * @param content - file content
-   * @returns handler method name, or null if not found
-   */
-  private extractCallableHandlerName(
-    node: Parser.SyntaxNode,
-    content: string
-  ): string | null {
-    // Find argument_list of Connect() call
-    const argumentList = node.children.find(child => child.type === 'argument_list');
-    if (!argumentList) return null;
-
-    // Find object_creation_expression for "new Callable(...)"
-    let callableCreation: Parser.SyntaxNode | null = null;
-
-    for (const arg of argumentList.namedChildren) {
-      // Look for object_creation_expression directly or within argument
-      if (arg.type === 'object_creation_expression') {
-        callableCreation = arg;
-        break;
-      }
-
-      const creationNode = arg.children.find(c => c.type === 'object_creation_expression');
-      if (creationNode) {
-        callableCreation = creationNode;
-        break;
-      }
-    }
-
-    if (!callableCreation) return null;
-
-    // Find argument_list of Callable constructor
-    const callableArgs = callableCreation.children.find(child => child.type === 'argument_list');
-    if (!callableArgs) return null;
-
-    // Second argument is the handler method (MethodName.HandlerMethod or just handler name)
-    const namedArgs = callableArgs.namedChildren;
-    if (namedArgs.length < 2) return null;
-
-    const handlerArg = namedArgs[1];
-
-    // Handle member_access_expression (MethodName.OnPhaseChanged)
-    const memberAccess = handlerArg.type === 'member_access_expression'
-      ? handlerArg
-      : handlerArg.children.find(c => c.type === 'member_access_expression');
-
-    if (memberAccess) {
-      const nameNode = memberAccess.childForFieldName('name');
-      if (nameNode) {
-        return this.getNodeText(nameNode, content);
-      }
-    }
-
-    // Handle direct identifier
-    const identifier = handlerArg.type === 'identifier'
-      ? handlerArg
-      : handlerArg.children.find(c => c.type === 'identifier');
-
-    if (identifier) {
-      return this.getNodeText(identifier, content);
-    }
-
-    return null;
-  }
-
-  /**
-   * Extract signal name from EmitSignal() call.
-   * Handles: EmitSignal("SignalName"), EmitSignal(nameof(SignalName)), EmitSignal(SignalName.SignalName)
-   * @param node - invocation_expression node for EmitSignal() call
-   * @param content - file content
-   * @returns signal name, or null if not found
-   */
-  private extractSignalName(
-    node: Parser.SyntaxNode,
-    content: string
-  ): string | null {
-    // Find argument_list
-    const argumentList = node.children.find(child => child.type === 'argument_list');
-    if (!argumentList || argumentList.namedChildren.length === 0) return null;
-
-    const firstArg = argumentList.namedChildren[0];
-
-    // Handle string literal: EmitSignal("SignalName")
-    if (firstArg.type === 'string_literal') {
-      const text = this.getNodeText(firstArg, content);
-      return text.replace(/^@?"(.*)"$/, '$1');
-    }
-
-    const stringLiteral = firstArg.children.find(c => c.type === 'string_literal');
-    if (stringLiteral) {
-      const text = this.getNodeText(stringLiteral, content);
-      return text.replace(/^@?"(.*)"$/, '$1');
-    }
-
-    // Handle nameof: EmitSignal(nameof(SignalName))
-    const nameofInvocation = firstArg.children.find(c => c.type === 'invocation_expression');
-    if (nameofInvocation) {
-      const nameofArgs = nameofInvocation.children.find(c => c.type === 'argument_list');
-      if (nameofArgs && nameofArgs.namedChildren.length > 0) {
-        const innerArg = nameofArgs.namedChildren[0];
-        const identifier = innerArg.type === 'identifier'
-          ? innerArg
-          : innerArg.children.find(c => c.type === 'identifier');
-        if (identifier) {
-          return this.getNodeText(identifier, content);
-        }
-      }
-    }
-
-    // Handle member access: EmitSignal(SignalName.SignalName)
-    const memberAccess = firstArg.type === 'member_access_expression'
-      ? firstArg
-      : firstArg.children.find(c => c.type === 'member_access_expression');
-
-    if (memberAccess) {
-      const nameNode = memberAccess.childForFieldName('name');
-      if (nameNode) {
-        return this.getNodeText(nameNode, content);
-      }
-    }
-
-    // Handle direct identifier: EmitSignal(SignalName)
-    const identifier = firstArg.type === 'identifier'
-      ? firstArg
-      : firstArg.children.find(c => c.type === 'identifier');
-
-    if (identifier) {
-      return this.getNodeText(identifier, content);
-    }
-
-    return null;
-  }
-
-  /**
-   * Process property declaration
-   */
-  private processProperty(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    _godotContext: GodotContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    const typeNode = node.childForFieldName('type');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const propertyType = typeNode ? this.getNodeText(typeNode, content) : 'object';
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-
-    // Add to type map
-    context.typeMap.set(name, {
-      type: this.resolveType(propertyType),
-      fullQualifiedName: propertyType,
-      source: 'property',
-      namespace: context.currentNamespace,
-    });
-
-    const description = this.extractXmlDocComment(node, content);
-
-    // Interface members are implicitly public
-    const isInterfaceMember = this.isInsideInterface(node);
-    const isExported = isInterfaceMember || modifiers.includes('public');
-
-    symbols.push({
-      name,
-      symbol_type: SymbolType.PROPERTY,
-      framework: context.currentClassFramework,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: isExported,
-      visibility,
-      signature: `${modifiers.join(' ')} ${propertyType} ${name}`.trim(),
-      description,
-    });
-  }
-
-  private processLocalDeclaration(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext
-  ): void {
-    const variableDeclaration = node.children.find(child => child.type === 'variable_declaration');
-    if (!variableDeclaration) return;
-
-    const typeNode = variableDeclaration.childForFieldName('type');
-    const declaredType = typeNode ? this.getNodeText(typeNode, content) : null;
-
-    // Process each variable declarator
-    const declaratorNodes = this.findNodesOfType(variableDeclaration, 'variable_declarator');
-    for (const declarator of declaratorNodes) {
-      const nameNode = declarator.childForFieldName('name');
-      if (!nameNode) continue;
-
-      const varName = this.getNodeText(nameNode, content);
-      let inferredType: string | null = null;
-
-      // If type is explicitly declared (not 'var')
-      if (declaredType && declaredType !== 'var') {
-        inferredType = this.resolveType(declaredType);
-      } else {
-        // Type is 'var' - try to infer from initializer
-        // Grammar: variable_declarator: seq(name, optional(bracketed_argument_list), optional(seq('=', $.expression)))
-        // Find the expression child (last named child after '=' token)
-        const initializerNode = declarator.namedChildren.find(
-          child =>
-            child !== nameNode && // Skip the name identifier
-            child.type !== 'bracketed_argument_list' // Skip array brackets if present
-        );
-
-        if (initializerNode) {
-          inferredType = this.inferTypeFromExpression(initializerNode, content, context);
-        }
-      }
-
-      // Add to type map if we have a type
-      if (inferredType) {
-        const resolvedType = this.resolveType(inferredType);
-        context.typeMap.set(varName, {
-          type: resolvedType,
-          fullQualifiedName: inferredType,
-          source: 'variable',
-          namespace: context.currentNamespace,
-        });
-      }
-    }
-  }
-
-  private inferTypeFromExpression(
-    expressionNode: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext
-  ): string | null {
-    switch (expressionNode.type) {
-      // Generic method invocation: GetNode<Node3D>()
-      case 'invocation_expression': {
-        const genericType = this.extractGenericTypeParameter(expressionNode, content);
-        if (genericType) return genericType;
-        // TODO: Could infer return type from method signature lookup
-        return null;
-      }
-
-      // Object creation: new List<string>() or new Node3D()
-      case 'object_creation_expression':
-      case 'implicit_object_creation_expression': {
-        const typeNode = expressionNode.childForFieldName('type');
-        if (typeNode) {
-          return this.getNodeText(typeNode, content);
-        }
-        return null;
-      }
-
-      // Array creation: new int[10] or new[] { 1, 2, 3 }
-      case 'array_creation_expression': {
-        const typeNode = expressionNode.childForFieldName('type');
-        if (typeNode) {
-          return this.getNodeText(typeNode, content);
-        }
-        return null;
-      }
-
-      case 'implicit_array_creation_expression': {
-        // new[] { ... } - would need to infer from elements
-        return null;
-      }
-
-      // Literals
-      case 'string_literal':
-      case 'verbatim_string_literal':
-      case 'raw_string_literal':
-      case 'interpolated_string_expression':
-        return 'string';
-
-      case 'integer_literal':
-        return 'int';
-
-      case 'real_literal':
-        return 'float';
-
-      case 'boolean_literal':
-        return 'bool';
-
-      case 'null_literal':
-        return 'null';
-
-      case 'character_literal':
-        return 'char';
-
-      // Member access: GameConstants.PLAYER_HAND_PATH
-      case 'member_access_expression': {
-        // Try to infer type from the member being accessed
-        const nameNode = expressionNode.childForFieldName('name');
-        if (nameNode) {
-          const memberName = this.getNodeText(nameNode, content);
-          // Check if we have type information for this member
-          const typeInfo = context.typeMap.get(memberName);
-          if (typeInfo) return typeInfo.type;
-        }
-        return null;
-      }
-
-      // Identifier: just a variable reference
-      case 'identifier': {
-        const varName = this.getNodeText(expressionNode, content);
-        const typeInfo = context.typeMap.get(varName);
-        if (typeInfo) return typeInfo.type;
-        return null;
-      }
-
-      // Conditional expression: condition ? trueExpr : falseExpr
-      case 'conditional_expression': {
-        // Infer from the true branch (both branches should have same type)
-        const trueExpr = expressionNode.children.find(
-          c => c.type !== '?' && c.type !== ':' && c.type !== 'expression'
-        );
-        if (trueExpr) {
-          return this.inferTypeFromExpression(trueExpr, content, context);
-        }
-        return null;
-      }
-
-      // Binary expressions: a + b, a * b, etc.
-      case 'binary_expression': {
-        const operatorNode = expressionNode.children.find(c =>
-          ['+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>', '&&', '||'].includes(c.type)
-        );
-
-        if (!operatorNode) return null;
-
-        const operator = operatorNode.type;
-
-        // Comparison operators return bool
-        if (['==', '!=', '<', '>', '<=', '>=', '&&', '||'].includes(operator)) {
-          return 'bool';
-        }
-
-        // Arithmetic operators - infer from left operand
-        const leftNode = expressionNode.childForFieldName('left');
-        if (leftNode) {
-          return this.inferTypeFromExpression(leftNode, content, context);
-        }
-
-        return null;
-      }
-
-      // Cast expression: (Type)value
-      case 'cast_expression': {
-        const typeNode = expressionNode.childForFieldName('type');
-        if (typeNode) {
-          return this.getNodeText(typeNode, content);
-        }
-        return null;
-      }
-
-      // As expression: value as Type
-      case 'as_expression': {
-        const typeNode = expressionNode.childForFieldName('right');
-        if (typeNode) {
-          return this.getNodeText(typeNode, content);
-        }
-        return null;
-      }
-
-      // Default expression: default(Type) or default
-      case 'default_expression': {
-        const typeNode = expressionNode.childForFieldName('type');
-        if (typeNode) {
-          return this.getNodeText(typeNode, content);
-        }
-        return null;
-      }
-
-      // Parenthesized expression: (expression)
-      case 'parenthesized_expression': {
-        const innerExpr = expressionNode.namedChildren[0];
-        if (innerExpr) {
-          return this.inferTypeFromExpression(innerExpr, content, context);
-        }
-        return null;
-      }
-
-      // Lambda expressions, anonymous methods, etc. - can't easily infer
-      case 'lambda_expression':
-      case 'anonymous_method_expression':
-      case 'anonymous_object_creation_expression':
-        return null;
-
-      // For any other expression type, we can't infer
-      default:
-        return null;
-    }
-  }
-
-  private extractGenericTypeParameter(
-    invocationNode: Parser.SyntaxNode,
-    content: string
-  ): string | null {
-    // The type_argument_list is inside generic_name, not directly under invocation_expression
-    // Structure: invocation_expression -> generic_name -> type_argument_list -> type_argument
-
-    // First, look for generic_name or member_access_expression that contains generic_name
-    let genericNameNode: Parser.SyntaxNode | null = null;
-
-    for (const child of invocationNode.children) {
-      if (child.type === 'generic_name') {
-        genericNameNode = child;
-        break;
-      } else if (child.type === 'member_access_expression') {
-        // The generic_name might be nested in member_access_expression
-        // e.g., obj.GetNode<T>() -> member_access_expression contains generic_name
-        const nestedGeneric = child.children.find(c => c.type === 'generic_name');
-        if (nestedGeneric) {
-          genericNameNode = nestedGeneric;
-          break;
-        }
-      }
-    }
-
-    if (!genericNameNode) return null;
-
-    // Now find the type_argument_list within generic_name
-    const typeArgList = genericNameNode.children.find(child => child.type === 'type_argument_list');
-
-    if (!typeArgList) return null;
-
-    // Get the first type argument (most common case)
-    // The type_argument_list contains direct type nodes, not wrapped in 'type_argument'
-    const typeArgNodes = typeArgList.namedChildren;
-    if (typeArgNodes.length === 0) return null;
-
-    // Get the text of the first type argument
-    return this.getNodeText(typeArgNodes[0], content);
-  }
-
-  /**
-   * Process interface declaration
-   */
-  private processInterface(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[],
-    exports: ParsedExport[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-    const baseTypes = this.extractBaseTypes(node, content);
-
-    context.currentClass = name;
-    context.classStack.push(name);
-
-    const qualifiedName = this.buildQualifiedName(context, name);
-    context.typeMap.set(name, {
-      type: name,
-      fullQualifiedName: qualifiedName,
-      source: 'method',
-      namespace: context.currentNamespace,
-    });
-
-    const description = this.extractXmlDocComment(node, content);
-
-    // Classify entity type using configuration-driven classifier
-    const classification = entityClassifier.classify(
-      'interface',
-      name,
-      baseTypes,
-      context.filePath || '',
-      undefined, // Auto-detect framework
-      context.currentNamespace, // Pass namespace for framework detection
-      context.options?.repositoryFrameworks // Pass repository frameworks from options
-    );
-
-    // Store interface framework in context so methods can inherit it
-    context.currentClassFramework = classification.framework;
-
-    const symbol: ParsedSymbol = {
-      name,
-      qualified_name: qualifiedName,
-      symbol_type: SymbolType.INTERFACE,
-      framework: classification.framework,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility,
-      signature: this.buildInterfaceSignature(name, modifiers, baseTypes),
-      description,
-    };
-
-    symbols.push(symbol);
-    context.symbolCache.set(qualifiedName, symbol);
-
-    if (modifiers.includes('public')) {
-      exports.push({
-        exported_names: [name],
-        export_type: 'named',
-        line_number: node.startPosition.row + 1,
-      });
-    }
-  }
-
-  /**
-   * Process struct declaration
-   */
-  private processStruct(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[],
-    exports: ParsedExport[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-    const description = this.extractXmlDocComment(node, content);
-    const qualifiedName = context.currentNamespace ? `${context.currentNamespace}.${name}` : name;
-
-    let structFramework: string | undefined;
-    if (context.currentClassFramework) {
-      structFramework = context.currentClassFramework;
-    } else {
-      const classification = entityClassifier.classify(
-        'struct',
-        name,
-        [],
-        context.filePath || '',
-        undefined,
-        context.currentNamespace,
-        context.options?.repositoryFrameworks
-      );
-      structFramework = classification.framework;
-    }
-
-    symbols.push({
-      name,
-      qualified_name: qualifiedName,
-      symbol_type: SymbolType.STRUCT,
-      framework: structFramework,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility,
-      signature: `struct ${name}`,
-      description,
-    });
-
-    if (modifiers.includes('public')) {
-      exports.push({
-        exported_names: [name],
-        export_type: 'named',
-        line_number: node.startPosition.row + 1,
-      });
-    }
-  }
-
-  /**
-   * Process enum declaration
-   */
-  private processEnum(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[],
-    exports: ParsedExport[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-    const description = this.extractXmlDocComment(node, content);
-    const qualifiedName = context.currentNamespace ? `${context.currentNamespace}.${name}` : name;
-
-    // Detect framework for enum using entity classifier
-    // If enum is inside a class, inherit from class; otherwise detect from file path/namespace
-    let enumFramework: string | undefined;
-    if (context.currentClassFramework) {
-      enumFramework = context.currentClassFramework;
-    } else {
-      const classification = entityClassifier.classify(
-        'enum',
-        name,
-        [], // Enums don't have base types
-        context.filePath || '',
-        undefined, // Auto-detect framework
-        context.currentNamespace,
-        context.options?.repositoryFrameworks
-      );
-      enumFramework = classification.framework;
-    }
-
-    symbols.push({
-      name,
-      qualified_name: qualifiedName,
-      symbol_type: SymbolType.ENUM,
-      framework: enumFramework,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility,
-      description,
-    });
-
-    const bodyNode = node.childForFieldName('body');
-    if (bodyNode) {
-      const memberNodes = this.findNodesOfType(bodyNode, 'enum_member_declaration');
-      for (const memberNode of memberNodes) {
-        const memberNameNode = memberNode.childForFieldName('name');
-        if (!memberNameNode) continue;
-
-        const memberName = this.getNodeText(memberNameNode, content);
-        const qualifiedName = `${name}.${memberName}`;
-        const memberDescription = this.extractXmlDocComment(memberNode, content);
-
-        symbols.push({
-          name: memberName,
-          qualified_name: qualifiedName,
-          symbol_type: SymbolType.CONSTANT,
-          framework: enumFramework,
-          namespace: context.currentNamespace,
-          start_line: memberNode.startPosition.row + 1,
-          end_line: memberNode.endPosition.row + 1,
-          is_exported: modifiers.includes('public'),
-          visibility: Visibility.PUBLIC,
-          signature: qualifiedName,
-          description: memberDescription,
-        });
-      }
-    }
-
-    if (modifiers.includes('public')) {
-      exports.push({
-        exported_names: [name],
-        export_type: 'named',
-        line_number: node.startPosition.row + 1,
-      });
-    }
-  }
-
-  /**
-   * Process delegate declaration
-   */
-  private processDelegate(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-
-    const isSignal = this.hasAttribute(node, 'Signal', content);
-
-    const description = this.extractXmlDocComment(node, content);
-
-    let delegateFramework: string | undefined;
-    if (context.currentClassFramework) {
-      delegateFramework = context.currentClassFramework;
-    } else {
-      const classification = entityClassifier.classify(
-        'delegate',
-        name,
-        [],
-        context.filePath || '',
-        undefined,
-        context.currentNamespace,
-        context.options?.repositoryFrameworks
-      );
-      delegateFramework = classification.framework;
-    }
-
-    if (isSignal && !delegateFramework) {
-      delegateFramework = 'godot';
-    }
-
-    symbols.push({
-      name,
-      symbol_type: SymbolType.TYPE_ALIAS,
-      framework: delegateFramework,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility,
-      signature: `delegate ${name}`,
-      description,
-    });
-  }
-
-  /**
-   * Process constructor declaration
-   */
-  private processConstructor(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const name = this.getNodeText(nameNode, content);
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-    const parameters = this.extractParameters(node, content);
-    const description = this.extractXmlDocComment(node, content);
-
-    symbols.push({
-      name,
-      symbol_type: SymbolType.METHOD,
-      namespace: context.currentNamespace,
-      start_line: node.startPosition.row + 1,
-      end_line: node.endPosition.row + 1,
-      is_exported: modifiers.includes('public'),
-      visibility,
-      signature: this.buildConstructorSignature(name, modifiers, parameters),
-      description,
-    });
-  }
-
-  /**
-   * Process event declaration
-   */
-  private processEvent(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    symbols: ParsedSymbol[]
-  ): void {
-    const variableDeclaration = node.children.find(child => child.type === 'variable_declaration');
-    if (!variableDeclaration) return;
-
-    const modifiers = this.extractModifiers(node);
-    const visibility = this.getVisibility(modifiers, node);
-
-    const declaratorNodes = this.findNodesOfType(variableDeclaration, 'variable_declarator');
-    for (const declarator of declaratorNodes) {
-      const nameNode = declarator.childForFieldName('name');
-      if (!nameNode) continue;
-
-      const name = this.getNodeText(nameNode, content);
-      const description = this.extractXmlDocComment(node, content);
-
-      symbols.push({
-        name,
-        symbol_type: SymbolType.VARIABLE,
-        framework: context.currentClassFramework,
-        namespace: context.currentNamespace,
-        start_line: declarator.startPosition.row + 1,
-        end_line: declarator.endPosition.row + 1,
-        is_exported: modifiers.includes('public'),
-        visibility,
-        signature: `event ${name}`,
-        description,
-      });
-    }
-  }
-
-  /**
-   * Process member access
-   */
-  private processMemberAccess(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    dependencies: ParsedDependency[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    // Get the full qualified name (e.g., "GameConstants.CARD_BACK_PATH") instead of just the name part
-    let memberName = this.getNodeText(node, content);
-
-    // Strip "this." prefix as it's redundant for local class references
-    if (memberName.startsWith('this.')) {
-      memberName = memberName.substring(5);
-    }
-
-    const callerName = this.findContainingMethod(node, context, content);
-
-    dependencies.push({
-      from_symbol: callerName,
-      to_symbol: memberName,
-      dependency_type: DependencyType.REFERENCES,
-      line_number: node.startPosition.row + 1,
-    });
-  }
-
-  /**
-   * Process inheritance relationships
-   */
-  private processInheritance(
-    node: Parser.SyntaxNode,
-    content: string,
-    _context: ASTContext,
-    dependencies: ParsedDependency[]
-  ): void {
-    const parent = this.findParentDeclaration(node);
-    if (!parent) return;
-
-    const parentNameNode = parent.childForFieldName('name');
-    if (!parentNameNode) return;
-
-    const fromSymbol = this.getNodeText(parentNameNode, content);
-    const isInterface = parent.type === 'interface_declaration';
-    const baseTypes = this.extractBaseTypesFromList(node, content);
-
-    for (let i = 0; i < baseTypes.length; i++) {
-      const baseName = baseTypes[i];
-      const isFirstItem = i === 0;
-      const looksLikeInterface = PATTERNS.interfacePrefix.test(baseName);
-
-      let dependencyType: DependencyType;
-      if (isInterface) {
-        dependencyType = DependencyType.INHERITS;
-      } else if (isFirstItem && !looksLikeInterface) {
-        dependencyType = DependencyType.INHERITS;
-      } else {
-        dependencyType = DependencyType.IMPLEMENTS;
-      }
-
-      dependencies.push({
-        from_symbol: fromSymbol,
-        to_symbol: baseName,
-        dependency_type: dependencyType,
-        line_number: node.startPosition.row + 1,
-      });
-    }
-  }
-
-  /**
-   * Process using directives
-   */
-  private processUsing(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext,
-    imports: ParsedImport[]
-  ): void {
-    const nameNode = node.children.find(
-      child => child.type === 'identifier' || child.type === 'qualified_name'
-    );
-    if (!nameNode) return;
-
-    const namespaceName = this.getNodeText(nameNode, content);
-    context.usingDirectives.add(namespaceName);
-
-    imports.push({
-      source: namespaceName,
-      imported_names: ['*'],
-      import_type: 'namespace',
-      line_number: node.startPosition.row + 1,
-      is_dynamic: false,
-    });
-  }
-
-  /**
-   * Process extern alias directives
-   */
-  private processExternAlias(
-    node: Parser.SyntaxNode,
-    content: string,
-    imports: ParsedImport[]
-  ): void {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return;
-
-    const aliasName = this.getNodeText(nameNode, content);
-
-    imports.push({
-      source: aliasName,
-      imported_names: [aliasName],
-      import_type: 'named',
-      line_number: node.startPosition.row + 1,
-      is_dynamic: false,
-    });
-  }
-
-  /**
-   * Enhance results with Godot-specific relationships
-   */
-  private enhanceGodotRelationships(result: ParseResult, godotContext: GodotContext): void {
-    // Add signal connections
-    for (const [signalName, signalInfo] of godotContext.signals) {
-      for (const emitter of signalInfo.emitters) {
-        result.dependencies.push({
-          from_symbol: emitter,
-          to_symbol: `signal:${signalName}`,
-          dependency_type: DependencyType.REFERENCES,
-          line_number: 0,
-        });
-      }
-    }
-
-    // Add node path references
-    for (const nodePath of godotContext.nodePaths) {
-      result.dependencies.push({
-        from_symbol: '<scene>',
-        to_symbol: `node:${nodePath}`,
-        dependency_type: DependencyType.REFERENCES,
-        line_number: 0,
-      });
-    }
-
-    // Add autoload references
-    for (const autoload of godotContext.autoloads) {
-      result.dependencies.push({
-        from_symbol: '<global>',
-        to_symbol: `autoload:${autoload}`,
-        dependency_type: DependencyType.REFERENCES,
-        line_number: 0,
-      });
-    }
-  }
-
-  // Helper methods
-
-  private extractModifiers(node: Parser.SyntaxNode): string[] {
-    const modifiers: string[] = [];
-
-    for (const child of node.children) {
-      if (child.type === 'modifier' && child.childCount > 0) {
-        const modifierType = child.child(0)?.type;
-        if (modifierType && CSharpParser.MODIFIER_KEYWORDS.has(modifierType)) {
-          modifiers.push(modifierType);
-        }
-      } else if (CSharpParser.MODIFIER_KEYWORDS.has(child.type)) {
-        modifiers.push(child.type);
-      }
-    }
-
-    return modifiers;
-  }
-
-  private getVisibility(modifiers: string[], node?: Parser.SyntaxNode): Visibility {
-    // Interface members are implicitly public in C#
-    if (node && this.isInsideInterface(node)) {
-      return Visibility.PUBLIC;
-    }
-
-    if (modifiers.includes('public')) return Visibility.PUBLIC;
-    if (modifiers.includes('protected')) return Visibility.PROTECTED;
-    if (modifiers.includes('internal')) return Visibility.PUBLIC; // Map internal to public for now
-    return Visibility.PRIVATE;
-  }
-
-  private isInsideInterface(node: Parser.SyntaxNode): boolean {
-    let current = node.parent;
-    while (current) {
-      if (current.type === 'interface_declaration') {
-        return true;
-      }
-      // Stop at class or struct declarations
-      if (current.type === 'class_declaration' || current.type === 'struct_declaration') {
-        return false;
-      }
-      current = current.parent;
-    }
-    return false;
-  }
-
-  private extractBaseTypes(node: Parser.SyntaxNode, content: string): string[] {
-    const baseList = node.children.find(child => child.type === 'base_list');
-    if (!baseList) return [];
-
-    return this.extractBaseTypesFromList(baseList, content);
-  }
-
-  private extractBaseTypesFromList(baseList: Parser.SyntaxNode, content: string): string[] {
-    const baseTypes: string[] = [];
-
-    for (const child of baseList.children) {
-      if (child.type === 'identifier' || child.type === 'qualified_name') {
-        const typeName = this.getNodeText(child, content).trim();
-        if (typeName) baseTypes.push(typeName);
-      }
-    }
-
-    return baseTypes;
-  }
-
-  private isGodotClass(baseTypes: string[]): boolean {
-    return baseTypes.some(type => CSharpParser.GODOT_BASE_CLASSES.has(type));
-  }
-
-  private hasAttribute(node: Parser.SyntaxNode, attributeName: string, content: string): boolean {
-    const attributes = this.findNodesOfType(node, 'attribute');
-    return attributes.some(attr => {
-      const text = this.getNodeText(attr, content);
-      return text.includes(attributeName);
-    });
-  }
-
-  private extractReturnType(node: Parser.SyntaxNode, content: string): string {
-    const typeNode = node.children.find(
-      child =>
-        child.type === 'predefined_type' ||
-        child.type === 'identifier' ||
-        child.type === 'qualified_name' ||
-        child.type === 'generic_name' ||
-        child.type === 'array_type' ||
-        child.type === 'nullable_type'
-    );
-
-    return typeNode ? this.getNodeText(typeNode, content) : 'void';
-  }
-
-  private extractParameters(node: Parser.SyntaxNode, content: string): ParameterInfo[] {
-    const parameters: ParameterInfo[] = [];
-    const parameterList = node.childForFieldName('parameters');
-
-    if (!parameterList) return parameters;
-
-    for (let i = 0; i < parameterList.childCount; i++) {
-      const child = parameterList.child(i);
-      if (child?.type === 'parameter') {
-        const typeNode = child.childForFieldName('type');
-        const nameNode = child.childForFieldName('name');
-
-        if (typeNode && nameNode) {
-          parameters.push({
-            name: this.getNodeText(nameNode, content),
-            type: this.getNodeText(typeNode, content),
-            isRef: this.getNodeText(child, content).includes('ref '),
-            isOut: this.getNodeText(child, content).includes('out '),
-            isParams: this.getNodeText(child, content).includes('params '),
-          });
-        }
-      }
-    }
-
-    return parameters;
-  }
-
-  private extractCallParameters(
-    node: Parser.SyntaxNode,
-    content: string,
-    context: ASTContext
-  ): { values: string[]; types: string[] } {
-    const values: string[] = [];
-    const types: string[] = [];
-    const argumentList = this.findNodeOfType(node, 'argument_list');
-
-    if (argumentList) {
-      for (let i = 0; i < argumentList.childCount; i++) {
-        const child = argumentList.child(i);
-        if (child?.type === 'argument') {
-          const text = this.getNodeText(child, content).trim();
-          if (text) {
-            values.push(text);
-            types.push(this.inferParameterType(text, context));
-          }
-        }
-      }
-    }
-
-    return { values, types };
-  }
-
-  private inferParameterType(paramText: string, context: ASTContext): string {
-    const cleanParam = paramText
-      .replace(/^(ref|out|in)\s+/, '')
-      .replace(/^.*:\s*/, '')
-      .trim();
-
-    if (cleanParam === 'null') return 'null';
-    if (cleanParam === 'true' || cleanParam === 'false') return 'bool';
-    if (/^".*"$/.test(cleanParam) || /^'.*'$/.test(cleanParam)) return 'string';
-    if (/^\d+\.\d+[fFdDmM]?$/.test(cleanParam)) return 'float';
-    if (/^\d+[uUlL]*$/.test(cleanParam)) return 'int';
-
-    const methodParamType = context.currentMethodParameters.get(cleanParam);
-    if (methodParamType) return methodParamType;
-
-    const typeInfo = context.typeMap.get(cleanParam);
-    if (typeInfo) return typeInfo.type;
-
-    const dotIndex = cleanParam.indexOf('.');
-    if (dotIndex > 0) {
-      const objectName = cleanParam.substring(0, dotIndex);
-      const methodParamTypeFromObject = context.currentMethodParameters.get(objectName);
-      if (methodParamTypeFromObject) return methodParamTypeFromObject;
-
-      const objectType = context.typeMap.get(objectName);
-      if (objectType) return objectType.type;
-    }
-
-    return 'unknown';
-  }
-
-  /**
-   * Extract the identifier from a nameof() expression in the first argument
-   * Used to track CallDeferred(nameof(MethodName)) as a method call dependency
-   */
-  private extractNameofIdentifier(node: Parser.SyntaxNode, content: string): string | null {
-    // Find the argument_list node
-    const argumentList = this.findNodeOfType(node, 'argument_list');
-    if (!argumentList || argumentList.namedChildCount === 0) return null;
-
-    // Get the first argument
-    const firstArg = argumentList.namedChild(0);
-    if (!firstArg || firstArg.type !== 'argument') return null;
-
-    // Look for invocation_expression (the nameof call itself)
-    const invocationNode = this.findNodeOfType(firstArg, 'invocation_expression');
-    if (!invocationNode) return null;
-
-    // Verify it's actually a nameof call
-    const functionNode = invocationNode.childForFieldName('function');
-    if (!functionNode) return null;
-
-    const functionName = this.getNodeText(functionNode, content);
-    if (functionName !== 'nameof') return null;
-
-    // Extract the argument to nameof()
-    const nameofArgList = this.findNodeOfType(invocationNode, 'argument_list');
-    if (!nameofArgList || nameofArgList.namedChildCount === 0) return null;
-
-    const nameofArg = nameofArgList.namedChild(0);
-    if (!nameofArg) return null;
-
-    // The argument text is the identifier we want (e.g., "InitializeGameplayCoordination")
-    const identifier = this.getNodeText(nameofArg, content).trim();
-    return identifier || null;
-  }
-
-  private resolveType(typeString: string): string {
-    // Return the actual type name as declared in the code, including interface "I" prefix
-    // The type system and symbol resolution should handle interface vs implementation resolution,
-    // not arbitrary name transformations
-    return typeString;
-  }
-
-  private buildQualifiedName(context: ASTContext, name: string): string {
-    const parts: string[] = [];
-
-    if (context.currentNamespace) {
-      parts.push(context.currentNamespace);
-    }
-
-    if (context.currentClass && context.currentClass !== name) {
-      parts.push(context.currentClass);
-    }
-
-    parts.push(name);
-
-    return parts.join('.');
-  }
-
-  private findContainingMethod(
-    node: Parser.SyntaxNode,
-    context: ASTContext,
-    content: string
-  ): string {
-    let parent = node.parent;
-
-    while (parent) {
-      if (
-        parent.type === 'method_declaration' ||
-        parent.type === 'constructor_declaration' ||
-        parent.type === 'property_declaration'
-      ) {
-        const nameNode = parent.childForFieldName('name');
-        if (nameNode) {
-          const methodName = this.getNodeText(nameNode, content);
-          return this.buildQualifiedName(context, methodName);
-        }
-      }
-      parent = parent.parent;
-    }
-
-    return '';
-  }
-
-  private findParentDeclaration(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-    let parent = node.parent;
-
-    while (parent) {
-      if (
-        parent.type === 'class_declaration' ||
-        parent.type === 'interface_declaration' ||
-        parent.type === 'struct_declaration'
-      ) {
-        return parent;
-      }
-      parent = parent.parent;
-    }
-
-    return null;
-  }
-
-  private findNodeOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child?.type === type) return child;
-    }
-    return null;
-  }
-
-  protected findNodesOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
-    const nodes: Parser.SyntaxNode[] = [];
-
-    const traverse = (n: Parser.SyntaxNode) => {
-      if (n.type === type) {
-        nodes.push(n);
-      }
-      for (let i = 0; i < n.childCount; i++) {
-        const child = n.child(i);
-        if (child) traverse(child);
-      }
-    };
-
-    traverse(node);
-    return nodes;
-  }
-
-  private buildClassSignature(name: string, modifiers: string[], baseTypes: string[]): string {
-    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    const inheritance = baseTypes.length > 0 ? ` : ${baseTypes.join(', ')}` : '';
-    return `${modifierString}class ${name}${inheritance}`;
-  }
-
-  private buildInterfaceSignature(name: string, modifiers: string[], baseTypes: string[]): string {
-    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    const inheritance = baseTypes.length > 0 ? ` : ${baseTypes.join(', ')}` : '';
-    return `${modifierString}interface ${name}${inheritance}`;
-  }
-
-  private buildMethodSignature(
-    name: string,
-    modifiers: string[],
-    returnType: string,
-    parameters: ParameterInfo[]
-  ): string {
-    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    const paramString = parameters.map(p => `${p.type} ${p.name}`).join(', ');
-    return `${modifierString}${returnType} ${name}(${paramString})`;
-  }
-
-  private buildConstructorSignature(
-    name: string,
-    modifiers: string[],
-    parameters: ParameterInfo[]
-  ): string {
-    const modifierString = modifiers.length > 0 ? `${modifiers.join(' ')} ` : '';
-    const paramString = parameters.map(p => `${p.type} ${p.name}`).join(', ');
-    return `${modifierString}${name}(${paramString})`;
-  }
-
-  private extractExplicitInterfaceQualifier(node: Parser.SyntaxNode, content: string): string | null {
-    const declarationText = this.getNodeText(node, content);
-    const explicitInterfacePattern = /\b(I[A-Z]\w+)\s*\.\s*\w+\s*\(/;
-    const match = declarationText.match(explicitInterfacePattern);
-    return match ? match[1] : null;
-  }
-
   protected shouldUseChunking(content: string, options: ChunkedParseOptions): boolean {
-    const chunkingEnabled = options.enableChunking !== false;
-    const exceedsSize = content.length > (options.chunkSize || this.DEFAULT_CHUNK_SIZE);
-    return chunkingEnabled && exceedsSize;
+    return shouldUseChunking(content, options, this.DEFAULT_CHUNK_SIZE);
   }
-
-  private createErrorResult(message: string): ParseResult {
-    return {
-      symbols: [],
-      dependencies: [],
-      imports: [],
-      exports: [],
-      errors: [
-        {
-          message,
-          line: 1,
-          column: 1,
-          severity: 'error',
-        },
-      ],
-    };
-  }
-
-  private finalizeResult(result: ParseResult, options?: ParseOptions): ParseResult {
-    const validatedOptions = this.validateOptions(options);
-
-    // Filter private symbols if needed
-    if (!validatedOptions.includePrivateSymbols) {
-      result.symbols = result.symbols.filter(s => s.visibility !== Visibility.PRIVATE);
-    }
-
-    // Remove duplicate dependencies
-    const uniqueDeps = new Map<string, ParsedDependency>();
-    for (const dep of result.dependencies) {
-      const key = `${dep.from_symbol}|${dep.to_symbol}|${dep.dependency_type}|${dep.line_number}`;
-      if (!uniqueDeps.has(key)) {
-        uniqueDeps.set(key, dep);
-      }
-    }
-    result.dependencies = Array.from(uniqueDeps.values());
-
-    return result;
-  }
-
-  // Chunked parsing implementation
 
   protected getChunkBoundaries(content: string, maxChunkSize: number): number[] {
-    const boundaries: number[] = [];
-    const tree = this.parser.parse(content);
-
-    if (!tree?.rootNode) return boundaries;
-
-    // Find top-level declarations
-    const declarations = this.findTopLevelDeclarations(tree.rootNode, content);
-
-    let currentSize = 0;
-
-    for (const decl of declarations) {
-      const declSize = decl.endIndex - decl.startIndex;
-
-      if (currentSize + declSize > maxChunkSize && currentSize > 0) {
-        boundaries.push(decl.startIndex - 1);
-        currentSize = 0;
-      }
-
-      currentSize += declSize;
-    }
-
-    return boundaries;
-  }
-
-  private findTopLevelDeclarations(
-    rootNode: Parser.SyntaxNode,
-    _content: string
-  ): Array<{ startIndex: number; endIndex: number; type: string }> {
-    const declarations: Array<{ startIndex: number; endIndex: number; type: string }> = [];
-
-    const topLevelTypes = [
-      'namespace_declaration',
-      'class_declaration',
-      'interface_declaration',
-      'struct_declaration',
-      'enum_declaration',
-      'delegate_declaration',
-    ];
-
-    for (const type of topLevelTypes) {
-      const nodes = this.findNodesOfType(rootNode, type);
-      for (const node of nodes) {
-        // Only include actual top-level declarations
-        let parent = node.parent;
-        let isTopLevel = true;
-
-        while (parent && parent !== rootNode) {
-          if (topLevelTypes.includes(parent.type)) {
-            isTopLevel = false;
-            break;
-          }
-          parent = parent.parent;
-        }
-
-        if (isTopLevel) {
-          declarations.push({
-            startIndex: node.startIndex,
-            endIndex: node.endIndex,
-            type: node.type,
-          });
-        }
-      }
-    }
-
-    return declarations.sort((a, b) => a.startIndex - b.startIndex);
-  }
-
-  private extractStructuralContext(content: string): StructuralContext[] {
-    const structures: StructuralContext[] = [];
-    const tree = this.parser.parse(content);
-
-    if (!tree?.rootNode) return structures;
-
-    const namespaceStack: string[] = [];
-    const classStack: string[] = [];
-
-    const traverse = (node: Parser.SyntaxNode) => {
-      switch (node.type) {
-        case 'namespace_declaration':
-        case 'file_scoped_namespace_declaration': {
-          const nameNode = node.childForFieldName('name');
-          if (nameNode) {
-            const name = this.getNodeText(nameNode, content);
-            namespaceStack.push(name);
-
-            structures.push({
-              type: 'namespace',
-              name,
-              qualifiedName: name,
-              startLine: node.startPosition.row + 1,
-              endLine: node.endPosition.row + 1,
-            });
-          }
-          break;
-        }
-
-        case 'class_declaration':
-        case 'interface_declaration': {
-          const nameNode = node.childForFieldName('name');
-          if (nameNode) {
-            const name = this.getNodeText(nameNode, content);
-            const namespace = namespaceStack.length > 0 ? namespaceStack.join('.') : undefined;
-            const parentClass =
-              classStack.length > 0 ? classStack[classStack.length - 1] : undefined;
-
-            const qualifiedParts: string[] = [];
-            if (namespace) qualifiedParts.push(namespace);
-            if (parentClass) qualifiedParts.push(parentClass);
-            qualifiedParts.push(name);
-
-            const qualifiedName = qualifiedParts.join('.');
-
-            structures.push({
-              type: node.type === 'class_declaration' ? 'class' : 'interface',
-              name,
-              qualifiedName,
-              startLine: node.startPosition.row + 1,
-              endLine: node.endPosition.row + 1,
-              namespace,
-              parentClass,
-            });
-
-            classStack.push(name);
-          }
-          break;
-        }
-      }
-
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) {
-          traverse(child);
-        }
-      }
-
-      if (node.type === 'class_declaration' || node.type === 'interface_declaration') {
-        classStack.pop();
-      }
-      if (
-        node.type === 'namespace_declaration' ||
-        node.type === 'file_scoped_namespace_declaration'
-      ) {
-        namespaceStack.pop();
-      }
-    };
-
-    traverse(tree.rootNode);
-    return structures;
+    return getChunkBoundaries(
+      content,
+      maxChunkSize,
+      this.parseContent.bind(this),
+      this.getNodeText.bind(this),
+      this.findNodesOfType.bind(this)
+    );
   }
 
   protected override splitIntoChunks(
     content: string,
-    maxChunkSize: number,
+    chunkSize: number,
     overlapLines: number
   ): ChunkResult[] {
-    const structures = this.extractStructuralContext(content);
-    logger.debug('Extracted structural context', {
-      count: structures.length,
-      structures: structures.slice(0, 5),
-    });
-    const baseChunks = super.splitIntoChunks(content, maxChunkSize, overlapLines);
-    logger.debug('Created base chunks', { count: baseChunks.length });
+    const boundaries = this.getChunkBoundaries(content, chunkSize);
+    const lines = content.split('\n');
+    const chunks: ChunkResult[] = [];
 
-    return baseChunks.map(chunk => {
-      const enclosingClasses: string[] = [];
-      let enclosingNamespace: string | undefined;
-      let qualifiedClassName: string | undefined;
-
-      for (const structure of structures) {
-        const chunkOverlapsStructure =
-          (chunk.startLine >= structure.startLine && chunk.startLine <= structure.endLine) ||
-          (chunk.endLine >= structure.startLine && chunk.endLine <= structure.endLine) ||
-          (chunk.startLine <= structure.startLine && chunk.endLine >= structure.endLine);
-
-        if (chunkOverlapsStructure) {
-          if (structure.type === 'namespace') {
-            enclosingNamespace = structure.qualifiedName;
-          } else if (structure.type === 'class' || structure.type === 'interface') {
-            enclosingClasses.push(structure.name);
-            if (!qualifiedClassName) {
-              qualifiedClassName = structure.qualifiedName;
-            }
-          }
-        }
-      }
-
-      if (!chunk.metadata) {
-        chunk.metadata = {
-          originalStartLine: chunk.startLine,
+    if (boundaries.length === 0) {
+      chunks.push({
+        content,
+        startLine: 1,
+        endLine: lines.length,
+        chunkIndex: 0,
+        isComplete: true,
+        metadata: {
+          originalStartLine: 1,
           hasOverlapBefore: false,
           hasOverlapAfter: false,
-          totalChunks: baseChunks.length,
-        };
-      }
+          totalChunks: 1,
+        },
+      });
+    } else {
+      let lastBoundary = 0;
 
-      chunk.metadata.enclosingStructures = {
-        namespace: enclosingNamespace,
-        classes: enclosingClasses.length > 0 ? enclosingClasses : undefined,
-        qualifiedClassName,
-      };
+      for (let i = 0; i <= boundaries.length; i++) {
+        const currentBoundary = i < boundaries.length ? boundaries[i] : content.length;
 
-      if (enclosingClasses.length > 0 || enclosingNamespace) {
-        logger.debug('Chunk enclosing structures', {
-          chunkIndex: chunk.chunkIndex,
-          startLine: chunk.startLine,
-          endLine: chunk.endLine,
-          namespace: enclosingNamespace,
-          classes: enclosingClasses,
-          qualifiedClassName,
+        const startIndex = Math.max(0, lastBoundary - overlapLines * 50);
+        const endIndex = currentBoundary;
+
+        const chunkContent = content.substring(startIndex, endIndex);
+        const startLineNum = content.substring(0, startIndex).split('\n').length;
+        const endLineNum = content.substring(0, endIndex).split('\n').length;
+
+        chunks.push({
+          content: chunkContent,
+          startLine: startLineNum,
+          endLine: endLineNum,
+          chunkIndex: i,
+          isComplete: i === boundaries.length,
+          metadata: {
+            originalStartLine: startLineNum,
+            hasOverlapBefore: i > 0,
+            hasOverlapAfter: i < boundaries.length,
+            totalChunks: boundaries.length + 1,
+          },
         });
-      }
 
-      return chunk;
-    });
+        lastBoundary = currentBoundary;
+      }
+    }
+
+    // Extract and enrich with structural context
+    const structures = extractStructuralContext(
+      content,
+      this.parseContent.bind(this),
+      this.getNodeText.bind(this)
+    );
+
+    return enrichChunksWithStructuralContext(chunks, structures);
   }
 
   protected mergeChunkResults(
-    chunks: ParseResult[],
+    chunkResults: ParseResult[],
     chunkMetadata: ChunkResult[]
   ): MergedParseResult {
-    const merged: ParseResult = {
-      symbols: [],
-      dependencies: [],
-      imports: [],
-      exports: [],
-      errors: [],
-    };
-
-    // Merge all chunks
-    for (const chunk of chunks) {
-      merged.symbols.push(...chunk.symbols);
-      merged.dependencies.push(...chunk.dependencies);
-      merged.imports.push(...chunk.imports);
-      merged.exports.push(...chunk.exports);
-      merged.errors.push(...chunk.errors);
-    }
-
-    // Remove duplicates
-    merged.symbols = this.removeDuplicateSymbols(merged.symbols);
-    merged.dependencies = this.removeDuplicateDependencies(merged.dependencies);
-
-    return {
-      ...merged,
-      chunksProcessed: chunks.length,
-      metadata: {
-        totalChunks: chunkMetadata.length,
-        duplicatesRemoved: 0,
-        crossChunkReferencesFound: 0,
-      },
-    };
-  }
-
-  private convertMergedResult(mergedResult: MergedParseResult): ParseResult {
-    return {
-      symbols: mergedResult.symbols,
-      dependencies: mergedResult.dependencies,
-      imports: mergedResult.imports,
-      exports: mergedResult.exports,
-      errors: mergedResult.errors,
-    };
+    return mergeChunkResults(
+      chunkResults,
+      chunkMetadata,
+      this.removeDuplicateSymbols.bind(this),
+      this.removeDuplicateDependencies.bind(this)
+    );
   }
 
   protected removeDuplicateSymbols(symbols: ParsedSymbol[]): ParsedSymbol[] {
-    const seen = new Map<string, ParsedSymbol>();
-
-    for (const symbol of symbols) {
-      const key =
-        symbol.symbol_type === SymbolType.CLASS && symbol.signature?.includes('partial')
-          ? `${symbol.qualified_name}:CLASS:partial`
-          : `${symbol.qualified_name || symbol.name}:${symbol.symbol_type}`;
-
-      if (!seen.has(key)) {
-        seen.set(key, symbol);
-      } else {
-        const existing = seen.get(key)!;
-        if (symbol.symbol_type === SymbolType.CLASS && this.isPartialClass(symbol)) {
-          seen.set(key, {
-            ...existing,
-            start_line: Math.min(existing.start_line, symbol.start_line),
-            end_line: Math.max(existing.end_line, symbol.end_line),
-          });
-        } else if (this.isMoreCompleteSymbol(symbol, existing)) {
-          seen.set(key, symbol);
-        }
-      }
-    }
-
-    return Array.from(seen.values());
+    return removeDuplicateSymbolsUtil(symbols, (symbol1, symbol2) => {
+      // Prefer symbols with more complete information
+      if (symbol1.signature && !symbol2.signature) return true;
+      if (!symbol1.signature && symbol2.signature) return false;
+      if (symbol1.description && !symbol2.description) return true;
+      if (!symbol1.description && symbol2.description) return false;
+      return symbol1.start_line < symbol2.start_line;
+    });
   }
 
-  private isPartialClass(symbol: ParsedSymbol): boolean {
-    return symbol.symbol_type === SymbolType.CLASS && !!symbol.signature?.includes('partial');
-  }
-
-  // Required abstract method implementations
-
+  /**
+   * Abstract method implementations - delegate to extracted modules
+   */
   protected extractSymbols(_rootNode: Parser.SyntaxNode, _content: string): ParsedSymbol[] {
-    // This is handled by the single-pass extraction
+    // Not used - we use performSinglePassExtraction instead
     return [];
   }
 
@@ -3015,178 +580,21 @@ export class CSharpParser extends ChunkedParser {
     _rootNode: Parser.SyntaxNode,
     _content: string
   ): ParsedDependency[] {
-    // This is handled by the single-pass extraction
+    // Not used - we use performSinglePassExtraction instead
     return [];
   }
 
   protected extractImports(_rootNode: Parser.SyntaxNode, _content: string): ParsedImport[] {
-    // This is handled by the single-pass extraction
+    // Not used - we use performSinglePassExtraction instead
     return [];
   }
 
   protected extractExports(_rootNode: Parser.SyntaxNode, _content: string): ParsedExport[] {
-    // This is handled by the single-pass extraction
+    // Not used - we use performSinglePassExtraction instead
     return [];
   }
 
-  private extractConstructorDependencies(
-    parameters: ParameterInfo[],
-    context: ASTContext,
-    lineNumber: number
-  ): ParsedDependency[] {
-    const dependencies: ParsedDependency[] = [];
-
-    if (!context.currentClass || parameters.length === 0) {
-      return dependencies;
-    }
-
-    for (const param of parameters) {
-      let typeName = param.type.trim();
-
-      if (this.isBuiltInType(typeName)) continue;
-
-      typeName = typeName.replace(/^\?/, '');
-
-      const genericMatch = typeName.match(/^([^<]+)<(.+)>$/);
-      if (genericMatch) {
-        const baseType = genericMatch[1].trim();
-        const genericArgs = genericMatch[2].split(',').map(t => t.trim());
-
-        if (!this.isBuiltInType(baseType)) {
-          const fullyQualifiedType = this.resolveFQN(baseType, context);
-          dependencies.push({
-            from_symbol: context.currentClass,
-            to_symbol: baseType,
-            to_qualified_name: fullyQualifiedType,
-            dependency_type: DependencyType.IMPORTS,
-            line_number: lineNumber,
-          });
-        }
-
-        for (const genericArg of genericArgs) {
-          const cleanArg = genericArg.trim();
-          if (!this.isBuiltInType(cleanArg)) {
-            const fullyQualifiedArg = this.resolveFQN(cleanArg, context);
-            dependencies.push({
-              from_symbol: context.currentClass,
-              to_symbol: cleanArg,
-              to_qualified_name: fullyQualifiedArg,
-              dependency_type: DependencyType.IMPORTS,
-              line_number: lineNumber,
-            });
-          }
-        }
-      } else {
-        const fullyQualifiedType = this.resolveFQN(typeName, context);
-        dependencies.push({
-          from_symbol: context.currentClass,
-          to_symbol: typeName,
-          to_qualified_name: fullyQualifiedType,
-          dependency_type: DependencyType.IMPORTS,
-          line_number: lineNumber,
-        });
-      }
-    }
-
-    return dependencies;
-  }
-
-  /**
-   * Extract containment relationships between parent classes/interfaces and their methods.
-   * Creates CONTAINS dependencies when a class/interface/struct contains methods or properties.
-   * Uses line range overlap to identify parent-child relationships.
-   */
-  private extractContainmentDependencies(symbols: ParsedSymbol[]): ParsedDependency[] {
-    const dependencies: ParsedDependency[] = [];
-
-    // Potential child symbols: methods and properties (C# fields are also stored as properties)
-    const childCandidates = symbols.filter(
-      s => s.symbol_type === SymbolType.METHOD || s.symbol_type === SymbolType.PROPERTY
-    );
-
-    // Potential parent symbols: classes, interfaces, structs
-    const parentCandidates = symbols.filter(
-      s =>
-        s.symbol_type === SymbolType.CLASS ||
-        s.symbol_type === SymbolType.INTERFACE ||
-        s.symbol_type === SymbolType.STRUCT
-    );
-
-    if (childCandidates.length === 0 || parentCandidates.length === 0) return dependencies;
-
-    // For each symbol, check if it's nested inside another symbol
-    for (const child of childCandidates) {
-      for (const parent of parentCandidates) {
-        // Skip self-comparison
-        if (child === parent) continue;
-
-        // Skip if they don't have proper line ranges
-        if (!child.start_line || !child.end_line || !parent.start_line || !parent.end_line) {
-          continue;
-        }
-
-        // Check if parent's line range fully contains the child
-        const isContained =
-          parent.start_line < child.start_line && parent.end_line > child.end_line;
-
-        if (isContained) {
-          // Ensure we only capture direct containment (not grandparent)
-          const hasIntermediateParent = parentCandidates.some(intermediate => {
-            if (intermediate === parent || intermediate === child) return false;
-            if (!intermediate.start_line || !intermediate.end_line) return false;
-
-            const intermediateContainsChild =
-              intermediate.start_line < child.start_line && intermediate.end_line > child.end_line;
-
-            const parentContainsIntermediate =
-              parent.start_line < intermediate.start_line &&
-              parent.end_line > intermediate.end_line;
-
-            return intermediateContainsChild && parentContainsIntermediate;
-          });
-
-          if (!hasIntermediateParent) {
-            dependencies.push({
-              from_symbol: parent.name,
-              to_symbol: child.name,
-              dependency_type: DependencyType.CONTAINS,
-              line_number: child.start_line,
-            });
-          }
-        }
-      }
-    }
-
-    return dependencies;
-  }
-
-  private isBuiltInType(type: string): boolean {
-    const builtIns = new Set([
-      'string', 'int', 'float', 'double', 'decimal', 'bool', 'byte', 'sbyte',
-      'short', 'ushort', 'uint', 'long', 'ulong', 'char', 'object', 'void',
-      'dynamic', 'var', 'nint', 'nuint',
-      'Action', 'Func', 'Task', 'ValueTask', 'Exception',
-      'IEnumerable', 'ICollection', 'IList', 'IDictionary', 'IQueryable',
-      'List', 'Dictionary', 'HashSet', 'Queue', 'Stack',
-      'Array', 'Tuple', 'ValueTuple'
-    ]);
-    return builtIns.has(type) || /^System\./.test(type);
-  }
-
-  private resolveFQN(className: string, context: ASTContext): string {
-    if (className.includes('.')) {
-      return className;
-    }
-
-    for (const usingDirective of context.usingDirectives) {
-      const potentialFqn = `${usingDirective}.${className}`;
-      return potentialFqn;
-    }
-
-    if (context.currentNamespace) {
-      return `${context.currentNamespace}.${className}`;
-    }
-
-    return className;
+  protected findNodesOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
+    return findNodesOfType(node, type);
   }
 }
