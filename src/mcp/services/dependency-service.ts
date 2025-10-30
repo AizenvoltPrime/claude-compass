@@ -13,7 +13,7 @@ import {
   TransitiveAnalysisOptions,
   symbolImportanceRanker,
   SymbolForRanking,
-} from '../../graph/transitive-analyzer';
+} from '../../graph/transitive-analyzer/';
 import {
   DEFAULT_DEPENDENCY_DEPTH,
   TRANSITIVE_ANALYSIS_THRESHOLD,

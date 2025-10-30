@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import * as SymbolService from '../../database/services/symbol-service';
 import { DependencyType } from '../../database/models';
-import { transitiveAnalyzer } from '../../graph/transitive-analyzer';
+import { transitiveAnalyzer } from '../../graph/transitive-analyzer/';
 import { TraceFlowArgs } from '../types';
 import { validateTraceFlowArgs } from '../validators';
 import { createComponentLogger } from '../../utils/logger';

@@ -1,5 +1,5 @@
 import { getDatabaseConnection, closeDatabaseConnection } from '../../src/database/connection';
-import { TransitiveAnalyzer } from '../../src/graph/transitive-analyzer';
+import { TransitiveAnalyzer } from '../../src/graph/transitive-analyzer/';
 import { SymbolWithFile } from '../../src/database/models';
 import * as SearchService from '../../src/database/services/search-service';
 import { Knex } from 'knex';

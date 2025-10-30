@@ -1,12 +1,10 @@
 import type { Knex } from 'knex';
-import { Repository, File, Symbol } from '../database/models';
 import * as RepositoryService from '../database/services/repository-service';
 import * as DependencyService from '../database/services/dependency-service';
 import * as CleanupService from '../database/services/cleanup-service';
 import * as SymbolService from '../database/services/symbol-service';
-import { ParseResult } from '../parsers';
-import { FileGraphBuilder, FileGraphData } from './file-graph';
-import { SymbolGraphBuilder, SymbolGraphData } from './symbol-graph';
+import { FileGraphBuilder } from './file-graph';
+import { SymbolGraphBuilder } from './symbol-graph';
 import { CrossStackGraphBuilder } from './cross-stack-builder';
 import { createComponentLogger } from '../utils/logger';
 
@@ -177,11 +175,7 @@ export class GraphBuilder {
       );
 
       // Store files and symbols in database
-      const dbFiles = await this.storageOrchestrator.storeFiles(
-        repository.id,
-        files,
-        parseResults
-      );
+      const dbFiles = await this.storageOrchestrator.storeFiles(repository.id, files, parseResults);
       await this.storageOrchestrator.storeSymbols(dbFiles, parseResults);
 
       // Link symbol parent-child relationships
@@ -336,14 +330,10 @@ export class GraphBuilder {
     this.logger.info('Starting cross-stack analysis', { repositoryId });
 
     try {
-      const fullStackGraph = await this.crossStackGraphBuilder.buildFullStackFeatureGraph(
-        repositoryId
-      );
+      const fullStackGraph =
+        await this.crossStackGraphBuilder.buildFullStackFeatureGraph(repositoryId);
 
-      await this.crossStackGraphBuilder.storeCrossStackRelationships(
-        fullStackGraph,
-        repositoryId
-      );
+      await this.crossStackGraphBuilder.storeCrossStackRelationships(fullStackGraph, repositoryId);
 
       // Query database for actual API call counts after all storage operations
       const apiCallStats: any = await this.db('api_calls as ac')

@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 import { SymbolType } from '../database/models';
 import * as RepositoryService from '../database/services/repository-service';
 import { createComponentLogger } from '../utils/logger';
-import { symbolImportanceRanker, SymbolForRanking } from '../graph/transitive-analyzer';
+import { symbolImportanceRanker, SymbolForRanking } from '../graph/transitive-analyzer/';
 
 import { validateSearchCodeArgs } from './validators';
 import {
