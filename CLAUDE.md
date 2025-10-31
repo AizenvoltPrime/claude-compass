@@ -67,17 +67,18 @@ npm run analyze /path/to/project                     # Analyze absolute path
 **Parser System (`src/parsers/`)**
 
 - Multi-language parsing using Tree-sitter
-- Language parsers: JavaScript, TypeScript, PHP, C#
+- Language parsers: JavaScript, TypeScript, PHP, C# (modularized into `src/parsers/csharp/`)
 - Framework parsers: Vue, React, Laravel, Next.js, Godot
+- Framework symbols registry (modularized into `src/parsers/framework-symbols/`)
 - Chunking strategies for large files
 - Cross-stack dependency detection
 
 **Graph Builder (`src/graph/`)**
 
-- Constructs dependency graphs from parsed symbols
+- Constructs dependency graphs from parsed symbols (modularized into `src/graph/builder/`)
 - Handles file, symbol, and framework relationships
-- Cross-stack builder for Vue ↔ Laravel connections
-- Call chain analysis and formatting
+- Cross-stack builder for Vue ↔ Laravel connections (modularized into `src/graph/cross-stack-builder/`)
+- Transitive analysis and call chain analysis (modularized into `src/graph/transitive-analyzer/`)
 
 **Database Layer (`src/database/`)**
 

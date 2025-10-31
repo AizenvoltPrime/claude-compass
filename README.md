@@ -135,12 +135,19 @@ The `analyze` command is the core of Claude Compass, performing deep multi-langu
 - `--cross-stack` - Enable Vue ↔ Laravel analysis
 - `--verbose` - Enable detailed logging
 
-### 2. GraphBuilder Orchestration (`src/graph/builder.ts`)
+### 2. GraphBuilder Orchestration (`src/graph/builder/`)
 
-The **GraphBuilder** coordinates the entire analysis pipeline:
+The **GraphBuilder** (refactored into modular services) coordinates the entire analysis pipeline:
 
 ```typescript
-// Initialize sub-builders
+// Modular services orchestrate the pipeline:
+// - file-discovery-service.ts: File system traversal
+// - file-parsing-orchestrator.ts: Multi-language parsing
+// - storage-orchestrator.ts: Database persistence
+// - embedding-orchestrator.ts: Vector embeddings
+// - framework-entity-persister.ts: Framework-specific entities
+
+// Sub-builders handle specialized graphs:
 new FileGraphBuilder(); // File-level relationships
 new SymbolGraphBuilder(); // Symbol-level dependencies
 new CrossStackGraphBuilder(); // Vue ↔ Laravel connections
@@ -233,12 +240,15 @@ godot_scenes/nodes -- Game entities (scenes and node hierarchy)
 - Recursive call detection
 - Symbol complexity metrics
 
-**Cross-Stack Builder** (`cross-stack-builder.ts`):
+**Cross-Stack Builder** (`cross-stack-builder/`):
 
-- Vue component → Laravel API route mapping
-- Data contract schema matching
-- Feature cluster identification
-- Cross-language dependency traversal
+Modular cross-stack analysis services:
+- `api-call-extraction.ts`: Frontend API call detection
+- `route-matching.ts`: API call to route relationship matching
+- `data-contract-detection.ts`: TypeScript/PHP schema matching
+- `feature-clustering.ts`: Feature identification from graphs
+- `graph-builders.ts`: Graph construction from relationships
+- Core functionality: Vue component → Laravel API route mapping, cross-language dependency traversal
 
 ### 8. Advanced Analysis Components
 
@@ -249,13 +259,17 @@ godot_scenes/nodes -- Game entities (scenes and node hierarchy)
 - Framework symbol registry integration
 - External symbol handling (npm packages, Laravel facades)
 
-**Transitive Analyzer** (`src/graph/transitive-analyzer.ts`):
+**Transitive Analyzer** (`src/graph/transitive-analyzer/`):
 
-- Deep dependency traversal (configurable depth: default 10, max 20)
-- Cycle detection with visited set tracking
-- Cross-stack impact analysis
-- Human-readable call chain formatting
-- Performance optimization with caching
+Modular transitive analysis services:
+- `transitive-analyzer-service.ts`: Core transitive traversal logic
+- `query-service.ts`: High-level transitive analysis queries
+- `call-chain-formatter.ts`: Human-readable call chain generation
+- `pathfinding-algorithms.ts`: Dijkstra, A*, path-finding algorithms
+- `traversal-algorithms.ts`: DFS/BFS graph traversal
+- `centrality-metrics.ts`: Graph centrality calculations
+- `symbol-importance-ranker.ts`: PageRank and symbol ranking
+- Core capabilities: Deep dependency traversal (configurable depth: default 10, max 20), cycle detection, cross-stack impact analysis, performance optimization with caching
 
 ### 9. Analysis Results & Metrics
 
