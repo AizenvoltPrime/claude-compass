@@ -5,7 +5,7 @@ import * as CleanupService from '../database/services/cleanup-service';
 import * as SymbolService from '../database/services/symbol-service';
 import { FileGraphBuilder } from './file-graph';
 import { SymbolGraphBuilder } from './symbol-graph';
-import { CrossStackGraphBuilder } from './cross-stack-builder';
+import { CrossStackGraphBuilder } from './cross-stack-builder/';
 import { createComponentLogger } from '../utils/logger';
 
 // Import all extracted modules

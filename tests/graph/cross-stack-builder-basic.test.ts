@@ -1,4 +1,7 @@
-import { CrossStackGraphBuilder } from '../../src/graph/cross-stack-builder';
+import {
+  CrossStackGraphBuilder,
+  buildDataContractGraph,
+} from '../../src/graph/cross-stack-builder';
 import { jest } from '@jest/globals';
 import type { Knex } from 'knex';
 
@@ -28,7 +31,7 @@ describe('CrossStackGraphBuilder - Basic Tests', () => {
 
   describe('buildDataContractGraph', () => {
     it('should handle empty input gracefully', async () => {
-      const result = await builder.buildDataContractGraph([], [], []);
+      const result = await buildDataContractGraph(mockDb, [], [], []);
 
       expect(result).toBeDefined();
       expect(result.nodes).toHaveLength(0);
@@ -44,11 +47,9 @@ describe('CrossStackGraphBuilder - Basic Tests', () => {
         throw new Error('Database error');
       }) as unknown as Knex;
 
-      const errorBuilder = new CrossStackGraphBuilder(erroringDb);
-
       // Should not throw, but handle the error gracefully
       await expect(async () => {
-        await errorBuilder.buildDataContractGraph([], [], []);
+        await buildDataContractGraph(erroringDb, [], [], []);
       }).not.toThrow();
     });
   });

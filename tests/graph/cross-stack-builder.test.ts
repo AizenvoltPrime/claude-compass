@@ -4,6 +4,7 @@ import {
   CrossStackEdge,
   CrossStackGraphData,
   FullStackFeatureGraph,
+  buildDataContractGraph,
 } from '../../src/graph/cross-stack-builder';
 import {
   ApiCall,
@@ -154,7 +155,8 @@ describe('CrossStackGraphBuilder', () => {
         },
       ];
 
-      const result = await builder.buildDataContractGraph(
+      const result = await buildDataContractGraph(
+        mockDb,
         typescriptInterfaces,
         phpDtos,
         dataContracts
@@ -218,7 +220,8 @@ describe('CrossStackGraphBuilder', () => {
       ];
 
       expect(async () => {
-        await builder.buildDataContractGraph(
+        await buildDataContractGraph(
+          mockDb,
           interfacesWithoutProperties,
           dtosWithoutProperties,
           []
