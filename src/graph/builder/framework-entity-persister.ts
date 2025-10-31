@@ -49,7 +49,7 @@ import {
   isGodotScene,
   isGodotNode,
 } from './framework-type-guards';
-import { SymbolGraphData } from '../symbol-graph';
+import { SymbolGraphData } from '../symbol-graph/';
 import { BuildError } from './types';
 import { createComponentLogger } from '../../utils/logger';
 

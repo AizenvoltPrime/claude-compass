@@ -232,13 +232,19 @@ godot_scenes/nodes -- Game entities (scenes and node hierarchy)
 - Circular dependency detection
 - Dependency depth calculation
 
-**Symbol Graph Builder** (`symbol-graph.ts`):
+**Symbol Graph Builder** (`symbol-graph/`):
 
-- Enhanced qualified name resolution
-- Interface-to-implementation mapping (C#/TypeScript)
-- Call chain analysis with depth tracking
-- Recursive call detection
-- Symbol complexity metrics
+Modular symbol-level analysis services:
+- `types.ts`: Core type definitions (SymbolNode, SymbolEdge, SymbolGraphData)
+- `name-parsing-utils.ts`: Qualified name parsing and generic parameter stripping
+- `language-detection-utils.ts`: Language compatibility and cross-language filtering
+- `symbol-lookup-utils.ts`: Symbol lookup helpers and class-member association
+- `symbol-resolution.ts`: Interface-to-implementation mapping, enhanced symbol lookup
+- `edge-builder.ts`: Complex dependency edge creation with context-based disambiguation
+- `dependency-queries.ts`: Caller/callee queries, implementation lookup
+- `graph-analysis.ts`: Call chain analysis, recursive call detection, complexity metrics
+- `graph-builder.ts`: Main SymbolGraphBuilder facade class
+- Core capabilities: Enhanced qualified name resolution, cross-language dependency filtering, transitive analysis
 
 **Cross-Stack Builder** (`cross-stack-builder/`):
 

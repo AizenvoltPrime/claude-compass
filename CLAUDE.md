@@ -78,6 +78,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 
 - Constructs dependency graphs from parsed symbols (modularized into `src/graph/builder/`)
 - Handles file, symbol, and framework relationships
+- Symbol graph builder for dependency analysis (modularized into `src/graph/symbol-graph/`)
 - Cross-stack builder for Vue ↔ Laravel connections (modularized into `src/graph/cross-stack-builder/`)
 - Transitive analysis and call chain analysis (modularized into `src/graph/transitive-analyzer/`)
 

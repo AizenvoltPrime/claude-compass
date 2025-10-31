@@ -1,7 +1,7 @@
 import { Repository } from '../../database/models';
 import { FileSizePolicy } from '../../config/file-size-policy';
 import { FileGraphData } from '../file-graph';
-import { SymbolGraphData } from '../symbol-graph';
+import { SymbolGraphData } from '../symbol-graph/';
 
 /**
  * Type definitions for GraphBuilder

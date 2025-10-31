@@ -8,7 +8,7 @@ import * as DependencyService from '../../database/services/dependency-service';
 import * as RepositoryService from '../../database/services/repository-service';
 import * as CleanupService from '../../database/services/cleanup-service';
 import { FileGraphBuilder, FileGraphData } from '../file-graph';
-import { SymbolGraphBuilder, SymbolGraphData } from '../symbol-graph';
+import { SymbolGraphBuilder, SymbolGraphData } from '../symbol-graph/';
 import { BuildOptions, BuildResult, BuildError } from './types';
 import { FileDiscoveryService } from './file-discovery-service';
 import { RepositoryManager } from './repository-manager';
