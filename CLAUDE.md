@@ -69,6 +69,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 - Multi-language parsing using Tree-sitter
 - Language parsers: JavaScript, TypeScript, PHP, C# (modularized into `src/parsers/csharp/`)
 - Framework parsers: Vue, React, Laravel, Next.js, Godot
+- ORM parsers: Prisma, TypeORM, Sequelize, Mongoose, Objection.js, MikroORM (modularized into `src/parsers/orm/`)
 - Framework symbols registry (modularized into `src/parsers/framework-symbols/`)
 - Chunking strategies for large files
 - Cross-stack dependency detection
