@@ -70,6 +70,7 @@ npm run analyze /path/to/project                     # Analyze absolute path
 - Language parsers: JavaScript, TypeScript, PHP, C# (modularized into `src/parsers/csharp/`)
 - Framework parsers: Vue, React, Laravel, Next.js, Godot
 - ORM parsers: Prisma, TypeORM, Sequelize, Mongoose, Objection.js, MikroORM (modularized into `src/parsers/orm/`)
+- Background job parsers: Bull, BullMQ, Agenda, Bee-Queue, Kue, Worker Threads (modularized into `src/parsers/background-job/`)
 - Framework symbols registry (modularized into `src/parsers/framework-symbols/`)
 - Framework detection (modularized into `src/parsers/framework-detector/`)
 - Chunking strategies for large files
