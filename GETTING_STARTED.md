@@ -169,7 +169,7 @@ npm run start search "User" --type class --exported-only
 │   ├── parsers/           # Tree-sitter language and framework parsers
 │   │   ├── base.ts        # Abstract parser interface
 │   │   ├── base-framework.ts # Framework parser base class
-│   │   ├── framework-detector.ts # Framework detection logic
+│   │   ├── framework-detector/  # Framework detection logic (modularized)
 │   │   ├── multi-parser.ts # Multi-parser coordination
 │   │   ├── chunked-parser.ts # Chunked parsing for large files
 │   │   ├── cross-stack.ts # Cross-stack parsing
