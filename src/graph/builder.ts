@@ -109,6 +109,7 @@ export class GraphBuilder {
       this.godotRelationshipBuilder,
       this.fileGraphBuilder,
       this.symbolGraphBuilder,
+      this.crossStackGraphBuilder,
       logger
     );
   }

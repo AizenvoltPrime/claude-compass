@@ -9,6 +9,7 @@ import * as RepositoryService from '../../database/services/repository-service';
 import * as CleanupService from '../../database/services/cleanup-service';
 import { FileGraphBuilder, FileGraphData } from '../file-graph';
 import { SymbolGraphBuilder, SymbolGraphData } from '../symbol-graph/';
+import { CrossStackGraphBuilder } from '../cross-stack-builder';
 import { BuildOptions, BuildResult, BuildError } from './types';
 import { FileDiscoveryService } from './file-discovery-service';
 import { RepositoryManager } from './repository-manager';
@@ -48,6 +49,7 @@ export class ChangeDetectionService {
     private godotRelationshipBuilder: GodotRelationshipBuilder,
     private fileGraphBuilder: FileGraphBuilder,
     private symbolGraphBuilder: SymbolGraphBuilder,
+    private crossStackGraphBuilder: CrossStackGraphBuilder,
     logger?: any
   ) {
     this.logger = logger || createComponentLogger('change-detection-service');
@@ -165,7 +167,30 @@ export class ChangeDetectionService {
       const filesToAnalyze = changedFiles.concat(newFiles);
 
       if (filesToAnalyze.length === 0 && deletedFileIds.length === 0) {
-        this.logger.info('No changed files detected, skipping analysis');
+        this.logger.info('No changed files detected, skipping file analysis');
+
+        const validatedOptions = this.repositoryManager.validateOptions(options, repository);
+        if (validatedOptions.enableCrossStackAnalysis) {
+          this.logger.info('Running cross-stack analysis (no file changes)', {
+            repositoryId: repository.id,
+          });
+          try {
+            const fullStackGraph =
+              await this.crossStackGraphBuilder.buildFullStackFeatureGraph(repository.id);
+            await this.crossStackGraphBuilder.storeCrossStackRelationships(
+              fullStackGraph,
+              repository.id
+            );
+            this.logger.info('Cross-stack analysis completed (no file changes)', {
+              repositoryId: repository.id,
+            });
+          } catch (error) {
+            this.logger.error('Cross-stack analysis failed (no file changes)', {
+              repositoryId: repository.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
 
         const { fileGraph, symbolGraph } = await this.buildGraphStatistics(
           repository,
@@ -199,6 +224,29 @@ export class ChangeDetectionService {
       await RepositoryService.updateRepository(this.db, repository.id, {
         last_indexed: new Date(),
       });
+
+      const validatedOptions = this.repositoryManager.validateOptions(options, repository);
+      if (validatedOptions.enableCrossStackAnalysis) {
+        this.logger.info('Running cross-stack analysis for incremental update', {
+          repositoryId: repository.id,
+        });
+        try {
+          const fullStackGraph =
+            await this.crossStackGraphBuilder.buildFullStackFeatureGraph(repository.id);
+          await this.crossStackGraphBuilder.storeCrossStackRelationships(
+            fullStackGraph,
+            repository.id
+          );
+          this.logger.info('Cross-stack analysis completed for incremental update', {
+            repositoryId: repository.id,
+          });
+        } catch (error) {
+          this.logger.error('Cross-stack analysis failed during incremental update', {
+            repositoryId: repository.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
 
       this.logger.info('Incremental analysis completed', {
         filesProcessed: partialResult.filesProcessed || 0,

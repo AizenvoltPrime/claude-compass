@@ -237,7 +237,7 @@ export class CrossStackGraphBuilder {
               from_symbol_id: callerSymbolId,
               to_symbol_id: endpointSymbolId,
               dependency_type: DependencyType.API_CALL,
-              line_number: edge.metadata.lineNumber ?? null,
+              line_number: edge.metadata.lineNumber ?? 0,
             });
           }
         }
@@ -269,6 +269,7 @@ export class CrossStackGraphBuilder {
               from_symbol_id: frontendTypeId,
               to_symbol_id: backendTypeId,
               dependency_type: DependencyType.SHARES_SCHEMA,
+              line_number: 0,
             });
           }
         }

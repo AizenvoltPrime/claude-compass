@@ -136,36 +136,16 @@ export class RepositoryManager {
   }
 
   async detectFrameworks(repositoryPath: string): Promise<string[]> {
+    const { readPackageJson, readComposerJson, detectJsFrameworks, detectPhpFrameworks } =
+      await import('../../parsers/framework-detector/file-io-utils');
+
     const frameworks: string[] = [];
 
-    try {
-      const packageJsonPath = path.join(repositoryPath, 'package.json');
-      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+    const packageJson = await readPackageJson(repositoryPath);
+    frameworks.push(...detectJsFrameworks(packageJson));
 
-      const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-
-      if (deps.vue || deps['@vue/cli-service']) frameworks.push('vue');
-      if (deps.react) frameworks.push('react');
-      if (deps.next) frameworks.push('nextjs');
-      if (deps.nuxt) frameworks.push('nuxt');
-      if (deps.express) frameworks.push('express');
-      if (deps.fastify) frameworks.push('fastify');
-    } catch {
-      // Ignore errors
-    }
-
-    try {
-      const composerJsonPath = path.join(repositoryPath, 'composer.json');
-      const composerJson = JSON.parse(await fs.readFile(composerJsonPath, 'utf-8'));
-
-      const deps = { ...composerJson.require, ...composerJson['require-dev'] };
-
-      if (deps['laravel/framework']) frameworks.push('laravel');
-      if (deps['symfony/framework-bundle']) frameworks.push('symfony');
-      if (deps['codeigniter4/framework']) frameworks.push('codeigniter');
-    } catch {
-      // Ignore errors
-    }
+    const composerJson = await readComposerJson(repositoryPath);
+    frameworks.push(...detectPhpFrameworks(composerJson));
 
     try {
       const projectGodotPath = path.join(repositoryPath, 'project.godot');

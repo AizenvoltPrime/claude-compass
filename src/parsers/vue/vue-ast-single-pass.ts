@@ -140,11 +140,16 @@ export function performVueSinglePassExtraction(
             currentOptions?.repositoryFrameworks
           );
 
+          let entityType = classification.entityType;
+          if (callee?.text === 'defineStore') {
+            entityType = 'store';
+          }
+
           symbols.push({
             name: nameNode.text,
             qualified_name: buildQualifiedNameFn(nameNode.text),
             symbol_type: SymbolType.VARIABLE,
-            entity_type: classification.entityType,
+            entity_type: entityType,
             framework: 'vue',
             start_line: node.startPosition?.row + 1 || 1,
             end_line: node.endPosition?.row + 1 || 1,
