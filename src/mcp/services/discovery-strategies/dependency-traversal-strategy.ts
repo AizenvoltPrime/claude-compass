@@ -39,6 +39,8 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
   private static readonly MAX_VISITED_NODES = 50000;
   private static readonly MAX_QUEUE_SIZE = 10000;
 
+  private entryPointEntityType?: string;
+
   constructor(private db: Knex) {}
 
   async shouldRun(context: DiscoveryContext): Promise<boolean> {
@@ -80,6 +82,10 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     // Load entry point symbols
     const symbolsBatch = await SymbolService.getSymbolsBatch(this.db, currentSymbols);
 
+    // Store entry point entity type for context-aware filtering
+    const entrySymbol = await SymbolService.getSymbol(this.db, entryPointId);
+    this.entryPointEntityType = entrySymbol?.entity_type;
+
     // Initialize validated files with entry point files
     for (const [_, symbol] of symbolsBatch) {
       if (symbol?.file_id) {
@@ -105,6 +111,31 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       queue.push({ id: symbolId, depth: 0, direction });
       visited.add(symbolId);
       discovered.set(symbolId, 1.0);
+
+      // Discover parent container for entry point executors (controller/service methods)
+      // Ensures parent class is included when starting from a method
+      if (role === SymbolRole.EXECUTOR) {
+        const parentContainerId = await this.getParentContainer(symbolId);
+        if (parentContainerId && !discovered.has(parentContainerId)) {
+          const parentSymbol = await SymbolService.getSymbol(this.db, parentContainerId);
+          if (parentSymbol) {
+            discovered.set(parentContainerId, 1.0);
+            visited.add(parentContainerId);
+            // Validate parent file for method discovery
+            if (parentSymbol.file_id) {
+              validatedFileIds.add(parentSymbol.file_id);
+            }
+
+            // CRITICAL: If parent needs backward traversal (e.g., models discovering callers), queue it
+            // This fixes the regression where models as entry points don't discover services/controllers
+            const parentRole = classifySymbol(parentSymbol);
+            const parentDirection = getTraversalDirection(parentSymbol, parentRole);
+            if (parentRole === SymbolRole.CONTAINER && parentDirection === 'backward') {
+              queue.push({ id: parentContainerId, depth: 0, direction: parentDirection });
+            }
+          }
+        }
+      }
     }
 
     // CRITICAL: Also queue original containers that need backward traversal
@@ -123,6 +154,24 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
         queue.push({ id: symbolId, depth: 0, direction });
         visited.add(symbolId);
         discovered.set(symbolId, 1.0);
+
+        // MODELS: Expand to relationship methods to discover related models
+        // This enables discovery of related models through relationship methods
+        if (symbol.entity_type === 'model') {
+          const relationshipMethods = await this.expandToExecutors(
+            [symbolId],
+            new Map([[symbolId, symbol]])
+          );
+
+          for (const methodId of relationshipMethods) {
+            if (visited.has(methodId)) continue;
+
+            visited.add(methodId);
+            discovered.set(methodId, 1.0);
+            // Relationship methods traverse forward to discover referenced models
+            queue.push({ id: methodId, depth: 1, direction: 'forward' });
+          }
+        }
       }
     }
 
@@ -174,6 +223,26 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
           // Models discovered as architectural entities (not expanded to methods like relationships/accessors)
           const sharedArchitecturalBoundaries = ['store', 'service', 'controller', 'repository', 'request', 'model'];
           if (depth > 0 && targetSymbol.entity_type && sharedArchitecturalBoundaries.includes(targetSymbol.entity_type)) {
+            // DEPTH FILTERING FOR SHARED ARCHITECTURAL BOUNDARIES
+            // Different thresholds for different entity types to prevent pollution
+            // Models: Allow at depth 2 (discovery through service methods)
+            // Services: Block at depth 2+ (prevent base class pollution)
+            // Controllers/Others: Block at depth 2+ in forward (prevent deep chains)
+            // Backward: Allow up to depth 3 for all types (full caller discovery)
+            let entityDepthThreshold: number;
+            if (direction === 'forward') {
+              // Forward direction: models allowed deeper, services blocked earlier
+              entityDepthThreshold = targetSymbol.entity_type === 'model' ? 3 : 2;
+            } else {
+              // Backward direction: uniform threshold
+              entityDepthThreshold = 4;
+            }
+
+            if (depth >= entityDepthThreshold) {
+              // Too deep for this direction - skip to prevent pollution
+              continue;
+            }
+
             // Discover the entity itself and queue for forward-only traversal to find imports
             // Don't expand to methods, don't traverse backward
             visited.add(targetId);
@@ -194,7 +263,15 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
               // Request is true leaf - don't queue at all
             } else if (targetSymbol.entity_type === 'model') {
               // Model: queue backward only to find controllers/services that use it
-              queue.push({ id: targetId, depth: depth + 1, direction: 'backward' });
+              // CONTEXT-AWARE DEPTH LIMIT:
+              // depth=0: entry point model methods → queue model backward
+              // depth<=2 + model entry: related models from relationships → queue backward
+              // depth>=1 + non-model entry: models from forward execution → blocked
+              const isModelEntryContext = this.entryPointEntityType === 'model';
+              const allowDeepModelQueuing = isModelEntryContext && depth <= 2;
+              if (depth < 1 || allowDeepModelQueuing) {
+                queue.push({ id: targetId, depth: depth + 1, direction: 'backward' });
+              }
             } else {
               // Service/controller/store: queue forward to discover imports
               const forwardDirection = await this.getNextDirection('forward', targetRole, targetSymbol, depth);
@@ -224,15 +301,18 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
 
             if (relevantMethods.length > 0) {
               // Determine direction for methods based on container depth and entity type
-              // Service methods at depth 1: use 'both' to discover calling controllers
-              // Service methods at depth 2+: use 'forward' only to prevent transitive pollution
+              // Container is at depth + 1, methods are at depth + 2
+              // Service container at depth 1 (from model@0): methods use 'both' to discover models + controllers
+              // Service container at depth 2+: methods use 'forward' only to prevent pollution
               // Model methods at depth > 0: always 'forward' (models are shared architectural entities)
               let methodDirection: TraversalDirection = direction;
 
               if (targetSymbol.entity_type === 'service') {
-                if (depth === 1) {
-                  methodDirection = 'both'; // Bridge to controllers
-                } else if (depth > 1) {
+                // Check container's actual depth (depth + 1), not parent's depth
+                const containerDepth = depth + 1;
+                if (containerDepth === 1) {
+                  methodDirection = 'both'; // Bridge to controllers and discover models
+                } else if (containerDepth > 1) {
                   methodDirection = 'forward'; // Prevent pollution
                 }
               } else if (depth > 0 && targetSymbol.entity_type === 'model') {
@@ -270,6 +350,17 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
         // NOTE: Models are NOT included - they need backward traversal to find services/controllers
         const architecturalBoundaries = ['store', 'service', 'controller', 'repository'];
         if (targetSymbol.entity_type && architecturalBoundaries.includes(targetSymbol.entity_type)) {
+          // DEPTH FILTERING FOR ARCHITECTURAL BOUNDARIES
+          // Apply direction-aware depth filtering before discovering the entity
+          // This prevents pollution from deep backward references at depth 3+
+          // Forward: depth >= 2 blocks targets at 3+ (prevents pollution)
+          // Backward: depth >= 4 blocks targets at 4+ (allows legitimate caller discovery)
+          const entityDepthThreshold = direction === 'forward' ? 2 : 4;
+          if (depth >= entityDepthThreshold) {
+            // Too deep for this direction - skip to prevent pollution
+            continue;
+          }
+
           // Add file to validated set (allows methods from this file)
           if (targetSymbol.file_id) {
             validatedFileIds.add(targetSymbol.file_id);
@@ -290,12 +381,30 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
         const validatedEntityTypes = ['store', 'service', 'controller', 'component', 'request', 'composable'];
         const isValidatedEntity = targetSymbol.entity_type && validatedEntityTypes.includes(targetSymbol.entity_type);
 
-        // DEPTH-BASED MODEL FILTERING: Models at depth >= 3 are too distant from the feature
-        // Depth 0: Entry point model, Depth 1: Direct references, Depth 2: Service-imported models
-        // Depth 3+: Unrelated models (User, Pin from policies)
-        // Note: depth is parent's depth, target is at depth + 1, so depth >= 2 filters targets at 3+
-        if (targetSymbol.entity_type === 'model' && depth >= 2) {
+        // DIRECTION-AWARE ENTITY FILTERING: Asymmetric thresholds for forward vs backward
+        // Forward: depth >= 2 blocks targets at 3+ (prevents pollution from execution chains)
+        // Backward: depth >= 4 blocks targets at 4+ (allows full caller chain discovery)
+        // This prevents pollution while allowing full backward caller discovery
+        // Note: depth is parent's depth, target is at depth + 1
+        const deepEntityTypes = ['model', 'controller', 'service', 'request'];
+        const entityDepthThreshold = direction === 'forward' ? 2 : 4;
+        if (targetSymbol.entity_type && deepEntityTypes.includes(targetSymbol.entity_type) && depth >= entityDepthThreshold) {
           continue;
+        }
+
+        // DIRECTION-AWARE METHOD FILTERING: Filter methods by parent container type
+        // Methods have entity_type="method", so they bypass entity filtering above
+        // Check parent container to filter controller/service methods at deep depths
+        // Uses same asymmetric threshold: forward >= 2, backward >= 4
+        if (targetSymbol.symbol_type === 'method' && depth >= entityDepthThreshold) {
+          const parentContainerId = await this.getParentContainer(targetId);
+          if (parentContainerId) {
+            const parentContainer = await SymbolService.getSymbol(this.db, parentContainerId);
+            if (parentContainer?.entity_type && ['controller', 'service'].includes(parentContainer.entity_type)) {
+              // Deep controller/service method - skip to prevent pollution
+              continue;
+            }
+          }
         }
 
         // ARCHITECTURAL PRE-VALIDATION: For methods, validate parent file BEFORE filtering
@@ -342,12 +451,17 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
         // NOTE: We discover the parent class itself but DON'T queue it for traversal
         // This prevents pollution from constructor injections and unrelated class-level imports
         // The relevant methods discovered through backward traversal will discover their own imports
-        // No depth constraint - parent containers are architecturally important at any depth
+        // DEPTH-AWARE: Skip parent discovery for deeply nested controller/service methods (depth >= 3)
         if (targetRole === SymbolRole.EXECUTOR && depth < maxDepth) {
           const parentContainerId = await this.getParentContainer(targetId);
           // Check discovered (not visited) - parent might be visited but not discovered during backward container traversal
           if (parentContainerId && !discovered.has(parentContainerId)) {
             const parentContainer = await SymbolService.getSymbol(this.db,parentContainerId);
+
+            // NO DEPTH FILTERING for parent containers
+            // If a method passed all filters and was discovered, its parent class should be included for context
+            // The method itself is already depth-filtered, so we don't need to filter its parent
+            // Parent containers are NOT queued for traversal, so they can't cause pollution
             if (parentContainer?.entity_type && ['controller', 'store', 'service'].includes(parentContainer.entity_type)) {
               visited.add(parentContainerId);
               discovered.set(parentContainerId, 1.0 - (depth + 2) / (maxDepth + 1));
@@ -377,16 +491,25 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
   /**
    * Get edges to follow based on symbol role and traversal direction.
    *
-   * EXECUTORS forward: calls, api_call, contains, imports, references (execution + architectural deps)
-   * EXECUTORS backward: calls, api_call (who calls this)
-   * ENTITIES forward: calls, api_call only (execution flow, NOT references)
-   * ENTITIES backward: calls, api_call (who calls this entity)
-   * CONTAINERS forward: contains (expand to executors)
-   * CONTAINERS backward: calls (who calls methods in this container)
+   * Pure execution graph traversal - only follows actual execution relationships:
+   * - calls: Direct function/method calls
+   * - api_call: Cross-stack API requests (Vue → Laravel)
+   * - contains: Parent-child containment (class → methods, file → functions)
+   * - references: Model/entity references (e.g., static calls, component → composable)
    *
-   * Note: Executors follow imports/references to discover architectural dependencies
-   * (request classes, models, components). DATA symbols (pure types/interfaces) are
-   * filtered by the main loop. Entities do NOT follow references to avoid pollution.
+   * Key principles:
+   * 1. EXECUTORS/ENTITIES follow references at depth <= 2 (discover immediate models/requests)
+   * 2. Composables/functions/models follow references backward (discover who uses them)
+   * 3. Services/controllers do NOT follow references backward (prevents shared infrastructure pollution)
+   * 4. Components NEVER follow references forward (prevents shared component pollution)
+   * 5. CONTAINERS never follow imports/references (prevents BaseService pollution)
+   *
+   * EXECUTORS forward: calls, api_call, contains, (references if depth <= 2)
+   * EXECUTORS backward: calls, api_call, (references if composable/function)
+   * ENTITIES forward: calls, api_call, (references if not component and depth <= 2)
+   * ENTITIES backward: calls, api_call, (references if model)
+   * CONTAINERS forward: contains (NO imports/references)
+   * CONTAINERS backward: calls, contains
    */
   private async getEdges(
     symbolId: number,
@@ -398,76 +521,93 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     const edges: number[] = [];
     const db = this.db;
 
-    // Forward traversal
+    // Forward traversal - follow execution edges only
     if (direction === 'forward' || direction === 'both') {
       if (role === SymbolRole.EXECUTOR) {
-        // Follow execution edges
+        // Follow execution edges: method calls, API calls
+        // Always follow calls/api_call (execution flow)
         const deps = await db('dependencies')
           .where('from_symbol_id', symbolId)
           .whereIn('dependency_type', ['calls', 'api_call', 'contains'])
           .pluck('to_symbol_id');
         edges.push(...deps);
 
-        // ARCHITECTURAL IMPORT DISCOVERY
-        // Methods at depth <= 3: Allow imports/references to discover architectural dependencies
-        // Depth 0: Entry point, Depth 1: Service methods, Depth 2: Controller methods, Depth 3: Request classes
-        // Classes at ANY depth: Allow imports/references to architectural entities only
-        // This discovers: request classes, related models, frontend components/stores
-        // Main loop filters out DATA symbols (pure types/interfaces)
-        const canFollowImports =
-          (symbol.symbol_type === 'method' && depth <= 3) ||
-          (symbol.symbol_type === 'class' && ['service', 'controller'].includes(symbol.entity_type || ''));
-
-        if (canFollowImports) {
-          const importedDeps = await db('dependencies')
+        // DEPTH-LIMITED REFERENCES: Only follow references at shallow depths
+        // Prevents pollution from deep utility functions discovering controllers
+        // Depth 0: Entry point, Depth 1: Service methods, Depth 2: Models/requests
+        // At depth > 2, executors shouldn't discover new architectural dependencies
+        if (depth <= 2) {
+          const referenceDeps = await db('dependencies')
             .where('from_symbol_id', symbolId)
-            .whereIn('dependency_type', ['imports', 'references'])
+            .where('dependency_type', 'references')
             .pluck('to_symbol_id');
-          edges.push(...importedDeps);
+          edges.push(...referenceDeps);
         }
       } else if (role === SymbolRole.ENTITY) {
-        // Entities (components, composables) follow calls only (actual execution)
-        // Do NOT follow references - those are structural (imports, types), not execution
+        // Entities follow execution edges (calls, api_call)
+        // Always follow calls/api_call for all entities
         const deps = await db('dependencies')
           .where('from_symbol_id', symbolId)
           .whereIn('dependency_type', ['calls', 'api_call'])
           .pluck('to_symbol_id');
         edges.push(...deps);
+
+        // DEPTH-LIMITED REFERENCES for non-component entities
+        // Components never follow references (prevents shared component pollution)
+        // Composables/backend entities follow references only at shallow depths
+        if (symbol.entity_type !== 'component' && depth <= 2) {
+          const referenceDeps = await db('dependencies')
+            .where('from_symbol_id', symbolId)
+            .where('dependency_type', 'references')
+            .pluck('to_symbol_id');
+          edges.push(...referenceDeps);
+        }
       } else if (role === SymbolRole.CONTAINER) {
-        // Containers expand via contains
+        // Containers expand via contains relationship ONLY
+        // Do NOT follow imports/references from containers (prevents BaseService pollution)
         const contained = await db('dependencies')
           .where('from_symbol_id', symbolId)
           .where('dependency_type', 'contains')
           .pluck('to_symbol_id');
         edges.push(...contained);
-
-        // ARCHITECTURAL CONTAINERS: Service/controller/store classes can follow imports
-        // to discover request classes, models, and other architectural dependencies
-        if (symbol.entity_type && ['service', 'controller', 'store'].includes(symbol.entity_type)) {
-          const importedDeps = await db('dependencies')
-            .where('from_symbol_id', symbolId)
-            .whereIn('dependency_type', ['imports', 'references'])
-            .pluck('to_symbol_id');
-          edges.push(...importedDeps);
-        }
       }
     }
 
-    // Backward traversal
-    if (direction === 'backward' || direction === 'both') {
-      // Who calls/references this symbol
-      // Models need 'references' because services/controllers use them via type hints and Eloquent
-      const dependencyTypes = symbol.entity_type === 'model'
-        ? ['calls', 'api_call', 'references']
-        : ['calls', 'api_call'];
+    // Backward traversal - who executes this symbol
+    // SYMBOL-TYPE-AWARE BACKWARD TRAVERSAL for 'both' direction
+    // Purely backward direction: always process backward edges (Test 2 needs Model→Service→Controller)
+    // Both direction - type-aware thresholds:
+    //   - Models/composables: allow backward at any depth (discover controllers/policies that use them)
+    //   - Methods/functions: allow backward only at depth < 2 (prevents service method caller explosion)
+    const isModelOrComposable = symbol.entity_type === 'model' || symbol.entity_type === 'composable';
+    const shouldProcessBackward = direction === 'backward' ||
+      (direction === 'both' && (isModelOrComposable || depth < 2));
 
-      const callers = await db('dependencies')
+    if (shouldProcessBackward) {
+      // Follow execution relationships (calls, api_call)
+      const executionCallers = await db('dependencies')
         .where('to_symbol_id', symbolId)
-        .whereIn('dependency_type', dependencyTypes)
+        .whereIn('dependency_type', ['calls', 'api_call'])
         .pluck('from_symbol_id');
-      edges.push(...callers);
+      edges.push(...executionCallers);
 
-      // Include contains for finding parent containers (context)
+      // Selectively follow references backward for:
+      // - Composables/functions: enables component → composable discovery
+      // - Models: enables model → service/controller discovery
+      // Excludes services/controllers to prevent pollution from shared infrastructure
+      if (
+        symbol.entity_type === 'composable' ||
+        symbol.entity_type === 'model' ||
+        (role === SymbolRole.EXECUTOR && symbol.symbol_type === 'function')
+      ) {
+        const referenceCallers = await db('dependencies')
+          .where('to_symbol_id', symbolId)
+          .where('dependency_type', 'references')
+          .pluck('from_symbol_id');
+        edges.push(...referenceCallers);
+      }
+
+      // Include contains for finding parent containers (architectural context)
       const parents = await db('dependencies')
         .where('to_symbol_id', symbolId)
         .where('dependency_type', 'contains')

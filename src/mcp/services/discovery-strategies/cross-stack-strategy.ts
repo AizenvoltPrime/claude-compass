@@ -160,6 +160,27 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
           components: referencedComponents.length,
         });
       }
+
+      // BACKWARD COMPONENT DISCOVERY: Find components that call/reference these composables
+      const composableCallers = await this.db('dependencies as d')
+        .join('symbols as caller', 'd.from_symbol_id', 'caller.id')
+        .whereIn('d.to_symbol_id', composableIds)
+        .whereIn('d.dependency_type', ['calls', 'references'])
+        .where('caller.entity_type', 'component')
+        .select('caller.id');
+
+      for (const row of composableCallers) {
+        if (!discovered.has(row.id)) {
+          discovered.set(row.id, RELEVANCE_SCORE);
+        }
+      }
+
+      if (composableCallers.length > 0) {
+        logger.debug('Composable callers discovered', {
+          composables: composableIds.length,
+          callerComponents: composableCallers.length,
+        });
+      }
     }
 
     logger.info('Cross-stack discovery complete', {

@@ -115,27 +115,47 @@ export function classifySymbol(symbol: SymbolInfo): SymbolRole {
  * Determine traversal direction based on symbol role and entity type.
  *
  * Rules:
- * - Models/Service classes: BACKWARD (who uses them)
- * - Components: FORWARD (what they need)
- * - Methods/Functions/Composables: BOTH (execution chain)
- * - Stores/Controllers: BOTH (after expanding to methods)
+ * - Backend entry points (controller methods): FORWARD (what they call)
+ * - Backend leaf entities (models, service classes): BACKWARD (who uses them)
+ * - Frontend entry points (components): FORWARD (what they call)
+ * - Service methods: BOTH (bridge between controllers and models)
+ * - Other executors: BOTH (execution chain)
  */
 export type TraversalDirection = 'forward' | 'backward' | 'both';
 
 export function getTraversalDirection(symbol: SymbolInfo, role: SymbolRole): TraversalDirection {
   const { entity_type, symbol_type } = symbol;
 
+  // Backend entry points: controller methods forward only
+  // Controllers are entry points and don't need to discover callers
+  // This prevents backward explosion when controllers are discovered mid-traversal
+  if (entity_type === 'controller' && symbol_type === 'method') {
+    return 'forward';
+  }
+
+  // Service methods: bidirectional (middle layer between controllers and models)
+  // MUST remain 'both' to allow backward traversal from models to reach controllers
+
+  // Trait/utility methods: forward only (shared infrastructure)
+  // Prevents backward explosion through shared infrastructure methods
+  if (entity_type === 'method' && symbol_type === 'method') {
+    return 'forward';
+  }
+
   // Backend leaf entities: discover backward (who uses them)
+  // Models search backward for services/controllers
+  // Service classes (not methods) traverse backward to find controllers
   if (entity_type === 'model' || (entity_type === 'service' && symbol_type === 'class')) {
     return 'backward';
   }
 
-  // Frontend leaf: discover forward (what they need)
+  // Frontend entry points: components discover forward (what they call)
   if (entity_type === 'component' && symbol_type !== 'method') {
     return 'forward';
   }
 
-  // Executors and middle-layer entities: bidirectional
+  // Store methods and other executors: bidirectional (execution chain)
+  // Bridges between frontend and backend
   if (role === SymbolRole.EXECUTOR) {
     return 'both';
   }
