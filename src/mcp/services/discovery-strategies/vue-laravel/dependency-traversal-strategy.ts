@@ -12,9 +12,9 @@
  */
 
 import type { Knex } from 'knex';
-import * as SymbolService from '../../../database/services/symbol-service';
-import { createComponentLogger } from '../../../utils/logger';
-import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
+import * as SymbolService from '../../../../database/services/symbol-service';
+import { createComponentLogger } from '../../../../utils/logger';
+import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from '../common/types';
 import {
   classifySymbol,
   getTraversalDirection,

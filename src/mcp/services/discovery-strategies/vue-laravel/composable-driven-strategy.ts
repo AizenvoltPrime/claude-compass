@@ -13,10 +13,10 @@
  * 5. Expand backend: controller methods → controller classes → services → models
  */
 
-import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
+import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from '../common/types';
 import type { Knex } from 'knex';
-import * as SymbolService from '../../../database/services/symbol-service';
-import { createComponentLogger } from '../../../utils/logger';
+import * as SymbolService from '../../../../database/services/symbol-service';
+import { createComponentLogger } from '../../../../utils/logger';
 
 const logger = createComponentLogger('ComposableDrivenStrategy');
 

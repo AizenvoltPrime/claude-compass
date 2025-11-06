@@ -11,7 +11,7 @@
  * 4. Repeats until no new symbols found or max iterations reached
  */
 
-import { createComponentLogger } from '../../../utils/logger';
+import { createComponentLogger } from '../../../../utils/logger';
 import type { Knex } from 'knex';
 import {
   DiscoveryStrategy,

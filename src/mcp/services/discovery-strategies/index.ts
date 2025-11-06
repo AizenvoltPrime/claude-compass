@@ -5,116 +5,61 @@
  * feature-related symbols across a codebase using multiple strategies
  * that run iteratively until convergence.
  *
+ * The strategies are organized by framework:
+ * - common/: Framework-agnostic strategies (dependency traversal, engine, types)
+ * - vue-laravel/: Vue-Laravel specific strategies (cross-stack, prop-driven, composable-driven)
+ * - godot/: Godot-specific strategies (to be implemented)
+ *
  * Usage:
  * ```typescript
- * const engine = new DiscoveryEngine({ maxIterations: 3 });
- * engine.registerStrategies([
- *   new DependencyTraversalStrategy(dbService),
- *   new NamingPatternStrategy(dbService),
- *   new ForwardDependencyStrategy(dbService),
- *   new CrossStackStrategy(dbService),
- *   new ReverseCallerStrategy(dbService),
- * ]);
+ * // For Vue-Laravel projects
+ * import { createStandardVueLaravelDiscoveryEngine } from './discovery-strategies';
+ * const engine = createStandardVueLaravelDiscoveryEngine(db, { maxIterations: 3 });
+ * const { symbols, stats } = await engine.discover(entryPointId, repoId, featureName, options);
  *
- * const { symbols, stats } = await engine.discover(
- *   entryPointId,
- *   repoId,
- *   featureName,
- *   options
- * );
+ * // For Godot projects
+ * import { createStandardGodotDiscoveryEngine } from './discovery-strategies';
+ * const engine = createStandardGodotDiscoveryEngine(db, { maxIterations: 3 });
+ * const { symbols, stats } = await engine.discover(entryPointId, repoId, featureName, options);
  * ```
  */
 
+// ============================================================================
+// Common exports (framework-agnostic)
+// ============================================================================
+
 // Core types and interfaces
-export * from './types';
+export * from './common/types';
 
 // Discovery engine
-export { DiscoveryEngine } from './discovery-engine';
-
-// Individual strategies (clean executor-centric versions)
-export { CleanDependencyTraversalStrategy } from './dependency-traversal-strategy';
-export { CleanCrossStackStrategy } from './cross-stack-strategy';
-export { PropDrivenStrategy } from './prop-driven-strategy';
-export { ComposableDrivenStrategy } from './composable-driven-strategy';
-
-// Symbol classification utilities
-export * from './symbol-classifier';
+export { DiscoveryEngine } from './common/discovery-engine';
 
 // Constants
-export * from './constants';
+export * from './common/constants';
 
-/**
- * Factory function to create a fully configured discovery engine
- * with clean executor-centric strategies.
- */
-import type { Knex } from 'knex';
-import { DiscoveryEngine } from './discovery-engine';
-import { DiscoveryEngineConfig } from './types';
-import { CleanDependencyTraversalStrategy } from './dependency-traversal-strategy';
-import { CleanCrossStackStrategy } from './cross-stack-strategy';
-import { PropDrivenStrategy } from './prop-driven-strategy';
-import { ComposableDrivenStrategy } from './composable-driven-strategy';
+// ============================================================================
+// Vue-Laravel exports
+// ============================================================================
 
-export function createStandardDiscoveryEngine(
-  db: Knex,
-  config?: Partial<DiscoveryEngineConfig>
-): DiscoveryEngine {
-  const engine = new DiscoveryEngine(db, config);
+// Vue-Laravel specific strategies
+export { CleanDependencyTraversalStrategy } from './vue-laravel/dependency-traversal-strategy';
+export { CleanCrossStackStrategy } from './vue-laravel/cross-stack-strategy';
+export { PropDrivenStrategy } from './vue-laravel/prop-driven-strategy';
+export { ComposableDrivenStrategy } from './vue-laravel/composable-driven-strategy';
 
-  // Register clean executor-centric strategies
-  // Pure graph traversal following actual execution paths
-  engine.registerStrategies([
-    new CleanCrossStackStrategy(db),           // API bridging (priority 5)
-    new CleanDependencyTraversalStrategy(db),  // Executor-centric BFS (priority 10)
-  ]);
+// Vue-Laravel symbol classification utilities (Vue/Laravel entity types)
+export * from './vue-laravel/symbol-classifier';
 
-  return engine;
-}
+// Vue-Laravel factory functions
+export {
+  createStandardVueLaravelDiscoveryEngine,
+  createPropDrivenDiscoveryEngine,
+  createComposableDrivenDiscoveryEngine,
+} from './vue-laravel';
 
-/**
- * Factory function to create a prop-driven discovery engine.
- * Uses data flow analysis through component props for precise feature discovery.
- * Best used when starting from Vue components.
- */
-export function createPropDrivenDiscoveryEngine(
-  db: Knex,
-  config?: Partial<DiscoveryEngineConfig>
-): DiscoveryEngine {
-  const engine = new DiscoveryEngine(db, config);
+// ============================================================================
+// Godot exports
+// ============================================================================
 
-  // Register prop-driven strategy
-  // Follows data flow through component props for precise discovery
-  engine.registerStrategies([
-    new PropDrivenStrategy(db),                // Prop-driven analysis (priority 3)
-    new CleanCrossStackStrategy(db),           // API bridging (priority 5)
-    new CleanDependencyTraversalStrategy(db),  // Executor-centric BFS (priority 10)
-  ]);
-
-  return engine;
-}
-
-/**
- * Factory function to create a composable-driven discovery engine.
- * Follows composable execution flow for precise feature discovery.
- * Best used when starting from Vue composables.
- *
- * NOTE: Does NOT use dependency-traversal to avoid discovering all composables
- * from parent components. Composable-driven is comprehensive enough on its own.
- */
-export function createComposableDrivenDiscoveryEngine(
-  db: Knex,
-  config?: Partial<DiscoveryEngineConfig>
-): DiscoveryEngine {
-  const engine = new DiscoveryEngine(db, config);
-
-  // Register ONLY composable-driven and cross-stack strategies
-  // Composable-driven explicitly discovers all needed symbols (composable, stores, components)
-  // Cross-stack bridges frontend to backend via API calls
-  // We intentionally OMIT dependency-traversal to prevent discovering all composables from parent components
-  engine.registerStrategies([
-    new ComposableDrivenStrategy(db),          // Composable-driven analysis (priority 3)
-    new CleanCrossStackStrategy(db),           // API bridging (priority 5)
-  ]);
-
-  return engine;
-}
+// Godot factory functions
+export { createStandardGodotDiscoveryEngine } from './godot';

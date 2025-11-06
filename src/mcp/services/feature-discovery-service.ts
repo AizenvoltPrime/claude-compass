@@ -3,7 +3,7 @@ import * as SymbolService from '../../database/services/symbol-service';
 import { validateDiscoverFeatureArgs } from '../validators';
 import { createComponentLogger } from '../../utils/logger';
 import {
-  createStandardDiscoveryEngine,
+  createStandardVueLaravelDiscoveryEngine,
   createPropDrivenDiscoveryEngine,
   createComposableDrivenDiscoveryEngine,
 } from './discovery-strategies';
@@ -170,14 +170,14 @@ export class FeatureDiscoveryService {
           convergenceThreshold: 1,
           debug: false,
         })
-      : createStandardDiscoveryEngine(this.db, {
+      : createStandardVueLaravelDiscoveryEngine(this.db, {
           maxIterations: 3,
           convergenceThreshold: 1,
           debug: false,
         });
 
     logger.info('Using discovery strategy', {
-      strategy: useComposableDriven ? 'composable-driven' : usePropDriven ? 'prop-driven' : 'standard',
+      strategy: useComposableDriven ? 'composable-driven' : usePropDriven ? 'prop-driven' : 'vue-laravel-standard',
       entryPoint: entrySymbol.name,
       entityType: entrySymbol.entity_type,
     });

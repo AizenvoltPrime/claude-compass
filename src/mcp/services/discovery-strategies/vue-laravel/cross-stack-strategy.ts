@@ -9,8 +9,8 @@
  */
 
 import type { Knex } from 'knex';
-import { createComponentLogger } from '../../../utils/logger';
-import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
+import { createComponentLogger } from '../../../../utils/logger';
+import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from '../common/types';
 
 const logger = createComponentLogger('cross-stack-clean');
 

@@ -14,10 +14,10 @@
  * 6. Expand backend: controllers → models
  */
 
-import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from './types';
+import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from '../common/types';
 import type { Knex } from 'knex';
-import * as SymbolService from '../../../database/services/symbol-service';
-import { createComponentLogger } from '../../../utils/logger';
+import * as SymbolService from '../../../../database/services/symbol-service';
+import { createComponentLogger } from '../../../../utils/logger';
 
 const logger = createComponentLogger('PropDrivenStrategy');
 
@@ -133,10 +133,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
         discovered.set(consumer.symbolId, 0.9);
 
         // Phase 3: Analyze props passed and trace data sources
-        const relevantStoreMethods = await this.tracePropsToStoreMethods(
-          entryAnalysis,
-          consumer
-        );
+        const relevantStoreMethods = await this.tracePropsToStoreMethods(consumer);
 
         logger.info('Phase 3 complete: Traced props to store methods', {
           consumer: consumer.name,
@@ -370,7 +367,6 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    * including from nested functions via 'contains' edges
    */
   private async tracePropsToStoreMethods(
-    entryAnalysis: ComponentAnalysis,
     consumer: ConsumerAnalysis
   ): Promise<number[]> {
     const db = this.db;
@@ -593,30 +589,5 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     }
 
     return Array.from(parentComponents);
-  }
-
-  /**
-   * Phase 2.5 helper: Find stores used by a component
-   */
-  private async findStoresUsedBy(componentId: number): Promise<number[]> {
-    const db = this.db;
-    const stores: number[] = [];
-
-    // Find all calls from this component
-    const calls = await db('dependencies')
-      .select('to_symbol_id')
-      .where({ from_symbol_id: componentId, dependency_type: 'calls' });
-
-    for (const call of calls) {
-      const symbol = await SymbolService.getSymbol(this.db,call.to_symbol_id);
-      if (!symbol) continue;
-
-      // Check if it's a store (like useVehiclesStore())
-      if (symbol.entity_type === 'store') {
-        stores.push(call.to_symbol_id);
-      }
-    }
-
-    return stores;
   }
 }
