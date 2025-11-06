@@ -42,6 +42,17 @@ export class PHPResolver extends BaseLanguageResolver {
     // When parser resolves $this->paymentService->processPayment(),
     // it provides resolved_class="PaymentService" to disambiguate the method call
     if (dependency?.resolved_class) {
+      // Check if this is a framework class that we shouldn't create dependencies for
+      if (this.isFrameworkClass(dependency.resolved_class)) {
+        logger.debug('Skipping framework class method call', {
+          targetSymbol,
+          resolvedClass: dependency.resolved_class,
+        });
+        // Return null to indicate no local dependency should be created
+        // This prevents false positives like $file->store() matching EquipmentController::store
+        return null;
+      }
+
       const instanceMethodSymbol = this.resolveInstanceMethodCall(
         context,
         targetSymbol,
@@ -51,6 +62,30 @@ export class PHPResolver extends BaseLanguageResolver {
         this.logResolution(true, targetSymbol, 'instance_method_call', context);
         return this.createHighConfidenceResult(instanceMethodSymbol, 'php:instance_method');
       }
+
+      // If we have a resolved_class but couldn't find the method, don't fall back to local scope
+      // This prevents matching unrelated methods with the same name
+      logger.debug('Instance method not found for resolved class, skipping local fallback', {
+        targetSymbol,
+        resolvedClass: dependency.resolved_class,
+      });
+      return null;
+    }
+
+    // CONSERVATIVE RESOLUTION: If we have a calling_object (instance method call) but couldn't resolve its type,
+    // don't fall back to local scope matching. This prevents false positives like:
+    // Instance method calls on unresolved types incorrectly matching unrelated local methods
+    //
+    // Only proceed to local scope if this is:
+    // 1. A direct function call (no calling_object), OR
+    // 2. A static call (handled above with ::), OR
+    // 3. A call where we're confident about the context
+    if (dependency?.calling_object) {
+      logger.debug('Skipping instance method call with unresolved type to prevent false positives', {
+        targetSymbol,
+        callingObject: dependency.calling_object,
+      });
+      return null;
     }
 
     const localSymbol = this.resolveInLocalScope(context, targetSymbol);
@@ -288,6 +323,57 @@ export class PHPResolver extends BaseLanguageResolver {
     }
 
     return method || null;
+  }
+
+  /**
+   * Check if a class name is a known framework class.
+   * Returns true for Laravel framework classes and PHP built-in classes.
+   */
+  private isFrameworkClass(className: string): boolean {
+    // Laravel framework classes
+    const laravelClasses = [
+      'UploadedFile', // Illuminate\Http\UploadedFile
+      'Request', // Illuminate\Http\Request
+      'Response', // Illuminate\Http\Response
+      'Collection', // Illuminate\Support\Collection
+      'Model', // Illuminate\Database\Eloquent\Model
+      'Builder', // Illuminate\Database\Eloquent\Builder (query builder)
+      'QueryBuilder', // Illuminate\Database\Query\Builder
+      'RedirectResponse', // Illuminate\Http\RedirectResponse
+      'JsonResponse', // Illuminate\Http\JsonResponse
+      'Validator', // Illuminate\Validation\Validator
+      'FormRequest', // Illuminate\Foundation\Http\FormRequest
+      'Str', // Illuminate\Support\Str
+      'Arr', // Illuminate\Support\Arr
+      'Carbon', // Carbon\Carbon (date library)
+      'CarbonImmutable', // Carbon\CarbonImmutable
+      'Filesystem', // Illuminate\Filesystem\Filesystem
+      'Storage', // Illuminate\Support\Facades\Storage
+      'File', // Illuminate\Support\Facades\File
+    ];
+
+    // PHP built-in classes
+    const phpBuiltins = [
+      'DateTime',
+      'DateTimeImmutable',
+      'DateInterval',
+      'Exception',
+      'PDO',
+      'PDOStatement',
+      'SplFileInfo',
+      'stdClass',
+    ];
+
+    const allFrameworkClasses = [...laravelClasses, ...phpBuiltins];
+
+    // Check exact match or class name ends with the framework class
+    // Handles both "UploadedFile" and "Illuminate\\Http\\UploadedFile"
+    return allFrameworkClasses.some(
+      frameworkClass =>
+        className === frameworkClass ||
+        className.endsWith(`\\${frameworkClass}`) ||
+        className.endsWith(`/${frameworkClass}`)
+    );
   }
 
   cleanup(): void {

@@ -99,6 +99,22 @@ export function createSymbolEdges(
             continue;
           }
 
+          // CONSERVATIVE FALLBACK PREVENTION: Skip fallback name matching for dependencies that were
+          // explicitly blocked by conservative resolution. These have calling_object (instance method)
+          // but no resolved_class (type unknown). The language resolver already determined these
+          // shouldn't match - don't override that decision with permissive name matching.
+          // Example: $data['image']->store() should NOT fall back to matching EquipmentController::store
+          if (dep.calling_object && !dep.resolved_class) {
+            logger.debug('Skipping fallback for unresolved instance method call - conservative resolution applies', {
+              from: symbol.name,
+              to: dep.to_symbol,
+              callingObject: dep.calling_object,
+              lineNumber: dep.line_number,
+              sourceFile: fileIdToPath.get(symbol.file_id)?.split('/').pop()
+            });
+            continue;
+          }
+
           let targetSymbols = enhancedSymbolLookup(dep.to_symbol, nameToSymbolMap, interfaceMap, seenExternalPatterns, suppressedExternalCount, suppressedAmbiguousCount, logger);
 
           if (targetSymbols.length > 0 && useFileAwareResolution) {

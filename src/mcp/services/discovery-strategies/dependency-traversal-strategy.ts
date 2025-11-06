@@ -106,7 +106,19 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       if (!symbol) continue;
 
       const role = classifySymbol(symbol);
-      const direction = getTraversalDirection(symbol, role);
+      let direction = getTraversalDirection(symbol, role);
+
+      // PARENT-AWARE DIRECTION FOR ENTRY POINTS: Methods need parent context for accurate direction
+      // Entry point service methods get 'both' direction to discover callers + models
+      // Transitively discovered service methods use natural 'forward' direction from getTraversalDirection()
+      // This prevents shared infrastructure (BaseService methods) from discovering all services
+      if (role === SymbolRole.EXECUTOR && symbol.symbol_type === 'method') {
+        const parentEntityType = await this.getParentContainerEntityType(symbolId);
+        if (parentEntityType === 'service') {
+          // Entry point service methods are bidirectional bridges between controllers and models
+          direction = 'both';
+        }
+      }
 
       queue.push({ id: symbolId, depth: 0, direction });
       visited.add(symbolId);
@@ -294,6 +306,40 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
               queue.push({ id: executorId, depth: depth + 1, direction });
             }
             continue; // Don't fall through - we expanded to methods
+          } else if (depth === 0 && direction === 'both' && targetSymbol.entity_type && ['model', 'request', 'controller', 'service', 'store', 'component'].includes(targetSymbol.entity_type)) {
+            // DEPTH=0 + DIRECTION=BOTH: Architectural entities discovered by entry point
+            // These are forward discoveries (entry point references model/request via dependencies)
+            // Add them to discovered - don't process by backward logic which looks for methods
+            // Example: Service method (both) → Model (references)
+            //   Model should be discovered, not searched for methods referencing the service method
+            visited.add(targetId);
+            const relevance = 1.0 - (depth + 1) / (maxDepth + 1);
+            discovered.set(targetId, relevance);
+
+            // Add file to validated set
+            if (targetSymbol.file_id) {
+              validatedFileIds.add(targetSymbol.file_id);
+            }
+
+            // Queue for traversal based on entity type
+            if (targetSymbol.entity_type === 'request') {
+              // Request is true leaf - don't queue
+            } else if (targetSymbol.entity_type === 'model') {
+              // Model: queue backward ONLY if entry point is a model
+              // For service/controller entry points, models are leaf dependencies (don't traverse backward)
+              // This prevents discovering all services that use the model (pollution)
+              // Example: Service entry point → Model → DON'T discover all services using that model
+              const isModelEntryContext = this.entryPointEntityType === 'model';
+              if (isModelEntryContext) {
+                queue.push({ id: targetId, depth: depth + 1, direction: 'backward' });
+              }
+              // If not model entry context, model is discovered but not queued (leaf dependency)
+            } else {
+              // Service/controller/store: queue forward to discover imports
+              const forwardDirection = await this.getNextDirection('forward', targetRole, targetSymbol, depth);
+              queue.push({ id: targetId, depth: depth + 1, direction: forwardDirection });
+            }
+            continue;
           } else if (direction === 'backward' || direction === 'both') {
             // Backward traversal: find which methods of this container reference the source
             // This prevents discovering entire controllers/services when only one method is relevant
@@ -462,7 +508,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
             // If a method passed all filters and was discovered, its parent class should be included for context
             // The method itself is already depth-filtered, so we don't need to filter its parent
             // Parent containers are NOT queued for traversal, so they can't cause pollution
-            if (parentContainer?.entity_type && ['controller', 'store', 'service'].includes(parentContainer.entity_type)) {
+            if (parentContainer?.entity_type && ['controller', 'store', 'service', 'component'].includes(parentContainer.entity_type)) {
               visited.add(parentContainerId);
               discovered.set(parentContainerId, 1.0 - (depth + 2) / (maxDepth + 1));
               // Add parent's file to validated set
@@ -691,7 +737,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     currentDepth: number
   ): Promise<TraversalDirection> {
     // Executors need context-aware traversal:
-    // - Controller/store methods: only 'forward' (API boundary)
+    // - Controller/store methods: respect backward traversal context to find API callers
     // - Service methods at depth 0-1: can use 'both' (bridge models to controllers)
     // - Service methods at depth 2+: only 'forward' (prevent transitive explosion)
     if (targetRole === SymbolRole.EXECUTOR) {
@@ -699,20 +745,31 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       const parentEntityType = await this.getParentContainerEntityType(targetSymbol.id);
 
       if (parentEntityType === 'controller' || parentEntityType === 'store') {
-        // Controller/store methods only traverse forward (no further backward expansion)
+        // DEPTH-AWARE BACKWARD TRAVERSAL: Allow backward at shallow depths (0-1)
+        // This enables legitimate caller discovery chains:
+        // - Service (depth 0) -> Controller (depth 1) -> Store/Route (depth 2)
+        // - Model (depth 0) -> Service (depth 1) -> Controller (depth 2) -> Store (depth 3)
+        // Deep discoveries (depth 2+) prevent pollution from unrelated callers
+        if ((currentDirection === 'backward' || currentDirection === 'both') && currentDepth <= 1) {
+          // Respect backward traversal context for shallow discoveries
+          return currentDirection === 'backward' ? 'backward' : 'both';
+        }
+        // Deep discoveries or forward context: only traverse forward
         return 'forward';
       }
 
-      // Service methods: only upgrade to 'both' at shallow depths (0-1)
-      // This prevents transitive explosion where service→service→service chains
-      // each get 'both' and discover unrelated controllers
-      if (currentDirection === 'backward' || currentDirection === 'both') {
-        if (currentDepth <= 1) {
-          return 'both'; // Shallow depth: upgrade to bidirectional
-        }
-        return 'forward'; // Deep depth: only traverse forward to prevent explosion
+      // Service methods: NEVER upgrade to 'both' when discovered transitively
+      // Entry point service methods already have 'both' from initialization code
+      // Transitively discovered service methods (shared base service) MUST use 'forward' only
+      // This prevents shared base service methods from discovering all child services
+      if (parentEntityType === 'service') {
+        // All transitively discovered service methods: forward only to prevent pollution
+        // Entry points don't go through getNextDirection, they're initialized with 'both'
+        return 'forward';
       }
-      return 'forward'; // Forward stays forward
+
+      // Other executors (non-service methods): forward only to prevent pollution
+      return 'forward';
     }
 
     // Entities/containers: only allow backward at depth 0 (entry point)
@@ -740,14 +797,28 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
   private async getParentContainerEntityType(symbolId: number): Promise<string | null> {
     const db = this.db;
 
-    const parent = await db('dependencies as d')
+    // First try 'contains' relationship (standard for classes/methods)
+    const containsParent = await db('dependencies as d')
       .select('s.entity_type')
       .join('symbols as s', 'd.from_symbol_id', 's.id')
       .where('d.to_symbol_id', symbolId)
       .where('d.dependency_type', 'contains')
       .first();
 
-    return parent?.entity_type || null;
+    if (containsParent) {
+      return containsParent.entity_type;
+    }
+
+    // For Vue components, check 'calls' relationship (components call their functions)
+    const callsParent = await db('dependencies as d')
+      .select('s.entity_type')
+      .join('symbols as s', 'd.from_symbol_id', 's.id')
+      .where('d.to_symbol_id', symbolId)
+      .where('d.dependency_type', 'calls')
+      .where('s.entity_type', 'component')
+      .first();
+
+    return callsParent?.entity_type || null;
   }
 
   /**
@@ -756,13 +827,27 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
   private async getParentContainer(symbolId: number): Promise<number | null> {
     const db = this.db;
 
-    const parent = await db('dependencies')
+    // First try 'contains' relationship (standard for classes/methods)
+    const containsParent = await db('dependencies')
       .where('to_symbol_id', symbolId)
       .where('dependency_type', 'contains')
       .select('from_symbol_id')
       .first();
 
-    return parent?.from_symbol_id || null;
+    if (containsParent) {
+      return containsParent.from_symbol_id;
+    }
+
+    // For Vue components, check 'calls' relationship (components call their functions)
+    const callsParent = await db('dependencies as d')
+      .join('symbols as s', 'd.from_symbol_id', 's.id')
+      .where('d.to_symbol_id', symbolId)
+      .where('d.dependency_type', 'calls')
+      .where('s.entity_type', 'component')
+      .select('d.from_symbol_id')
+      .first();
+
+    return callsParent?.from_symbol_id || null;
   }
 
   /**

@@ -229,5 +229,44 @@ export function initializePHPBuiltins(): FrameworkSymbol[] {
     });
   }
 
+  // Laravel UploadedFile methods (file upload handling)
+  const uploadedFileMethods = [
+    'store', 'storeAs', 'storePublicly', 'storePubliclyAs',
+    'move', 'isValid', 'getError', 'getClientOriginalName',
+    'getClientOriginalExtension', 'getClientMimeType', 'guessExtension',
+    'getMimeType', 'getSize', 'getPath', 'getRealPath', 'getPathname',
+    'getBasename', 'getFilename', 'getExtension', 'hashName'
+  ];
+
+  for (const method of uploadedFileMethods) {
+    symbols.push({
+      name: method,
+      symbol_type: SymbolType.METHOD,
+      visibility: Visibility.PUBLIC,
+      framework: 'Laravel',
+      context: 'uploaded-file',
+      description: `Laravel UploadedFile method: ${method}`
+    });
+  }
+
+  // Laravel Storage facade methods (filesystem operations)
+  const storageMethods = [
+    'disk', 'get', 'put', 'putFile', 'putFileAs', 'exists', 'missing',
+    'download', 'url', 'temporaryUrl', 'delete', 'copy', 'move', 'size',
+    'lastModified', 'files', 'allFiles', 'directories', 'allDirectories',
+    'makeDirectory', 'deleteDirectory', 'path', 'prepend', 'append'
+  ];
+
+  for (const method of storageMethods) {
+    symbols.push({
+      name: `Storage::${method}`,
+      symbol_type: SymbolType.METHOD,
+      visibility: Visibility.PUBLIC,
+      framework: 'Laravel',
+      context: 'storage-facade',
+      description: `Laravel Storage facade method: ${method}`
+    });
+  }
+
   return symbols;
 }

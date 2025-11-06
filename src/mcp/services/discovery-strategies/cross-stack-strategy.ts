@@ -65,12 +65,24 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     // discover their parent containers (stores, components, composables) for architectural context
     const parentContainerIds: number[] = [];
     if (frontendCallerIds.length > 0) {
-      const parentContainers = await this.db('dependencies as d')
+      // Query 1: Standard 'contains' relationships (stores, composables)
+      const containsParents = await this.db('dependencies as d')
         .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
         .whereIn('d.to_symbol_id', frontendCallerIds)
         .where('d.dependency_type', 'contains')
         .whereIn('parent.entity_type', ['store', 'component', 'composable'])
         .select('parent.id');
+
+      // Query 2: Vue components use 'calls' relationships (component calls its functions)
+      const callsParents = await this.db('dependencies as d')
+        .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
+        .whereIn('d.to_symbol_id', frontendCallerIds)
+        .where('d.dependency_type', 'calls')
+        .where('parent.entity_type', 'component')
+        .select('parent.id');
+
+      // Combine both results
+      const parentContainers = [...containsParents, ...callsParents];
 
       for (const row of parentContainers) {
         if (!discovered.has(row.id)) {
@@ -81,6 +93,8 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
 
       logger.debug('Parent containers discovered', {
         parentCount: parentContainers.length,
+        containsCount: containsParents.length,
+        callsCount: callsParents.length,
       });
     }
 
@@ -107,12 +121,25 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
       // When we discover a component/composable that calls stores, add it to the feature
       if (storeCalls.length > 0) {
         const callerIds = storeCalls.map(r => r.from_symbol_id);
-        const callerParents = await this.db('dependencies as d')
+
+        // Query 1: Standard 'contains' relationships (composables)
+        const containsCallerParents = await this.db('dependencies as d')
           .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
           .whereIn('d.to_symbol_id', callerIds)
           .where('d.dependency_type', 'contains')
           .whereIn('parent.entity_type', ['component', 'composable'])
           .select('parent.id', 'parent.entity_type');
+
+        // Query 2: Vue components use 'calls' relationships
+        const callsCallerParents = await this.db('dependencies as d')
+          .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
+          .whereIn('d.to_symbol_id', callerIds)
+          .where('d.dependency_type', 'calls')
+          .where('parent.entity_type', 'component')
+          .select('parent.id', 'parent.entity_type');
+
+        // Combine both results
+        const callerParents = [...containsCallerParents, ...callsCallerParents];
 
         for (const row of callerParents) {
           if (!discovered.has(row.id)) {
@@ -126,6 +153,8 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
         logger.debug('Forward frontend discovery', {
           storeCalls: storeCalls.length,
           callerParents: callerParents.length,
+          containsParents: containsCallerParents.length,
+          callsParents: callsCallerParents.length,
           composables: composableIds.length,
         });
       }
