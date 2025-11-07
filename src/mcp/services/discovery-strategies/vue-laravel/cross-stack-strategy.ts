@@ -31,33 +31,11 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     const { currentSymbols, entryPointId } = context;
     const discovered = new Map<number, number>();
 
-    logger.debug('Starting cross-stack discovery', {
-      currentSymbols: currentSymbols.length,
-    });
-
     if (currentSymbols.length === 0) {
       return discovered;
     }
 
-    // Fetch entry point entity type to determine if we need transitive parent discovery
-    const entryPoint = await this.db('symbols')
-      .where('id', entryPointId)
-      .select('entity_type')
-      .first();
-
-    if (!entryPoint) {
-      logger.warn('Entry point not found in database', { entryPointId });
-    }
-
-    // Backend entry points: controller/service/model classes or their methods
-    // Note: Controller methods have entity_type='controller', not 'method'
-    // Excluding entity_type='method' (trait/utility methods) to prevent over-discovery
-    const isBackendEntry = entryPoint && ['controller', 'service', 'model'].includes(entryPoint.entity_type || '');
-
-    logger.debug('Entry point context', {
-      entityType: entryPoint?.entity_type,
-      isBackendEntry,
-    });
+    const isBackendEntry = await this.isBackendEntryPoint(entryPointId);
 
     // Find API calls FROM current symbols (frontend → backend)
     const forwardCalls = await this.db('api_calls')
@@ -110,12 +88,6 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
           parentContainerIds.push(row.id);
         }
       }
-
-      logger.debug('Parent containers discovered', {
-        parentCount: parentContainers.length,
-        containsCount: containsParents.length,
-        callsCount: callsParents.length,
-      });
     }
 
     // FORWARD FRONTEND DISCOVERY: When we discover stores via backward API traversal,
@@ -188,15 +160,6 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
             }
           }
         }
-
-        logger.debug('Forward frontend discovery', {
-          storeCalls: storeCalls.length,
-          callerParents: callerParents.length,
-          containsParents: containsCallerParents.length,
-          callsParents: callsCallerParents.length,
-          transitiveParents: transitiveParents.length,
-          composables: composableIds.length,
-        });
       }
     }
 
@@ -223,14 +186,8 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
             discovered.set(row.id, RELEVANCE_SCORE);
           }
         }
-
-        logger.debug('Composable references discovered', {
-          totalRefs: composableRefs.length,
-          components: referencedComponents.length,
-        });
       }
 
-      // BACKWARD COMPONENT DISCOVERY: Find components that call/reference these composables
       const composableCallers = await this.db('dependencies as d')
         .join('symbols as caller', 'd.from_symbol_id', 'caller.id')
         .whereIn('d.to_symbol_id', composableIds)
@@ -243,13 +200,6 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
           discovered.set(row.id, RELEVANCE_SCORE);
         }
       }
-
-      if (composableCallers.length > 0) {
-        logger.debug('Composable callers discovered', {
-          composables: composableIds.length,
-          callerComponents: composableCallers.length,
-        });
-      }
     }
 
     logger.info('Cross-stack discovery complete', {
@@ -261,5 +211,43 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     });
 
     return discovered;
+  }
+
+  private async isBackendEntryPoint(entryPointId: number): Promise<boolean> {
+    try {
+      const entryPoint = await this.db('symbols')
+        .where('id', entryPointId)
+        .select('entity_type')
+        .first();
+
+      if (!entryPoint) {
+        logger.warn('Entry point not found in database', { entryPointId });
+        return false;
+      }
+
+      if (['controller', 'service', 'model'].includes(entryPoint.entity_type || '')) {
+        return true;
+      }
+
+      if (entryPoint.entity_type === 'method') {
+        const parentContainer = await this.db('dependencies as d')
+          .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
+          .where('d.to_symbol_id', entryPointId)
+          .where('d.dependency_type', 'contains')
+          .whereIn('parent.entity_type', ['controller', 'service'])
+          .select('parent.entity_type')
+          .first();
+
+        return !!parentContainer;
+      }
+
+      return false;
+    } catch (error) {
+      logger.error('Failed to determine backend entry point', {
+        entryPointId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 }

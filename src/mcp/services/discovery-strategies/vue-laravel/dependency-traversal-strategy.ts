@@ -112,10 +112,6 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       directionResolver
     );
 
-    logger.debug('Initialized traversal queue', {
-      queueSize: queue.size(),
-    });
-
     while (!queue.isEmpty()) {
       if (state.hasExceededLimits(CleanDependencyTraversalStrategy.MAX_VISITED_NODES)) {
         logger.warn('Hit max visited nodes limit', state.getSize());
@@ -463,7 +459,6 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       );
 
     if (isSharedBoundary) {
-      // Models discovered from controller/service methods bypass depth filtering
       const sourceSymbol = await SymbolService.getSymbol(this.db, sourceId);
       const shouldBypassFilter = await this.shouldBypassDepthFilterForModel(
         container,
@@ -603,6 +598,22 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     queue: TraversalQueue,
     containerExpander: ContainerExpander
   ): Promise<void> {
+    state.markVisited(containerId);
+
+    const isArchitecturalBoundary =
+      container.entity_type &&
+      ['model', 'request', 'service', 'controller'].includes(container.entity_type);
+
+    if (isArchitecturalBoundary) {
+      const containerRelevance = 1.0 - (depth + 1) / (maxDepth + 1);
+      state.addDiscovered(containerId, containerRelevance);
+
+      if (container.file_id) {
+        state.addValidatedFile(container.file_id);
+      }
+      return;
+    }
+
     const executors = await containerExpander.expandToExecutors(
       [containerId],
       new Map([[containerId, container]])
@@ -614,6 +625,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       state.markVisited(executorId);
       const relevance = 1.0 - (depth + 1) / (maxDepth + 1);
       state.addDiscovered(executorId, relevance);
+
       queue.enqueue({ id: executorId, depth: depth + 1, direction });
     }
   }
@@ -637,15 +649,7 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       state.addValidatedFile(container.file_id);
     }
 
-    if (container.entity_type === 'request') {
-      return;
-    }
-
-    if (container.entity_type === 'model') {
-      const isModelEntryContext = this.entryPointEntityType === 'model';
-      if (isModelEntryContext) {
-        queue.enqueue({ id: containerId, depth: depth + 1, direction: 'backward' });
-      }
+    if (container.entity_type === 'request' || container.entity_type === 'model') {
       return;
     }
 
