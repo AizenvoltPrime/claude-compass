@@ -16,6 +16,8 @@ const logger = createComponentLogger('cross-stack-clean');
 
 const RELEVANCE_SCORE = 0.9;
 
+type EntryPointType = 'backend' | 'storeMethod' | 'component' | 'other';
+
 export class CleanCrossStackStrategy implements DiscoveryStrategy {
   readonly name = 'cross-stack';
   readonly description = 'Bridge frontend-backend via API calls';
@@ -35,7 +37,8 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
       return discovered;
     }
 
-    const isBackendEntry = await this.isBackendEntryPoint(entryPointId);
+    // Cache entry point type checks to avoid redundant database queries
+    const entryPointType = await this.detectEntryPointType(entryPointId);
 
     // Find API calls FROM current symbols (frontend → backend)
     const forwardCalls = await this.db('api_calls')
@@ -134,9 +137,8 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
         // Example: Component.calls(submitForm) → submitForm.contains(arrow_function) → arrow_function.calls(storeMethod)
         // When we discover arrow_function via store call, this traverses backwards to find the Component:
         // callerIds (arrow_function) ←contains← intermediate (submitForm) ←calls← component (Component)
-        // ONLY run for backend entry points (controller/service/model) to prevent over-discovery from frontend entries
         let transitiveParents: Array<{ id: number; entity_type: string }> = [];
-        if (isBackendEntry) {
+        if (callerIds.length > 0 && this.shouldDiscoverTransitiveParents(entryPointType)) {
           transitiveParents = await this.db('dependencies as d1')
             .join('symbols as intermediate', 'd1.from_symbol_id', 'intermediate.id')
             .join('dependencies as d2', 'intermediate.id', 'd2.to_symbol_id')
@@ -213,11 +215,52 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     return discovered;
   }
 
-  private async isBackendEntryPoint(entryPointId: number): Promise<boolean> {
+  private shouldDiscoverTransitiveParents(entryPointType: EntryPointType): boolean {
+    // Activation conditions:
+    // 1. Backend entry (controller/service/model) - discover all components using the feature
+    // 2. Store method entry - discover components calling that store method (backward traversal)
+    // 3. NOT for component entries - prevents sibling discovery (components sharing same stores)
+    return entryPointType === 'backend' || entryPointType === 'storeMethod';
+  }
+
+  private async detectEntryPointType(entryPointId: number): Promise<EntryPointType> {
+    const isBackend = await this.isEntityTypeEntryPoint(
+      entryPointId,
+      ['controller', 'service', 'model'],
+      ['controller', 'service']
+    );
+
+    if (isBackend) {
+      return 'backend';
+    }
+
+    const isStoreMethod = await this.isEntityTypeEntryPoint(entryPointId, [], ['store']);
+
+    if (isStoreMethod) {
+      return 'storeMethod';
+    }
+
+    const entryPoint = await this.db('symbols')
+      .where('id', entryPointId)
+      .select('entity_type')
+      .first();
+
+    if (entryPoint?.entity_type === 'component') {
+      return 'component';
+    }
+
+    return 'other';
+  }
+
+  private async isEntityTypeEntryPoint(
+    entryPointId: number,
+    directEntityTypes: string[],
+    methodParentEntityTypes: string[]
+  ): Promise<boolean> {
     try {
       const entryPoint = await this.db('symbols')
         .where('id', entryPointId)
-        .select('entity_type')
+        .select('entity_type', 'symbol_type')
         .first();
 
       if (!entryPoint) {
@@ -225,26 +268,43 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
         return false;
       }
 
-      if (['controller', 'service', 'model'].includes(entryPoint.entity_type || '')) {
+      if (directEntityTypes.length > 0 && directEntityTypes.includes(entryPoint.entity_type || '')) {
         return true;
       }
 
-      if (entryPoint.entity_type === 'method') {
+      if (entryPoint.entity_type === 'method' && entryPoint.symbol_type === 'method') {
+        if (methodParentEntityTypes.length === 0) {
+          logger.debug('Method entry point has no parent entity types to check', {
+            entryPointId,
+            entityType: entryPoint.entity_type,
+          });
+          return false;
+        }
+
         const parentContainer = await this.db('dependencies as d')
           .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
           .where('d.to_symbol_id', entryPointId)
           .where('d.dependency_type', 'contains')
-          .whereIn('parent.entity_type', ['controller', 'service'])
+          .whereIn('parent.entity_type', methodParentEntityTypes)
           .select('parent.entity_type')
           .first();
+
+        if (!parentContainer) {
+          logger.debug('Method entry point has no matching parent container', {
+            entryPointId,
+            expectedParentTypes: methodParentEntityTypes,
+          });
+        }
 
         return !!parentContainer;
       }
 
       return false;
     } catch (error) {
-      logger.error('Failed to determine backend entry point', {
+      logger.error('Failed to determine entry point type', {
         entryPointId,
+        directEntityTypes,
+        methodParentEntityTypes,
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
