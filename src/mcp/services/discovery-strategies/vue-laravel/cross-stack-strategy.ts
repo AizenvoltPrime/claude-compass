@@ -28,7 +28,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
   }
 
   async discover(context: DiscoveryContext): Promise<DiscoveryResult> {
-    const { currentSymbols } = context;
+    const { currentSymbols, entryPointId } = context;
     const discovered = new Map<number, number>();
 
     logger.debug('Starting cross-stack discovery', {
@@ -38,6 +38,26 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     if (currentSymbols.length === 0) {
       return discovered;
     }
+
+    // Fetch entry point entity type to determine if we need transitive parent discovery
+    const entryPoint = await this.db('symbols')
+      .where('id', entryPointId)
+      .select('entity_type')
+      .first();
+
+    if (!entryPoint) {
+      logger.warn('Entry point not found in database', { entryPointId });
+    }
+
+    // Backend entry points: controller/service/model classes or their methods
+    // Note: Controller methods have entity_type='controller', not 'method'
+    // Excluding entity_type='method' (trait/utility methods) to prevent over-discovery
+    const isBackendEntry = entryPoint && ['controller', 'service', 'model'].includes(entryPoint.entity_type || '');
+
+    logger.debug('Entry point context', {
+      entityType: entryPoint?.entity_type,
+      isBackendEntry,
+    });
 
     // Find API calls FROM current symbols (frontend → backend)
     const forwardCalls = await this.db('api_calls')
@@ -122,7 +142,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
       if (storeCalls.length > 0) {
         const callerIds = storeCalls.map(r => r.from_symbol_id);
 
-        // Query 1: Standard 'contains' relationships (composables)
+        // Query 1: Direct parents - Standard 'contains' relationships (composables)
         const containsCallerParents = await this.db('dependencies as d')
           .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
           .whereIn('d.to_symbol_id', callerIds)
@@ -130,7 +150,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
           .whereIn('parent.entity_type', ['component', 'composable'])
           .select('parent.id', 'parent.entity_type');
 
-        // Query 2: Vue components use 'calls' relationships
+        // Query 2: Direct parents - Vue components use 'calls' relationships
         const callsCallerParents = await this.db('dependencies as d')
           .join('symbols as parent', 'd.from_symbol_id', 'parent.id')
           .whereIn('d.to_symbol_id', callerIds)
@@ -138,8 +158,27 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
           .where('parent.entity_type', 'component')
           .select('parent.id', 'parent.entity_type');
 
-        // Combine both results
-        const callerParents = [...containsCallerParents, ...callsCallerParents];
+        // Query 3: Transitive parents for Vue inline functions (2-level nesting)
+        // Example: Component.calls(submitForm) → submitForm.contains(arrow_function) → arrow_function.calls(storeMethod)
+        // When we discover arrow_function via store call, this traverses backwards to find the Component:
+        // callerIds (arrow_function) ←contains← intermediate (submitForm) ←calls← component (Component)
+        // ONLY run for backend entry points (controller/service/model) to prevent over-discovery from frontend entries
+        let transitiveParents: Array<{ id: number; entity_type: string }> = [];
+        if (isBackendEntry) {
+          transitiveParents = await this.db('dependencies as d1')
+            .join('symbols as intermediate', 'd1.from_symbol_id', 'intermediate.id')
+            .join('dependencies as d2', 'intermediate.id', 'd2.to_symbol_id')
+            .join('symbols as component', 'd2.from_symbol_id', 'component.id')
+            .whereIn('d1.to_symbol_id', callerIds)
+            .where('d1.dependency_type', 'contains')
+            .whereIn('intermediate.entity_type', ['function', 'variable'])
+            .where('d2.dependency_type', 'calls')
+            .where('component.entity_type', 'component')
+            .select('component.id as id', 'component.entity_type');
+        }
+
+        // Combine all results
+        const callerParents = [...containsCallerParents, ...callsCallerParents, ...transitiveParents];
 
         for (const row of callerParents) {
           if (!discovered.has(row.id)) {
@@ -155,6 +194,7 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
           callerParents: callerParents.length,
           containsParents: containsCallerParents.length,
           callsParents: callsCallerParents.length,
+          transitiveParents: transitiveParents.length,
           composables: composableIds.length,
         });
       }
