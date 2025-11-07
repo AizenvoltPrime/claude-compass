@@ -96,10 +96,11 @@ export class CleanCrossStackStrategy implements DiscoveryStrategy {
     // FORWARD FRONTEND DISCOVERY: When we discover stores via backward API traversal,
     // continue forward to find components/composables that USE those stores
     // This completes the full feature discovery: Backend → API → Store → Components → Referenced Components
+    // SKIP THIS for component entry points to prevent sibling component pollution
     const frontendSymbolsToExpand = [...frontendCallerIds, ...parentContainerIds];
     const composableIds: number[] = [];
 
-    if (frontendSymbolsToExpand.length > 0) {
+    if (frontendSymbolsToExpand.length > 0 && entryPointType !== 'component') {
       // Find direct callers of store methods
       const storeCalls = await this.db('dependencies')
         .whereIn('to_symbol_id', frontendCallerIds)
