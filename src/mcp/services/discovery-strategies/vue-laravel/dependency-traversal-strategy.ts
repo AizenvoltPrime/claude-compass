@@ -45,22 +45,32 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
 
   constructor(private db: Knex) {}
 
+  private async shouldBypassDepthFilterForModel(
+    targetSymbol: SymbolInfo,
+    sourceSymbol: SymbolInfo | undefined,
+    queries: SymbolGraphQueries
+  ): Promise<boolean> {
+    if (
+      targetSymbol.entity_type !== 'model' ||
+      !sourceSymbol ||
+      sourceSymbol.symbol_type !== 'method'
+    ) {
+      return false;
+    }
+
+    // Optimized: single query to get parent entity_type via join
+    const parent = await this.db('dependencies as d')
+      .join('symbols as s', 'd.from_symbol_id', 's.id')
+      .where('d.to_symbol_id', sourceSymbol.id)
+      .where('d.dependency_type', 'contains')
+      .select('s.entity_type')
+      .first();
+
+    return parent?.entity_type === 'controller' || parent?.entity_type === 'service';
+  }
+
   async shouldRun(context: DiscoveryContext): Promise<boolean> {
     if (context.iteration !== 0) {
-      return false;
-    }
-
-    const entrySymbol = await SymbolService.getSymbol(this.db, context.entryPointId);
-    if (!entrySymbol) {
-      return false;
-    }
-
-    if (entrySymbol.entity_type === 'component') {
-      logger.info('Skipping dependency traversal for component entry point', {
-        symbolId: context.entryPointId,
-        symbolName: entrySymbol.name,
-        reason: 'Components use prop-driven + cross-stack strategies for precise discovery',
-      });
       return false;
     }
 
@@ -280,7 +290,8 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
         state,
         depthFilter,
         fileValidation,
-        queries
+        queries,
+        symbol
       );
 
       if (!shouldProcess) continue;
@@ -344,7 +355,8 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     state: TraversalState,
     depthFilter: DepthFilterPolicy,
     fileValidation: FileValidationPolicy,
-    queries: SymbolGraphQueries
+    queries: SymbolGraphQueries,
+    sourceSymbol?: SymbolInfo
   ): Promise<boolean> {
     const config: DepthFilterConfig = {
       entityType: targetSymbol.entity_type,
@@ -354,7 +366,16 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       entryPointEntityType: this.entryPointEntityType,
     };
 
-    if (depthFilter.shouldFilterEntity(config)) {
+    // Models referenced by controller/service methods bypass depth filtering
+    // since they are fundamental data entities for understanding features
+    const shouldBypassDepthFilter = await this.shouldBypassDepthFilterForModel(
+      targetSymbol,
+      sourceSymbol,
+      queries
+    );
+
+    // Apply depth filtering unless bypass is enabled
+    if (!shouldBypassDepthFilter && depthFilter.shouldFilterEntity(config)) {
       return false;
     }
 
@@ -442,7 +463,15 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       );
 
     if (isSharedBoundary) {
-      if (depthFilter.shouldFilterEntity(config)) {
+      // Models discovered from controller/service methods bypass depth filtering
+      const sourceSymbol = await SymbolService.getSymbol(this.db, sourceId);
+      const shouldBypassFilter = await this.shouldBypassDepthFilterForModel(
+        container,
+        sourceSymbol,
+        queries
+      );
+
+      if (!shouldBypassFilter && depthFilter.shouldFilterEntity(config)) {
         return;
       }
 
@@ -574,7 +603,6 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
     queue: TraversalQueue,
     containerExpander: ContainerExpander
   ): Promise<void> {
-
     const executors = await containerExpander.expandToExecutors(
       [containerId],
       new Map([[containerId, container]])

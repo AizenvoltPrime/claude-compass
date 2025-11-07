@@ -8,6 +8,9 @@
 import type { Knex } from 'knex';
 import type { SymbolInfo } from './symbol-classifier';
 import { SymbolRole } from './symbol-classifier';
+import { createComponentLogger } from '../../../../utils/logger';
+
+const logger = createComponentLogger('symbol-graph-queries');
 
 export class SymbolGraphQueries {
   constructor(private readonly db: Knex) {}
@@ -81,6 +84,82 @@ export class SymbolGraphQueries {
     return [...new Set(referencingMethods)];
   }
 
+  private async shouldDiscoverModelsTransitively(symbolId: number): Promise<number | null> {
+    try {
+      const parentContainer = await this.db('dependencies')
+        .select('from_symbol_id')
+        .where({ to_symbol_id: symbolId, dependency_type: 'contains' })
+        .first();
+
+      if (!parentContainer) {
+        return null;
+      }
+
+      const parent = await this.db('symbols')
+        .select('id', 'entity_type')
+        .where('id', parentContainer.from_symbol_id)
+        .first();
+
+      if (parent && (parent.entity_type === 'controller' || parent.entity_type === 'service')) {
+        return parent.id;
+      }
+
+      return null;
+    } catch (error) {
+      logger.error(
+        `Failed to check if symbol ${symbolId} should discover models transitively: ${error}`
+      );
+      return null;
+    }
+  }
+
+  private async getDirectModelReferences(methodId: number): Promise<number[]> {
+    try {
+      const modelIds = await this.db('dependencies as d')
+        .join('symbols as target', 'd.to_symbol_id', 'target.id')
+        .where('d.from_symbol_id', methodId)
+        .where('d.dependency_type', 'references')
+        .where('target.entity_type', 'model')
+        .pluck('target.id');
+
+      return modelIds;
+    } catch (error) {
+      logger.error(`Failed to get direct model references for method ${methodId}: ${error}`);
+      return [];
+    }
+  }
+
+  private async getTransitiveModelReferences(methodId: number): Promise<number[]> {
+    try {
+      const serviceMethodCalls = await this.db('dependencies as call_dep')
+        .join('symbols as service_method', 'call_dep.to_symbol_id', 'service_method.id')
+        .join('dependencies as contains_dep', 'service_method.id', 'contains_dep.to_symbol_id')
+        .join('symbols as service_class', 'contains_dep.from_symbol_id', 'service_class.id')
+        .where('call_dep.from_symbol_id', methodId)
+        .where('call_dep.dependency_type', 'calls')
+        .where('service_method.symbol_type', 'method')
+        .where('contains_dep.dependency_type', 'contains')
+        .where('service_class.entity_type', 'service')
+        .pluck('service_method.id');
+
+      if (serviceMethodCalls.length === 0) {
+        return [];
+      }
+
+      const transitiveModelRefs = await this.db('dependencies as d')
+        .join('symbols as target', 'd.to_symbol_id', 'target.id')
+        .whereIn('d.from_symbol_id', serviceMethodCalls)
+        .where('d.dependency_type', 'references')
+        .where('target.entity_type', 'model')
+        .pluck('target.id');
+
+      return transitiveModelRefs;
+    } catch (error) {
+      logger.error(`Failed to get transitive model references for method ${methodId}: ${error}`);
+      return [];
+    }
+  }
+
   async getForwardEdges(
     symbolId: number,
     role: SymbolRole,
@@ -96,12 +175,27 @@ export class SymbolGraphQueries {
         .pluck('to_symbol_id');
       edges.push(...deps);
 
+      // Follow references at shallow depths
       if (depth <= 2) {
         const referenceDeps = await this.db('dependencies')
           .where('from_symbol_id', symbolId)
           .where('dependency_type', 'references')
           .pluck('to_symbol_id');
         edges.push(...referenceDeps);
+      }
+
+      // Controllers/services discover models directly and transitively through service calls
+      // Models are data entities fundamental to understanding features
+      if (symbol.symbol_type === 'method') {
+        const parentId = await this.shouldDiscoverModelsTransitively(symbolId);
+
+        if (parentId) {
+          const directModelRefs = await this.getDirectModelReferences(symbolId);
+          edges.push(...directModelRefs);
+
+          const transitiveModelRefs = await this.getTransitiveModelReferences(symbolId);
+          edges.push(...transitiveModelRefs);
+        }
       }
     } else if (role === SymbolRole.ENTITY) {
       const deps = await this.db('dependencies')

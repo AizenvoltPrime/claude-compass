@@ -2,6 +2,10 @@ import Parser from 'tree-sitter';
 import { ParsedSymbol, ParsedImport, ParsedExport, ParseError } from '../base';
 import { ChunkResult } from '../chunked-parser';
 
+// Symbol name for anonymous arrow function callbacks (e.g., onMounted(() => {...}))
+// This matches the symbol_type created by the parser for arrow functions
+const ARROW_FUNCTION_SYMBOL_NAME = 'arrow_function';
+
 export function extractComponentReference(
   callNode: Parser.SyntaxNode,
   content: string,
@@ -65,6 +69,13 @@ export function findContainingFunction(
         if (parent.parent && parent.parent.type === 'variable_declarator') {
           const varNameNode = parent.parent.childForFieldName('name');
           if (varNameNode) return varNameNode.text;
+        }
+
+        // Arrow functions passed as callbacks (e.g., onMounted(() => {...}))
+        // Return the arrow_function symbol name so dependencies get properly attached
+        // to the callback function instead of being orphaned to 'global'
+        if (parent.type === 'arrow_function') {
+          return ARROW_FUNCTION_SYMBOL_NAME;
         }
       }
     }
