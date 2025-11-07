@@ -520,18 +520,42 @@ export abstract class BaseParser {
   }
 
   /**
-   * Check if symbol is exported
+   * Check if symbol is exported by walking up the AST tree
+   *
+   * Handles multiple export patterns:
+   * - export function name() {}           → function_declaration parent is export_statement
+   * - export const name = () => {}        → variable_declarator → lexical_declaration → export_statement
+   * - export class Name {}                → class_declaration parent is export_statement
+   * - export const name = function() {}   → variable_declarator → lexical_declaration → export_statement
+   *
+   * @param node The AST node to check for export status
+   * @param symbolName The name of the symbol (unused but kept for compatibility)
+   * @param content The file content (unused but kept for compatibility)
+   * @returns true if the node or any ancestor is wrapped in an export statement
    */
   protected isSymbolExported(
     node: Parser.SyntaxNode,
     symbolName: string,
     content: string
   ): boolean {
-    // This is a basic implementation - language-specific parsers should override
-    const parentNode = node.parent;
-    if (!parentNode) return false;
+    let currentNode: Parser.SyntaxNode | null = node;
 
-    return parentNode.type === 'export_statement' || parentNode.type === 'export_declaration';
+    // Walk up the AST tree to find any ancestor export node
+    // Stop when we reach the root or find an export
+    while (currentNode) {
+      if (
+        currentNode.type === 'export_statement' ||
+        currentNode.type === 'export_declaration'
+      ) {
+        return true;
+      }
+
+      // Move up to parent node
+      currentNode = currentNode.parent;
+    }
+
+    // No export found in ancestry
+    return false;
   }
 
   /**

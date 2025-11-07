@@ -39,6 +39,8 @@ export class DepthFilterPolicy {
     'request',
   ];
 
+  static readonly MAX_MODEL_BYPASS_DEPTH = 4;
+
   shouldFilterSharedArchitecturalBoundary(config: DepthFilterConfig): boolean {
     if (config.depth === 0) {
       return false;

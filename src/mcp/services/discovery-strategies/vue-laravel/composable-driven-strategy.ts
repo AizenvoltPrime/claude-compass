@@ -17,6 +17,7 @@ import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from '../common/
 import type { Knex } from 'knex';
 import * as SymbolService from '../../../../database/services/symbol-service';
 import { createComponentLogger } from '../../../../utils/logger';
+import { batchGetSymbols, findParentStore } from './discovery-helpers';
 
 const logger = createComponentLogger('ComposableDrivenStrategy');
 
@@ -32,19 +33,6 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
   readonly priority = 3; // Run before general traversal but after cross-stack
 
   constructor(private db: Knex) {}
-
-  /**
-   * Helper: Batch fetch symbols by IDs to avoid N+1 queries
-   */
-  private async batchGetSymbols(symbolIds: number[]): Promise<Map<number, any>> {
-    if (symbolIds.length === 0) return new Map();
-
-    const symbols = await this.db('symbols')
-      .whereIn('id', symbolIds)
-      .select('*');
-
-    return new Map(symbols.map(s => [s.id, s]));
-  }
 
   /**
    * Only run in iteration 0 when we have the composable entry point
@@ -75,27 +63,19 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
         continue;
       }
 
-      // Phase 1: Analyze entry point composable
       discovered.set(symbolId, 1.0);
 
-      // Phase 1a: Find nested functions (e.g., fetchCameraAlerts inside createCameraAlertMarkers)
       const nestedFunctions = await this.findNestedFunctions(symbolId);
-      for (const nestedId of nestedFunctions) {
-        discovered.set(nestedId, 0.98);
-      }
 
-      // Phase 1b: Find direct store calls from composable and nested functions
-      const allFunctions = [symbolId, ...nestedFunctions];
-      const storeMethods: number[] = [];
+      const storeMethods = await this.gatherStoreMethodsFromComposableAndNested(
+        symbolId,
+        nestedFunctions
+      );
 
-      for (const funcId of allFunctions) {
-        const storeMethodIds = await this.findStoreMethodCalls(funcId);
-        storeMethods.push(...storeMethodIds);
-      }
 
       logger.info('Phase 1 complete: Entry point analyzed', {
         composable: symbol.name,
-        nestedFunctions: nestedFunctions.length,
+        nestedFunctionsAnalyzed: nestedFunctions.length,
         storeMethods: storeMethods.length,
       });
 
@@ -126,7 +106,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
         discovered.set(storeMethodId, 0.9);
 
         // Find parent store
-        const parentStore = await this.findParentStore(storeMethodId);
+        const parentStore = await findParentStore(this.db, storeMethodId);
         if (parentStore) {
           discovered.set(parentStore, 0.9);
         }
@@ -161,6 +141,21 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
   /**
    * Phase 1a: Find nested functions contained by this composable
    */
+  private async gatherStoreMethodsFromComposableAndNested(
+    composableId: number,
+    nestedFunctionIds: number[]
+  ): Promise<number[]> {
+    const allFunctions = [composableId, ...nestedFunctionIds];
+    const storeMethods: number[] = [];
+
+    for (const funcId of allFunctions) {
+      const storeMethodIds = await this.findStoreMethodCalls(funcId);
+      storeMethods.push(...storeMethodIds);
+    }
+
+    return storeMethods;
+  }
+
   private async findNestedFunctions(composableId: number): Promise<number[]> {
     const db = this.db;
 
@@ -172,7 +167,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
 
     // Batch fetch all symbols to avoid N+1 queries
     const symbolIds = nested.map(edge => edge.to_symbol_id);
-    const symbolsMap = await this.batchGetSymbols(symbolIds);
+    const symbolsMap = await batchGetSymbols(this.db, symbolIds);
 
     const nestedIds: number[] = [];
     for (const edge of nested) {
@@ -227,7 +222,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
 
     // Batch fetch all caller symbols to avoid N+1 queries
     const callerIds = callers.map(c => c.from_symbol_id);
-    const callerSymbolsMap = await this.batchGetSymbols(callerIds);
+    const callerSymbolsMap = await batchGetSymbols(this.db, callerIds);
 
     // Find containers for callers that aren't components
     const nonComponentCallerIds: number[] = [];
@@ -252,7 +247,7 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
 
       if (containers.length > 0) {
         const containerIds = containers.map(c => c.from_symbol_id);
-        const containerSymbolsMap = await this.batchGetSymbols(containerIds);
+        const containerSymbolsMap = await batchGetSymbols(this.db, containerIds);
 
         for (const container of containers) {
           const containerSymbol = containerSymbolsMap.get(container.from_symbol_id);
@@ -293,30 +288,6 @@ export class ComposableDrivenStrategy implements DiscoveryStrategy {
     }
 
     return components;
-  }
-
-  /**
-   * Helper: Find parent store of a store method
-   */
-  private async findParentStore(storeMethodId: number): Promise<number | null> {
-    const db = this.db;
-
-    // Find parent via 'contains' backwards
-    const parentContainer = await db('dependencies')
-      .select('from_symbol_id')
-      .where({ to_symbol_id: storeMethodId, dependency_type: 'contains' })
-      .first();
-
-    if (!parentContainer) {
-      return null;
-    }
-
-    const parent = await SymbolService.getSymbol(this.db,parentContainer.from_symbol_id);
-    if (parent && parent.entity_type === 'store') {
-      return parentContainer.from_symbol_id;
-    }
-
-    return null;
   }
 
   /**

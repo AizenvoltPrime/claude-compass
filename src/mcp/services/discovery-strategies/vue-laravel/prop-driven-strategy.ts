@@ -18,6 +18,7 @@ import { DiscoveryStrategy, DiscoveryContext, DiscoveryResult } from '../common/
 import type { Knex } from 'knex';
 import * as SymbolService from '../../../../database/services/symbol-service';
 import { createComponentLogger } from '../../../../utils/logger';
+import { batchGetSymbols, findParentStore } from './discovery-helpers';
 
 const logger = createComponentLogger('PropDrivenStrategy');
 
@@ -98,6 +99,17 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
         directStoreCalls: entryAnalysis.storeCallsInSetup.length,
       });
 
+      // Phase 1.4: Discover composables imported by entry point
+      // Composables are application-level utilities that should be included in feature discovery
+      // Unlike library imports (vue, vue-router), composables are part of the feature's implementation
+      const composableImports = await this.findComposableImports(symbolId);
+      for (const composableId of composableImports) {
+        discovered.set(composableId, 0.95);
+      }
+      logger.info('Phase 1.4 complete: Found imported composables', {
+        composables: composableImports.length,
+      });
+
       // Phase 1.5: Discover child components used by entry point
       const childComponents = await this.findChildComponents(symbolId);
       for (const childId of childComponents) {
@@ -144,7 +156,7 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
           discovered.set(storeMethodId, 0.9);
 
           // Also discover the parent store
-          const parentStore = await this.findParentStore(storeMethodId);
+          const parentStore = await findParentStore(this.db, storeMethodId);
           if (parentStore) {
             discovered.set(parentStore, 0.9);
           }
@@ -201,30 +213,6 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
     const storeCallsInSetup = await this.findStoreMethodCalls(symbolId);
 
     return { symbolId, props, storeCallsInSetup };
-  }
-
-  /**
-   * Helper: Find parent store of a store method
-   */
-  private async findParentStore(storeMethodId: number): Promise<number | null> {
-    const db = this.db;
-
-    // Find parent via 'contains' backwards
-    const parentContainer = await db('dependencies')
-      .select('from_symbol_id')
-      .where({ to_symbol_id: storeMethodId, dependency_type: 'contains' })
-      .first();
-
-    if (!parentContainer) {
-      return null;
-    }
-
-    const parent = await SymbolService.getSymbol(this.db,parentContainer.from_symbol_id);
-    if (parent && parent.entity_type === 'store') {
-      return parentContainer.from_symbol_id;
-    }
-
-    return null;
   }
 
   /**
@@ -521,15 +509,19 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
    */
   private async findChildComponents(componentId: number): Promise<number[]> {
     const db = this.db;
-    const childComponents: number[] = [];
 
-    // Find all components referenced by this component
     const references = await db('dependencies')
       .select('to_symbol_id')
       .where({ from_symbol_id: componentId, dependency_type: 'references' });
 
+    if (references.length === 0) return [];
+
+    const symbolIds = references.map(ref => ref.to_symbol_id);
+    const symbolsMap = await batchGetSymbols(db, symbolIds);
+
+    const childComponents: number[] = [];
     for (const ref of references) {
-      const symbol = await SymbolService.getSymbol(this.db,ref.to_symbol_id);
+      const symbol = symbolsMap.get(ref.to_symbol_id);
       if (symbol && symbol.entity_type === 'component') {
         childComponents.push(ref.to_symbol_id);
       }
@@ -539,51 +531,89 @@ export class PropDrivenStrategy implements DiscoveryStrategy {
   }
 
   /**
+   * Phase 1.4: Find composables imported by a component
+   * Only includes application-level composables (entity_type === 'composable'),
+   * not library imports (vue, vue-router, etc.)
+   */
+  private async findComposableImports(componentId: number): Promise<number[]> {
+    const db = this.db;
+
+    const imports = await db('dependencies')
+      .select('to_symbol_id')
+      .where({ from_symbol_id: componentId, dependency_type: 'imports' });
+
+    if (imports.length === 0) return [];
+
+    const symbolIds = imports.map(imp => imp.to_symbol_id);
+    const symbolsMap = await batchGetSymbols(db, symbolIds);
+
+    const composables: number[] = [];
+    for (const imp of imports) {
+      const symbol = symbolsMap.get(imp.to_symbol_id);
+      if (symbol && symbol.entity_type === 'composable') {
+        composables.push(imp.to_symbol_id);
+      }
+    }
+
+    return composables;
+  }
+
+  /**
    * Phase 2.5: Find parent components that use a composable/function
    */
   private async findParentComponents(composableId: number): Promise<number[]> {
     const db = this.db;
     const parentComponents = new Set<number>();
 
-    // Find who calls this composable
     const callers = await db('dependencies')
       .select('from_symbol_id')
       .where({ to_symbol_id: composableId, dependency_type: 'calls' });
 
+    if (callers.length === 0) return [];
+
+    const callerIds = callers.map(c => c.from_symbol_id);
+    const callerSymbolsMap = await batchGetSymbols(db, callerIds);
+
+    const nonComponentCallerIds: number[] = [];
     for (const caller of callers) {
-      const symbol = await SymbolService.getSymbol(this.db,caller.from_symbol_id);
+      const symbol = callerSymbolsMap.get(caller.from_symbol_id);
       if (!symbol) continue;
 
-      // If the caller is a component, add it directly
       if (symbol.entity_type === 'component') {
         parentComponents.add(caller.from_symbol_id);
-        continue;
+      } else {
+        nonComponentCallerIds.push(caller.from_symbol_id);
       }
+    }
 
-      // Otherwise, the caller might be a variable/function inside a component
-      // Try 1: Find the component that contains this caller via 'contains' edge
-      const container = await db('dependencies')
-        .select('from_symbol_id')
-        .where({ to_symbol_id: caller.from_symbol_id, dependency_type: 'contains' })
-        .first();
+    if (nonComponentCallerIds.length > 0) {
+      const containers = await db('dependencies')
+        .select('from_symbol_id', 'to_symbol_id')
+        .whereIn('to_symbol_id', nonComponentCallerIds)
+        .where('dependency_type', 'contains');
 
-      if (container) {
-        const containerSymbol = await SymbolService.getSymbol(this.db,container.from_symbol_id);
-        if (containerSymbol && containerSymbol.entity_type === 'component') {
-          parentComponents.add(container.from_symbol_id);
-          continue;
+      if (containers.length > 0) {
+        const containerIds = containers.map(c => c.from_symbol_id);
+        const containerSymbolsMap = await batchGetSymbols(db, containerIds);
+
+        for (const container of containers) {
+          const containerSymbol = containerSymbolsMap.get(container.from_symbol_id);
+          if (containerSymbol && containerSymbol.entity_type === 'component') {
+            parentComponents.add(container.from_symbol_id);
+          }
         }
       }
 
-      // Try 2: File-based discovery - find components in the same file
-      // This handles cases where variables don't have 'contains' edges
-      if (symbol.file_id) {
-        const componentsInFile = await db('symbols')
-          .select('id')
-          .where({ file_id: symbol.file_id, entity_type: 'component' });
+      for (const callerId of nonComponentCallerIds) {
+        const symbol = callerSymbolsMap.get(callerId);
+        if (symbol && symbol.file_id) {
+          const componentsInFile = await db('symbols')
+            .select('id')
+            .where({ file_id: symbol.file_id, entity_type: 'component' });
 
-        for (const comp of componentsInFile) {
-          parentComponents.add(comp.id);
+          for (const comp of componentsInFile) {
+            parentComponents.add(comp.id);
+          }
         }
       }
     }

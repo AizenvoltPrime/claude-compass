@@ -40,15 +40,26 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
 
   private static readonly MAX_VISITED_NODES = 50000;
   private static readonly MAX_QUEUE_SIZE = 10000;
+  private static readonly ARCHITECTURAL_ENTITY_CONTAINERS = ['request', 'middleware', 'job'];
 
   private entryPointEntityType?: string;
 
   constructor(private db: Knex) {}
 
+  private isArchitecturalEntityContainer(
+    role: SymbolRole,
+    entityType?: string
+  ): boolean {
+    return role === SymbolRole.CONTAINER &&
+      !!entityType &&
+      CleanDependencyTraversalStrategy.ARCHITECTURAL_ENTITY_CONTAINERS.includes(entityType);
+  }
+
   private async shouldBypassDepthFilterForModel(
     targetSymbol: SymbolInfo,
     sourceSymbol: SymbolInfo | undefined,
-    queries: SymbolGraphQueries
+    queries: SymbolGraphQueries,
+    depth: number
   ): Promise<boolean> {
     if (
       targetSymbol.entity_type !== 'model' ||
@@ -58,7 +69,10 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       return false;
     }
 
-    // Optimized: single query to get parent entity_type via join
+    if (depth > DepthFilterPolicy.MAX_MODEL_BYPASS_DEPTH) {
+      return false;
+    }
+
     const parent = await this.db('dependencies as d')
       .join('symbols as s', 'd.from_symbol_id', 's.id')
       .where('d.to_symbol_id', sourceSymbol.id)
@@ -66,7 +80,20 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       .select('s.entity_type')
       .first();
 
-    return parent?.entity_type === 'controller' || parent?.entity_type === 'service';
+    const shouldBypass = parent?.entity_type === 'controller' || parent?.entity_type === 'service';
+
+    if (shouldBypass) {
+      logger.debug('Model bypass depth filter', {
+        modelName: targetSymbol.name,
+        modelId: targetSymbol.id,
+        sourceMethod: sourceSymbol.name,
+        sourceMethodId: sourceSymbol.id,
+        parentEntityType: parent?.entity_type,
+        depth
+      });
+    }
+
+    return shouldBypass;
   }
 
   async shouldRun(context: DiscoveryContext): Promise<boolean> {
@@ -292,7 +319,12 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
 
       if (!shouldProcess) continue;
 
-      if (targetRole === SymbolRole.CONTAINER) {
+      const isArchitecturalEntityContainer = this.isArchitecturalEntityContainer(
+        targetRole,
+        targetSymbol.entity_type
+      );
+
+      if (targetRole === SymbolRole.CONTAINER && !isArchitecturalEntityContainer) {
         await this.processContainer(
           targetId,
           targetSymbol,
@@ -362,17 +394,38 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       entryPointEntityType: this.entryPointEntityType,
     };
 
-    // Models referenced by controller/service methods bypass depth filtering
-    // since they are fundamental data entities for understanding features
-    const shouldBypassDepthFilter = await this.shouldBypassDepthFilterForModel(
-      targetSymbol,
-      sourceSymbol,
-      queries
-    );
+    // Architectural entities (requests, middleware, jobs) bypass depth filtering
+    // These are first-class feature components that should always be discovered
+    const isArchitecturalEntity = targetSymbol.entity_type &&
+      ['request', 'middleware', 'job'].includes(targetSymbol.entity_type);
+
+    // Models get limited bypass (depth 0-2) to allow legitimate feature models
+    // while blocking deeper transitive pollution (depth 3+)
+    const shouldBypassDepthFilter = isArchitecturalEntity ||
+      await this.shouldBypassDepthFilterForModel(targetSymbol, sourceSymbol, queries, depth);
 
     // Apply depth filtering unless bypass is enabled
     if (!shouldBypassDepthFilter && depthFilter.shouldFilterEntity(config)) {
+      logger.debug('Depth filter blocked symbol', {
+        targetName: targetSymbol.name,
+        targetId: targetSymbol.id,
+        targetEntityType: targetSymbol.entity_type,
+        depth,
+        role: targetRole,
+        isArchitecturalEntity,
+        shouldBypassDepthFilter
+      });
       return false;
+    }
+
+    if (shouldBypassDepthFilter && targetSymbol.entity_type === 'model') {
+      logger.debug('Model bypassed depth filter', {
+        modelName: targetSymbol.name,
+        modelId: targetSymbol.id,
+        depth,
+        isArchitecturalEntity,
+        bypassReason: isArchitecturalEntity ? 'architectural' : 'controller/service method'
+      });
     }
 
     if (targetSymbol.symbol_type === 'method' && depthFilter.shouldFilterMethod(config)) {
@@ -459,11 +512,11 @@ export class CleanDependencyTraversalStrategy implements DiscoveryStrategy {
       );
 
     if (isSharedBoundary) {
+      // Shared boundaries (stores, services, controllers, models) are subject to depth filtering
+      // However, models get limited bypass (depth 0-2) for legitimate feature discovery
       const sourceSymbol = await SymbolService.getSymbol(this.db, sourceId);
       const shouldBypassFilter = await this.shouldBypassDepthFilterForModel(
-        container,
-        sourceSymbol,
-        queries
+        container, sourceSymbol, queries, depth
       );
 
       if (!shouldBypassFilter && depthFilter.shouldFilterEntity(config)) {

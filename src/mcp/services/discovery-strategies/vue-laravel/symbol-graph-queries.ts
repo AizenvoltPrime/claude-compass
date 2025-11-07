@@ -13,6 +13,8 @@ import { createComponentLogger } from '../../../../utils/logger';
 const logger = createComponentLogger('symbol-graph-queries');
 
 export class SymbolGraphQueries {
+  private static readonly ARCHITECTURAL_ENTITY_TYPES = ['request', 'middleware', 'job'];
+
   constructor(private readonly db: Knex) {}
 
   async getParentContainer(symbolId: number): Promise<number | null> {
@@ -160,6 +162,26 @@ export class SymbolGraphQueries {
     }
   }
 
+  private async getArchitecturalEntityReferences(
+    symbolId: number
+  ): Promise<Array<{ id: number; name: string; entity_type: string }>> {
+    return await this.db('dependencies as d')
+      .join('symbols as target', 'd.to_symbol_id', 'target.id')
+      .where('d.from_symbol_id', symbolId)
+      .where('d.dependency_type', 'references')
+      .whereIn('target.entity_type', SymbolGraphQueries.ARCHITECTURAL_ENTITY_TYPES)
+      .select('target.id', 'target.name', 'target.entity_type');
+  }
+
+  private async getNonArchitecturalReferences(symbolId: number): Promise<number[]> {
+    return await this.db('dependencies as d')
+      .join('symbols as target', 'd.to_symbol_id', 'target.id')
+      .where('d.from_symbol_id', symbolId)
+      .where('d.dependency_type', 'references')
+      .whereNotIn('target.entity_type', ['request', 'model', 'middleware', 'job'])
+      .pluck('target.id');
+  }
+
   async getForwardEdges(
     symbolId: number,
     role: SymbolRole,
@@ -175,17 +197,28 @@ export class SymbolGraphQueries {
         .pluck('to_symbol_id');
       edges.push(...deps);
 
-      // Follow references at shallow depths
-      if (depth <= 2) {
-        const referenceDeps = await this.db('dependencies')
-          .where('from_symbol_id', symbolId)
-          .where('dependency_type', 'references')
-          .pluck('to_symbol_id');
-        edges.push(...referenceDeps);
+      const architecturalRefs = await this.getArchitecturalEntityReferences(symbolId);
+
+      if (architecturalRefs.length > 0) {
+        logger.debug('Found architectural references', {
+          fromSymbolId: symbolId,
+          depth,
+          role,
+          architecturalRefs: architecturalRefs.map(r => ({
+            id: r.id,
+            name: r.name,
+            entity_type: r.entity_type
+          }))
+        });
       }
 
-      // Controllers/services discover models directly and transitively through service calls
-      // Models are data entities fundamental to understanding features
+      edges.push(...architecturalRefs.map(r => r.id));
+
+      if (depth <= 2) {
+        const otherRefs = await this.getNonArchitecturalReferences(symbolId);
+        edges.push(...otherRefs);
+      }
+
       if (symbol.symbol_type === 'method') {
         const parentId = await this.shouldDiscoverModelsTransitively(symbolId);
 
@@ -204,12 +237,18 @@ export class SymbolGraphQueries {
         .pluck('to_symbol_id');
       edges.push(...deps);
 
+      // Always follow references to architectural entities regardless of depth
+      const architecturalRefs = await this.db('dependencies as d')
+        .join('symbols as target', 'd.to_symbol_id', 'target.id')
+        .where('d.from_symbol_id', symbolId)
+        .where('d.dependency_type', 'references')
+        .whereIn('target.entity_type', ['request', 'model', 'middleware', 'job'])
+        .pluck('target.id');
+      edges.push(...architecturalRefs);
+
       if (symbol.entity_type !== 'component' && depth <= 2) {
-        const referenceDeps = await this.db('dependencies')
-          .where('from_symbol_id', symbolId)
-          .where('dependency_type', 'references')
-          .pluck('to_symbol_id');
-        edges.push(...referenceDeps);
+        const otherRefs = await this.getNonArchitecturalReferences(symbolId);
+        edges.push(...otherRefs);
       }
     } else if (role === SymbolRole.CONTAINER) {
       const contained = await this.db('dependencies')
