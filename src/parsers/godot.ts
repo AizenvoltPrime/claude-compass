@@ -636,6 +636,87 @@ export class GodotParser extends BaseFrameworkParser {
     });
   }
 
+  private extractGodotDependencies(content: string, symbols: ParsedSymbol[]): ParsedDependency[] {
+    const dependencies: ParsedDependency[] = [];
+    const lines = content.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      const lineNumber = i + 1;
+
+      let combinedLine = line;
+      let lookAhead = 1;
+      while (i + lookAhead < lines.length && lookAhead <= 3 && line.includes('.Connect(')) {
+        combinedLine += ' ' + lines[i + lookAhead].trim();
+        if (combinedLine.includes(');')) break;
+        lookAhead++;
+      }
+
+      const connectMatch = combinedLine.match(/\.Connect\s*\(\s*(?:[\w.]+\.)?SignalName\.(\w+)\s*,\s*new\s+Callable\s*\(\s*this\s*,\s*(?:MethodName\.(\w+)|nameof\((\w+)\))\s*\)\s*\)/);
+      if (connectMatch) {
+        const signalName = connectMatch[1];
+        const methodName = connectMatch[2] || connectMatch[3];
+        const containingMethod = this.findContainingMethod(symbols, lineNumber);
+
+        if (containingMethod && methodName) {
+          dependencies.push({
+            from_symbol: containingMethod,
+            to_symbol: methodName,
+            dependency_type: DependencyType.SIGNAL_CONNECTION,
+            line_number: lineNumber,
+          });
+        }
+      }
+
+      const emitMatch = line.match(/EmitSignal\s*\(\s*SignalName\.(\w+)/);
+      if (emitMatch) {
+        const signalName = emitMatch[1];
+        const containingMethod = this.findContainingMethod(symbols, lineNumber);
+
+        if (containingMethod) {
+          dependencies.push({
+            from_symbol: containingMethod,
+            to_symbol: `signal:${signalName}`,
+            dependency_type: DependencyType.SIGNAL_CONNECTION,
+            line_number: lineNumber,
+          });
+        }
+      }
+
+      const sceneLoadMatch = line.match(/(?:GD\.Load|ResourceLoader\.Load)\s*<\s*PackedScene\s*>\s*\(\s*"(res:\/\/[^"]+\.tscn)"\s*\)/);
+      if (sceneLoadMatch) {
+        const scenePath = sceneLoadMatch[1];
+        const containingMethod = this.findContainingMethod(symbols, lineNumber);
+
+        if (containingMethod) {
+          dependencies.push({
+            from_symbol: containingMethod,
+            to_symbol: scenePath,
+            dependency_type: DependencyType.REFERENCES,
+            line_number: lineNumber,
+          });
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  private findContainingMethod(symbols: ParsedSymbol[], lineNumber: number): string | undefined {
+    for (const symbol of symbols) {
+      if (
+        symbol.symbol_type === SymbolType.METHOD &&
+        symbol.start_line &&
+        symbol.end_line &&
+        lineNumber >= symbol.start_line &&
+        lineNumber <= symbol.end_line
+      ) {
+        return symbol.name;
+      }
+    }
+    return undefined;
+  }
+
   private isAutoloadScript(filePath: string, content: string): boolean {
     // Check if file is in autoload directory or has singleton patterns
     return filePath.includes('/autoload/') ||
@@ -717,11 +798,20 @@ export class GodotParser extends BaseFrameworkParser {
           validatedOptions as FrameworkParseOptions
         );
 
-        // Merge C# parse results with Godot framework entities
+        // Extract Godot-specific dependencies (signals, scene instantiation)
+        const godotDependencies = this.extractGodotDependencies(content, csharpResult.symbols);
+
+        // Merge C# parse results with Godot framework entities and Godot dependencies
+        // Override framework field to 'godot' for all symbols since this is a Godot script
+        const godotSymbols = csharpResult.symbols.map(symbol => ({
+          ...symbol,
+          framework: 'godot' as const
+        }));
+
         return {
           filePath,
-          symbols: csharpResult.symbols,
-          dependencies: csharpResult.dependencies,
+          symbols: godotSymbols,
+          dependencies: [...csharpResult.dependencies, ...godotDependencies],
           imports: csharpResult.imports,
           exports: csharpResult.exports,
           errors: csharpResult.errors,

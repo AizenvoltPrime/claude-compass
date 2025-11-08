@@ -7,6 +7,8 @@ import {
   createPropDrivenDiscoveryEngine,
   createComposableDrivenDiscoveryEngine,
 } from './discovery-strategies';
+import { createStandardGodotDiscoveryEngine } from './discovery-strategies/godot';
+import { GodotSymbolClassifier } from './discovery-strategies/godot/symbol-classifier';
 
 const logger = createComponentLogger('feature-discovery-service');
 
@@ -20,6 +22,7 @@ interface FeatureSymbol {
   end_line: number;
   signature?: string;
   base_class?: string;
+  framework?: string;
 }
 
 interface FeatureRoute {
@@ -151,14 +154,22 @@ export class FeatureDiscoveryService {
 
     const featureName = this.extractFeatureName(entrySymbol.name);
 
-    // Choose discovery strategy based on entry point entity type
+    // Choose discovery strategy based on entry point framework and entity type
+    // - Godot: godot-standard (signal flow, scene hierarchy, autoloads, dependency traversal)
     // - Vue components: prop-driven (follows data flow through props)
     // - Vue composables: composable-driven (follows execution flow from composable)
-    // - Everything else: standard (executor-centric graph traversal)
-    const useComposableDriven = entrySymbol.entity_type === 'composable';
-    const usePropDriven = entrySymbol.entity_type === 'component';
+    // - Everything else: vue-laravel-standard (executor-centric graph traversal)
+    const isGodotEntry = entrySymbol.framework === 'godot' || this.isGodotEntityType(entrySymbol.entity_type);
+    const useComposableDriven = !isGodotEntry && entrySymbol.entity_type === 'composable';
+    const usePropDriven = !isGodotEntry && entrySymbol.entity_type === 'component';
 
-    const engine = useComposableDriven
+    const engine = isGodotEntry
+      ? createStandardGodotDiscoveryEngine(this.db, {
+          maxIterations: 3,
+          convergenceThreshold: 1,
+          debug: false,
+        })
+      : useComposableDriven
       ? createComposableDrivenDiscoveryEngine(this.db, {
           maxIterations: 3,
           convergenceThreshold: 1,
@@ -176,10 +187,19 @@ export class FeatureDiscoveryService {
           debug: false,
         });
 
+    const strategyName = isGodotEntry
+      ? 'godot-standard'
+      : useComposableDriven
+      ? 'composable-driven'
+      : usePropDriven
+      ? 'prop-driven'
+      : 'vue-laravel-standard';
+
     logger.info('Using discovery strategy', {
-      strategy: useComposableDriven ? 'composable-driven' : usePropDriven ? 'prop-driven' : 'vue-laravel-standard',
+      strategy: strategyName,
       entryPoint: entrySymbol.name,
       entityType: entrySymbol.entity_type,
+      framework: entrySymbol.framework,
     });
 
     const { symbols: symbolRelevance, stats } = await engine.discover(
@@ -289,8 +309,13 @@ export class FeatureDiscoveryService {
     );
   }
 
+  private isGodotEntityType(entityType?: string): boolean {
+    if (!entityType) return false;
+    return GodotSymbolClassifier.ARCHITECTURAL_ENTITY_TYPES.includes(entityType);
+  }
+
   private async getSymbol(symbolId: number): Promise<FeatureSymbol | null> {
-    const symbol = await SymbolService.getSymbolWithFile(this.db,symbolId);
+    const symbol = await SymbolService.getSymbolWithFile(this.db, symbolId);
     if (!symbol) return null;
 
     return {
@@ -303,6 +328,7 @@ export class FeatureDiscoveryService {
       end_line: symbol.end_line,
       signature: symbol.signature,
       base_class: symbol.base_class,
+      framework: symbol.framework,
     };
   }
 

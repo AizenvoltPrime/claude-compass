@@ -928,7 +928,29 @@ export interface GodotNode {
   node_type: string;
   parent_node_id?: number;
   script_path?: string;
+  script_symbol_id?: number;
   properties: Record<string, any>;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface GodotAutoload {
+  id: number;
+  repo_id: number;
+  autoload_name: string;
+  script_path: string;
+  symbol_id?: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface GodotSceneInstance {
+  id: number;
+  repo_id: number;
+  parent_scene_id: number;
+  child_scene_id: number;
+  instance_name?: string;
+  node_id?: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -953,7 +975,23 @@ export interface CreateGodotNode {
   node_type: string;
   parent_node_id?: number;
   script_path?: string;
+  script_symbol_id?: number;
   properties?: Record<string, any>;
+}
+
+export interface CreateGodotAutoload {
+  repo_id: number;
+  autoload_name: string;
+  script_path: string;
+  symbol_id?: number;
+}
+
+export interface CreateGodotSceneInstance {
+  repo_id: number;
+  parent_scene_id: number;
+  child_scene_id: number;
+  instance_name?: string;
+  node_id?: number;
 }
 
 

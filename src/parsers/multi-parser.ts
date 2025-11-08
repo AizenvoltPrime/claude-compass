@@ -301,17 +301,24 @@ export class MultiParser {
 
     while (currentDir !== path.dirname(currentDir)) {
       try {
-        // Look for package.json or composer.json as indicators of project root
+        // Look for package.json, composer.json, or project.godot as indicators of project root
         const packageJsonPath = path.join(currentDir, 'package.json');
         const composerJsonPath = path.join(currentDir, 'composer.json');
+        const projectGodotPath = path.join(currentDir, 'project.godot');
 
         try {
           require('fs').accessSync(packageJsonPath);
           return currentDir;
         } catch (error) {
           // If package.json not found, try composer.json
-          require('fs').accessSync(composerJsonPath);
-          return currentDir;
+          try {
+            require('fs').accessSync(composerJsonPath);
+            return currentDir;
+          } catch (error2) {
+            // If composer.json not found, try project.godot
+            require('fs').accessSync(projectGodotPath);
+            return currentDir;
+          }
         }
       } catch (error) {
         currentDir = path.dirname(currentDir);

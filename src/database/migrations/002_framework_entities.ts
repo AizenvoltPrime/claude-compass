@@ -179,6 +179,7 @@ export async function up(knex: Knex): Promise<void> {
     table.string('node_type').notNullable();
     table.integer('parent_node_id').references('id').inTable('godot_nodes').onDelete('CASCADE');
     table.text('script_path');
+    table.integer('script_symbol_id').references('id').inTable('symbols').onDelete('SET NULL');
     table.jsonb('properties').defaultTo('{}');
     table.timestamps(true, true);
 
@@ -186,6 +187,57 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['scene_id']);
     table.index(['node_type']);
     table.index(['parent_node_id']);
+    table.index(['script_symbol_id']);
+  });
+
+  await knex.schema.createTable('godot_autoloads', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table.string('autoload_name').notNullable();
+    table.text('script_path').notNullable();
+    table.integer('symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
+    table.timestamps(true, true);
+
+    table.unique(['repo_id', 'autoload_name']);
+    table.index(['repo_id']);
+    table.index(['symbol_id']);
+    table.index(['autoload_name']);
+  });
+
+  await knex.schema.createTable('godot_scene_instances', table => {
+    table.increments('id').primary();
+    table
+      .integer('repo_id')
+      .notNullable()
+      .references('id')
+      .inTable('repositories')
+      .onDelete('CASCADE');
+    table
+      .integer('parent_scene_id')
+      .notNullable()
+      .references('id')
+      .inTable('godot_scenes')
+      .onDelete('CASCADE');
+    table
+      .integer('child_scene_id')
+      .notNullable()
+      .references('id')
+      .inTable('godot_scenes')
+      .onDelete('CASCADE');
+    table.string('instance_name');
+    table.integer('node_id').references('id').inTable('godot_nodes').onDelete('CASCADE');
+    table.timestamps(true, true);
+
+    table.index(['repo_id']);
+    table.index(['parent_scene_id']);
+    table.index(['child_scene_id']);
+    table.index(['node_id']);
+    table.unique(['parent_scene_id', 'child_scene_id', 'node_id']);
   });
 
   // Framework metadata table - stores framework-specific data as JSON
@@ -268,6 +320,8 @@ export async function down(knex: Knex): Promise<void> {
 
   // Drop in reverse order to respect foreign key constraints
   await knex.schema.dropTableIfExists('components');
+  await knex.schema.dropTableIfExists('godot_scene_instances');
+  await knex.schema.dropTableIfExists('godot_autoloads');
   await knex.schema.dropTableIfExists('godot_nodes');
   await knex.schema.dropTableIfExists('godot_scenes');
   await knex.schema.dropTableIfExists('framework_metadata');

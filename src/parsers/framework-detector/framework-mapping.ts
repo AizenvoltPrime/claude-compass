@@ -23,6 +23,9 @@ export function getApplicableFrameworks(
   } else if (['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.phps'].includes(ext)) {
     // PHP files need base PHP parsing
     frameworks.push('php');
+  } else if (ext === '.cs') {
+    // C# files need base C# parsing (will be replaced by Godot parser if detected)
+    frameworks.push('csharp');
   }
 
   // Add framework-specific parsers based on detection and file type
@@ -222,6 +225,11 @@ export function getApplicableFrameworks(
           const shouldInclude = hasScriptsPath || hasCamelCase;
 
           if (shouldInclude) {
+            // Godot parser handles base C# parsing internally, so remove base 'csharp' parser
+            const csharpIndex = frameworks.indexOf('csharp');
+            if (csharpIndex !== -1) {
+              frameworks.splice(csharpIndex, 1);
+            }
             frameworks.push('godot');
           }
         } else if (filePath.endsWith('project.godot')) {

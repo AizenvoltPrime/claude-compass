@@ -1,20 +1,18 @@
 /**
  * Godot Feature Discovery Strategies
  *
- * This module provides Godot-specific discovery strategies that understand:
- * - Godot nodes and scenes
- * - GDScript classes and functions
- * - Signal connections and dependencies
- * - Resource files and autoloads
+ * Provides Godot-specific discovery strategies that understand:
+ * - Godot nodes and scenes (scene hierarchy traversal)
+ * - C# classes and methods (dependency graph traversal)
+ * - Signal connections (event-driven communication)
+ * - Autoloads (global singletons)
  *
- * TODO: Implement Godot-specific discovery strategies
+ * Godot architecture mirrors backend layering:
+ * - Nodes: Leaf entities (building blocks)
+ * - Coordinators/Managers: Middleware (orchestrators)
+ * - Handlers: Entry points (input/event processors)
  *
- * Planned strategies:
- * - Scene-driven: Discovers features by following scene hierarchy
- * - Signal-driven: Follows signal connections between nodes
- * - Node-driven: Traces node dependencies and child relationships
- *
- * Usage (when implemented):
+ * Usage:
  * ```typescript
  * const engine = createStandardGodotDiscoveryEngine(db);
  * const { symbols, stats } = await engine.discover(entryPointId, repoId, featureName, options);
@@ -24,26 +22,30 @@
 import type { Knex } from 'knex';
 import { DiscoveryEngine } from '../common/discovery-engine';
 import { DiscoveryEngineConfig } from '../common/types';
+import { SignalFlowStrategy } from './signal-flow-strategy';
+import { SceneHierarchyStrategy } from './scene-hierarchy-strategy';
+import { AutoloadStrategy } from './autoload-strategy';
+import { GodotDependencyTraversalStrategy } from './godot-dependency-traversal-strategy';
 
 /**
  * Factory function to create a standard Godot discovery engine.
  *
- * WARNING: Godot-specific discovery strategies are not yet implemented.
- * This returns an empty engine that will not discover any symbols.
+ * Registers 4 discovery strategies in priority order:
+ * 1. Signal Flow (priority 7) - Follows signal-slot connections
+ * 2. Scene Hierarchy (priority 8) - Discovers scenes and nodes
+ * 3. Autoload (priority 9) - Finds global singletons
+ * 4. Dependency Traversal (priority 10) - Follows C# call graph
  *
- * TODO: Implement Godot-specific strategies:
- * - Scene hierarchy traversal (discovers nodes in scene tree)
- * - Signal connection discovery (follows signal/callback connections)
- * - Node relationship analysis (parent/child node relationships)
- * - Autoload and resource discovery (singleton nodes, resources)
- * - GDScript class inheritance traversal
- *
- * Godot-specific entity types to support:
- * - node: Scene tree nodes (Node2D, Spatial, Control, etc.)
- * - scene: .tscn scene files
- * - script: .gd GDScript files
- * - resource: Resource files (.tres, .res)
- * - autoload: Singleton/autoload scripts
+ * Supported Godot entity types:
+ * - node: Scene tree nodes (Node, Node2D, Control, etc.)
+ * - coordinator: Orchestrators between layers
+ * - manager: System managers
+ * - handler: Input/event handlers
+ * - service: Shared services
+ * - ui_component: UI elements
+ * - resource: Data resources
+ * - engine: Game engines/systems
+ * - pool: Object pools
  */
 export function createStandardGodotDiscoveryEngine(
   db: Knex,
@@ -51,10 +53,12 @@ export function createStandardGodotDiscoveryEngine(
 ): DiscoveryEngine {
   const engine = new DiscoveryEngine(db, config);
 
-  // TODO: Add Godot-specific strategies when implemented
-  // For now, return an empty engine
-  // Note: The Vue-Laravel dependency traversal strategy cannot be used here
-  // as it assumes Vue/Laravel entity types (component, store, controller, etc.)
+  engine.registerStrategies([
+    new SignalFlowStrategy(db),
+    new SceneHierarchyStrategy(db),
+    new AutoloadStrategy(db),
+    new GodotDependencyTraversalStrategy(db),
+  ]);
 
   return engine;
 }
