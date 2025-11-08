@@ -35,15 +35,15 @@ interface FeatureRoute {
 interface FeatureManifest {
   feature_name: string;
   entry_point: FeatureSymbol;
-  frontend: {
+  frontend?: {
     stores: FeatureSymbol[];
     components: FeatureSymbol[];
     composables: FeatureSymbol[];
   };
-  api: {
+  api?: {
     routes: FeatureRoute[];
   };
-  backend: {
+  backend?: {
     controllers: FeatureSymbol[];
     services: FeatureSymbol[];
     requests: FeatureSymbol[];
@@ -58,6 +58,8 @@ interface FeatureManifest {
   infrastructure?: {
     managers: FeatureSymbol[];
     handlers: FeatureSymbol[];
+    controllers: FeatureSymbol[];
+    services: FeatureSymbol[];
     coordinators: FeatureSymbol[];
     engines: FeatureSymbol[];
     pools: FeatureSymbol[];
@@ -119,11 +121,6 @@ export class FeatureDiscoveryService {
 
   async discoverFeature(args: any) {
     const validatedArgs = validateDiscoverFeatureArgs(args);
-    const repoId = this.getDefaultRepoId();
-
-    if (!repoId) {
-      throw new Error('repo_id is required when no default repository is set');
-    }
 
     const includeComponents = validatedArgs.include_components !== false;
     const includeRoutes = validatedArgs.include_routes !== false;
@@ -136,6 +133,16 @@ export class FeatureDiscoveryService {
     const maxSymbols = validatedArgs.max_symbols || 500;
     const minRelevanceScore = validatedArgs.min_relevance_score || 0;
 
+    const entrySymbol = await this.getSymbol(validatedArgs.symbol_id);
+    if (!entrySymbol) {
+      throw new Error(`Symbol with ID ${validatedArgs.symbol_id} not found`);
+    }
+
+    const repoId = entrySymbol.repo_id;
+    if (!repoId) {
+      throw new Error(`Symbol ${validatedArgs.symbol_id} has no associated repository`);
+    }
+
     logger.info('Starting feature discovery (layer-based graph traversal)', {
       symbolId: validatedArgs.symbol_id,
       repoId,
@@ -146,11 +153,6 @@ export class FeatureDiscoveryService {
         maxDepth,
       },
     });
-
-    const entrySymbol = await this.getSymbol(validatedArgs.symbol_id);
-    if (!entrySymbol) {
-      throw new Error(`Symbol with ID ${validatedArgs.symbol_id} not found`);
-    }
 
     const featureName = this.extractFeatureName(entrySymbol.name);
 
@@ -258,7 +260,8 @@ export class FeatureDiscoveryService {
         includeRoutes,
         includeModels,
       },
-      stats
+      stats,
+      isGodotEntry
     );
 
     logger.info('Feature discovery complete', {
@@ -314,7 +317,7 @@ export class FeatureDiscoveryService {
     return GodotSymbolClassifier.ARCHITECTURAL_ENTITY_TYPES.includes(entityType);
   }
 
-  private async getSymbol(symbolId: number): Promise<FeatureSymbol | null> {
+  private async getSymbol(symbolId: number): Promise<(FeatureSymbol & { repo_id: number }) | null> {
     const symbol = await SymbolService.getSymbolWithFile(this.db, symbolId);
     if (!symbol) return null;
 
@@ -329,6 +332,7 @@ export class FeatureDiscoveryService {
       signature: symbol.signature,
       base_class: symbol.base_class,
       framework: symbol.framework,
+      repo_id: symbol.file?.repo_id || 0,
     };
   }
 
@@ -338,12 +342,23 @@ export class FeatureDiscoveryService {
 
     const symbols = await this.db('symbols')
       .join('files', 'symbols.file_id', 'files.id')
+      .leftJoin('dependencies as parent_deps', function() {
+        this.on('parent_deps.to_symbol_id', '=', 'symbols.id')
+            .andOnVal('parent_deps.dependency_type', '=', 'contains');
+      })
+      .leftJoin('symbols as parent_symbol', 'parent_symbol.id', 'parent_deps.from_symbol_id')
       .whereIn('symbols.id', symbolIds)
       .select(
         'symbols.id',
         'symbols.name',
         'symbols.symbol_type as type',
-        'symbols.entity_type',
+        this.db.raw(`
+          CASE
+            WHEN symbols.entity_type IS NOT NULL THEN symbols.entity_type
+            WHEN symbols.symbol_type = 'method' THEN parent_symbol.entity_type
+            ELSE NULL
+          END as entity_type
+        `),
         'files.path as file_path',
         'symbols.start_line',
         'symbols.end_line',
@@ -562,7 +577,8 @@ export class FeatureDiscoveryService {
     allSymbols: FeatureSymbol[],
     routes: FeatureRoute[],
     options: { includeComponents: boolean; includeRoutes: boolean; includeModels: boolean },
-    stats: { strategyStats: Map<string, any> }
+    stats: { strategyStats: Map<string, any> },
+    isGodotEntry: boolean
   ): FeatureManifest {
     /**
      * Maximum number of symbols to return per category in the feature manifest.
@@ -728,21 +744,27 @@ export class FeatureDiscoveryService {
     return {
       feature_name: featureName,
       entry_point: entryPoint,
-      frontend: {
-        stores: sampled.stores,
-        components: sampled.components,
-        composables: sampled.composables,
-      },
-      api: {
-        routes: options.includeRoutes ? routes.slice(0, SAMPLE_SIZE) : [],
-      },
-      backend: {
-        controllers: sampled.controllers,
-        services: sampled.services,
-        requests: sampled.requests,
-        models: sampled.models,
-        jobs: sampled.jobs,
-      },
+      ...(!isGodotEntry && {
+        frontend: {
+          stores: sampled.stores,
+          components: sampled.components,
+          composables: sampled.composables,
+        },
+      }),
+      ...(!isGodotEntry && {
+        api: {
+          routes: options.includeRoutes ? routes.slice(0, SAMPLE_SIZE) : [],
+        },
+      }),
+      ...(!isGodotEntry && {
+        backend: {
+          controllers: sampled.controllers,
+          services: sampled.services,
+          requests: sampled.requests,
+          models: sampled.models,
+          jobs: sampled.jobs,
+        },
+      }),
       ...(hasGameEngineSymbols && {
         game_engine: {
           nodes: sampled.nodes,
@@ -754,6 +776,8 @@ export class FeatureDiscoveryService {
         infrastructure: {
           managers: sampled.managers,
           handlers: sampled.handlers,
+          controllers: sampled.controllers,
+          services: sampled.services,
           coordinators: sampled.coordinators,
           engines: sampled.engines,
           pools: sampled.pools,
@@ -780,12 +804,12 @@ export class FeatureDiscoveryService {
       total_symbols: allSymbols.length,
       discovery_strategy: Array.from(stats.strategyStats.keys()).join(' + '),
       summary: {
-        ...(hasFrontendSymbols && {
+        ...(!isGodotEntry && hasFrontendSymbols && {
           total_stores: categorized.stores.length,
           total_components: categorized.components.length,
           total_composables: categorized.composables.length,
         }),
-        ...(hasBackendSymbols && {
+        ...(!isGodotEntry && hasBackendSymbols && {
           total_controllers: categorized.controllers.length,
           total_services: categorized.services.length,
           total_requests: categorized.requests.length,
@@ -800,6 +824,8 @@ export class FeatureDiscoveryService {
         ...(hasInfrastructureSymbols && {
           total_managers: categorized.managers.length,
           total_handlers: categorized.handlers.length,
+          total_controllers: categorized.controllers.length,
+          total_services: categorized.services.length,
           total_coordinators: categorized.coordinators.length,
           total_engines: categorized.engines.length,
           total_pools: categorized.pools.length,
@@ -818,7 +844,7 @@ export class FeatureDiscoveryService {
           total_providers: categorized.providers.length,
         }),
         total_related: categorized.related.length,
-        ...(routes.length > 0 && {
+        ...(!isGodotEntry && routes.length > 0 && {
           total_routes: routes.length,
         }),
         showing_sample: true,

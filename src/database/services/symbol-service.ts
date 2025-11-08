@@ -297,6 +297,7 @@ export async function getSymbolWithFile(db: Knex, id: number): Promise<SymbolWit
       'symbols.*',
       'files.path as file_path',
       'files.language as file_language',
+      'files.repo_id as file_repo_id',
       'repositories.name as repo_name',
       'repositories.path as repo_path'
     )
@@ -311,6 +312,7 @@ export async function getSymbolWithFile(db: Knex, id: number): Promise<SymbolWit
       id: result.file_id,
       path: result.file_path,
       language: result.file_language,
+      repo_id: result.file_repo_id,
       repository: {
         name: result.repo_name,
         path: result.repo_path,
