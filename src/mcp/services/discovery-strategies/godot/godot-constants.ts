@@ -85,11 +85,12 @@ export const FILE_VALIDATING_ENTITIES: readonly string[] = [
  * Used for depth-based filtering to prevent pollution.
  *
  * Includes all infrastructure plus nodes/resources that can be shared.
+ * IMPORTANT: Handlers are NOT shared boundaries - they are feature-specific entry points
+ * using the strategy pattern and should not cross-pollute each other's discoveries.
  */
 export const SHARED_BOUNDARIES: readonly string[] = [
   ...GLOBAL_INFRASTRUCTURE_ENTITIES,
   ...NODE_ENTITIES,
-  'handler',
 ];
 
 /**

@@ -294,16 +294,19 @@ export class GodotSymbolGraphQueries {
           results.map(r => `${r.name} (${r.entity_type || 'none'}, ${r.symbol_type}) via ${r.dependency_type}`));
       }
 
-      // CRITICAL: Filter OUT callers that are methods belonging to global infrastructure
-      // This prevents discovering unrelated global infrastructure methods via shared utilities
+      // CRITICAL: Filter OUT callers that are methods belonging to:
+      // 1. Global infrastructure (prevents shared utility pollution)
+      // 2. Sibling handlers (prevents strategy pattern pollution via shared interface methods)
       const filteredResults: number[] = [];
       for (const result of results) {
-        // If the caller is a method, check if its parent is global infrastructure
+        // If the caller is a method, check if its parent is global infrastructure or a handler
         if (result.symbol_type === 'method') {
           const parentId = await this.getParentContainer(result.from_symbol_id);
           if (parentId) {
             const parentEntityType = await this.getParentEntityType(parentId);
-            if (parentEntityType && GLOBAL_INFRASTRUCTURE_ENTITIES.includes(parentEntityType)) {
+            if (parentEntityType &&
+                (GLOBAL_INFRASTRUCTURE_ENTITIES.includes(parentEntityType) ||
+                 parentEntityType === 'handler')) {
               logger.debug(`  → Filtering out backward caller ${result.name} - belongs to ${parentEntityType} parent`);
               continue;
             }
