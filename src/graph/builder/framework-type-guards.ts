@@ -88,6 +88,15 @@ export function isGodotNode(entity: any): boolean {
   );
 }
 
+export function isGodotAutoload(entity: any): boolean {
+  return (
+    entity != null &&
+    typeof entity === 'object' &&
+    entity.type === 'godot_autoload' &&
+    entity.framework === 'godot'
+  );
+}
+
 export function isClosureRouteLinkedDuringPersistence(route: { controller_class?: string | null; action?: string | null }): boolean {
   return route.controller_class === 'Closure' || route.action === 'Closure';
 }

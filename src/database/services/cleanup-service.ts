@@ -205,13 +205,6 @@ export async function cleanupFileData(db: Knex, fileIds: number[]): Promise<void
           .pluck('id');
 
         if (scriptIds.length > 0) {
-          const hasGodotAutoloads = await trx.schema.hasTable('godot_autoloads');
-          if (hasGodotAutoloads) {
-            deletionResults.godotAutoloads = await trx('godot_autoloads')
-              .whereIn('script_id', scriptIds)
-              .del();
-          }
-
           const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
           if (hasGodotRelationships) {
             deletionResults.godotScriptRelationships = await trx('godot_relationships')
@@ -392,13 +385,6 @@ export async function deleteFilesWithTransaction(db: Knex, fileIds: number[]): P
           .pluck('id');
 
         if (scriptIds.length > 0) {
-          const hasGodotAutoloads = await trx.schema.hasTable('godot_autoloads');
-          if (hasGodotAutoloads) {
-            deletionResults.godotAutoloads = await trx('godot_autoloads')
-              .whereIn('script_id', scriptIds)
-              .del();
-          }
-
           const hasGodotRelationships = await trx.schema.hasTable('godot_relationships');
           if (hasGodotRelationships) {
             deletionResults.godotScriptRelationships = await trx('godot_relationships')

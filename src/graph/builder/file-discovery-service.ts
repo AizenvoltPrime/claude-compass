@@ -211,6 +211,8 @@ export class FileDiscoveryService {
       '.vue',
       '.php',
       '.cs',
+      '.tscn',
+      '.godot',
     ];
 
     if (!allowedExtensions.includes(ext)) {

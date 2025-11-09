@@ -48,6 +48,7 @@ import {
   isORMSystemEntity,
   isGodotScene,
   isGodotNode,
+  isGodotAutoload,
 } from './framework-type-guards';
 import { SymbolGraphData } from '../symbol-graph/';
 import { BuildError } from './types';
@@ -89,8 +90,14 @@ export class FrameworkEntityPersister {
     const allFiles = await FileService.getFilesByRepository(this.db, repositoryId);
     const filesMap = new Map(allFiles.map(f => [f.path, f]));
     const normalizedFilesMap = new Map(allFiles.map(f => [path.normalize(f.path), f]));
+    const processedAutoloadNames: string[] = [];
+    let processedProjectGodot = false;
 
     for (const parseResult of parseResults) {
+      if (parseResult.filePath.endsWith('project.godot')) {
+        processedProjectGodot = true;
+      }
+
       if (!parseResult.frameworkEntities || parseResult.frameworkEntities.length === 0) {
         continue;
       }
@@ -175,7 +182,8 @@ export class FrameworkEntityPersister {
             !matchingSymbol &&
             entity.type !== 'api_call' &&
             !isGodotScene(entity) &&
-            !isGodotNode(entity)
+            !isGodotNode(entity) &&
+            !isGodotAutoload(entity)
           ) {
             const matchingFile = this.findFileForEntity(
               parseResult.filePath,
@@ -426,16 +434,23 @@ export class FrameworkEntityPersister {
               }
 
               if (parentUpdates.length > 0) {
-                const caseStatement = parentUpdates
-                  .map(({ nodeId, parentId }) => `WHEN ${nodeId} THEN ${parentId}`)
-                  .join(' ');
-                const nodeIds = parentUpdates.map(({ nodeId }) => nodeId).join(',');
+                const caseBindings: number[] = [];
+                const caseParts: string[] = [];
 
-                await this.db.raw(`
-                  UPDATE godot_nodes
-                  SET parent_node_id = CASE id ${caseStatement} END
-                  WHERE id IN (${nodeIds})
-                `);
+                parentUpdates.forEach(({ nodeId, parentId }) => {
+                  caseParts.push('WHEN ? THEN ?');
+                  caseBindings.push(nodeId, parentId);
+                });
+
+                const caseStatement = caseParts.join(' ');
+                const nodeIds = parentUpdates.map(({ nodeId }) => nodeId);
+
+                await this.db.raw(
+                  `UPDATE godot_nodes
+                   SET parent_node_id = CASE id ${caseStatement} END
+                   WHERE id IN (${nodeIds.map(() => '?').join(',')})`,
+                  [...caseBindings, ...nodeIds]
+                );
 
                 this.logger.debug('Batch updated parent relationships', {
                   scenePath: sceneEntity.scenePath,
@@ -505,6 +520,77 @@ export class FrameworkEntityPersister {
                 }
               }
             }
+          } else if (isGodotAutoload(entity)) {
+            const autoloadEntity = entity as any;
+            const autoloadName = autoloadEntity.autoloadName || autoloadEntity.name;
+            const scriptPath = autoloadEntity.scriptPath || '';
+            const className = autoloadEntity.className || autoloadEntity.name;
+
+            if (!scriptPath) {
+              this.logger.error('Godot autoload missing script path', {
+                autoloadName,
+                entity: autoloadEntity,
+              });
+              continue;
+            }
+
+            const normalizedScriptPath = scriptPath.replace(/^\*?res:\/\//, '');
+
+            const autoloadFile = this.findFileForEntity(
+              normalizedScriptPath,
+              filesMap,
+              normalizedFilesMap,
+              allFiles
+            );
+
+            if (!autoloadFile) {
+              this.logger.error('Godot autoload script file not found in database', {
+                autoloadName,
+                scriptPath,
+                normalizedScriptPath,
+                repositoryId,
+                availableFilesCount: allFiles.length,
+                sampleFiles: allFiles.slice(0, 5).map(f => f.path),
+              });
+              continue;
+            }
+
+            const classSymbol = symbols.find(
+              s =>
+                s.name === className &&
+                s.symbol_type === SymbolType.CLASS &&
+                s.file_id === autoloadFile.id
+            );
+
+            if (!classSymbol) {
+              this.logger.warn('Godot autoload class symbol not found', {
+                autoloadName,
+                className,
+                scriptPath,
+                fileId: autoloadFile.id,
+                availableSymbols: symbols
+                  .filter(s => s.file_id === autoloadFile.id)
+                  .map(s => ({ name: s.name, type: s.symbol_type })),
+              });
+            }
+
+            await GodotService.storeGodotAutoload(this.db, {
+              repo_id: repositoryId,
+              autoload_name: autoloadName,
+              script_path: scriptPath,
+              symbol_id: classSymbol?.id || null,
+            });
+
+            processedAutoloadNames.push(autoloadName);
+
+            this.logger.debug('Stored Godot autoload', {
+              autoloadName,
+              scriptPath,
+              className,
+              symbolId: classSymbol?.id,
+              fileId: autoloadFile.id,
+              filePath: autoloadFile.path,
+            });
           } else if (entity.type === 'api_call') {
             // API calls processed by cross-stack builder
           }
@@ -521,6 +607,10 @@ export class FrameworkEntityPersister {
           );
         }
       }
+    }
+
+    if (processedProjectGodot) {
+      await GodotService.deleteRemovedAutoloads(this.db, repositoryId, processedAutoloadNames);
     }
   }
 

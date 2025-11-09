@@ -205,6 +205,8 @@ export class RepositoryManager {
         '.vue',
         '.php',
         '.cs',
+        '.tscn',
+        '.godot',
       ],
 
       fileSizePolicy: options.fileSizePolicy || this.createDefaultFileSizePolicy(options),

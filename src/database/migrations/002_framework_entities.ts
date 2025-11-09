@@ -200,7 +200,7 @@ export async function up(knex: Knex): Promise<void> {
       .onDelete('CASCADE');
     table.string('autoload_name').notNullable();
     table.text('script_path').notNullable();
-    table.integer('symbol_id').references('id').inTable('symbols').onDelete('CASCADE');
+    table.integer('symbol_id').nullable().references('id').inTable('symbols').onDelete('SET NULL');
     table.timestamps(true, true);
 
     table.unique(['repo_id', 'autoload_name']);

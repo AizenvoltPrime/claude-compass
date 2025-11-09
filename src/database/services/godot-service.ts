@@ -2,8 +2,10 @@ import type { Knex } from 'knex';
 import type {
   GodotScene,
   GodotNode,
+  GodotAutoload,
   CreateGodotScene,
   CreateGodotNode,
+  CreateGodotAutoload,
   GodotSceneWithNodes,
   GodotNodeWithScript,
 } from '../models';
@@ -132,4 +134,80 @@ export async function getGodotNodesByScenes(db: Knex, sceneIds: number[]): Promi
     .orderBy('scene_id')
     .orderBy('node_name');
   return nodes as GodotNode[];
+}
+
+export async function storeGodotAutoload(db: Knex, data: CreateGodotAutoload): Promise<GodotAutoload> {
+  try {
+    const existingAutoload = await db('godot_autoloads')
+      .where({ repo_id: data.repo_id, autoload_name: data.autoload_name })
+      .first();
+
+    if (existingAutoload) {
+      const [autoload] = await db('godot_autoloads')
+        .where({ id: existingAutoload.id })
+        .update({ ...data, updated_at: new Date() })
+        .returning('*');
+      return autoload as GodotAutoload;
+    } else {
+      const [autoload] = await db('godot_autoloads').insert(data).returning('*');
+      return autoload as GodotAutoload;
+    }
+  } catch (error) {
+    logger.error('Failed to store Godot autoload', {
+      autoload_name: data.autoload_name,
+      script_path: data.script_path,
+      error: (error as Error).message,
+    });
+    throw error;
+  }
+}
+
+export async function getGodotAutoload(db: Knex, id: number): Promise<GodotAutoload | null> {
+  const autoload = await db('godot_autoloads').where({ id }).first();
+  return (autoload as GodotAutoload) || null;
+}
+
+export async function getGodotAutoloadsByRepository(
+  db: Knex,
+  repoId: number
+): Promise<GodotAutoload[]> {
+  const autoloads = await db('godot_autoloads')
+    .where({ repo_id: repoId })
+    .orderBy('autoload_name');
+  return autoloads as GodotAutoload[];
+}
+
+export async function findGodotAutoloadByName(
+  db: Knex,
+  repoId: number,
+  autoloadName: string
+): Promise<GodotAutoload | null> {
+  const autoload = await db('godot_autoloads')
+    .where({ repo_id: repoId, autoload_name: autoloadName })
+    .first();
+  return (autoload as GodotAutoload) || null;
+}
+
+export async function deleteRemovedAutoloads(
+  db: Knex,
+  repoId: number,
+  currentAutoloadNames: string[]
+): Promise<number> {
+  let query = db('godot_autoloads').where({ repo_id: repoId });
+
+  if (currentAutoloadNames.length > 0) {
+    query = query.whereNotIn('autoload_name', currentAutoloadNames);
+  }
+
+  const deletedCount = await query.del();
+
+  if (deletedCount > 0) {
+    logger.info('Deleted removed autoloads', {
+      repoId,
+      deletedCount,
+      currentAutoloads: currentAutoloadNames,
+    });
+  }
+
+  return deletedCount;
 }

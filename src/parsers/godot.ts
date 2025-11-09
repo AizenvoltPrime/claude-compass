@@ -786,41 +786,59 @@ export class GodotParser extends BaseFrameworkParser {
         };
       }
 
-      // For .cs files with Godot patterns, delegate to C# parser and add Godot framework entities
-      if (filePath.endsWith('.cs') && this.isGodotScript(content)) {
+      // For ALL C# files, delegate to C# parser for proper parsing
+      if (filePath.endsWith('.cs')) {
         // Delegate to CSharpParser for full C# parsing with CONTAINS dependencies
         const csharpResult = await this.csharpParser.parseFile(filePath, content, validatedOptions);
 
-        // Add Godot-specific framework entities (nodes, signals, exports)
-        const frameworkResult = await this.detectFrameworkEntities(
-          content,
-          filePath,
-          validatedOptions as FrameworkParseOptions
-        );
+        // Check if this is a Godot script (has Godot-specific patterns)
+        const isGodot = this.isGodotScript(content);
 
-        // Extract Godot-specific dependencies (signals, scene instantiation)
-        const godotDependencies = this.extractGodotDependencies(content, csharpResult.symbols);
+        if (isGodot) {
+          // Add Godot-specific framework entities (nodes, signals, exports)
+          const frameworkResult = await this.detectFrameworkEntities(
+            content,
+            filePath,
+            validatedOptions as FrameworkParseOptions
+          );
 
-        // Merge C# parse results with Godot framework entities and Godot dependencies
-        // Override framework field to 'godot' for all symbols since this is a Godot script
-        const godotSymbols = csharpResult.symbols.map(symbol => ({
-          ...symbol,
-          framework: 'godot' as const
-        }));
+          // Extract Godot-specific dependencies (signals, scene instantiation)
+          const godotDependencies = this.extractGodotDependencies(content, csharpResult.symbols);
 
-        return {
-          filePath,
-          symbols: godotSymbols,
-          dependencies: [...csharpResult.dependencies, ...godotDependencies],
-          imports: csharpResult.imports,
-          exports: csharpResult.exports,
-          errors: csharpResult.errors,
-          frameworkEntities: frameworkResult.entities,
-          success: true
-        };
+          // Merge C# parse results with Godot framework entities and Godot dependencies
+          // Override framework field to 'godot' for all symbols since this is a Godot script
+          const godotSymbols = csharpResult.symbols.map(symbol => ({
+            ...symbol,
+            framework: 'godot' as const
+          }));
+
+          return {
+            filePath,
+            symbols: godotSymbols,
+            dependencies: [...csharpResult.dependencies, ...godotDependencies],
+            imports: csharpResult.imports,
+            exports: csharpResult.exports,
+            errors: csharpResult.errors,
+            frameworkEntities: frameworkResult.entities,
+            success: true
+          };
+        } else {
+          // Plain C# file without Godot patterns - return C# parse results as-is
+          // Symbols already have framework='csharp' from entity classifier
+          return {
+            filePath,
+            symbols: csharpResult.symbols,
+            dependencies: csharpResult.dependencies,
+            imports: csharpResult.imports,
+            exports: csharpResult.exports,
+            errors: csharpResult.errors,
+            frameworkEntities: [],
+            success: true
+          };
+        }
       }
 
-      // Fallback to base implementation for other files
+      // Fallback to base implementation for non-C# files
       return super.parseFile(filePath, content, options);
 
     } catch (error) {
