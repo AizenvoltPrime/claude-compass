@@ -50,6 +50,7 @@ export function extractFunctionSymbol(
 
   return {
     name,
+    qualified_name: name,
     symbol_type: SymbolType.FUNCTION,
     entity_type: entityType,
     base_class: classification.baseClass || undefined,
@@ -130,6 +131,7 @@ export function extractVariableSymbol(
 
   return {
     name,
+    qualified_name: name,
     symbol_type: symbolType,
     entity_type: entityType,
     framework: classification.framework,
@@ -178,6 +180,7 @@ export function extractClassSymbol(
 
   return {
     name,
+    qualified_name: name,
     symbol_type: SymbolType.CLASS,
     entity_type: classification.entityType,
     base_class: classification.baseClass || undefined,
@@ -235,6 +238,7 @@ export function extractMethodSymbol(
 
   return {
     name,
+    qualified_name: name,
     symbol_type: SymbolType.METHOD,
     entity_type: classification.entityType,
     framework: classification.framework,
@@ -269,6 +273,7 @@ export function extractArrowFunctionSymbol(
 
   return {
     name: 'arrow_function',
+    qualified_name: 'arrow_function',
     symbol_type: SymbolType.FUNCTION,
     entity_type: classification.entityType,
     framework: classification.framework,

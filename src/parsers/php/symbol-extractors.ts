@@ -28,6 +28,7 @@ export function extractNamespaceSymbol(
 
   return {
     name,
+    qualified_name: name,
     symbol_type: SymbolType.NAMESPACE,
     start_line: node.startPosition.row + 1,
     end_line: node.endPosition.row + 1,
@@ -207,10 +208,12 @@ export function extractMethodSymbol(
   const visibility = extractVisibility(node, content, getNodeText, findNodesOfType);
   const description = extractPhpDocComment(node, content, getNodeText);
 
-  let qualifiedName: string | undefined;
+  let qualifiedName: string;
   if (context.currentClass) {
     const classQualifiedName = buildQualifiedName(context, context.currentClass);
     qualifiedName = `${classQualifiedName}::${name}`;
+  } else {
+    qualifiedName = buildQualifiedName(context, name);
   }
 
   const frameworkContext = (context.options as any)?.frameworkContext?.framework;
@@ -269,8 +272,11 @@ export function extractPropertySymbols(
         context.options?.repositoryFrameworks
       );
 
+      const qualifiedName = buildQualifiedName(context, cleanName);
+
       symbols.push({
         name: cleanName,
+        qualified_name: qualifiedName,
         symbol_type: SymbolType.PROPERTY,
         entity_type: classification.entityType,
         framework: classification.framework,

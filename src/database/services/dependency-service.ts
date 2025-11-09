@@ -374,3 +374,69 @@ export async function resolveQualifiedNameDependencies(
   logger.info('Resolved dependencies by qualified name', { updatedCount });
   return updatedCount;
 }
+
+/**
+ * Delete orphaned dependencies (where to_symbol_id is NULL and cannot be resolved).
+ * Deletes dependencies in two categories:
+ * 1. No to_qualified_name - can never be resolved
+ * 2. Has to_qualified_name but no matching symbol exists in repository
+ */
+export async function deleteOrphanedDependencies(
+  db: Knex,
+  repositoryId: number
+): Promise<number> {
+  logger.info('Cleaning up orphaned dependencies after incremental update', {
+    repositoryId,
+  });
+
+  // Delete dependencies with no qualified name
+  const result1 = await db.raw(
+    `
+      DELETE FROM dependencies
+      WHERE to_symbol_id IS NULL
+        AND to_qualified_name IS NULL
+        AND from_symbol_id IN (
+          SELECT s.id
+          FROM symbols s
+          JOIN files f ON s.file_id = f.id
+          WHERE f.repo_id = ?
+        )
+    `,
+    [repositoryId]
+  );
+
+  // Delete dependencies with qualified name but no matching symbol in repository
+  // Preserve IMPORTS type as they may point to external packages (npm, system libs)
+  const result2 = await db.raw(
+    `
+      DELETE FROM dependencies d
+      WHERE d.to_symbol_id IS NULL
+        AND d.to_qualified_name IS NOT NULL
+        AND d.dependency_type != 'imports'
+        AND d.from_symbol_id IN (
+          SELECT s.id
+          FROM symbols s
+          JOIN files f ON s.file_id = f.id
+          WHERE f.repo_id = ?
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM symbols s2
+          JOIN files f2 ON s2.file_id = f2.id
+          WHERE f2.repo_id = ?
+            AND s2.qualified_name = d.to_qualified_name
+        )
+    `,
+    [repositoryId, repositoryId]
+  );
+
+  const deletedCount = (result1.rowCount || 0) + (result2.rowCount || 0);
+  if (deletedCount > 0) {
+    logger.info('Deleted orphaned dependencies', {
+      deletedCount,
+      withoutQualifiedName: result1.rowCount || 0,
+      withNonexistentTarget: result2.rowCount || 0
+    });
+  }
+  return deletedCount;
+}

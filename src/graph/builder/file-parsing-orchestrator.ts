@@ -92,7 +92,9 @@ export class FileParsingOrchestrator {
   ): Promise<Array<ParseResult & { filePath: string }>> {
     const multiParser = new MultiParser();
 
-    const eloquentRegistry = await this.buildEloquentRelationshipRegistry(files, options);
+    // Use pre-built registry if provided, otherwise build from files
+    const eloquentRegistry = options.eloquentRelationshipRegistry ||
+      await this.buildEloquentRelationshipRegistry(files, options);
 
     const concurrency = options.maxConcurrency || 10;
     const limit = pLimit(concurrency);

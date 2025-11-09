@@ -23,6 +23,7 @@ export interface File {
   size?: number;
   last_modified?: Date;
   git_hash?: string;
+  content_hash?: string;
   is_generated: boolean;
   is_test: boolean;
   created_at: Date;
@@ -308,6 +309,7 @@ export interface CreateFile {
   size?: number;
   last_modified?: Date;
   git_hash?: string;
+  content_hash?: string;
   is_generated?: boolean;
   is_test?: boolean;
 }

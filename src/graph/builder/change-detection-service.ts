@@ -29,6 +29,7 @@ import {
   createExternalImportFileDependencies,
 } from './file-dependency-builder';
 import { createComponentLogger } from '../../utils/logger';
+import { computeFileHash } from '../../utils/file-hash';
 
 /**
  * Change Detection Service
@@ -101,34 +102,45 @@ export class ChangeDetectionService {
     );
     deletedFileIds.push(...deletedFiles.map(f => f.id));
 
-    const dbPathsArray = await FileService.getFilePathsByRepository(this.db, repository.id);
-    const dbFilePaths = new Set<string>(dbPathsArray);
+    const existingFiles = await FileService.getFilesByRepository(this.db, repository.id);
+    const filesByPath = new Map(existingFiles.map(f => [f.path, f]));
 
     for (const fileInfo of currentFiles) {
-      if (!dbFilePaths.has(fileInfo.path)) {
+      const dbFile = filesByPath.get(fileInfo.path);
+
+      if (!dbFile) {
         newFiles.push(fileInfo.path);
-      } else {
-        try {
-          const stats = await fs.stat(fileInfo.path);
-          if (stats.mtime > lastIndexed) {
-            changedFiles.push(fileInfo.path);
-          }
-        } catch (error) {
-          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-            this.logger.debug('File no longer exists during stat check', {
-              file: fileInfo.path,
-            });
-          } else {
-            this.logger.error('Unexpected error checking file modification time', {
-              file: fileInfo.path,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            throw new Error(
-              `Failed to check modification time for ${fileInfo.path}: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-          }
+        continue;
+      }
+
+      try {
+        const stats = await fs.stat(fileInfo.path);
+
+        if (stats.mtime <= lastIndexed) {
+          continue;
+        }
+
+        const currentHash = await computeFileHash(fileInfo.path);
+        if (dbFile.content_hash && currentHash === dbFile.content_hash) {
+          continue;
+        }
+
+        changedFiles.push(fileInfo.path);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          this.logger.debug('File no longer exists during stat check', {
+            file: fileInfo.path,
+          });
+        } else {
+          this.logger.error('Unexpected error checking file modification time', {
+            file: fileInfo.path,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw new Error(
+            `Failed to check modification time for ${fileInfo.path}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
         }
       }
     }
@@ -298,9 +310,23 @@ export class ChangeDetectionService {
     const validatedOptions = this.repositoryManager.validateOptions(options, repository);
     const files = filePaths.map(filePath => ({ path: filePath }));
 
+    // Build Eloquent relationship registry from ALL files in repository, not just changed files.
+    // This ensures Laravel with() relationship extraction works during incremental analysis.
+    const allRepositoryFiles = await FileService.getFilesByRepository(this.db, repositoryId);
+    const allFileObjects = allRepositoryFiles.map(f => ({ path: f.path }));
+    const eloquentRegistry = await this.fileParsingOrchestrator.buildEloquentRelationshipRegistry(
+      allFileObjects as any[],
+      validatedOptions
+    );
+
+    const enhancedOptions = {
+      ...validatedOptions,
+      eloquentRelationshipRegistry: eloquentRegistry,
+    };
+
     const parseResults = await this.fileParsingOrchestrator.parseFiles(
       files as any[],
-      validatedOptions
+      enhancedOptions
     );
 
     const existingFiles = await FileService.getFilesByRepository(this.db, repositoryId);
@@ -338,6 +364,10 @@ export class ChangeDetectionService {
       parseResults
     );
 
+    // For incremental analysis: get ALL files from repository, not just re-parsed ones.
+    // This ensures SymbolResolver has context for resolving dependencies to unchanged files.
+    const allFiles = await FileService.getFilesByRepository(this.db, repositoryId);
+
     const importsMap = createImportsMap(dbFiles, parseResults);
     const exportsMap = createExportsMap(dbFiles, parseResults);
     const dependenciesMap = createDependenciesMap(symbols, parseResults, dbFiles);
@@ -352,7 +382,7 @@ export class ChangeDetectionService {
     const symbolGraph = await this.symbolGraphBuilder.buildSymbolGraph(
       symbols,
       dependenciesMap,
-      dbFiles,
+      allFiles,  // Pass ALL files, not just re-parsed ones
       importsMap,
       exportsMap,
       repository.path
@@ -370,7 +400,7 @@ export class ChangeDetectionService {
     const crossFileFileDependencies = createCrossFileFileDependencies(
       symbolDependencies,
       symbols,
-      dbFiles
+      allFiles  // Use all files for symbol-to-file mapping
     );
 
     const externalCallFileDependencies = createExternalCallFileDependencies(
@@ -404,6 +434,14 @@ export class ChangeDetectionService {
       repositoryId
     );
     this.logger.info('Re-resolved dependencies by qualified name', { resolvedCount });
+
+    const orphanedCount = await DependencyService.deleteOrphanedDependencies(
+      this.db,
+      repositoryId
+    );
+    if (orphanedCount > 0) {
+      this.logger.info('Cleaned up orphaned dependencies', { orphanedCount });
+    }
 
     await this.godotRelationshipBuilder.buildGodotRelationships(repositoryId, parseResults);
 

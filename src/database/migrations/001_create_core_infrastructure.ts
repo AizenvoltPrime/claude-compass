@@ -47,6 +47,7 @@ export async function up(knex: Knex): Promise<void> {
     table.integer('size');
     table.timestamp('last_modified');
     table.string('git_hash');
+    table.string('content_hash', 64);
     table.boolean('is_generated').defaultTo(false);
     table.boolean('is_test').defaultTo(false);
     table.timestamps(true, true);
@@ -56,6 +57,7 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['repo_id', 'language'], 'files_repo_lang_idx');
     table.index(['repo_id', 'is_test'], 'files_repo_test_idx');
     table.index(['repo_id', 'last_modified'], 'files_repo_modified_idx');
+    table.index(['content_hash'], 'files_content_hash_idx');
     table.index(['language']);
     table.index(['is_test']);
   });
@@ -133,13 +135,13 @@ export async function up(knex: Knex): Promise<void> {
     table.index(['resolved_class'], 'deps_resolved_class_idx');
   });
 
-  // Add foreign key with CASCADE to prevent orphaned dependencies
+  // Add foreign key with SET NULL to preserve dependencies for re-resolution during incremental analysis
   await knex.raw(`
     ALTER TABLE dependencies
     ADD CONSTRAINT dependencies_to_symbol_id_foreign
     FOREIGN KEY (to_symbol_id)
     REFERENCES symbols(id)
-    ON DELETE CASCADE
+    ON DELETE SET NULL
   `);
 
   await knex.schema.createTable('file_dependencies', table => {

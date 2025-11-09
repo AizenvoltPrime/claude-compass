@@ -126,6 +126,7 @@ export function extractQueueSymbol(
 
   return {
     name,
+    qualified_name: name,
     symbol_type: SymbolType.JOB_QUEUE,
     start_line: AstHelpers.getLineNumber(node.startIndex, content),
     end_line: AstHelpers.getLineNumber(node.endIndex, content),
@@ -154,6 +155,7 @@ export function extractJobDefinitionSymbol(
 
   return {
     name: jobName,
+    qualified_name: jobName,
     symbol_type: SymbolType.JOB_DEFINITION,
     start_line: AstHelpers.getLineNumber(node.startIndex, content),
     end_line: AstHelpers.getLineNumber(node.endIndex, content),
@@ -174,6 +176,7 @@ export function extractProcessorSymbol(node: Parser.SyntaxNode, content: string)
 
   return {
     name: processorName,
+    qualified_name: processorName,
     symbol_type: SymbolType.FUNCTION,
     start_line: AstHelpers.getLineNumber(node.startIndex, content),
     end_line: AstHelpers.getLineNumber(node.endIndex, content),
@@ -194,6 +197,7 @@ export function extractWorkerThreadSymbol(node: Parser.SyntaxNode, content: stri
 
   return {
     name: `${workerName}_thread`,
+    qualified_name: `${workerName}_thread`,
     symbol_type: SymbolType.WORKER_THREAD,
     start_line: AstHelpers.getLineNumber(node.startIndex, content),
     end_line: AstHelpers.getLineNumber(node.endIndex, content),

@@ -49,6 +49,7 @@ export function processNamespace(
 
   symbols.push({
     name,
+    qualified_name: name,
     symbol_type: SymbolType.NAMESPACE,
     start_line: node.startPosition.row + 1,
     end_line: node.endPosition.row + 1,
@@ -427,8 +428,11 @@ export function processConstructor(
   const parameters = extractParameters(node, content, getNodeText);
   const description = extractXmlDocComment(node, content, getNodeText);
 
+  const qualifiedName = buildQualifiedName(context, name);
+
   symbols.push({
     name,
+    qualified_name: qualifiedName,
     symbol_type: SymbolType.METHOD,
     namespace: context.currentNamespace,
     start_line: node.startPosition.row + 1,
@@ -474,8 +478,11 @@ export function processProperty(
   const isInterfaceMember = isInsideInterface(node);
   const isExported = isInterfaceMember || modifiers.includes('public');
 
+  const qualifiedName = buildQualifiedName(context, name);
+
   symbols.push({
     name,
+    qualified_name: qualifiedName,
     symbol_type: SymbolType.PROPERTY,
     framework: context.currentClassFramework,
     namespace: context.currentNamespace,
@@ -546,8 +553,11 @@ export function processField(
       });
     }
 
+    const qualifiedName = buildQualifiedName(context, fieldName);
+
     symbols.push({
       name: fieldName,
+      qualified_name: qualifiedName,
       symbol_type: modifiers.includes('const') ? SymbolType.CONSTANT : SymbolType.VARIABLE,
       framework: context.currentClassFramework,
       namespace: context.currentNamespace,

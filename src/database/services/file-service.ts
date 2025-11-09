@@ -203,9 +203,12 @@ export async function findDeletedFiles(
   currentFilePaths: string[]
 ): Promise<Pick<File, 'id' | 'path'>[]> {
   if (currentFilePaths.length === 0) {
-    logger.debug('No current files provided, all DB files considered deleted', { repoId });
+    logger.debug('No current files provided, all real files considered deleted', { repoId });
     const deletedFiles = await db('files')
       .where('repo_id', repoId)
+      .where(function() {
+        this.where('is_generated', false).orWhereNull('is_generated');
+      })
       .select('id', 'path');
     return deletedFiles as Pick<File, 'id' | 'path'>[];
   }
@@ -220,15 +223,24 @@ export async function findDeletedFiles(
     return await findDeletedFilesWithTempTable(db, repoId, currentFilePaths);
   }
 
+  logger.debug('Finding deleted files', {
+    repoId,
+    currentFilePaths: currentFilePaths.slice(0, 5).concat(currentFilePaths.length > 5 ? [`... and ${currentFilePaths.length - 5} more`] : []),
+  });
+
   const deletedFiles = await db('files')
     .where('repo_id', repoId)
     .whereNotIn('path', currentFilePaths)
+    .where(function() {
+      this.where('is_generated', false).orWhereNull('is_generated');
+    })
     .select('id', 'path');
 
   logger.debug('Deletion detection completed', {
     repoId,
     currentFileCount: currentFilePaths.length,
     deletedFileCount: deletedFiles.length,
+    deletedFilePaths: deletedFiles.map(f => f.path),
   });
 
   return deletedFiles as Pick<File, 'id' | 'path'>[];
@@ -262,6 +274,7 @@ async function findDeletedFilesWithTempTable(
       LEFT JOIN temp_current_paths t ON f.path = t.path
       WHERE f.repo_id = ?
         AND t.path IS NULL
+        AND (f.is_generated = false OR f.is_generated IS NULL)
     `,
       [repoId]
     );

@@ -7,6 +7,7 @@ import * as SymbolService from '../../database/services/symbol-service';
 import * as RouteService from '../../database/services/route-service';
 import { ParseResult } from '../../parsers/base';
 import { createComponentLogger } from '../../utils/logger';
+import { computeFileHash } from '../../utils/file-hash';
 
 /**
  * Storage Orchestrator
@@ -27,29 +28,35 @@ export class StorageOrchestrator {
     files: Array<{ path: string }>,
     parseResults: Array<ParseResult & { filePath: string }>
   ): Promise<File[]> {
-    const statsPromises = files.map((file, i) => {
-      if (!parseResults[i]) return Promise.resolve(null);
+    const fileDataPromises = files.map(async (file, i) => {
+      if (!parseResults[i]) return null;
 
-      return fs.stat(file.path).catch(error => {
-        this.logger.error('Failed to stat file', {
+      try {
+        const [stats, contentHash] = await Promise.all([
+          fs.stat(file.path),
+          computeFileHash(file.path),
+        ]);
+        return { stats, contentHash };
+      } catch (error) {
+        this.logger.error('Failed to process file', {
           path: file.path,
           error: (error as Error).message,
         });
         return null;
-      });
+      }
     });
 
-    const allStats = await Promise.all(statsPromises);
+    const allFileData = await Promise.all(fileDataPromises);
 
     const createFiles: CreateFile[] = [];
     const validIndices: number[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const stats = allStats[i];
+      const fileData = allFileData[i];
       const parseResult = parseResults[i];
 
-      if (!parseResult || !stats) {
+      if (!parseResult || !fileData) {
         continue;
       }
 
@@ -59,8 +66,9 @@ export class StorageOrchestrator {
         repo_id: repositoryId,
         path: file.path,
         language,
-        size: stats.size,
-        last_modified: stats.mtime,
+        size: fileData.stats.size,
+        last_modified: fileData.stats.mtime,
+        content_hash: fileData.contentHash,
         is_generated: this.isGeneratedFile(file.path),
         is_test: this.isTestFile(file.path),
       });
