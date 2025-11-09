@@ -77,15 +77,51 @@ export async function cleanupFileData(db: Knex, fileIds: number[]): Promise<void
     const deletionResults: Record<string, number> = {};
 
     if (symbolIds.length > 0) {
-      // Only delete dependencies FROM changed files, not TO them
+      // Capture qualified names of symbols being cleaned up
+      const cleanedQualifiedNames = await trx('symbols')
+        .whereIn('id', symbolIds)
+        .whereNotNull('qualified_name')
+        .pluck('qualified_name');
+
+      logger.info('Captured qualified names of cleaned symbols', {
+        count: cleanedQualifiedNames.length,
+      });
+
+      // Delete dependencies FROM changed files
       deletionResults.dependencies = await trx('dependencies')
         .whereIn('from_symbol_id', symbolIds)
         .del();
 
+      // Delete orphaned dependencies (to_symbol_id IS NULL) pointing to cleaned qualified names
+      // During incremental re-analysis, symbols are cleaned and re-parsed
+      // Only truly orphaned dependencies should be removed; valid dependencies from other files
+      // will be preserved and re-resolved during the symbol resolution phase
+      if (cleanedQualifiedNames.length > 0) {
+        deletionResults.orphanedDependencies = await trx('dependencies')
+          .whereNull('to_symbol_id')
+          .whereIn('to_qualified_name', cleanedQualifiedNames)
+          .del();
+
+        logger.info('Cleaned up orphaned dependencies to cleaned symbols', {
+          count: deletionResults.orphanedDependencies,
+        });
+      }
+
       const hasRoutes = await trx.schema.hasTable('routes');
       if (hasRoutes) {
+        // Get file paths for the files being re-analyzed
+        const filePaths = await trx('files').whereIn('id', fileIds).pluck('path');
+
+        // Delete routes defined in these files (by file_path column)
+        // Routes are parsed from route definition files (e.g., routes/api.php)
+        // and need to be deleted when those files are re-analyzed
         deletionResults.routes = await trx('routes')
-          .whereIn('handler_symbol_id', symbolIds)
+          .where(function() {
+            // Delete by handler_symbol_id (for routes where handler is in the file being cleaned)
+            this.whereIn('handler_symbol_id', symbolIds)
+              // OR delete by file_path (for routes defined in the file being re-analyzed)
+              .orWhereIn('file_path', filePaths);
+          })
           .del();
       }
 
@@ -230,14 +266,50 @@ export async function deleteFilesWithTransaction(db: Knex, fileIds: number[]): P
     const deletionResults: Record<string, number> = {};
 
     if (symbolIds.length > 0) {
+      // Capture qualified names of symbols being deleted
+      const deletedQualifiedNames = await trx('symbols')
+        .whereIn('id', symbolIds)
+        .whereNotNull('qualified_name')
+        .pluck('qualified_name');
+
+      logger.info('Captured qualified names of deleted symbols', {
+        count: deletedQualifiedNames.length,
+      });
+
+      // Delete dependencies FROM deleted symbols
       deletionResults.dependencies = await trx('dependencies')
         .whereIn('from_symbol_id', symbolIds)
         .del();
 
+      // Delete orphaned dependencies TO deleted symbols (by qualified name)
+      // This handles both direct references (to_symbol_id) and unresolved references (to_qualified_name)
+      if (deletedQualifiedNames.length > 0) {
+        deletionResults.orphanedDependencies = await trx('dependencies')
+          .where(function() {
+            this.whereIn('to_symbol_id', symbolIds)
+              .orWhere(function() {
+                this.whereNull('to_symbol_id')
+                  .whereIn('to_qualified_name', deletedQualifiedNames);
+              });
+          })
+          .del();
+
+        logger.info('Cleaned up orphaned dependencies to deleted symbols', {
+          count: deletionResults.orphanedDependencies,
+        });
+      }
+
       const hasRoutes = await trx.schema.hasTable('routes');
       if (hasRoutes) {
+        // Get file paths for the files being deleted
+        const filePaths = await trx('files').whereIn('id', fileIds).pluck('path');
+
+        // Delete routes where handler is in deleted files OR routes defined in deleted files
         deletionResults.routes = await trx('routes')
-          .whereIn('handler_symbol_id', symbolIds)
+          .where(function() {
+            this.whereIn('handler_symbol_id', symbolIds)
+              .orWhereIn('file_path', filePaths);
+          })
           .del();
       }
 

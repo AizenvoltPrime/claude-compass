@@ -407,6 +407,8 @@ export async function deleteOrphanedDependencies(
 
   // Delete dependencies with qualified name but no matching symbol in repository
   // Preserve IMPORTS type as they may point to external packages (npm, system libs)
+  // Note: Most orphaned dependencies are now cleaned up at deletion time in cleanup-service.ts
+  // This function serves as a safety net for edge cases and post-resolution cleanup
   const result2 = await db.raw(
     `
       DELETE FROM dependencies d
