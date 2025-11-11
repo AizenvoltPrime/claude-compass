@@ -92,18 +92,25 @@ export async function cleanupFileData(db: Knex, fileIds: number[]): Promise<void
         .whereIn('from_symbol_id', symbolIds)
         .del();
 
-      // Delete orphaned dependencies (to_symbol_id IS NULL) pointing to cleaned qualified names
-      // During incremental re-analysis, symbols are cleaned and re-parsed
-      // Only truly orphaned dependencies should be removed; valid dependencies from other files
-      // will be preserved and re-resolved during the symbol resolution phase
-      if (cleanedQualifiedNames.length > 0) {
-        deletionResults.orphanedDependencies = await trx('dependencies')
-          .whereNull('to_symbol_id')
-          .whereIn('to_qualified_name', cleanedQualifiedNames)
-          .del();
+      // DO NOT delete dependencies TO cleaned symbols
+      // When symbols are deleted below, foreign key ON DELETE SET NULL will set to_symbol_id = NULL
+      // These NULL dependencies will be:
+      // 1. Deduplicated (removing duplicates) in resolveQualifiedNameDependencies()
+      // 2. Re-resolved to new symbol IDs during resolution phase
+      // This preserves cross-file dependencies from unchanged files
 
-        logger.info('Cleaned up orphaned dependencies to cleaned symbols', {
+      // Count dependencies that will be set to NULL by FK constraint
+      const depsToBeNulled = await trx('dependencies')
+        .whereIn('to_symbol_id', symbolIds)
+        .count('* as count')
+        .first();
+
+      deletionResults.orphanedDependencies = parseInt(depsToBeNulled?.count as string || '0');
+
+      if (deletionResults.orphanedDependencies > 0) {
+        logger.info('Cross-file dependencies will be preserved via FK CASCADE', {
           count: deletionResults.orphanedDependencies,
+          note: 'to_symbol_id will be set to NULL, then re-resolved after re-parsing',
         });
       }
 
@@ -274,21 +281,20 @@ export async function deleteFilesWithTransaction(db: Knex, fileIds: number[]): P
         .whereIn('from_symbol_id', symbolIds)
         .del();
 
-      // Delete orphaned dependencies TO deleted symbols (by qualified name)
-      // This handles both direct references (to_symbol_id) and unresolved references (to_qualified_name)
+      // Delete dependencies TO deleted symbols
       if (deletedQualifiedNames.length > 0) {
         deletionResults.orphanedDependencies = await trx('dependencies')
-          .where(function() {
-            this.whereIn('to_symbol_id', symbolIds)
-              .orWhere(function() {
-                this.whereNull('to_symbol_id')
-                  .whereIn('to_qualified_name', deletedQualifiedNames);
-              });
+          .whereIn('to_symbol_id', symbolIds)
+          .orWhere(function() {
+            // Also delete unresolved dependencies pointing to these qualified names
+            this.whereNull('to_symbol_id')
+              .whereIn('to_qualified_name', deletedQualifiedNames);
           })
           .del();
 
-        logger.info('Cleaned up orphaned dependencies to deleted symbols', {
+        logger.info('Cleaned up dependencies to deleted symbols', {
           count: deletionResults.orphanedDependencies,
+          qualifiedNamesCount: deletedQualifiedNames.length,
         });
       }
 

@@ -35,6 +35,29 @@ function deduplicateFileDependencies(
 }
 
 /**
+ * Deduplicate symbol dependencies by keeping the first entry
+ * for each unique combination matching the database unique constraint:
+ * (from_symbol_id, to_symbol_id, dependency_type, line_number)
+ */
+function deduplicateDependencies(
+  dependencies: CreateDependency[]
+): CreateDependency[] {
+  const uniqueMap = new Map<string, CreateDependency>();
+
+  for (const dep of dependencies) {
+    const key = `${dep.from_symbol_id}-${dep.to_symbol_id}-${dep.dependency_type}-${dep.line_number}`;
+    const existing = uniqueMap.get(key);
+
+    // Keep the first entry
+    if (!existing) {
+      uniqueMap.set(key, dep);
+    }
+  }
+
+  return Array.from(uniqueMap.values());
+}
+
+/**
  * Create a single dependency
  */
 export async function createDependency(db: Knex, data: CreateDependency): Promise<Dependency> {
@@ -54,36 +77,101 @@ export async function createDependency(db: Knex, data: CreateDependency): Promis
 export async function createDependencies(db: Knex, dependencies: CreateDependency[]): Promise<Dependency[]> {
   if (dependencies.length === 0) return [];
 
+  // Deduplicate before processing to prevent constraint violations
+  const uniqueDependencies = deduplicateDependencies(dependencies);
+
+  if (uniqueDependencies.length !== dependencies.length) {
+    logger.debug('Removed duplicate dependencies from batch', {
+      original: dependencies.length,
+      unique: uniqueDependencies.length,
+      duplicatesRemoved: dependencies.length - uniqueDependencies.length,
+    });
+  }
+
   // Process in chunks to avoid PostgreSQL parameter limits
   const BATCH_SIZE = 1000;
   const results: Dependency[] = [];
 
-  for (let i = 0; i < dependencies.length; i += BATCH_SIZE) {
-    const chunk = dependencies.slice(i, i + BATCH_SIZE);
+  try {
+    for (let i = 0; i < uniqueDependencies.length; i += BATCH_SIZE) {
+      const chunk = uniqueDependencies.slice(i, i + BATCH_SIZE);
 
-    // Convert parameter_types arrays to JSON strings for database storage
-    const processedChunk = chunk.map(dep => ({
-      ...dep,
-      parameter_types: dep.parameter_types ? JSON.stringify(dep.parameter_types) : null,
-    }));
+      // Convert parameter_types arrays to JSON strings for database storage
+      const processedChunk = chunk.map(dep => ({
+        ...dep,
+        parameter_types: dep.parameter_types ? JSON.stringify(dep.parameter_types) : null,
+      }));
 
-    // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
-    const chunkResults = await db('dependencies')
-      .insert(processedChunk)
-      .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number'])
-      .merge([
-        'line_number',
-        'updated_at',
-        'parameter_context',
-        'call_instance_id',
-        'parameter_types',
-      ])
-      .returning('*');
+      // Use upsert logic to handle duplicates - PostgreSQL ON CONFLICT
+      const chunkResults = await db('dependencies')
+        .insert(processedChunk)
+        .onConflict(['from_symbol_id', 'to_symbol_id', 'dependency_type', 'line_number'])
+        .merge([
+          'line_number',
+          'updated_at',
+          'parameter_context',
+          'call_instance_id',
+          'parameter_types',
+        ])
+        .returning('*');
 
-    results.push(...(chunkResults as Dependency[]));
+      results.push(...(chunkResults as Dependency[]));
+    }
+
+    return results;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+
+    // Check if this is a duplicate key error (expected during incremental analysis)
+    const isDuplicateError = errorMessage.includes('duplicate key') ||
+                             errorMessage.includes('unique constraint');
+
+    if (isDuplicateError) {
+      // For duplicates, query and return the existing records
+      logger.debug('Dependencies already exist, retrieving existing records', {
+        count: uniqueDependencies.length,
+      });
+
+      try {
+        const existingDeps: Dependency[] = [];
+        for (const dep of uniqueDependencies) {
+          const whereClause: any = {
+            from_symbol_id: dep.from_symbol_id,
+            to_symbol_id: dep.to_symbol_id,
+            dependency_type: dep.dependency_type,
+            line_number: dep.line_number,
+          };
+
+          const existing = await db('dependencies')
+            .where(whereClause)
+            .first();
+
+          if (existing) {
+            existingDeps.push(existing);
+          }
+        }
+        return existingDeps;
+      } catch (queryError) {
+        const queryErrorMsg = queryError instanceof Error ? queryError.message : String(queryError);
+        logger.warn('Failed to query existing dependencies after duplicate error', {
+          error: queryErrorMsg,
+          originalError: errorMessage,
+        });
+        // Return empty array rather than failing completely
+        return [];
+      }
+    }
+
+    // For non-duplicate errors, throw to fail fast
+    logger.error('Failed to create dependencies', {
+      error: errorMessage,
+      stack,
+      count: uniqueDependencies.length,
+      sampleData: uniqueDependencies.slice(0, 2),
+    });
+    throw error;
   }
-
-  return results;
 }
 
 /**
@@ -343,6 +431,56 @@ export async function getDependenciesToWithContext(db: Knex, symbolId: number): 
 }
 
 /**
+ * Deduplicate dependencies based on source-side uniqueness.
+ * Ensures only ONE dependency exists per (from_symbol_id, to_qualified_name, dependency_type, line_number).
+ * This prevents constraint violations when multiple dependencies with the same source attributes
+ * get resolved to the same target symbol. Keeps the most recently created entry.
+ */
+async function deduplicateDependenciesBeforeResolution(
+  db: Knex,
+  repositoryId: number
+): Promise<number> {
+  logger.info('Deduplicating dependencies before re-resolution', {
+    repositoryId,
+  });
+
+  // Delete duplicate dependencies based on source-side uniqueness
+  // Keep only the most recent (MAX(id)) for each (from_symbol, to_qualified_name, type, line) combination
+  const result = await db.raw(
+    `
+      DELETE FROM dependencies
+      WHERE id IN (
+        SELECT dupes.id
+        FROM (
+          SELECT
+            d.id,
+            ROW_NUMBER() OVER (
+              PARTITION BY d.from_symbol_id, d.to_qualified_name, d.dependency_type, d.line_number
+              ORDER BY d.id DESC
+            ) as rn
+          FROM dependencies d
+          INNER JOIN symbols s ON d.from_symbol_id = s.id
+          INNER JOIN files f ON s.file_id = f.id
+          WHERE f.repo_id = ?
+            AND d.to_qualified_name IS NOT NULL
+        ) dupes
+        WHERE dupes.rn > 1
+      )
+    `,
+    [repositoryId]
+  );
+
+  const deletedCount = result.rowCount || 0;
+  if (deletedCount > 0) {
+    logger.info('Removed duplicate dependencies with same source attributes', {
+      deletedCount,
+      repositoryId
+    });
+  }
+  return deletedCount;
+}
+
+/**
  * Re-resolve dependencies by qualified name after incremental update.
  * Updates dependencies to link to their target symbols using qualified names.
  */
@@ -354,6 +492,10 @@ export async function resolveQualifiedNameDependencies(
     repositoryId,
   });
 
+  // Step 1: Deduplicate unresolved dependencies that would resolve to the same target
+  const preDedupCount = await deduplicateDependenciesBeforeResolution(db, repositoryId);
+
+  // Step 2: Resolve dependencies by updating to_symbol_id
   const result = await db.raw(
     `
       UPDATE dependencies
@@ -371,7 +513,11 @@ export async function resolveQualifiedNameDependencies(
   );
 
   const updatedCount = result.rowCount || 0;
-  logger.info('Resolved dependencies by qualified name', { updatedCount });
+  logger.info('Resolved dependencies by qualified name', {
+    updatedCount,
+    preDedupDeleted: preDedupCount
+  });
+
   return updatedCount;
 }
 

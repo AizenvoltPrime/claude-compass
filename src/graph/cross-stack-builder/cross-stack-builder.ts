@@ -151,7 +151,29 @@ export class CrossStackGraphBuilder {
                 drift_detected: false,
               }));
 
-              await ApiCallService.createDataContracts(this.db, dataContractsToCreate);
+              const createdContracts = await ApiCallService.createDataContracts(
+                this.db,
+                dataContractsToCreate
+              );
+
+              if (createdContracts.length === 0) {
+                // Rare edge case: attempted to create contracts but none were returned
+                // This should not happen with current implementation (returns existing on duplicates)
+                this.logger.warn('No data contracts returned from creation attempt', {
+                  attempted: dataContractsToCreate.length,
+                });
+              } else if (createdContracts.length < dataContractsToCreate.length) {
+                // Partial success: some contracts created, some already existed
+                this.logger.info('Created/retrieved data contracts from detection', {
+                  returned: createdContracts.length,
+                  attempted: dataContractsToCreate.length,
+                });
+              } else {
+                this.logger.info('Created data contracts from detection', {
+                  count: createdContracts.length,
+                  attempted: dataContractsToCreate.length,
+                });
+              }
             }
 
             const updatedCrossStackData = await ApiCallService.getCrossStackDependencies(
@@ -277,10 +299,19 @@ export class CrossStackGraphBuilder {
 
       if (apiCallsToCreate.length > 0) {
         try {
-          await ApiCallService.createApiCalls(this.db, apiCallsToCreate);
-          this.logger.info('Created API calls in api_calls table', {
-            count: apiCallsToCreate.length,
-          });
+          const createdApiCalls = await ApiCallService.createApiCalls(this.db, apiCallsToCreate);
+
+          if (createdApiCalls.length === 0) {
+            // All API calls already exist (expected during incremental analysis with no changes)
+            this.logger.debug('API calls already exist in database', {
+              attempted: apiCallsToCreate.length,
+            });
+          } else {
+            this.logger.info('Created API calls in api_calls table', {
+              count: createdApiCalls.length,
+              attempted: apiCallsToCreate.length,
+            });
+          }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const errorStack = error instanceof Error ? error.stack : undefined;
@@ -294,16 +325,42 @@ export class CrossStackGraphBuilder {
 
       if (dataContractsToCreate.length > 0) {
         try {
-          await ApiCallService.createDataContracts(this.db, dataContractsToCreate);
-          this.logger.info('Created data contracts in data_contracts table', {
+          this.logger.debug('Attempting to create data contracts', {
             count: dataContractsToCreate.length,
+            sample: dataContractsToCreate.slice(0, 2),
           });
+
+          const createdContracts = await ApiCallService.createDataContracts(
+            this.db,
+            dataContractsToCreate
+          );
+
+          if (createdContracts.length === 0) {
+            // Rare edge case: attempted to create contracts but none were returned
+            // This should not happen with current implementation (returns existing on duplicates)
+            this.logger.warn('No data contracts returned from creation attempt', {
+              attempted: dataContractsToCreate.length,
+            });
+          } else if (createdContracts.length < dataContractsToCreate.length) {
+            // Partial success: some contracts created, some already existed
+            this.logger.info('Created/retrieved data contracts', {
+              returned: createdContracts.length,
+              attempted: dataContractsToCreate.length,
+            });
+          } else {
+            this.logger.info('Created data contracts in data_contracts table', {
+              count: createdContracts.length,
+              attempted: dataContractsToCreate.length,
+            });
+          }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const errorStack = error instanceof Error ? error.stack : undefined;
           this.logger.error('Failed to create data contracts in database', {
             error: errorMessage,
             stack: errorStack,
+            errorType: typeof error,
+            isError: error instanceof Error,
             dataContractsToCreate: dataContractsToCreate.slice(0, 2),
           });
         }
@@ -311,17 +368,46 @@ export class CrossStackGraphBuilder {
 
       if (dependenciesToCreate.length > 0) {
         try {
-          await DependencyService.createDependencies(this.db, dependenciesToCreate);
-          this.logger.info('Created cross-stack dependencies in dependencies table', {
+          this.logger.debug('Attempting to create cross-stack dependencies', {
             count: dependenciesToCreate.length,
             types: [...new Set(dependenciesToCreate.map(d => d.dependency_type))],
+            sample: dependenciesToCreate.slice(0, 2),
           });
+
+          const createdDeps = await DependencyService.createDependencies(
+            this.db,
+            dependenciesToCreate
+          );
+
+          if (createdDeps.length === 0) {
+            // Rare edge case: attempted to create dependencies but none were returned
+            // This should not happen with current implementation (returns existing on duplicates)
+            this.logger.warn('No dependencies returned from creation attempt', {
+              attempted: dependenciesToCreate.length,
+              types: [...new Set(dependenciesToCreate.map(d => d.dependency_type))],
+            });
+          } else if (createdDeps.length < dependenciesToCreate.length) {
+            // Partial success: some created, some already existed
+            this.logger.info('Created/retrieved cross-stack dependencies', {
+              returned: createdDeps.length,
+              attempted: dependenciesToCreate.length,
+              types: [...new Set(dependenciesToCreate.map(d => d.dependency_type))],
+            });
+          } else {
+            this.logger.info('Created cross-stack dependencies in dependencies table', {
+              count: createdDeps.length,
+              attempted: dependenciesToCreate.length,
+              types: [...new Set(dependenciesToCreate.map(d => d.dependency_type))],
+            });
+          }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const errorStack = error instanceof Error ? error.stack : undefined;
           this.logger.error('Failed to create cross-stack dependencies', {
             error: errorMessage,
             stack: errorStack,
+            errorType: typeof error,
+            isError: error instanceof Error,
             dependenciesToCreate: dependenciesToCreate.slice(0, 2),
           });
         }

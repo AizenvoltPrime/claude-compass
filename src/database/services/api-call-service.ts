@@ -45,6 +45,29 @@ function trackEmbeddingSuccess(): void {
   embeddingTotalAttempts++;
 }
 
+/**
+ * Deduplicate data contracts by keeping the first entry
+ * for each unique combination matching the database unique constraint:
+ * (frontend_type_id, backend_type_id, name)
+ */
+function deduplicateDataContracts(
+  contracts: CreateDataContract[]
+): CreateDataContract[] {
+  const uniqueMap = new Map<string, CreateDataContract>();
+
+  for (const contract of contracts) {
+    const key = `${contract.frontend_type_id}-${contract.backend_type_id}-${contract.name}`;
+    const existing = uniqueMap.get(key);
+
+    // Keep the first entry
+    if (!existing) {
+      uniqueMap.set(key, contract);
+    }
+  }
+
+  return Array.from(uniqueMap.values());
+}
+
 export async function getCrossStackDependencies(
   db: Knex,
   repoId: number
@@ -198,14 +221,18 @@ export async function createApiCalls(db: Knex, data: CreateApiCall[]): Promise<A
             },
           }));
 
-        logger.warn('Duplicate API calls skipped by UNIQUE constraint', {
+        // Log at debug level if all are duplicates (expected in incremental analysis)
+        const isAllDuplicates = skipped === batch.length;
+        const logLevel = isAllDuplicates ? 'debug' : 'warn';
+
+        logger[logLevel]('Duplicate API calls skipped by UNIQUE constraint', {
           batchNumber: Math.floor(i / BATCH_SIZE) + 1,
           batchSize: batch.length,
           inserted: batchResults.length,
           skipped,
           skipRate: `${((skipped / batch.length) * 100).toFixed(1)}%`,
           duplicatesFoundInBatch: duplicateKeys.length,
-          duplicateDetails: duplicateKeys,
+          duplicateDetails: isAllDuplicates ? [] : duplicateKeys, // Don't log details if all duplicates
         });
       }
 
@@ -214,21 +241,35 @@ export async function createApiCalls(db: Knex, data: CreateApiCall[]): Promise<A
 
     if (totalSkipped > 0) {
       const overallSkipRate = ((totalSkipped / data.length) * 100).toFixed(1);
-      logger.info('API call insertion complete with duplicates skipped', {
-        totalAttempted: data.length,
-        totalInserted: results.length,
-        totalSkipped,
-        overallSkipRate: `${overallSkipRate}%`,
-      });
+      const skipRatio = totalSkipped / data.length;
 
-      if (totalSkipped / data.length > 0.1) {
-        logger.warn(
-          'High duplicate rate detected - investigate if analysis is running multiple times',
-          {
-            skipRate: `${overallSkipRate}%`,
-            threshold: '10%',
-          }
-        );
+      // Log at appropriate level based on skip rate
+      if (skipRatio === 1.0) {
+        // 100% duplicates is expected during incremental analysis with no changes
+        logger.debug('All API calls already exist in database (incremental analysis)', {
+          totalAttempted: data.length,
+          totalInserted: results.length,
+          totalSkipped,
+          overallSkipRate: `${overallSkipRate}%`,
+        });
+      } else {
+        logger.info('API call insertion complete with duplicates skipped', {
+          totalAttempted: data.length,
+          totalInserted: results.length,
+          totalSkipped,
+          overallSkipRate: `${overallSkipRate}%`,
+        });
+
+        // Only warn if skip rate is high but not 100% (partial duplicates suggest issues)
+        if (skipRatio > 0.1 && skipRatio < 1.0) {
+          logger.warn(
+            'High duplicate rate detected - investigate if analysis is running multiple times',
+            {
+              skipRate: `${overallSkipRate}%`,
+              threshold: '10%',
+            }
+          );
+        }
       }
     }
 
@@ -250,12 +291,23 @@ export async function createDataContracts(
 ): Promise<DataContract[]> {
   if (data.length === 0) return [];
 
+  // Deduplicate before processing to prevent constraint violations
+  const uniqueContracts = deduplicateDataContracts(data);
+
+  if (uniqueContracts.length !== data.length) {
+    logger.debug('Removed duplicate data contracts from batch', {
+      original: data.length,
+      unique: uniqueContracts.length,
+      duplicatesRemoved: data.length - uniqueContracts.length,
+    });
+  }
+
   const BATCH_SIZE = 100;
   const results: DataContract[] = [];
 
   try {
-    for (let i = 0; i < data.length; i += BATCH_SIZE) {
-      const batch = data.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < uniqueContracts.length; i += BATCH_SIZE) {
+      const batch = uniqueContracts.slice(i, i + BATCH_SIZE);
 
       const batchResults = await db('data_contracts')
         .insert(batch)
@@ -266,13 +318,65 @@ export async function createDataContracts(
       results.push(...(batchResults as DataContract[]));
     }
 
+    if (results.length < uniqueContracts.length) {
+      // Some contracts were updated rather than inserted (expected during incremental analysis)
+      logger.debug('Data contract upsert complete', {
+        totalAttempted: uniqueContracts.length,
+        totalReturned: results.length,
+        updated: uniqueContracts.length - results.length,
+      });
+    }
+
     return results;
-  } catch (error: any) {
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+
+    // Check if this is a duplicate key error (expected during incremental analysis)
+    const isDuplicateError = errorMessage.includes('duplicate key') ||
+                             errorMessage.includes('unique constraint');
+
+    if (isDuplicateError) {
+      // For duplicates, query and return the existing records
+      logger.debug('Data contracts already exist, retrieving existing records', {
+        count: uniqueContracts.length,
+      });
+
+      try {
+        const existingContracts: DataContract[] = [];
+        for (const contract of uniqueContracts) {
+          const whereClause: any = {
+            frontend_type_id: contract.frontend_type_id,
+            backend_type_id: contract.backend_type_id,
+            name: contract.name,
+          };
+
+          const existing = await db('data_contracts')
+            .where(whereClause)
+            .first();
+
+          if (existing) {
+            existingContracts.push(existing);
+          }
+        }
+        return existingContracts;
+      } catch (queryError) {
+        const queryErrorMsg = queryError instanceof Error ? queryError.message : String(queryError);
+        logger.warn('Failed to query existing data contracts after duplicate error', {
+          error: queryErrorMsg,
+          originalError: errorMessage,
+        });
+        // Return empty array rather than failing completely
+        return [];
+      }
+    }
+
+    // For non-duplicate errors, throw to fail fast
     logger.error('Failed to create data contracts', {
-      error: error.message,
-      stack: error.stack,
-      count: data.length,
-      sampleData: data.slice(0, 2),
+      error: errorMessage,
+      stack,
+      count: uniqueContracts.length,
+      sampleData: uniqueContracts.slice(0, 2),
     });
     throw error;
   }
